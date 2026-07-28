@@ -163,7 +163,7 @@ jobs:
           rm -f ./*.sha256
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.verify.outputs.version }}
           name: v${{ needs.verify.outputs.version }}
