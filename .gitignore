@@ -1,0 +1,54 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Tauri (GUI crate, added later)
+crates/tokenstat-gui/target/
+crates/tokenstat-gui/gen/
+
+# Node, for the GUI front end and any tooling
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Local fixtures and scratch data
+/fixtures/local/
+/tmp/
+*.local.json
+
+# Coverage and profiling
+/coverage/
+lcov.info
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Editors and tooling
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.iml
+.zed/
+.direnv/
+
+# OS
+.DS_Store
+.AppleDouble
+Thumbs.db
+desktop.ini
+
+# Build and release scratch
+/release-artifacts/
+/pkg/

@@ -1,0 +1,11 @@
+[package]
+name = "tokenstat-core"
+description = "Parsing, normalization, pricing, and aggregation of AI tool token usage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]

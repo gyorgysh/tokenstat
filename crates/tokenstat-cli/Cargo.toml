@@ -1,0 +1,16 @@
+[package]
+name = "tokenstat-cli"
+description = "Unified token usage stats for AI coding agents and LLM tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "tokenstat"
+path = "src/main.rs"
+
+[dependencies]
+tokenstat-core.workspace = true

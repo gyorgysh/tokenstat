@@ -1,0 +1,184 @@
+name: release
+
+# Cut a release by pushing a tag on main:
+#
+#   git tag -a v0.1.0 -m "v0.1.0"
+#   git push origin v0.1.0
+#
+# A tag containing a hyphen (v0.1.0-rc.1) publishes as a prerelease.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build, for rerunning a failed release
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version from tag
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${INPUT_TAG:-$REF_NAME}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag '$tag' is not a semantic version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the manifest version matches the tag
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$manifest" != "$VERSION" ]; then
+            echo "Cargo.toml version '$manifest' does not match tag version '$VERSION'." >&2
+            exit 1
+          fi
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
+
+      - name: Package
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          name="tokenstat-${VERSION}-${TARGET}"
+          mkdir -p "dist/${name}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${TARGET}/release/tokenstat.exe" "dist/${name}/"
+          else
+            cp "target/${TARGET}/release/tokenstat" "dist/${name}/"
+          fi
+          cp README.md "dist/${name}/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "${name}.zip" "${name}" > /dev/null
+            asset="${name}.zip"
+          else
+            tar czf "${name}.tar.gz" "${name}"
+            asset="${name}.tar.gz"
+          fi
+          # Checksums let a Homebrew formula or Scoop manifest verify downloads.
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$asset" > "${asset}.sha256"
+          else
+            shasum -a 256 "$asset" > "${asset}.sha256"
+          fi
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/${{ steps.package.outputs.asset }}
+            dist/${{ steps.package.outputs.asset }}.sha256
+          retention-days: 7
+
+  publish:
+    name: publish github release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Collect checksums
+        run: |
+          cd dist
+          cat ./*.sha256 > SHA256SUMS
+          rm -f ./*.sha256
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.verify.outputs.version }}
+          name: v${{ needs.verify.outputs.version }}
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          generate_release_notes: true
+          files: dist/*
+
+  # Homebrew tap and Scoop manifest updates hook in here once the artifact
+  # layout is stable. Both consume dist/SHA256SUMS from the published release,
+  # so no change to the build job is required.
+  #
+  # tap:
+  #   name: update homebrew tap
+  #   needs: [verify, publish]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Bump formula in gyorgysh/homebrew-tap
+  #       ...
