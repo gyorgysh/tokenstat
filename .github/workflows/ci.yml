@@ -151,7 +151,7 @@ jobs:
           fi
           cp README.md CONTRIBUTING.md staging/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tokenstat-preview-${{ matrix.target }}
           path: staging/
