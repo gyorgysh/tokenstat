@@ -153,7 +153,9 @@ tokenstat
 
 `scan` reads your logs into a local archive. Everything else reads that archive.
 Bare `tokenstat` on a TTY opens a full-screen client with tabs, headline stats,
-and a command field. Piped use and `tokenstat summary` print the one-shot report.
+and a command field. If the archive was last scanned more than 10 minutes ago,
+it rescans automatically on open. Piped use and `tokenstat summary` print the
+one-shot report.
 
 | Command | Shows |
 | --- | --- |

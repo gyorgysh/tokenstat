@@ -1,9 +1,11 @@
 //! Full-screen interactive client.
 //!
-//! Takes over the terminal (alternate screen, raw mode, mouse) the way agent
-//! CLIs do. Tabs switch reports, Summary opens with headline stats already
-//! drawn, and the command field filters slash-command help as you type.
-//! Logic stays in `tokenstat-core`. This module is layout and input only.
+//! Takes over the terminal (alternate screen, raw mode) the way agent CLIs do.
+//! Tabs switch reports, Summary opens with headline stats already drawn, and
+//! the command field filters slash-command help as you type. On open, if the
+//! archive has not been scanned in the last ten minutes, a scan runs before
+//! the first interactive frame settles. Logic stays in `tokenstat-core`. This
+//! module is layout and input only.
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -322,6 +324,14 @@ struct App {
 /// How many model rows the Summary tab shows before asking for expand.
 const SUMMARY_MODEL_PREVIEW: usize = 10;
 
+/// Rescan when opening the interactive client if the archive is this old.
+///
+/// People open `tokenstat` to see current usage, not to remember a separate
+/// `scan` step. Ten minutes matches the Patron sync floor: denser than the
+/// free/supporter intervals, short enough that a coding session still refreshes
+/// on the next open.
+const AUTO_SCAN_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+
 /// Enter alternate screen, run until quit, then restore the terminal.
 ///
 /// Mouse capture is intentionally off. Capturing the mouse leaves some
@@ -344,6 +354,16 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
 
     let result = (|| {
         let mut app = App::load(db_path, tz)?;
+        // Fresh numbers on open: if nobody has scanned for a while (or ever),
+        // do it before the first interactive frame settles. Draw once first so
+        // a long scan shows "Updating archive…" instead of a blank screen.
+        if archive_needs_scan(app.last_scan.as_deref(), AUTO_SCAN_MAX_AGE) {
+            app.status = "Updating archive…".into();
+            terminal.draw(|f| draw(f, &mut app))?;
+            if let Err(e) = app.run_scan(false) {
+                app.status = format!("Auto-scan failed: {e}");
+            }
+        }
         loop {
             terminal.draw(|f| draw(f, &mut app))?;
             if event::poll(Duration::from_millis(200))? {
@@ -364,6 +384,18 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
 
     drop(_guard);
     result
+}
+
+/// True when `last_scan_ms` is missing or older than `max_age`.
+fn archive_needs_scan(last_scan_ms: Option<&str>, max_age: Duration) -> bool {
+    let Some(raw) = last_scan_ms else {
+        return true;
+    };
+    let Ok(ms) = raw.parse::<i64>() else {
+        return true;
+    };
+    let age_ms = (jiff::Timestamp::now().as_millisecond() - ms).max(0) as u64;
+    age_ms >= max_age.as_millis() as u64
 }
 
 /// Restores cooked mode and the primary screen. Idempotent enough for Drop and
@@ -1490,9 +1522,29 @@ fn draw_status(f: &mut Frame<'_>, area: Rect, app: &App) {
     } else {
         app.status.clone()
     };
+    let version = format!("v{}", tokenstat_core::VERSION);
+    let ver_w = version.chars().count() as u16;
+    // Leave room for the version on the right so it stays put while status text
+    // changes length. Truncate the hint rather than colliding with the version.
+    let hint_budget = area.width.saturating_sub(ver_w.saturating_add(3)) as usize;
+    let hint = if hint.chars().count() > hint_budget {
+        let mut cut = hint
+            .chars()
+            .take(hint_budget.saturating_sub(1))
+            .collect::<String>();
+        cut.push('…');
+        cut
+    } else {
+        hint
+    };
+    let hint_len = hint.chars().count() as u16;
+    let pad = area.width.saturating_sub(1 + hint_len + ver_w + 1) as usize;
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
         Span::styled(hint, Style::default().fg(MUTED)),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(version, Style::default().fg(MUTED)),
+        Span::raw(" "),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
@@ -2322,4 +2374,28 @@ fn run_sync_inline(app: &mut App, host_flag: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_last_scan_needs_a_refresh() {
+        assert!(archive_needs_scan(None, AUTO_SCAN_MAX_AGE));
+        assert!(archive_needs_scan(Some("not-a-number"), AUTO_SCAN_MAX_AGE));
+    }
+
+    #[test]
+    fn a_fresh_scan_is_left_alone() {
+        let now = jiff::Timestamp::now().as_millisecond().to_string();
+        assert!(!archive_needs_scan(Some(&now), AUTO_SCAN_MAX_AGE));
+    }
+
+    #[test]
+    fn an_old_scan_triggers_a_refresh() {
+        // Fifteen minutes ago, past the ten-minute threshold.
+        let old = (jiff::Timestamp::now().as_millisecond() - 15 * 60 * 1000).to_string();
+        assert!(archive_needs_scan(Some(&old), AUTO_SCAN_MAX_AGE));
+    }
 }

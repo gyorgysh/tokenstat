@@ -1221,6 +1221,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[cfg(target_os = "macos")]
     fn signed_release_bin() -> Option<PathBuf> {
         let path = std::env::var("TOKENSTAT_SIGNED_BIN").ok()?;
         let path = PathBuf::from(path);
