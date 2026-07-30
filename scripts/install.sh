@@ -20,6 +20,16 @@
 #   --bin-dir DIR             same as TOKENSTAT_BIN_DIR
 #   --version VER             same as TOKENSTAT_VERSION
 
+# Piped into dash (/bin/sh on many Linux distros): re-exec under bash so the
+# rest of the script (pipefail, etc.) is valid. macOS /bin/sh is already bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash -s -- "$@"
+  fi
+  echo "✖ tokenstat installer requires bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 REPO="gyorgysh/tokenstat"

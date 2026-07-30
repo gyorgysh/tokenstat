@@ -16,6 +16,15 @@
 #   --bin-dir DIR           same as TOKENSTAT_BIN_DIR
 #   --yes / -y              same as TOKENSTAT_YES=1
 
+# Piped into dash (/bin/sh on many Linux distros): re-exec under bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+  if command -v bash >/dev/null 2>&1; then
+    exec bash -s -- "$@"
+  fi
+  echo "✖ tokenstat uninstaller requires bash" >&2
+  exit 1
+fi
+
 set -euo pipefail
 
 # Every scheduler entry tokenstat can install. All of them are removed whether or
