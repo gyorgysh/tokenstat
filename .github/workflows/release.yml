@@ -1,0 +1,249 @@
+name: release
+
+# Cut a release by pushing an annotated tag that points at a commit on main:
+#
+#   git tag -a v0.1.0 -m "v0.1.0"
+#   git push origin v0.1.0
+#
+# Tag-only trigger. Do not add branch pushes or workflow_dispatch here: that
+# pattern created empty "No jobs were run" failure runs on every push to main.
+# To re-run a failed release, move the tag and push again.
+#
+# A tag containing a hyphen (v0.1.0-rc.1) publishes as a prerelease.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version from tag
+        id: tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="$REF_NAME"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Tag '$tag' is not a semantic version (expected vMAJOR.MINOR.PATCH)." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$version" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the manifest version matches the tag
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$manifest" != "$VERSION" ]; then
+            echo "Cargo.toml version '$manifest' does not match tag version '$VERSION'." >&2
+            exit 1
+          fi
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
+
+      # secrets.* cannot appear in `if:` (GitHub rejects the workflow). Skip inside
+      # the script when the p12 secret is unset.
+      - name: Sign and notarize (macOS, optional)
+        if: runner.os == 'macOS'
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEVELOPER_ID_P12_BASE64}" ]; then
+            echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set)."
+            exit 0
+          fi
+          BIN="target/${TARGET}/release/tokenstat"
+          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
+          KEYCHAIN="${RUNNER_TEMP}/tokenstat.keychain-db"
+          KEYCHAIN_PW="${KEYCHAIN_PASSWORD:-}"
+          if [ -z "${KEYCHAIN_PW}" ]; then
+            KEYCHAIN_PW="$(openssl rand -base64 32)"
+          fi
+          echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > "${CERT_PATH}"
+          security create-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          security import "${CERT_PATH}" -k "${KEYCHAIN}" -P "${DEVELOPER_ID_P12_PASSWORD}" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          rm -f "${CERT_PATH}"
+          IDENTITY="${DEVELOPER_ID_APP:-}"
+          if [ -z "${IDENTITY}" ]; then
+            IDENTITY=$(security find-identity -v -p codesigning "${KEYCHAIN}" \
+              | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          fi
+          if [ -z "${IDENTITY}" ]; then
+            echo "No Developer ID Application identity (set DEVELOPER_ID_APP or fix the p12)." >&2
+            exit 1
+          fi
+          # TEAM_ID is unused for a bare binary but kept in env for future bundle signing.
+          : "${TEAM_ID:=}"
+          codesign --force --options runtime --timestamp \
+            --sign "${IDENTITY}" "${BIN}"
+          codesign --verify --verbose=2 "${BIN}"
+          # Notarize when an App Store Connect API key is configured.
+          if [ -n "${NOTARY_KEY_P8_BASE64}" ] && [ -n "${NOTARY_KEY_ID}" ] && [ -n "${NOTARY_ISSUER_ID}" ]; then
+            KEY_PATH="${RUNNER_TEMP}/AuthKey.p8"
+            echo "${NOTARY_KEY_P8_BASE64}" | base64 --decode > "${KEY_PATH}"
+            ZIP="${RUNNER_TEMP}/tokenstat-notarize.zip"
+            ditto -c -k --keepParent "${BIN}" "${ZIP}"
+            xcrun notarytool submit "${ZIP}" \
+              --key "${KEY_PATH}" \
+              --key-id "${NOTARY_KEY_ID}" \
+              --issuer "${NOTARY_ISSUER_ID}" \
+              --wait
+            xcrun stapler staple "${BIN}" || true
+            rm -f "${KEY_PATH}"
+          else
+            echo "Skipping notarization (NOTARY_* secrets not set)."
+          fi
+
+      - name: Package
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          name="tokenstat-${VERSION}-${TARGET}"
+          mkdir -p "dist/${name}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${TARGET}/release/tokenstat.exe" "dist/${name}/"
+          else
+            cp "target/${TARGET}/release/tokenstat" "dist/${name}/"
+          fi
+          cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "${name}.zip" "${name}" > /dev/null
+            asset="${name}.zip"
+          else
+            tar czf "${name}.tar.gz" "${name}"
+            asset="${name}.tar.gz"
+          fi
+          # Checksums let a Homebrew formula or Scoop manifest verify downloads.
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$asset" > "${asset}.sha256"
+          else
+            shasum -a 256 "$asset" > "${asset}.sha256"
+          fi
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/${{ steps.package.outputs.asset }}
+            dist/${{ steps.package.outputs.asset }}.sha256
+          retention-days: 7
+
+  publish:
+    name: publish github release
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Collect checksums
+        run: |
+          cd dist
+          cat ./*.sha256 > SHA256SUMS
+          rm -f ./*.sha256
+
+      - name: Publish
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v${{ needs.verify.outputs.version }}
+          name: v${{ needs.verify.outputs.version }}
+          prerelease: ${{ needs.verify.outputs.prerelease }}
+          generate_release_notes: true
+          files: dist/*
+
+  # Homebrew tap and Scoop manifest updates hook in here once the artifact
+  # layout is stable. Both consume dist/SHA256SUMS from the published release,
+  # so no change to the build job is required.
+  #
+  # tap:
+  #   name: update homebrew tap
+  #   needs: [verify, publish]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Bump formula in gyorgysh/homebrew-tap
+  #       ...

@@ -1,0 +1,53 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Local fixtures and scratch data
+/fixtures/local/
+/tmp/
+*.local.json
+
+# Price books are fetched at runtime into the user data dir, never shipped.
+/crates/tokenstat-core/pricing/
+
+# Internal working notes. Research, design rationale, and session handover.
+# Not published: these reference local paths and machine specifics.
+/roadmap.md
+/WORKLOG.md
+
+# Coverage and profiling
+/coverage/
+lcov.info
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Editors and tooling
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+.idea/
+*.iml
+.zed/
+.direnv/
+.cursor/
+
+# OS
+.DS_Store
+.AppleDouble
+Thumbs.db
+desktop.ini
+
+# Build and release scratch
+/release-artifacts/
+/pkg/
