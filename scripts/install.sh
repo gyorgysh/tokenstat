@@ -2,7 +2,7 @@
 #
 # tokenstat installer for macOS and Linux.
 #
-#   curl -fsSL https://tokenstat.ai/install.sh | sh
+#   curl -fsSL https://tokenstat.ai/install.sh | bash
 #
 # Downloads the matching GitHub Release binary into ~/.local/bin (user-writable
 # so `tokenstat update` works), verifies SHA256SUMS, and runs `tokenstat setup`

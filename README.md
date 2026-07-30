@@ -74,7 +74,7 @@ like `/usr/local/bin` are refused.
 
 ```bash
 # macOS / Linux
-curl -fsSL https://tokenstat.ai/install.sh | sh
+curl -fsSL https://tokenstat.ai/install.sh | bash
 ```
 
 ```powershell
@@ -128,8 +128,8 @@ cargo install --path crates/tokenstat-cli
 
 ```bash
 # macOS / Linux
-curl -fsSL https://tokenstat.ai/uninstall.sh | sh
-curl -fsSL https://tokenstat.ai/uninstall.sh | sh -s -- --purge --yes   # also delete archive
+curl -fsSL https://tokenstat.ai/uninstall.sh | bash
+curl -fsSL https://tokenstat.ai/uninstall.sh | bash -s -- --purge --yes   # also delete archive
 ```
 
 ```powershell

@@ -52,7 +52,7 @@ Local token usage for AI coding agents. Counters stay on your machine unless you
 ### Install
 
 \`\`\`bash
-curl -fsSL https://tokenstat.ai/install.sh | sh
+curl -fsSL https://tokenstat.ai/install.sh | bash
 \`\`\`
 
 Windows (PowerShell):

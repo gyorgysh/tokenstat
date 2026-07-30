@@ -2,7 +2,7 @@
 #
 # tokenstat uninstaller for macOS and Linux.
 #
-#   curl -fsSL https://tokenstat.ai/uninstall.sh | sh
+#   curl -fsSL https://tokenstat.ai/uninstall.sh | bash
 #
 # Removes the hourly scan schedule, then the binary. Leaves the local archive
 # alone unless you pass --purge (your scanned history, including usage coding
