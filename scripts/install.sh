@@ -235,15 +235,16 @@ main() {
   export PATH="${BIN_DIR}:$PATH"
 
   say "running setup (scan, schedule, optional account link)"
-  setup_args=()
+  # No bash arrays: macOS /bin/sh is bash 3.2, and `set -u` treats an empty
+  # "${arr[@]}" as unbound. Positional parameters are safe when empty.
+  set --
   if [ "$NO_SCHEDULE" = "1" ]; then
-    setup_args+=(--no-schedule)
+    set -- "$@" --no-schedule
   fi
   if [ "$YES" = "1" ]; then
-    setup_args+=(--yes)
+    set -- "$@" --yes
   fi
-  # bash 3.2 (macOS /bin/sh) with `set -u` rejects an empty "${arr[@]}".
-  "$dest" setup ${setup_args[@]+"${setup_args[@]}"} || warn "setup reported an error (you can re-run: tokenstat setup)"
+  "$dest" setup "$@" || warn "setup reported an error (you can re-run: tokenstat setup)"
 
   echo
   ok "tokenstat v${version} ready"
