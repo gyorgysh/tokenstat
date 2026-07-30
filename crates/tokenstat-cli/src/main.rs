@@ -128,7 +128,8 @@ enum Command {
     /// Set up automatic scanning, so history is not lost to log cleanup
     ///
     /// Prints the scheduler entry by default. Nothing is written unless you
-    /// pass --install.
+    /// pass --install. Re-running --install repairs a previous install: refreshes
+    /// paths and intervals, and removes sync/update entries that no longer belong.
     Schedule {
         /// Write and activate the scheduler entry for this platform
         #[arg(long)]
@@ -458,7 +459,18 @@ fn main() -> Result<()> {
             return render::profile_sync_status(host.as_deref(), cli.json);
         }
         if *scheduled {
-            let store = Store::open(&db_path)?;
+            let store = match Store::open(&db_path) {
+                Ok(s) => s,
+                Err(e) if e.is_busy() => {
+                    if cli.json {
+                        println!(r#"{{"skipped":"deferred","reason":"archive busy"}}"#);
+                    } else {
+                        println!("archive busy, will retry next run");
+                    }
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
             return render::profile_sync_scheduled(
                 &store,
                 host.as_deref(),

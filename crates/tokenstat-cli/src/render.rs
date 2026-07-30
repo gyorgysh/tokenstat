@@ -1357,8 +1357,27 @@ pub fn update_auto(value: &str, json: bool) -> Result<()> {
     };
     tokenstat_sync::config::set_update_auto(on).map_err(|e| anyhow::anyhow!("{e}"))?;
 
+    let home = directories::BaseDirs::new()
+        .map(|d| d.home_dir().to_path_buf())
+        .context("locating your home directory")?;
+    let exe = crate::schedule::preferred_executable();
+    let schedule_touched = if on {
+        crate::schedule::install(
+            &home,
+            crate::schedule::Unit::Update,
+            &exe,
+            crate::schedule::Unit::Update.default_interval(),
+        )
+        .map(|_| true)
+        .unwrap_or(false)
+    } else {
+        crate::schedule::uninstall(&home, crate::schedule::Unit::Update)
+            .map(|r| r.removed)
+            .unwrap_or(false)
+    };
+
     if json {
-        println!(r#"{{"auto_update":{on}}}"#);
+        println!(r#"{{"auto_update":{on},"schedule_updated":{schedule_touched}}}"#);
         return Ok(());
     }
     let g = good();
@@ -1367,10 +1386,17 @@ pub fn update_auto(value: &str, json: bool) -> Result<()> {
         println!("  {g}automatic updates on{g:#}");
         println!("  {DIM}A newer release is downloaded, its checksum checked, and the{DIM:#}");
         println!("  {DIM}binary run and version-checked before it replaces this one.{DIM:#}");
-        println!("  {DIM}Schedule the daily check with: tokenstat schedule --install{DIM:#}");
+        if schedule_touched {
+            println!("  {g}installed{g:#} daily update schedule");
+        } else {
+            println!("  {DIM}Schedule the daily check with: tokenstat schedule --install{DIM:#}");
+        }
     } else {
         println!("  {g}automatic updates off{g:#}");
         println!("  {DIM}tokenstat update still works when you run it yourself.{DIM:#}");
+        if schedule_touched {
+            println!("  {g}removed{g:#} daily update schedule");
+        }
     }
     println!();
     Ok(())
@@ -1451,30 +1477,45 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
 }
 
 /// Best-effort sync (and auto-update) schedule after linking an account.
+///
+/// Goes through `repair` so a re-login also refreshes the scan entry and drops
+/// a stale update unit when auto-apply is off.
 fn maybe_install_linked_schedules(host: Option<&str>, quiet: bool) {
     let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) else {
         return;
     };
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "tokenstat".to_string());
-    match crate::schedule::install_linked_units(&home, &exe, host) {
-        Ok(linked) => {
+    let exe = crate::schedule::preferred_executable();
+    let info = match tokenstat_sync::scheduling_info(host) {
+        Ok(i) if i.logged_in => i,
+        _ => return,
+    };
+    let sync_interval = info
+        .min_interval
+        .unwrap_or_else(|| crate::schedule::Unit::Sync.default_interval());
+    let want_update = tokenstat_sync::auto_apply_enabled();
+    match crate::schedule::repair(
+        &home,
+        &exe,
+        crate::schedule::Unit::Scan.default_interval(),
+        crate::schedule::SyncAction::Install(sync_interval),
+        want_update,
+    ) {
+        Ok(report) => {
             if quiet {
                 return;
             }
             let g = good();
-            if let Some(secs) = linked.sync_interval_secs {
+            if let Some(secs) = report.sync_interval_secs {
                 println!(
                     "  {g}installed{g:#} sync every {} min {DIM}(+ up to {}s jitter){DIM:#}",
                     secs / 60,
                     tokenstat_sync::JITTER_WINDOW_SECS
                 );
             }
-            if linked.update.is_some() {
+            if report.update.is_some() {
                 println!("  {g}installed{g:#} daily update check");
+            } else if report.update_removed {
+                println!("  {g}removed{g:#} stale update schedule");
             }
         }
         Err(e) => {
@@ -1487,6 +1528,10 @@ fn maybe_install_linked_schedules(host: Option<&str>, quiet: bool) {
 }
 
 /// Drop the sync token for a host. No server call.
+///
+/// Leaves the sync schedule in place: `sync --scheduled` exits quietly without
+/// a token, and the next `tokenstat login` starts uploading again without
+/// another `schedule --install`.
 pub fn profile_logout(host: Option<&str>, json: bool) -> Result<()> {
     let host = tokenstat_sync::logout(host).map_err(|e| anyhow::anyhow!("{e}"))?;
     if json {
@@ -1495,6 +1540,7 @@ pub fn profile_logout(host: Option<&str>, json: bool) -> Result<()> {
     }
     println!();
     println!("  cleared sync token for {host}");
+    println!("  {DIM}sync schedule left in place (resumes after login){DIM:#}");
     println!();
     Ok(())
 }
@@ -1608,9 +1654,10 @@ pub fn profile_sync(
 
 /// `sync` as run by the scheduler.
 ///
-/// A background job has no one to read it, so the two boring outcomes (no
-/// account, not due yet) print a single line and exit 0. Only a real failure is
-/// loud, because that is the one worth finding in the log.
+/// A background job has no one to read it, so the boring outcomes (no account,
+/// not due yet, archive busy, brief network blip) print a single line and exit
+/// 0. Only a durable failure is loud, because that is the one worth finding in
+/// the log.
 pub fn profile_sync_scheduled(
     store: &Store,
     host: Option<&str>,
@@ -1645,6 +1692,22 @@ pub fn profile_sync_scheduled(
                 println!(r#"{{"skipped":"rate_limited","next_allowed_at":"{until}"}}"#);
             } else {
                 println!("not due yet, next sync allowed at {until}");
+            }
+            Ok(())
+        }
+        tokenstat_sync::ScheduledOutcome::Deferred { reason } => {
+            if json {
+                let escaped = reason.replace('\\', "\\\\").replace('"', "\\\"");
+                println!(r#"{{"skipped":"deferred","reason":"{escaped}"}}"#);
+            } else if reason.contains("database is locked")
+                || reason.contains("database is busy")
+                || reason.contains("database error")
+            {
+                println!("archive busy, will retry next run");
+            } else if reason.contains("schema fetch failed") || reason.contains("error sending") {
+                println!("schema unreachable, will retry next run");
+            } else {
+                println!("sync deferred, will retry next run: {reason}");
             }
             Ok(())
         }
@@ -2187,15 +2250,14 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
             );
         }
         // No second question: the one at the top covered it.
+        // Scan only here so a failed login still leaves the archive catching up.
+        // After the account step we run `repair`, which refreshes every unit and
+        // drops a stale sync/update left by an older install.
         let installed = {
             let home = directories::BaseDirs::new()
                 .map(|d| d.home_dir().to_path_buf())
                 .context("locating your home directory")?;
-            let exe = std::env::current_exe()
-                .ok()
-                .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "tokenstat".to_string());
+            let exe = crate::schedule::preferred_executable();
             match crate::schedule::install(&home, Unit::Scan, &exe, Unit::Scan.default_interval()) {
                 Ok(_) => {
                     if !opts.json {
@@ -2286,40 +2348,55 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
         }
     }
 
-    // 4. First sync, only when there is an account and something to send.
-    // Install the sync timer before the upload so a success leaves the machine
-    // paced; a refusal still recorded pacing via record_sync_hold.
+    // 4. Repair the full schedule layout, then first sync when there is an account.
+    // Re-running setup / the website installer refreshes paths and intervals.
+    // Sync is only installed when linked; if not linked yet, an existing sync
+    // unit is left alone so logout does not undo install-and-forget.
     let mut sync_scheduled = false;
-    if connected && !opts.no_schedule {
+    if !opts.no_schedule {
         let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
-        let exe = std::env::current_exe()
-            .ok()
-            .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "tokenstat".to_string());
+        let exe = crate::schedule::preferred_executable();
         if let Some(home) = home {
-            match crate::schedule::install_linked_units(&home, &exe, opts.host) {
-                Ok(linked) => {
-                    sync_scheduled = linked.sync.is_some();
+            let sync_interval = tokenstat_sync::scheduling_info(opts.host)
+                .ok()
+                .and_then(|i| i.min_interval)
+                .unwrap_or_else(|| Unit::Sync.default_interval());
+            let want_update = tokenstat_sync::auto_apply_enabled();
+            let sync_action = if connected {
+                crate::schedule::SyncAction::Install(sync_interval)
+            } else {
+                crate::schedule::SyncAction::Keep
+            };
+            match crate::schedule::repair(
+                &home,
+                &exe,
+                Unit::Scan.default_interval(),
+                sync_action,
+                want_update,
+            ) {
+                Ok(report) => {
+                    sync_scheduled = report.sync.is_some();
                     if !opts.json {
-                        if let Some(secs) = linked.sync_interval_secs {
+                        if let Some(secs) = report.sync_interval_secs {
                             println!(
                                 "  {g}installed{g:#} sync every {} min {DIM}(+ up to {}s jitter){DIM:#}",
                                 secs / 60,
                                 tokenstat_sync::JITTER_WINDOW_SECS
                             );
                         }
-                        if linked.update.is_some() {
+                        if report.update.is_some() {
                             println!("  {g}installed{g:#} daily update check");
+                        } else if report.update_removed {
+                            println!("  {g}removed{g:#} stale update schedule");
                         }
-                        if sync_scheduled {
+                        if sync_scheduled || report.update_removed {
                             println!();
                         }
                     }
                 }
                 Err(e) => {
                     if !opts.json {
-                        println!("  {DIM}could not install sync schedule: {e}{DIM:#}");
+                        println!("  {DIM}could not repair schedule: {e}{DIM:#}");
                         println!("  {DIM}run later with: tokenstat schedule --install{DIM:#}");
                         println!();
                     }
@@ -2393,11 +2470,7 @@ pub fn schedule(
 ) -> Result<()> {
     use crate::schedule::{self as sched, Platform, Unit};
 
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "tokenstat".to_string());
+    let exe = sched::preferred_executable();
     let interval = every_mins.max(1) * 60;
     let platform = Platform::detect();
 
@@ -2426,17 +2499,41 @@ pub fn schedule(
         let g = good();
         println!();
 
-        let report = sched::install(&home, Unit::Scan, &exe, interval)?;
-        println!("  {g}Installed{g:#} scan every {every_mins} min");
-        for path in &report.paths {
-            println!("  {DIM}{}{DIM:#}", path.display());
-        }
-        if let Some(hint) = &report.hint {
-            println!("  {DIM}{hint}{DIM:#}");
+        if want_update {
+            // auto_apply_enabled() also honours TOKENSTAT_AUTO_UPDATE, which the
+            // scheduler will not inherit. Persist the choice, or the unit we are
+            // about to write would wake up every day and decide it is switched off.
+            let persisted = tokenstat_sync::config::load()
+                .ok()
+                .and_then(|c| c.update.auto)
+                .unwrap_or(false);
+            if !persisted {
+                let _ = tokenstat_sync::config::set_update_auto(true);
+            }
         }
 
-        if want_sync {
-            let report = sched::install(&home, Unit::Sync, &exe, sync_interval)?;
+        let sync_action = if want_sync {
+            sched::SyncAction::Install(sync_interval)
+        } else if no_sync {
+            sched::SyncAction::Remove
+        } else {
+            // Not linked: leave an existing sync unit alone so logout does not
+            // undo install-and-forget. It will no-op until the next login.
+            sched::SyncAction::Keep
+        };
+        let report = sched::repair(&home, &exe, interval, sync_action, want_update)?;
+
+        if let Some(report) = &report.scan {
+            println!("  {g}Installed{g:#} scan every {every_mins} min");
+            for path in &report.paths {
+                println!("  {DIM}{}{DIM:#}", path.display());
+            }
+            if let Some(hint) = &report.hint {
+                println!("  {DIM}{hint}{DIM:#}");
+            }
+        }
+
+        if let Some(report) = &report.sync {
             println!();
             println!(
                 "  {g}Installed{g:#} sync every {} min {DIM}(+ up to {}s jitter){DIM:#}",
@@ -2449,24 +2546,21 @@ pub fn schedule(
             if let Some(hint) = &report.hint {
                 println!("  {DIM}{hint}{DIM:#}");
             }
+        } else if report.sync_removed {
+            println!();
+            println!("  {g}Removed{g:#} sync schedule (--no-sync)");
         } else if !no_sync {
             println!();
-            println!("  {DIM}No account linked, so nothing is uploaded and no sync entry{DIM:#}");
-            println!("  {DIM}was installed. Run: tokenstat login{DIM:#}");
+            println!("  {DIM}No account linked, so nothing is uploaded yet.{DIM:#}");
+            println!(
+                "  {DIM}An existing sync schedule is left in place. Run: tokenstat login{DIM:#}"
+            );
+        } else {
+            println!();
+            println!("  {DIM}Sync schedule skipped (--no-sync).{DIM:#}");
         }
 
-        if want_update {
-            // auto_apply_enabled() also honours TOKENSTAT_AUTO_UPDATE, which the
-            // scheduler will not inherit. Persist the choice, or the unit we are
-            // about to write would wake up every day and decide it is switched off.
-            let persisted = tokenstat_sync::config::load()
-                .ok()
-                .and_then(|c| c.update.auto)
-                .unwrap_or(false);
-            if !persisted {
-                let _ = tokenstat_sync::config::set_update_auto(true);
-            }
-            let report = sched::install(&home, Unit::Update, &exe, update_interval)?;
+        if let Some(report) = &report.update {
             println!();
             println!("  {g}Installed{g:#} daily update check");
             for path in &report.paths {
@@ -2475,6 +2569,9 @@ pub fn schedule(
             if let Some(hint) = &report.hint {
                 println!("  {DIM}{hint}{DIM:#}");
             }
+        } else if report.update_removed {
+            println!();
+            println!("  {g}Removed{g:#} stale update schedule");
         } else {
             println!();
             println!("  {DIM}Automatic updates are off, so no update entry was installed.{DIM:#}");

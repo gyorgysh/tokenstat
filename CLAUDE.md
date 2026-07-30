@@ -81,15 +81,27 @@ from any shell without `cargo run`.
 fmt/clippy/test), so the user can try the build immediately. Use unrestricted
 permissions for the copy (`~/.local/bin` is outside the workspace).
 
+**macOS exception:** if `~/.local/bin/tokenstat` already carries a real signing
+identity (`codesign --display` shows `Authority=`), do **not** overwrite it and
+do **not** ad-hoc `codesign --sign -` it. That path belongs to the official
+Developer ID release from the website installer / `tokenstat update`. Test with
+`cargo run` instead.
+
 ```bash
 # Prefer the workspace target dir so a sandbox CARGO_TARGET_DIR does not
 # leave you copying a stale binary.
 unset CARGO_TARGET_DIR
 cargo build --release -p tokenstat-cli
-mkdir -p ~/.local/bin
-cp -f target/release/tokenstat ~/.local/bin/tokenstat
-xattr -cr ~/.local/bin/tokenstat 2>/dev/null || true
-codesign --force --sign - ~/.local/bin/tokenstat
+DEST="$HOME/.local/bin/tokenstat"
+if [ "$(uname -s)" = "Darwin" ] && [ -f "$DEST" ] \
+  && codesign --display --verbose=2 "$DEST" 2>&1 | grep -q '^Authority='; then
+  echo "skipping: $DEST is Developer ID signed"
+else
+  mkdir -p ~/.local/bin
+  cp -f target/release/tokenstat "$DEST"
+  xattr -cr "$DEST" 2>/dev/null || true
+  codesign --force --sign - "$DEST"
+fi
 ```
 
 Ensure `~/.local/bin` is on your `PATH`. On macOS, resign after `cp` so the

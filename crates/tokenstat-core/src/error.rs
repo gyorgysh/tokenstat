@@ -72,6 +72,22 @@ pub enum CoreError {
     ForbiddenSyncField(String),
 }
 
+impl CoreError {
+    /// True when SQLite refused the call because another connection holds a lock.
+    ///
+    /// Scheduled jobs treat this as "try again next tick" rather than a hard
+    /// failure: a scan can hold a write transaction longer than a sync wants to wait.
+    pub fn is_busy(&self) -> bool {
+        match self {
+            CoreError::Db(err) => matches!(
+                err.sqlite_error_code(),
+                Some(rusqlite::ErrorCode::DatabaseBusy) | Some(rusqlite::ErrorCode::DatabaseLocked)
+            ),
+            _ => false,
+        }
+    }
+}
+
 /// A non-fatal problem worth telling the user about, surfaced by `doctor`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {

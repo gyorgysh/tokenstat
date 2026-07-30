@@ -7,7 +7,8 @@
   Downloads the matching GitHub Release zip into %LOCALAPPDATA%\tokenstat,
   verifies SHA256SUMS, adds the directory to the user PATH, and runs
   `tokenstat setup` (scan, hourly schedule, and a prompt to link an account
-  when run on a TTY).
+  when run on a TTY). Re-running is safe: setup repairs the schedule
+  (refreshes paths/intervals and removes stale sync/update entries).
 
   Website one-liner:
     irm https://tokenstat.ai/install.ps1 | iex

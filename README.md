@@ -114,9 +114,12 @@ tokenstat update --auto off
 ```
 
 macOS builds are Developer ID signed and notarized when repository secrets are
-configured (see [CONTRIBUTING.md](CONTRIBUTING.md)). When the installed binary
-carries a real signing identity, a replacement must too. Do not ad-hoc
-`codesign --sign -` a release binary: that strips the Developer ID signature.
+configured (see [CONTRIBUTING.md](CONTRIBUTING.md)). After a website install,
+`~/.local/bin/tokenstat` is that release: do not overwrite it with a local
+`cargo` build, and do not ad-hoc `codesign --sign -` it (that strips the
+Developer ID signature). Scheduler entries prefer the signed install when both
+a release and a cargo binary are present. When the installed binary carries a
+real signing identity, a replacement must too.
 
 From source:
 

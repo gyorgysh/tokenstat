@@ -99,5 +99,5 @@ pub use profile::{
 pub use update::{
     ApplyReport, ScheduledUpdate, UPDATE_JITTER_WINDOW_SECS, UpdateCheck, UpdateError,
     UpdateOutcome, apply_update, auto_apply_enabled, check_latest, current_target,
-    maybe_auto_update, scheduled_update, version_cmp,
+    has_macos_signing_authority, maybe_auto_update, scheduled_update, version_cmp,
 };

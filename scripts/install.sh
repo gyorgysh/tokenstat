@@ -7,6 +7,8 @@
 # Downloads the matching GitHub Release binary into ~/.local/bin (user-writable
 # so `tokenstat update` works), verifies SHA256SUMS, and runs `tokenstat setup`
 # (scan, hourly schedule, and a prompt to link an account when run on a TTY).
+# Re-running is safe: setup repairs the schedule (refreshes paths/intervals and
+# removes stale sync/update entries that no longer belong).
 # Never ad-hoc codesigns: macOS release builds are Developer ID signed and
 # notarized when CI secrets are set.
 #
@@ -242,6 +244,13 @@ main() {
   if [ "$(uname -s)" = "Darwin" ]; then
     # Clear quarantine only. Do not ad-hoc re-sign (strips Developer ID).
     xattr -cr "$dest" 2>/dev/null || true
+    if command -v codesign >/dev/null 2>&1; then
+      if codesign --display --verbose=2 "$dest" 2>&1 | grep -q '^Authority='; then
+        ok "Developer ID signature kept (official release)"
+      else
+        warn "installed binary has no Developer ID identity (unsigned or ad-hoc build)"
+      fi
+    fi
   fi
   ok "installed $dest"
 

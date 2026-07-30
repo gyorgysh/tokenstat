@@ -641,6 +641,11 @@ pub enum ScheduledOutcome {
     Held {
         until: Option<String>,
     },
+    /// A transient failure (archive busy, network blip). Log it and exit 0 so
+    /// the next timer tick retries. Manual `tokenstat sync` still fails loud.
+    Deferred {
+        reason: String,
+    },
     Synced(Box<SyncResult>),
 }
 
@@ -689,7 +694,31 @@ pub fn sync_scheduled(
         }) => Ok(ScheduledOutcome::Held {
             until: next_allowed_at,
         }),
+        Err(err) if err.is_transient() => Ok(ScheduledOutcome::Deferred {
+            reason: err.to_string(),
+        }),
         Err(err) => Err(err),
+    }
+}
+
+impl ProfileError {
+    /// Failures a background timer should swallow and retry on the next tick.
+    ///
+    /// Auth mistakes, empty archives, and unsupported schemas stay hard so the
+    /// log still surfaces things that will not fix themselves.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            ProfileError::Core(e) => e.is_busy(),
+            ProfileError::Http(e) => {
+                e.is_connect() || e.is_timeout() || e.is_request() || e.status().is_none()
+            }
+            ProfileError::Message(m) => {
+                m.starts_with("schema fetch failed:")
+                    || m.contains("database is locked")
+                    || m.contains("database is busy")
+            }
+            _ => false,
+        }
     }
 }
 

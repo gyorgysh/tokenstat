@@ -127,19 +127,62 @@ impl Store {
                 source,
             })?;
         }
+        // An existing archive must open without DDL. CREATE TABLE takes a write
+        // lock, and the hourly scan holds write transactions for far longer than
+        // a statusline or sync wants to wait. Fresh files still get the full
+        // schema on first open.
+        let fresh = !path.exists()
+            || std::fs::metadata(path)
+                .map(|m| m.len() == 0)
+                .unwrap_or(true);
         let conn = Connection::open(path)?;
-        Self::init(conn)
+        Self::configure(&conn)?;
+        if fresh || !Self::schema_ready(&conn)? {
+            Self::migrate(&conn)?;
+        }
+        Ok(Store { conn })
     }
 
     pub fn open_in_memory() -> Result<Self, CoreError> {
-        Self::init(Connection::open_in_memory()?)
+        let conn = Connection::open_in_memory()?;
+        Self::configure(&conn)?;
+        Self::migrate(&conn)?;
+        Ok(Store { conn })
     }
 
-    fn init(conn: Connection) -> Result<Self, CoreError> {
+    /// WAL + busy wait. Safe to call on a connection that will only read.
+    fn configure(conn: &Connection) -> Result<(), CoreError> {
         // WAL keeps a statusline read from ever blocking behind a scan.
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        // Scan insert_events can hold a write lock for tens of seconds on a
+        // large archive. Five seconds was too short for overlapping sync opens.
+        conn.busy_timeout(std::time::Duration::from_secs(60))?;
+        Ok(())
+    }
+
+    /// True when `meta.schema_version` is present (tables already created).
+    fn schema_ready(conn: &Connection) -> Result<bool, CoreError> {
+        let has_meta: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !has_meta {
+            return Ok(false);
+        }
+        Ok(conn
+            .query_row("SELECT v FROM meta WHERE k = 'schema_version'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?
+            .is_some())
+    }
+
+    fn migrate(conn: &Connection) -> Result<(), CoreError> {
         conn.execute_batch(
             r#"
             CREATE TABLE IF NOT EXISTS event (
@@ -182,7 +225,7 @@ impl Store {
             "INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?1)",
             params![SCHEMA_VERSION.to_string()],
         )?;
-        Ok(Store { conn })
+        Ok(())
     }
 
     /// Insert events, collapsing repeats of the same request.
@@ -893,5 +936,50 @@ mod tests {
         let (day, month) = s.statusline_snapshot("2023-11-15", "2023-11-01").unwrap();
         assert_eq!(day.output, Some(7));
         assert_eq!(month.output, Some(7));
+    }
+
+    #[test]
+    fn opening_an_existing_archive_does_not_need_the_writer_to_finish() {
+        // The old open path ran CREATE TABLE on every call, which takes a write
+        // lock and lost to a concurrent scan. Re-opening an existing file must
+        // stay read-only enough to succeed while another connection holds a
+        // write transaction.
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-store-busy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tokenstat.db");
+
+        {
+            let mut s = Store::open(&path).unwrap();
+            let tz = jiff::tz::TimeZone::UTC;
+            s.insert_events(&[ev("a", 1_700_000_000_000, "m", 1)], &tz)
+                .unwrap();
+        }
+
+        let writer = Connection::open(&path).unwrap();
+        writer
+            .busy_timeout(std::time::Duration::from_secs(60))
+            .unwrap();
+        writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+        let tx = writer.unchecked_transaction().unwrap();
+        tx.execute("UPDATE event SET output = output WHERE 1 = 1", [])
+            .unwrap();
+
+        let reader = Store::open(&path).expect("open must not wait on DDL behind a writer");
+        let totals = reader
+            .totals(&Query::default())
+            .expect("WAL reads must work during a write transaction");
+        assert_eq!(totals.events, 1);
+
+        tx.commit().unwrap();
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

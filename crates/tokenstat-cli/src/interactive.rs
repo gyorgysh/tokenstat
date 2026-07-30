@@ -528,11 +528,7 @@ impl App {
         let home = directories::BaseDirs::new()
             .map(|d| d.home_dir().to_path_buf())
             .context("locating your home directory")?;
-        let exe = std::env::current_exe()
-            .ok()
-            .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "tokenstat".to_string());
+        let exe = crate::schedule::preferred_executable();
         install(&home, Unit::Scan, &exe, Unit::Scan.default_interval())?;
         self.status = "Installed hourly scan schedule".into();
         Ok(())
@@ -542,15 +538,14 @@ impl App {
         let home = directories::BaseDirs::new()
             .map(|d| d.home_dir().to_path_buf())
             .context("locating your home directory")?;
-        let exe = std::env::current_exe()
-            .ok()
-            .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "tokenstat".to_string());
+        let exe = crate::schedule::preferred_executable();
         let linked = crate::schedule::install_linked_units(&home, &exe, host_flag)?;
         if linked.sync.is_some() {
             let mins = linked.sync_interval_secs.unwrap_or(3600) / 60;
             self.status = format!("Installed sync every {mins} min");
+        }
+        if linked.update.is_some() {
+            self.status = "Installed daily update schedule".into();
         }
         Ok(())
     }

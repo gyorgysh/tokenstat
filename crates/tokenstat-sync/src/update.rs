@@ -552,6 +552,14 @@ fn verify_candidate(
 /// below on development machines, where it guards nothing and would block updates
 /// whenever a release is not itself signed. A real identity shows up as an
 /// `Authority=` line; ad-hoc reports `Signature=adhoc` and no authority.
+///
+/// Public so the CLI can prefer a Developer ID install under `~/.local/bin`
+/// over a cargo/ad-hoc binary when writing scheduler entries.
+#[cfg(target_os = "macos")]
+pub fn has_macos_signing_authority(path: &Path) -> bool {
+    has_signing_authority(path)
+}
+
 #[cfg(target_os = "macos")]
 fn has_signing_authority(path: &Path) -> bool {
     let out = Command::new("codesign")
@@ -569,6 +577,11 @@ fn has_signing_authority(path: &Path) -> bool {
         String::from_utf8_lossy(&out.stdout)
     );
     text.lines().any(|l| l.starts_with("Authority="))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn has_macos_signing_authority(_path: &Path) -> bool {
+    false
 }
 
 /// macOS only: never install a binary less trusted than the one it replaces.

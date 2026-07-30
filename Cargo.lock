@@ -2049,7 +2049,7 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokenstat-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anstream 0.6.21",
  "anstyle",
@@ -2066,7 +2066,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "directories",
@@ -2084,7 +2084,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "serde",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "tokenstat-sync"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "directories",
@@ -2531,7 +2531,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "serde_json",

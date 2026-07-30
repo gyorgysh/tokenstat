@@ -81,6 +81,16 @@ foreach ($Label in $Labels) {
   }
 }
 
+# Hidden runners written by `tokenstat schedule --install` (avoid cmd flash).
+$ScheduleDir = Join-Path $env:LOCALAPPDATA "ai.tokenstat.tokenstat\schedule"
+if (Test-Path -LiteralPath $ScheduleDir) {
+  Say "removing schedule helpers in $ScheduleDir"
+  Remove-Item -LiteralPath $ScheduleDir -Recurse -Force -ErrorAction SilentlyContinue
+  if (-not (Test-Path -LiteralPath $ScheduleDir)) {
+    Ok "schedule helpers removed"
+  }
+}
+
 # 2. Binary / install directory.
 if (Test-Path -LiteralPath $BinDir) {
   Say "removing $BinDir"

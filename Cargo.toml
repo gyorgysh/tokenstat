@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/tokenstat-core", "crates/tokenstat-cli", "crates/tokenstat-sync", "crates/tokenstat-mcp", "xtask"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 authors = ["tokenstat contributors"]
@@ -11,9 +11,9 @@ repository = "https://github.com/gyorgysh/tokenstat"
 homepage = "https://tokenstat.ai"
 
 [workspace.dependencies]
-tokenstat-core = { path = "crates/tokenstat-core", version = "0.1.0" }
-tokenstat-sync = { path = "crates/tokenstat-sync", version = "0.1.0" }
-tokenstat-mcp = { path = "crates/tokenstat-mcp", version = "0.1.0" }
+tokenstat-core = { path = "crates/tokenstat-core", version = "0.1.1" }
+tokenstat-sync = { path = "crates/tokenstat-sync", version = "0.1.1" }
+tokenstat-mcp = { path = "crates/tokenstat-mcp", version = "0.1.1" }
 
 # Core. Deliberately no network stack here: the privacy guarantee is that the
 # crate reading your logs cannot send them anywhere.
