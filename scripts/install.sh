@@ -242,7 +242,8 @@ main() {
   if [ "$YES" = "1" ]; then
     setup_args+=(--yes)
   fi
-  "$dest" setup "${setup_args[@]}" || warn "setup reported an error (you can re-run: tokenstat setup)"
+  # bash 3.2 (macOS /bin/sh) with `set -u` rejects an empty "${arr[@]}".
+  "$dest" setup ${setup_args[@]+"${setup_args[@]}"} || warn "setup reported an error (you can re-run: tokenstat setup)"
 
   echo
   ok "tokenstat v${version} ready"
