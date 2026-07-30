@@ -221,6 +221,8 @@ jobs:
     name: publish github release
     needs: [verify, build]
     runs-on: ubuntu-latest
+    # Pause here until a required reviewer approves (Settings → Environments → release).
+    environment: release
     permissions:
       contents: write
     steps:
