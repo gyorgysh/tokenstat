@@ -1,0 +1,626 @@
+//! Terminal rendering.
+//!
+//! Deliberately hand rolled rather than pulling a table crate. The output has a
+//! specific shape (right-aligned magnitudes, inline bars, a heat grid) that a
+//! generic table would fight, and it keeps the dependency surface small.
+//!
+//! Colour goes through `anstream`, which strips styling when the output is piped
+//! or the terminal cannot handle it, so `tokenstat daily | less` stays readable.
+
+use anstyle::{AnsiColor, Color, RgbColor, Style};
+
+pub const DIM: Style = Style::new().dimmed();
+pub const BOLD: Style = Style::new().bold();
+
+/// Electric accent for black terminals (`#B264EB`).
+///
+/// Sampled from the galaxy purple reference (mid `#9F68C7`), then pushed
+/// brighter so chrome, bars, and the active tab read cleanly on black. The
+/// website should use black/white surfaces with `#9F68C7` as the brand mid and
+/// `#B264EB` where something needs to pop.
+pub const ACCENT_RGB: (u8, u8, u8) = (0xB2, 0x64, 0xEB);
+
+/// Secondary accent (`#67E8F9`). Cool cyan beside electric purple, the usual
+/// nebula pairing on black. Used for the activity heat grid so it does not
+/// fight the purple chrome with a leftover green.
+pub const SECONDARY_RGB: (u8, u8, u8) = (0x67, 0xE8, 0xF9);
+
+pub fn accent() -> Style {
+    let (r, g, b) = ACCENT_RGB;
+    Style::new().fg_color(Some(Color::Rgb(RgbColor(r, g, b))))
+}
+
+/// Brand ramp from deep violet through electric purple to cyan.
+///
+/// `t` is 0..=1. Low values stay quiet on black, high values peak in cyan so
+/// charts read as a fade that gets stronger rather than one flat purple.
+pub fn intensity_rgb(t: f64) -> (u8, u8, u8) {
+    const STOPS: [(f64, (u8, u8, u8)); 4] = [
+        (0.0, (0x3D, 0x2A, 0x55)),
+        (0.35, (0x9F, 0x68, 0xC7)),
+        (0.70, (0xB2, 0x64, 0xEB)),
+        (1.0, (0x67, 0xE8, 0xF9)),
+    ];
+    let t = t.clamp(0.0, 1.0);
+    for w in STOPS.windows(2) {
+        let (t0, c0) = w[0];
+        let (t1, c1) = w[1];
+        if t <= t1 {
+            let u = if (t1 - t0).abs() < f64::EPSILON {
+                0.0
+            } else {
+                (t - t0) / (t1 - t0)
+            };
+            return lerp_rgb(c0, c1, u);
+        }
+    }
+    STOPS[STOPS.len() - 1].1
+}
+
+fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), t: f64) -> (u8, u8, u8) {
+    let t = t.clamp(0.0, 1.0);
+    (
+        (a.0 as f64 + (b.0 as f64 - a.0 as f64) * t).round() as u8,
+        (a.1 as f64 + (b.1 as f64 - a.1 as f64) * t).round() as u8,
+        (a.2 as f64 + (b.2 as f64 - a.2 as f64) * t).round() as u8,
+    )
+}
+
+/// Heat-grid cell colors on the same ramp, spaced so levels read apart.
+pub fn heat_rgb(level: u8) -> (u8, u8, u8) {
+    match level {
+        0 => (0x2A, 0x20, 0x38),
+        1 => (0x5A, 0x3D, 0x82),
+        2 => (0x9F, 0x68, 0xC7),
+        3 => ACCENT_RGB,
+        _ => SECONDARY_RGB,
+    }
+}
+
+/// Style for one heat level, for the one-shot renderer.
+pub fn heat_style(level: u8) -> Style {
+    let (r, g, b) = heat_rgb(level);
+    Style::new().fg_color(Some(Color::Rgb(RgbColor(r, g, b))))
+}
+
+pub fn good() -> Style {
+    Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)))
+}
+
+pub fn warn() -> Style {
+    Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)))
+}
+
+/// Format a dollar amount for tables. Sub-dollar values keep cents so a real
+/// but tiny Gemini bill does not render as `$0`.
+pub fn usd(dollars: f64) -> String {
+    if dollars == 0.0 {
+        "$0".into()
+    } else if dollars.abs() < 1.0 {
+        format!("${dollars:.2}")
+    } else if dollars.abs() < 10.0 {
+        format!("${dollars:.1}")
+    } else {
+        format!("${dollars:.0}")
+    }
+}
+
+/// Format a token count compactly: `1.2M`, `93.0M`, `4.2k`.
+///
+/// Reports are scanned, not read, so a reader should get the magnitude at a
+/// glance without counting digits.
+pub fn tokens(n: u64) -> String {
+    const K: f64 = 1_000.0;
+    let f = n as f64;
+    if f >= K * K * K {
+        format!("{:.2}B", f / (K * K * K))
+    } else if f >= K * K {
+        format!("{:.1}M", f / (K * K))
+    } else if f >= K {
+        format!("{:.1}k", f / K)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Thousands-separated integer, for places where the exact value matters.
+pub fn exact(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A proportional bar drawn with eighth-block characters, so a value smaller
+/// than one cell still renders visibly instead of vanishing.
+pub fn bar(fraction: f64, width: usize) -> String {
+    const EIGHTHS: [char; 8] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
+    let f = fraction.clamp(0.0, 1.0);
+    let total_eighths = (f * width as f64 * 8.0).round() as usize;
+    let full = total_eighths / 8;
+    let rem = total_eighths % 8;
+    let mut s = "█".repeat(full.min(width));
+    if full < width && rem > 0 {
+        s.push(EIGHTHS[rem - 1]);
+    }
+    s
+}
+
+/// Pad to `w` display columns, accounting for wide characters.
+pub fn pad_right(s: &str, w: usize) -> String {
+    let len = width(s);
+    if len > w {
+        truncate(s, w)
+    } else {
+        format!("{s}{}", " ".repeat(w - len))
+    }
+}
+
+pub fn pad_left(s: &str, w: usize) -> String {
+    let len = width(s);
+    if len > w {
+        truncate(s, w)
+    } else {
+        format!("{}{s}", " ".repeat(w - len))
+    }
+}
+
+/// Approximate display width. Full width CJK and emoji count as two columns.
+fn width(s: &str) -> usize {
+    s.chars().map(char_width).sum()
+}
+
+fn char_width(c: char) -> usize {
+    let cp = c as u32;
+    // Ranges that render double width in a terminal. Not exhaustive, but it
+    // covers what actually shows up in project and model names.
+    if (0x1100..=0x115F).contains(&cp)
+        || (0x2E80..=0xA4CF).contains(&cp)
+        || (0xAC00..=0xD7A3).contains(&cp)
+        || (0xF900..=0xFAFF).contains(&cp)
+        || (0xFF00..=0xFF60).contains(&cp)
+        || (0xFFE0..=0xFFE6).contains(&cp)
+        || (0x1F300..=0x1FAFF).contains(&cp)
+    {
+        2
+    } else {
+        1
+    }
+}
+
+fn truncate(s: &str, w: usize) -> String {
+    if w == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let cw = char_width(c);
+        if used + cw > w.saturating_sub(1) {
+            out.push('…');
+            return out;
+        }
+        out.push(c);
+        used += cw;
+    }
+    out
+}
+
+/// Glyph for one calendar cell. A filled square reads as a calendar rather
+/// than as a texture, which the old shaded blocks did not.
+pub const HEAT_CELL: &str = "■";
+
+/// Columns reserved for the weekday labels down the left edge.
+pub const HEAT_GUTTER: usize = 4;
+
+/// Terminal columns one week occupies: the cell plus its gap.
+pub const HEAT_COL: usize = 2;
+
+/// One day in the activity calendar.
+#[derive(Debug, Clone, Copy)]
+pub struct HeatCell {
+    pub date: jiff::civil::Date,
+    pub value: u64,
+    /// Heat level `0..=4`. Level 0 means the day is inside the range but idle.
+    pub level: u8,
+}
+
+/// A calendar-aligned activity grid, newest week last.
+///
+/// The point of the calendar, rather than a packed run of active days, is that
+/// a column really is a week and a row really is a weekday. Days with no usage
+/// have to be filled in, because the archive only stores days that had events
+/// and rendering those back to back silently shifts every later column.
+#[derive(Debug, Clone)]
+pub struct HeatCalendar {
+    /// Seven rows, Monday first. `None` is outside the rendered range.
+    pub rows: Vec<Vec<Option<HeatCell>>>,
+    /// `(column, short month name)` for the header strip.
+    pub months: Vec<(usize, &'static str)>,
+    pub weeks: usize,
+    pub total: u64,
+    pub active_days: usize,
+    /// Consecutive active days ending on the most recent day with data.
+    pub streak_current: usize,
+    /// Longest run of consecutive active days in the rendered range.
+    pub streak_best: usize,
+    pub busiest: Option<HeatCell>,
+    pub first: jiff::civil::Date,
+    pub last: jiff::civil::Date,
+}
+
+impl HeatCalendar {
+    /// Width of the rendered block in terminal columns.
+    pub fn width(&self) -> usize {
+        HEAT_GUTTER + self.weeks * HEAT_COL
+    }
+
+    /// Every rendered day, oldest first. The grid is stored row-major for
+    /// drawing, so consumers that want a date series come through here.
+    pub fn days(&self) -> impl Iterator<Item = &HeatCell> {
+        (0..self.weeks).flat_map(move |c| (0..7).filter_map(move |r| self.rows[r][c].as_ref()))
+    }
+
+    /// The month header strip, already padded to line up with the columns.
+    pub fn header(&self) -> String {
+        let mut s = " ".repeat(HEAT_GUTTER);
+        for (col, name) in &self.months {
+            let want = HEAT_GUTTER + col * HEAT_COL;
+            let have = s.chars().count();
+            if have > want {
+                continue;
+            }
+            s.push_str(&" ".repeat(want - have));
+            s.push_str(name);
+        }
+        s
+    }
+
+    /// Label for a grid row. Only alternate days are labelled so the gutter
+    /// stays quiet.
+    pub fn row_label(row: usize) -> &'static str {
+        match row {
+            0 => "Mon",
+            2 => "Wed",
+            4 => "Fri",
+            _ => "",
+        }
+    }
+}
+
+/// Build the calendar from `(YYYY-MM-DD, value)` pairs in any order.
+///
+/// The grid is a fixed window of `weeks` columns ending on `anchor`, so the
+/// usual call is a rolling twelve months: the archive can hold years, the grid
+/// shows the last 53 weeks and pads the quiet ones with idle cells rather than
+/// shrinking. Days after `anchor` are left blank instead of reading as idle.
+pub fn heat_calendar(
+    days: &[(String, u64)],
+    weeks: usize,
+    anchor: jiff::civil::Date,
+) -> Option<HeatCalendar> {
+    use jiff::civil::Date;
+
+    let mut parsed: Vec<(Date, u64)> = days
+        .iter()
+        .filter_map(|(d, v)| d.parse::<Date>().ok().map(|d| (d, *v)))
+        .collect();
+    if parsed.is_empty() {
+        return None;
+    }
+    parsed.sort_by_key(|(d, _)| *d);
+
+    let last = anchor;
+    let weeks = weeks.clamp(1, 53);
+
+    // Grid edges: end on the Sunday of the anchor's week, start on a Monday.
+    let end = shift_days(
+        anchor,
+        6 - i64::from(anchor.weekday().to_monday_zero_offset()),
+    );
+    let start = shift_days(end, -((weeks * 7 - 1) as i64));
+
+    let max = parsed
+        .iter()
+        .filter(|(d, _)| *d >= start)
+        .map(|(_, v)| *v)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let span = (days_between(start, end) as usize) + 1;
+    let cols = span.div_ceil(7);
+    let mut total = 0u64;
+    let mut active_days = 0usize;
+    let mut busiest: Option<HeatCell> = None;
+    let mut run = 0usize;
+    let mut streak_best = 0usize;
+    let mut streak_current = 0usize;
+
+    // One ascending walk over the calendar. `parsed` is ascending too, so the
+    // lookup advances alongside it instead of searching per day.
+    let mut lookup = parsed.iter().peekable();
+    let mut cells: Vec<Option<HeatCell>> = Vec::with_capacity(span);
+    let mut date = start;
+    for _ in 0..span {
+        if date > anchor {
+            cells.push(None);
+            date = shift_days(date, 1);
+            continue;
+        }
+        let mut value = 0u64;
+        while let Some((d, v)) = lookup.peek() {
+            if *d < date {
+                lookup.next();
+            } else if *d == date {
+                value += *v;
+                lookup.next();
+            } else {
+                break;
+            }
+        }
+        let cell = HeatCell {
+            date,
+            value,
+            level: heat_level(value, max),
+        };
+        if value > 0 {
+            total += value;
+            active_days += 1;
+            run += 1;
+            streak_best = streak_best.max(run);
+            if busiest.is_none_or(|b| value > b.value) {
+                busiest = Some(cell);
+            }
+        } else if date < last {
+            // A quiet anchor day does not break the streak. The day is not
+            // over yet, and reporting "0 day streak" every morning is wrong.
+            run = 0;
+        }
+        streak_current = run;
+        cells.push(Some(cell));
+        date = shift_days(date, 1);
+    }
+
+    let rows: Vec<Vec<Option<HeatCell>>> = (0..7)
+        .map(|r| {
+            (0..cols)
+                .map(|c| cells.get(c * 7 + r).copied().flatten())
+                .collect()
+        })
+        .collect();
+    let months: Vec<(usize, &'static str)> = (0..cols).fold(Vec::new(), |mut acc, col| {
+        let monday = shift_days(start, (col * 7) as i64);
+        if let Some(name) = month_label(monday, col, acc.last()) {
+            acc.push((col, name));
+        }
+        acc
+    });
+
+    Some(HeatCalendar {
+        rows,
+        months,
+        weeks: cols,
+        total,
+        active_days,
+        streak_current,
+        streak_best,
+        busiest,
+        first: start,
+        last,
+    })
+}
+
+/// Month name for a column, or `None` when the label would repeat or crowd the
+/// previous one. Three-character names need two columns of clearance.
+fn month_label(
+    monday: jiff::civil::Date,
+    col: usize,
+    prev: Option<&(usize, &'static str)>,
+) -> Option<&'static str> {
+    const NAMES: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let name = NAMES[(monday.month() as usize) - 1];
+    match prev {
+        Some((_, p)) if *p == name => None,
+        Some((c, _)) if col.saturating_sub(*c) < 2 => None,
+        _ => Some(name),
+    }
+}
+
+fn shift_days(d: jiff::civil::Date, n: i64) -> jiff::civil::Date {
+    d.checked_add(jiff::Span::new().days(n)).unwrap_or(d)
+}
+
+fn days_between(a: jiff::civil::Date, b: jiff::civil::Date) -> i64 {
+    b.since(a).map(|s| s.get_days() as i64).unwrap_or(0)
+}
+
+fn heat_level(v: u64, max: u64) -> u8 {
+    if v == 0 {
+        0
+    } else {
+        // Fourth root spreads the low end out, so a quiet day is still
+        // distinguishable from an empty one.
+        let ratio = (v as f64 / max as f64).powf(0.25);
+        ((ratio * 4.0).ceil() as u8).clamp(1, 4)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_magnitudes_read_at_a_glance() {
+        assert_eq!(tokens(999), "999");
+        assert_eq!(tokens(4_200), "4.2k");
+        assert_eq!(tokens(93_000_000), "93.0M");
+        assert_eq!(tokens(2_500_000_000), "2.50B");
+    }
+
+    #[test]
+    fn exact_inserts_thousands_separators() {
+        assert_eq!(exact(0), "0");
+        assert_eq!(exact(999), "999");
+        assert_eq!(exact(1_000), "1,000");
+        assert_eq!(exact(161_861), "161,861");
+    }
+
+    #[test]
+    fn bar_is_visible_for_tiny_but_nonzero_values() {
+        assert_eq!(bar(0.0, 10), "");
+        assert!(!bar(0.01, 10).is_empty());
+        assert_eq!(bar(1.0, 10).chars().count(), 10);
+        // Never exceeds the requested width.
+        assert!(bar(2.0, 5).chars().count() <= 5);
+    }
+
+    #[test]
+    fn padding_accounts_for_wide_characters() {
+        assert_eq!(pad_right("ab", 4), "ab  ");
+        assert_eq!(pad_left("ab", 4), "  ab");
+        // A CJK character occupies two columns, so only one fits plus padding.
+        assert_eq!(width(&pad_right("日本", 6)), 6);
+    }
+
+    #[test]
+    fn truncation_marks_elision() {
+        assert!(pad_right("averylongprojectname", 8).ends_with('…'));
+        assert_eq!(width(&pad_right("averylongprojectname", 8)), 8);
+        // Exact fit must not elide. YYYY-MM-DD is ten columns.
+        assert_eq!(pad_right("2026-07-29", 10), "2026-07-29");
+        assert_eq!(pad_left("2026-07-29", 10), "2026-07-29");
+    }
+
+    #[test]
+    fn intensity_ramps_from_violet_to_cyan() {
+        assert_eq!(intensity_rgb(0.0), (0x3D, 0x2A, 0x55));
+        assert_eq!(intensity_rgb(1.0), SECONDARY_RGB);
+        let mid = intensity_rgb(0.5);
+        // Mid should sit between brand purple and electric, not at either end.
+        assert_ne!(mid, intensity_rgb(0.0));
+        assert_ne!(mid, intensity_rgb(1.0));
+    }
+
+    /// Wednesday 2026-07-29, the anchor most of these cases hang off.
+    fn anchor() -> jiff::civil::Date {
+        jiff::civil::date(2026, 7, 29)
+    }
+
+    #[test]
+    fn calendar_has_seven_rows_and_whole_weeks() {
+        let days: Vec<_> = (1..=28)
+            .map(|d| (format!("2026-07-{d:02}"), d as u64 * 100))
+            .collect();
+        let cal = heat_calendar(&days, 5, anchor()).expect("calendar");
+        assert_eq!(cal.rows.len(), 7);
+        assert_eq!(cal.weeks, 5);
+        assert!(cal.rows.iter().all(|r| r.len() == cal.weeks));
+    }
+
+    #[test]
+    fn calendar_puts_each_day_in_its_real_weekday_row() {
+        let days = vec![("2026-07-29".to_string(), 10)];
+        let cal = heat_calendar(&days, 4, anchor()).expect("calendar");
+        // 2026-07-29 is a Wednesday: row 2, Monday first.
+        let found = cal.rows[2]
+            .iter()
+            .flatten()
+            .find(|c| c.value == 10)
+            .expect("cell");
+        assert_eq!(found.date.to_string(), "2026-07-29");
+    }
+
+    #[test]
+    fn calendar_holds_the_window_open_when_the_archive_is_young() {
+        // A week-old archive still renders a full rolling year of idle cells,
+        // rather than collapsing to the days that happen to have data.
+        let days = vec![("2026-07-27".to_string(), 5)];
+        let cal = heat_calendar(&days, 53, anchor()).expect("calendar");
+        assert_eq!(cal.weeks, 53);
+        assert_eq!(cal.active_days, 1);
+        // A year back from the anchor week: starts in the previous August.
+        assert_eq!(cal.first.to_string(), "2025-07-28");
+        assert_eq!(cal.months.first().map(|m| m.1), Some("Jul"));
+    }
+
+    #[test]
+    fn calendar_leaves_days_after_the_anchor_blank() {
+        // The rest of this week has not happened. Blank, not idle.
+        let days = vec![("2026-07-29".to_string(), 5)];
+        let cal = heat_calendar(&days, 2, anchor()).expect("calendar");
+        let last_col = cal.weeks - 1;
+        assert!(cal.rows[2][last_col].is_some(), "Wednesday is the anchor");
+        assert!(cal.rows[3][last_col].is_none(), "Thursday is the future");
+        assert!(cal.rows[6][last_col].is_none(), "Sunday is the future");
+    }
+
+    #[test]
+    fn calendar_fills_gaps_between_active_days() {
+        // The archive stores only active days. The grid must still show the
+        // idle days between them, or every later column drifts.
+        let days = vec![("2026-07-06".to_string(), 5), ("2026-07-10".to_string(), 7)];
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 12)).expect("calendar");
+        assert_eq!(cal.active_days, 2);
+        assert_eq!(cal.total, 12);
+        assert_eq!(cal.busiest.map(|b| b.value), Some(7));
+        // Mon and Fri active, Tue to Thu idle: no run longer than one day.
+        assert_eq!(cal.streak_best, 1);
+    }
+
+    #[test]
+    fn calendar_counts_the_trailing_streak() {
+        let days: Vec<_> = (20..=24)
+            .map(|d| (format!("2026-07-{d:02}"), 100u64))
+            .collect();
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 24)).expect("calendar");
+        assert_eq!(cal.streak_current, 5);
+        assert_eq!(cal.streak_best, 5);
+    }
+
+    #[test]
+    fn a_quiet_anchor_day_does_not_break_the_streak() {
+        // Worked through yesterday, nothing logged yet today. The day is not
+        // over, so the streak stands.
+        let days: Vec<_> = (26..=28)
+            .map(|d| (format!("2026-07-{d:02}"), 100u64))
+            .collect();
+        let cal = heat_calendar(&days, 4, anchor()).expect("calendar");
+        assert_eq!(cal.streak_current, 3);
+        // Two idle days before the anchor do break it.
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 30)).expect("calendar");
+        assert_eq!(cal.streak_current, 0);
+    }
+
+    #[test]
+    fn calendar_header_lines_months_up_with_columns() {
+        let days: Vec<_> = (0..60)
+            .map(|i| {
+                let d = jiff::civil::date(2026, 6, 1)
+                    .checked_add(jiff::Span::new().days(i))
+                    .expect("date");
+                (d.to_string(), 100u64)
+            })
+            .collect();
+        let cal = heat_calendar(&days, 20, anchor()).expect("calendar");
+        let header = cal.header();
+        assert!(header.contains("Jun"));
+        assert!(header.contains("Jul"));
+        for (col, name) in &cal.months {
+            let at = HEAT_GUTTER + col * HEAT_COL;
+            assert!(header[at..].starts_with(name), "{name} misplaced: {header}");
+        }
+    }
+
+    #[test]
+    fn calendar_handles_empty_input() {
+        assert!(heat_calendar(&[], 5, anchor()).is_none());
+    }
+}
