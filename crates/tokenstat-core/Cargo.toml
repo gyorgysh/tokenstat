@@ -1,0 +1,28 @@
+[package]
+name = "tokenstat-core"
+description = "Parsing, normalization, pricing, and aggregation of AI tool token usage"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+# No network dependency may ever appear here, directly or transitively. This is
+# the mechanism behind the privacy claim, not a style preference.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+jiff.workspace = true
+blake3.workspace = true
+rusqlite.workspace = true
+walkdir.workspace = true
+rayon.workspace = true
+directories.workspace = true
+zstd.workspace = true
+sha2 = { workspace = true }
+hmac = { workspace = true }
+
+[dev-dependencies]
+walkdir.workspace = true
