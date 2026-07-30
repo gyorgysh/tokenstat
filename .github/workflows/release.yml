@@ -240,14 +240,26 @@ jobs:
           cat ./*.sha256 > SHA256SUMS
           rm -f ./*.sha256
 
+      - name: Write release notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          chmod +x .github/scripts/release-notes.sh
+          .github/scripts/release-notes.sh "$VERSION" > dist/RELEASE_NOTES.md
+          cat dist/RELEASE_NOTES.md
+
       - name: Publish
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.verify.outputs.version }}
-          name: v${{ needs.verify.outputs.version }}
+          name: tokenstat v${{ needs.verify.outputs.version }}
           prerelease: ${{ needs.verify.outputs.prerelease }}
+          body_path: dist/RELEASE_NOTES.md
           generate_release_notes: true
-          files: dist/*
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
 
   # Homebrew tap and Scoop manifest updates hook in here once the artifact
   # layout is stable. Both consume dist/SHA256SUMS from the published release,
