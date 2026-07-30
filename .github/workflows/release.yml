@@ -34,6 +34,9 @@ jobs:
       prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Need full history so a tag that is not tip-of-main still proves ancestry.
+          fetch-depth: 0
 
       - name: Resolve version from tag
         id: tag
@@ -60,6 +63,16 @@ jobs:
           manifest=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           if [ "$manifest" != "$VERSION" ]; then
             echo "Cargo.toml version '$manifest' does not match tag version '$VERSION'." >&2
+            exit 1
+          fi
+
+      - name: Require the tag to point at a commit on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "Release tags must point at a commit reachable from origin/main." >&2
+            git rev-parse HEAD
+            git rev-parse origin/main
             exit 1
           fi
 

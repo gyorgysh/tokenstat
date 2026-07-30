@@ -535,8 +535,10 @@ pub fn sync(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileE
             if attempt >= 4 {
                 return Err(map_sync_error(status, &text));
             }
-            let wait = retry_after.unwrap_or(u64::from(attempt) * 2);
-            thread::sleep(Duration::from_secs(wait.max(1)));
+            // Cap like the 429 short-wait path: a day-long Retry-After on a 503
+            // must not park a foreground sync for hours.
+            let wait = retry_after.unwrap_or(u64::from(attempt) * 2).clamp(1, 30);
+            thread::sleep(Duration::from_secs(wait));
             continue;
         }
 

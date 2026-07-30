@@ -176,13 +176,12 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
     }
     let resp = req.send()?;
     if resp.status().as_u16() == 404 {
-        // Either there is genuinely no release, or the repository is private and
-        // we have no token. Both look identical from here, so say so rather than
-        // reporting "up to date" and leaving someone to wonder.
+        // Public repo with no release yet is the common case. A private repo
+        // without GITHUB_TOKEN looks the same; mention that only as a footnote.
         if github_token().is_none() {
             return Err(UpdateError::Message(
-                "GitHub returned 404 for the latest release. If the repository is private, \
-                 set GITHUB_TOKEN; otherwise there is no published release yet."
+                "No GitHub Release found yet for this project. \
+                 If you expected one and the repository is private, set GITHUB_TOKEN."
                     .into(),
             ));
         }
@@ -803,11 +802,13 @@ fn is_safe_replace_path(path: &Path) -> bool {
     if s.starts_with("/usr/") || s.starts_with("/bin/") {
         return false;
     }
-    // Homebrew prefixes (Apple Silicon and Intel).
+    // Homebrew prefixes (Apple Silicon, Intel, and Linuxbrew).
     if s.starts_with("/opt/homebrew/")
         || s.starts_with("/usr/local/Cellar/")
         || s.starts_with("/usr/local/bin/")
+        || s.starts_with("/home/linuxbrew/")
         || s.contains("/Homebrew/")
+        || s.contains("/linuxbrew/")
     {
         return false;
     }
@@ -1154,6 +1155,9 @@ mod tests {
         )));
         assert!(!is_safe_replace_path(Path::new(
             "/usr/local/Cellar/tokenstat/0.0.1/bin/tokenstat"
+        )));
+        assert!(!is_safe_replace_path(Path::new(
+            "/home/linuxbrew/.linuxbrew/bin/tokenstat"
         )));
     }
 

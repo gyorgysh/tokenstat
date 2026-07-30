@@ -23,7 +23,7 @@ use tokenstat_core::{GroupBy, Query, Store};
     about = "tokenstat.ai: unified token usage stats for AI coding agents",
     long_about = "tokenstat.ai reads the session logs your AI tools already write, deduplicates them,\n\
                   and reports what you actually used.\n\n\
-                  Everything happens on your machine.",
+                  Counters stay on your machine unless you opt into sync.",
     disable_help_subcommand = true
 )]
 struct Cli {
@@ -224,7 +224,8 @@ enum Command {
         /// Apply even when `update.auto` is off (same as a plain `update`)
         #[arg(long)]
         yes: bool,
-        /// Turn automatic daily updates on or off, and schedule them
+        /// Turn automatic daily updates on or off (persist the preference;
+        /// install the daily unit with `tokenstat schedule --install`)
         #[arg(long, value_name = "on|off")]
         auto: Option<String>,
         /// Run as a background job: wait a spread-out delay, do nothing unless
@@ -249,8 +250,8 @@ enum Command {
     },
     /// Upload aggregate day × source × model counts to tokenstat.ai
     ///
-    /// Opt in only. Payload is counters and public model ids. Projects,
-    /// sessions, paths, and prompts never leave the machine.
+    /// Opt in only. Payload is counters, public model ids, and salted project
+    /// digests. Sessions, paths, and prompts stay on the machine.
     Sync {
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,

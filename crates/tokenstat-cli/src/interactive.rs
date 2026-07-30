@@ -252,11 +252,6 @@ enum SetupStep {
 const LOGIN_HOSTS: &[(&str, &str, Option<&str>)] = &[
     ("tokenstat.ai (prod)", "Default public host", Some("prod")),
     (
-        "sandbox (localhost:8400)",
-        "Local web for development",
-        Some("sandbox"),
-    ),
-    (
         "Use saved / env host",
         "TOKENSTAT_API_BASE or config sync.host",
         None,
@@ -363,6 +358,13 @@ pub fn run(db_path: &Path, tz: &TimeZone) -> Result<()> {
             if let Err(e) = app.run_scan(false) {
                 app.status = format!("Auto-scan failed: {e}");
             }
+        }
+        if app.empty && app.wizard.is_none() && !filter_active(&app.filter) {
+            app.wizard = Some(Wizard::Setup {
+                step: SetupStep::Welcome,
+                selected: 0,
+            });
+            app.status = "Archive empty. Continue setup, or Esc to browse.".into();
         }
         loop {
             terminal.draw(|f| draw(f, &mut app))?;
@@ -536,6 +538,23 @@ impl App {
         Ok(())
     }
 
+    fn install_linked_schedules(&mut self, host_flag: Option<&str>) -> Result<()> {
+        let home = directories::BaseDirs::new()
+            .map(|d| d.home_dir().to_path_buf())
+            .context("locating your home directory")?;
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "tokenstat".to_string());
+        let linked = crate::schedule::install_linked_units(&home, &exe, host_flag)?;
+        if linked.sync.is_some() {
+            let mins = linked.sync_interval_secs.unwrap_or(3600) / 60;
+            self.status = format!("Installed sync every {mins} min");
+        }
+        Ok(())
+    }
+
     /// Whether the command palette should be drawn above the input.
     fn showing_suggestions(&self) -> bool {
         // Keep the catalog out of the way while browsing tabs. As soon as the
@@ -659,7 +678,9 @@ impl App {
                 self.status = "Blocks".into();
             }
             "heatmap" => {
-                self.status = "Heatmap from the shell: tokenstat heatmap   (or summary tab)".into();
+                self.tab = Tab::Summary;
+                self.scroll = 0;
+                self.status = "Heatmap is on the Summary tab".into();
             }
             "wrapped" => {
                 self.status = "Year review from the shell: tokenstat wrapped [--year YYYY]".into();
@@ -1616,7 +1637,13 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let pairs: Vec<(String, u64)> = app
             .days
             .iter()
-            .map(|d| (d.key.clone(), d.counters.total()))
+            .map(|d| {
+                let c = &d.counters;
+                (
+                    d.key.clone(),
+                    c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0),
+                )
+            })
             .collect();
         // Purple→cyan heat: idle cells stay muted, hot days peak in cyan so
         // the grid sits with the electric purple chrome instead of fighting it.
@@ -1761,7 +1788,7 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             ),
         ]));
         lines.push(Line::from(Span::styled(
-            "It was not. This is subscription usage, so nothing was charged.",
+            "List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.",
             Style::default().fg(MUTED),
         )));
         if prices.is_empty() {
@@ -1792,7 +1819,7 @@ fn empty_archive_lines() -> Vec<Line<'static>> {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "Type /scan and press Enter to read your local logs.",
+            "Type /setup for guided scan + schedule, or /scan to read logs now.",
             Style::default().fg(MUTED),
         )),
         Line::from(""),
@@ -2043,9 +2070,16 @@ fn doctor_lines(app: &App) -> Vec<Line<'static>> {
         Span::raw(ui::exact(app.totals.events)),
     ]));
     if let Some(ms) = &app.last_scan {
+        let shown = ms
+            .parse::<i64>()
+            .map(|ts| {
+                let age = (jiff::Timestamp::now().as_millisecond() - ts).max(0) / 1000;
+                format!("{} ago", format_age_secs(age))
+            })
+            .unwrap_or_else(|_| ms.clone());
         lines.push(Line::from(vec![
             Span::styled("Last scan ", Style::default().fg(MUTED)),
-            Span::raw(ms.clone()),
+            Span::raw(shown),
         ]));
     }
     if filter_active(&app.filter) {
@@ -2334,6 +2368,8 @@ fn run_login_outside_tui(
     match outcome {
         Ok(result) => {
             app.refresh_sync_hint();
+            // Same as CLI login: sync only runs on a schedule once linked.
+            let _ = app.install_linked_schedules(host_flag);
             app.status = format!("Logged in as @{} · {}", result.handle, result.host);
             app.wizard = Some(Wizard::AfterLogin {
                 handle: result.handle,
@@ -2374,6 +2410,15 @@ fn run_sync_inline(app: &mut App, host_flag: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn format_age_secs(secs: i64) -> String {
+    match secs {
+        s if s < 60 => format!("{s}s"),
+        s if s < 3600 => format!("{}m", s / 60),
+        s if s < 86400 => format!("{}h", s / 3600),
+        s => format!("{}d", s / 86400),
+    }
 }
 
 #[cfg(test)]

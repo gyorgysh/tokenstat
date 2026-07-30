@@ -152,12 +152,11 @@ pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
         println!();
         println!("  {DIM}No supported tool logs found on this machine.{DIM:#}");
         println!(
-            "  {DIM}Install Claude Code, Codex, Grok, OpenCode, or Cline, then scan again.{DIM:#}"
+            "  {DIM}On disk: Claude Code, Codex, Grok, OpenCode, Cline, Antigravity CLI,{DIM:#}"
         );
+        println!("  {DIM}OpenClaw, Zed, Copilot CLI. Then scan again.{DIM:#}");
         println!("  {DIM}Cursor keeps usage on its servers (tokenstat auth cursor).{DIM:#}");
-        println!(
-            "  {DIM}Antigravity CLI is offline; IDE needs the app open + tokenstat fetch.{DIM:#}"
-        );
+        println!("  {DIM}Antigravity IDE needs the app open + tokenstat fetch.{DIM:#}");
     } else if r.rows_seen == 0 && r.events_recovered == 0 {
         println!();
         println!("  {DIM}Logs were found, but no new usage rows were readable.{DIM:#}");
@@ -366,7 +365,13 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         println!();
         let pairs: Vec<(String, u64)> = days
             .iter()
-            .map(|d| (d.key.clone(), d.counters.total()))
+            .map(|d| {
+                let c = &d.counters;
+                (
+                    d.key.clone(),
+                    c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0),
+                )
+            })
             .collect();
         if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz)) {
             heat_block(&cal, false);
@@ -434,7 +439,9 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         "  {BOLD}{}{BOLD:#} {DIM}if this had been billed per token{DIM:#}",
         format_args!("{}", ui::usd(total_value.dollars()))
     );
-    println!("  {DIM}It was not. This is subscription usage, so nothing was charged.{DIM:#}");
+    println!(
+        "  {DIM}List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.{DIM:#}"
+    );
     if prices.is_empty() {
         let a = accent();
         println!(
@@ -1410,8 +1417,9 @@ pub fn profile_login(host: Option<&str>, json: bool) -> Result<()> {
         "  {DIM}schema{DIM:#}   [{}, {}]",
         result.schema_min_v, result.schema_max_v
     );
-    println!("  {DIM}token stored in the OS keychain for this host{DIM:#}");
+    println!("  {DIM}token stored under credentials/sync/ for this host{DIM:#}");
     println!();
+    maybe_install_linked_schedules(host, false);
     let a = accent();
     println!("  Next: {a}tokenstat sync{a:#}");
     println!();
@@ -1433,12 +1441,49 @@ pub fn profile_login_code(host: Option<&str>, code: &str, json: bool) -> Result<
     println!("  {g}connected{g:#} as {BOLD}@{}{BOLD:#}", result.handle);
     println!("  {DIM}host{DIM:#}     {}", result.host);
     println!("  {DIM}machine{DIM:#}  {}", result.machine);
-    println!("  {DIM}token stored in the OS keychain for this host{DIM:#}");
+    println!("  {DIM}token stored under credentials/sync/ for this host{DIM:#}");
     println!();
+    maybe_install_linked_schedules(host, false);
     let a = accent();
     println!("  Next: {a}tokenstat sync{a:#}");
     println!();
     Ok(())
+}
+
+/// Best-effort sync (and auto-update) schedule after linking an account.
+fn maybe_install_linked_schedules(host: Option<&str>, quiet: bool) {
+    let Some(home) = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()) else {
+        return;
+    };
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "tokenstat".to_string());
+    match crate::schedule::install_linked_units(&home, &exe, host) {
+        Ok(linked) => {
+            if quiet {
+                return;
+            }
+            let g = good();
+            if let Some(secs) = linked.sync_interval_secs {
+                println!(
+                    "  {g}installed{g:#} sync every {} min {DIM}(+ up to {}s jitter){DIM:#}",
+                    secs / 60,
+                    tokenstat_sync::JITTER_WINDOW_SECS
+                );
+            }
+            if linked.update.is_some() {
+                println!("  {g}installed{g:#} daily update check");
+            }
+        }
+        Err(e) => {
+            if !quiet {
+                println!("  {DIM}could not install sync schedule: {e}{DIM:#}");
+                println!("  {DIM}run later with: tokenstat schedule --install{DIM:#}");
+            }
+        }
+    }
 }
 
 /// Drop the sync token for a host. No server call.
@@ -2242,6 +2287,47 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
     }
 
     // 4. First sync, only when there is an account and something to send.
+    // Install the sync timer before the upload so a success leaves the machine
+    // paced; a refusal still recorded pacing via record_sync_hold.
+    let mut sync_scheduled = false;
+    if connected && !opts.no_schedule {
+        let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
+        let exe = std::env::current_exe()
+            .ok()
+            .and_then(|p| std::fs::canonicalize(&p).ok().or(Some(p)))
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "tokenstat".to_string());
+        if let Some(home) = home {
+            match crate::schedule::install_linked_units(&home, &exe, opts.host) {
+                Ok(linked) => {
+                    sync_scheduled = linked.sync.is_some();
+                    if !opts.json {
+                        if let Some(secs) = linked.sync_interval_secs {
+                            println!(
+                                "  {g}installed{g:#} sync every {} min {DIM}(+ up to {}s jitter){DIM:#}",
+                                secs / 60,
+                                tokenstat_sync::JITTER_WINDOW_SECS
+                            );
+                        }
+                        if linked.update.is_some() {
+                            println!("  {g}installed{g:#} daily update check");
+                        }
+                        if sync_scheduled {
+                            println!();
+                        }
+                    }
+                }
+                Err(e) => {
+                    if !opts.json {
+                        println!("  {DIM}could not install sync schedule: {e}{DIM:#}");
+                        println!("  {DIM}run later with: tokenstat schedule --install{DIM:#}");
+                        println!();
+                    }
+                }
+            }
+        }
+    }
+
     if connected && totals.events > 0 {
         match tokenstat_sync::sync(
             &store,
@@ -2286,7 +2372,13 @@ pub fn setup(db_path: &Path, tz: &jiff::tz::TimeZone, opts: SetupOptions<'_>) ->
     println!("  {BOLD}Done.{BOLD:#} Try {a}tokenstat{a:#} for the full-screen view,");
     println!("  or {a}tokenstat summary{a:#} for one screen of numbers.");
     if connected {
-        println!("  {DIM}Your account updates on its own from here.{DIM:#}");
+        if sync_scheduled {
+            println!("  {DIM}Your account updates on its own from here.{DIM:#}");
+        } else {
+            println!(
+                "  {DIM}To keep the profile current: {DIM:#}{a}tokenstat schedule --install{a:#}"
+            );
+        }
     }
     println!();
     Ok(())

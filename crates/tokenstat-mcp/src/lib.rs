@@ -49,7 +49,7 @@ fn handle(engine: &mut Engine, msg: Value) -> Value {
                 "name": "tokenstat",
                 "version": VERSION,
             },
-            "instructions": "Local token usage only. Data never leaves this machine."
+            "instructions": "Local token usage archive. Sync is opt-in and sends aggregate counters only."
         })),
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),

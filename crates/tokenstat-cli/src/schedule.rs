@@ -369,6 +369,57 @@ pub fn install(home: &Path, unit: Unit, exe: &str, interval_secs: u64) -> Result
     }
 }
 
+/// What `install_linked_units` put on the scheduler after an account link.
+#[derive(Debug, Default)]
+pub struct LinkedInstall {
+    pub sync: Option<InstallReport>,
+    pub sync_interval_secs: Option<u64>,
+    pub update: Option<InstallReport>,
+}
+
+/// Install the sync unit (and update, when auto-apply is on) for a linked host.
+///
+/// Call after login or setup connect. Scan is separate: it is worth having
+/// without an account. Sync is not.
+pub fn install_linked_units(
+    home: &Path,
+    exe: &str,
+    host_flag: Option<&str>,
+) -> Result<LinkedInstall> {
+    let info = tokenstat_sync::scheduling_info(host_flag).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if !info.logged_in {
+        return Ok(LinkedInstall::default());
+    }
+    let sync_interval = info
+        .min_interval
+        .unwrap_or_else(|| Unit::Sync.default_interval());
+    let sync = install(home, Unit::Sync, exe, sync_interval)?;
+
+    let update = if tokenstat_sync::auto_apply_enabled() {
+        let persisted = tokenstat_sync::config::load()
+            .ok()
+            .and_then(|c| c.update.auto)
+            .unwrap_or(false);
+        if !persisted {
+            let _ = tokenstat_sync::config::set_update_auto(true);
+        }
+        Some(install(
+            home,
+            Unit::Update,
+            exe,
+            Unit::Update.default_interval(),
+        )?)
+    } else {
+        None
+    };
+
+    Ok(LinkedInstall {
+        sync: Some(sync),
+        sync_interval_secs: Some(sync_interval),
+        update,
+    })
+}
+
 fn current_uid() -> String {
     Command::new("id")
         .arg("-u")

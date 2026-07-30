@@ -239,6 +239,9 @@ main() {
   if [ "$NO_SCHEDULE" = "1" ]; then
     setup_args+=(--no-schedule)
   fi
+  if [ "$YES" = "1" ]; then
+    setup_args+=(--yes)
+  fi
   "$dest" setup "${setup_args[@]}" || warn "setup reported an error (you can re-run: tokenstat setup)"
 
   echo

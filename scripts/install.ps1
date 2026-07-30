@@ -156,6 +156,7 @@ try {
   Say "running setup (scan, schedule, optional account link)"
   $setupArgs = @()
   if ($NoSchedule) { $setupArgs += "--no-schedule" }
+  if ($AutoYes) { $setupArgs += "--yes" }
   & $dest setup @setupArgs
   if ($LASTEXITCODE -ne 0) {
     Warn "setup reported an error (you can re-run: tokenstat setup)"

@@ -40,8 +40,8 @@ getrandom = "0.3"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 anstream = "0.6"
 anstyle = "1"
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }
+crossterm = "0.29"
 
 [profile.release]
 opt-level = 3

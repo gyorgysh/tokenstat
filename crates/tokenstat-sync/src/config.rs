@@ -231,20 +231,33 @@ pub struct SyncPacing {
 /// Remember a refusal without touching the window cursor.
 ///
 /// A held-back sync uploaded nothing, so `from` / `to` / `last_sync_at` must
-/// stay exactly as they were. Only the pacing hint moves.
+/// stay exactly as they were. Only the pacing hint moves. When there is no
+/// cursor yet (first sync refused before any accept), still persist pacing so
+/// `--scheduled` can skip without a request.
 pub fn record_sync_hold(host: &str, pacing: SyncPacing) -> Result<(), ConfigError> {
     let mut cfg = load()?;
     if let Some(cursor) = cfg.sync.cursor.get_mut(host) {
         if pacing.next_allowed_at.is_some() {
-            cursor.next_allowed_at = pacing.next_allowed_at;
+            cursor.next_allowed_at = pacing.next_allowed_at.clone();
         }
         if pacing.min_interval.is_some() {
             cursor.min_interval = pacing.min_interval;
         }
-        save(&cfg)
+    } else if pacing.next_allowed_at.is_some() || pacing.min_interval.is_some() {
+        cfg.sync.cursor.insert(
+            host.to_string(),
+            SyncCursor {
+                from: String::new(),
+                to: String::new(),
+                last_sync_at: String::new(),
+                next_allowed_at: pacing.next_allowed_at,
+                min_interval: pacing.min_interval,
+            },
+        );
     } else {
-        Ok(())
+        return Ok(());
     }
+    save(&cfg)
 }
 
 pub fn cursor_for(host: &str) -> Result<Option<SyncCursor>, ConfigError> {
