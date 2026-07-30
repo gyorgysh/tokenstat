@@ -18,6 +18,14 @@ local session logs your tools already write, normalizes counters into one schema
 and reports spend by model, project, tool, and time. Everything runs on your
 machine by default. Sync to a public profile is opt in.
 
+<p align="center">
+  <img src="docs/tui-summary.webp" alt="tokenstat interactive Summary view" width="720">
+</p>
+
+<p align="center">
+  <img src="docs/tui-models.webp" alt="tokenstat interactive Models view" width="720">
+</p>
+
 ## Highlights
 
 - **Local first** — counters stay on your machine; conversation text never reaches the archive
