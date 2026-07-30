@@ -1,0 +1,23 @@
+[package]
+name = "tokenstat-mcp"
+description = "MCP server: query local tokenstat spend over stdio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[lib]
+name = "tokenstat_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tokenstat-mcp"
+path = "src/main.rs"
+
+[dependencies]
+tokenstat-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
