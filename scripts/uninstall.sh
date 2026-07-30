@@ -18,11 +18,14 @@
 
 # Piped into dash (/bin/sh on many Linux distros): re-exec under bash.
 if [ -z "${BASH_VERSION:-}" ]; then
-  if command -v bash >/dev/null 2>&1; then
-    exec bash -s -- "$@"
+  if ! command -v bash >/dev/null 2>&1; then
+    echo "✖ tokenstat uninstaller requires bash" >&2
+    exit 1
   fi
-  echo "✖ tokenstat uninstaller requires bash" >&2
-  exit 1
+  case "$(basename "$0")" in
+    sh|dash|ash) exec bash -s -- "$@" ;;
+    *) exec bash "$0" "$@" ;;
+  esac
 fi
 
 set -euo pipefail

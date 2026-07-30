@@ -23,11 +23,15 @@
 # Piped into dash (/bin/sh on many Linux distros): re-exec under bash so the
 # rest of the script (pipefail, etc.) is valid. macOS /bin/sh is already bash.
 if [ -z "${BASH_VERSION:-}" ]; then
-  if command -v bash >/dev/null 2>&1; then
-    exec bash -s -- "$@"
+  if ! command -v bash >/dev/null 2>&1; then
+    echo "✖ tokenstat installer requires bash" >&2
+    exit 1
   fi
-  echo "✖ tokenstat installer requires bash" >&2
-  exit 1
+  # curl|sh → $0 is the shell. A file path → re-exec that file under bash.
+  case "$(basename "$0")" in
+    sh|dash|ash) exec bash -s -- "$@" ;;
+    *) exec bash "$0" "$@" ;;
+  esac
 fi
 
 set -euo pipefail
