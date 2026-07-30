@@ -1,0 +1,22 @@
+[package]
+name = "tokenstat-sync"
+description = "Networked fetches for vendors that keep usage off disk (Cursor, Antigravity)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+tokenstat-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+jiff.workspace = true
+directories.workspace = true
+reqwest.workspace = true
+anyhow.workspace = true
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+getrandom = { workspace = true }

@@ -1,0 +1,980 @@
+//! tokenstat.ai device login and profile sync client.
+//!
+//! Opt-in only. Builds a sealed day × source × model × opaque-project payload
+//! in core, then gzip-posts it with a bearer token from the OS keychain.
+//! Project paths, sessions, prompts, and hostnames never enter this path.
+
+use std::io::Write;
+use std::thread;
+use std::time::Duration;
+
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use serde::Deserialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
+use tokenstat_core::{
+    Store, SyncBuildArgs, SyncWindow, build_sync_payload, default_sync_window, parse_window_arg,
+};
+
+use crate::config::{self, ConfigError};
+use crate::host::{self, HostError};
+use crate::keychain::{self, KeychainError};
+use crate::schema;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProfileError {
+    #[error(transparent)]
+    Host(#[from] HostError),
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+    #[error(transparent)]
+    Keychain(#[from] KeychainError),
+    #[error(transparent)]
+    Core(#[from] tokenstat_core::CoreError),
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error("{message}")]
+    RateLimited {
+        message: String,
+        retry_after: Option<u64>,
+        next_allowed_at: Option<String>,
+    },
+    #[error("{0}")]
+    Message(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct LoginResult {
+    pub host: String,
+    pub handle: String,
+    pub machine: String,
+    pub schema_min_v: u32,
+    pub schema_max_v: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncResult {
+    pub host: String,
+    pub window: SyncWindow,
+    pub rows: u64,
+    pub idempotency_key: String,
+    pub dry_run: bool,
+    pub schema_v: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct StatusResult {
+    pub host: String,
+    pub handle: Option<String>,
+    pub tier: Option<String>,
+    pub last_sync_at: Option<String>,
+    pub machines: Vec<Value>,
+    pub schema_min_v: Option<u32>,
+    pub schema_max_v: Option<u32>,
+    pub schema_current: Option<u32>,
+    pub raw: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    #[serde(default)]
+    verification_uri_complete: Option<String>,
+    expires_in: u64,
+    interval: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct TokenSuccess {
+    token: String,
+    #[serde(default)]
+    handle: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiErrorBody {
+    #[serde(default)]
+    error: Option<String>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
+    // No cookie jar: bearer routes must not attach a web session cookie.
+    Ok(reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
+fn env_api_base() -> Option<String> {
+    std::env::var("TOKENSTAT_API_BASE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+}
+
+pub fn resolve_api_host(flag: Option<&str>) -> Result<String, ProfileError> {
+    let cfg = config::load()?;
+    Ok(host::resolve_host(
+        flag,
+        env_api_base().as_deref(),
+        cfg.sync.host.as_deref(),
+    )?)
+}
+
+/// Redeem a pairing code minted on the website, skipping the browser round trip.
+///
+/// The other direction of `login`: instead of printing a code and waiting for
+/// someone to approve it in a browser, this hands back a code they already have
+/// from a signed-in page. Same result, one less window to move between.
+pub fn login_with_code(host_flag: Option<&str>, code: &str) -> Result<LoginResult, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let machine = config::ensure_machine_id()?;
+    let _salt = config::ensure_project_salt()?;
+    let client = http_client()?;
+
+    let envelope = schema::fetch_schema(&client, &host)?;
+    let _ = envelope.choose_payload_v()?;
+
+    let code = normalize_pairing_code(code)?;
+    let resp = client
+        .post(format!("{host}/api/v1/device/redeem"))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({ "code": code, "machine": machine }))
+        .send()?;
+
+    let status = resp.status();
+    let text = resp.text()?;
+    if !status.is_success() {
+        let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+        let detail = body
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| text.trim());
+        return Err(ProfileError::Message(format!(
+            "pairing failed ({}): {detail}",
+            status.as_u16()
+        )));
+    }
+
+    let ok: TokenSuccess = serde_json::from_str(&text)?;
+    if !ok.token.starts_with("tsk_") {
+        return Err(ProfileError::Message(
+            "server returned a token that is not a tsk_ sync token".into(),
+        ));
+    }
+    keychain::store_token(&host, &ok.token)?;
+    config::set_sync_host(&host)?;
+    Ok(LoginResult {
+        host,
+        handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
+        machine,
+        schema_min_v: envelope.min_v,
+        schema_max_v: envelope.max_v,
+    })
+}
+
+/// Accept a pairing code the way people actually paste it.
+///
+/// Lowercase, missing dash, stray spaces or quotes from a copy that grabbed too
+/// much: all of that is the same code, and refusing it would be pedantry. The
+/// alphabet has no O/0 or I/1 to confuse, so there is nothing ambiguous to guess.
+fn normalize_pairing_code(raw: &str) -> Result<String, ProfileError> {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    if cleaned.len() != 8 {
+        return Err(ProfileError::Message(format!(
+            "that does not look like a pairing code: expected eight characters like WXYZ-1234, got {:?}",
+            raw.trim()
+        )));
+    }
+    Ok(format!("{}-{}", &cleaned[..4], &cleaned[4..]))
+}
+
+/// RFC 8628 device authorization grant against `{host}/api/v1/device/*`.
+pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let machine = config::ensure_machine_id()?;
+    let _salt = config::ensure_project_salt()?;
+    let client = http_client()?;
+
+    // Learn the server range early so a hopeless mismatch fails before the
+    // browser dance.
+    let envelope = schema::fetch_schema(&client, &host)?;
+    let _ = envelope.choose_payload_v()?;
+
+    let code_url = format!("{host}/api/v1/device/code");
+    let resp = client
+        .post(&code_url)
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({ "machine": machine }))
+        .send()?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(ProfileError::Message(format!(
+            "device code request failed ({status}): {body}"
+        )));
+    }
+
+    let device: DeviceCodeResponse = resp.json()?;
+    println!("Open: {}", device.verification_uri);
+    if let Some(complete) = &device.verification_uri_complete {
+        println!("Or:   {complete}");
+    }
+    println!("Code: {}", device.user_code);
+    println!();
+    println!("Waiting for confirmation…");
+
+    let open_url = device
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(device.verification_uri.as_str());
+    let _ = open_browser(open_url);
+
+    let token_url = format!("{host}/api/v1/device/token");
+    let deadline = std::time::Instant::now() + Duration::from_secs(device.expires_in.max(1));
+    let mut interval = Duration::from_secs(device.interval.max(1));
+
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(ProfileError::Message(
+                "device login timed out before confirmation".into(),
+            ));
+        }
+        thread::sleep(interval);
+
+        let poll = client
+            .post(&token_url)
+            .header("content-type", "application/json")
+            .json(&serde_json::json!({ "device_code": device.device_code }))
+            .send()?;
+
+        let status = poll.status();
+        let text = poll.text()?;
+
+        if status.as_u16() == 428
+            || text.contains("authorization_pending")
+            || text.contains("slow_down")
+        {
+            if text.contains("slow_down") {
+                interval = interval.saturating_add(Duration::from_secs(5));
+            }
+            continue;
+        }
+
+        if status.is_success() {
+            let ok: TokenSuccess = serde_json::from_str(&text)?;
+            if !ok.token.starts_with("tsk_") {
+                return Err(ProfileError::Message(
+                    "server returned a token that is not a tsk_ sync token".into(),
+                ));
+            }
+            keychain::store_token(&host, &ok.token)?;
+            config::set_sync_host(&host)?;
+            let handle = ok.handle.unwrap_or_else(|| "(unknown)".into());
+            return Ok(LoginResult {
+                host,
+                handle,
+                machine,
+                schema_min_v: envelope.min_v,
+                schema_max_v: envelope.max_v,
+            });
+        }
+
+        let err: ApiErrorBody = serde_json::from_str(&text).unwrap_or(ApiErrorBody {
+            error: Some(format!("http_{}", status.as_u16())),
+            message: Some(text.clone()),
+        });
+        return Err(ProfileError::Message(format!(
+            "login failed: {}{}",
+            err.error.unwrap_or_else(|| status.to_string()),
+            err.message.map(|m| format!(" ({m})")).unwrap_or_default()
+        )));
+    }
+}
+
+/// Delete the keychain entry for the resolved host. No server call.
+pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    keychain::delete_token(&host)?;
+    Ok(host)
+}
+
+/// `GET /api/v1/me` with the bearer token.
+pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token = keychain::load_token(&host)?.ok_or_else(|| {
+        ProfileError::Message("not logged in. run `tokenstat login` first".into())
+    })?;
+    let client = http_client()?;
+    let resp = client
+        .get(format!("{host}/api/v1/me"))
+        .header("authorization", format!("Bearer {token}"))
+        .send()?;
+    let status = resp.status();
+    let text = resp.text()?;
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(ProfileError::Message(
+            "token missing or revoked. run `tokenstat login`".into(),
+        ));
+    }
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "status request failed ({status}): {text}"
+        )));
+    }
+    let raw: Value = serde_json::from_str(&text)?;
+    let handle = raw
+        .get("handle")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let tier = raw.get("tier").and_then(|v| v.as_str()).map(str::to_string);
+    let last_sync_at = raw
+        .get("last_sync_at")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let machines = raw
+        .get("machines")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let schema = raw.get("schema");
+    let schema_min_v = schema
+        .and_then(|s| s.get("min_v"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32);
+    let schema_max_v = schema
+        .and_then(|s| s.get("max_v"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32);
+    let schema_current = schema
+        .and_then(|s| s.get("current"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32);
+    Ok(StatusResult {
+        host,
+        handle,
+        tier,
+        last_sync_at,
+        machines,
+        schema_min_v,
+        schema_max_v,
+        schema_current,
+        raw,
+    })
+}
+
+pub struct SyncOptions<'a> {
+    pub host_flag: Option<&'a str>,
+    pub prune: bool,
+    pub window: Option<&'a str>,
+    pub dry_run: bool,
+    pub tz_name: Option<&'a str>,
+}
+
+/// Build and POST a complete window from the local archive.
+pub fn sync(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileError> {
+    let host = resolve_api_host(opts.host_flag)?;
+    let client = http_client()?;
+
+    let token = if opts.dry_run {
+        None
+    } else {
+        Some(keychain::load_token(&host)?.ok_or_else(|| {
+            ProfileError::Message("not logged in. run `tokenstat login` first".into())
+        })?)
+    };
+
+    let envelope = if opts.dry_run {
+        schema::try_fetch_schema(&client, &host)
+    } else {
+        Some(schema::fetch_schema(&client, &host)?)
+    };
+
+    let (schema_v, sources, confidence) = match &envelope {
+        Some(env) => {
+            let v = env.choose_payload_v()?;
+            (v, Some(env.sources.clone()), Some(env.confidence.clone()))
+        }
+        None => (tokenstat_core::SYNC_SCHEMA_VERSION, None, None),
+    };
+
+    let machine = config::ensure_machine_id()?;
+    let salt = config::ensure_project_salt()?;
+    let tz = tokenstat_core::timezone(opts.tz_name)?;
+    let tz_name = tz.iana_name().unwrap_or("UTC");
+
+    let window = if let Some(raw) = opts.window {
+        parse_window_arg(raw)?
+    } else {
+        let totals = store.totals(&tokenstat_core::Query::default())?;
+        let today = jiff::Timestamp::now()
+            .to_zoned(tz.clone())
+            .date()
+            .to_string();
+        let cursor_from = config::cursor_for(&host)?.map(|c| c.from);
+        default_sync_window(
+            totals.first_date.as_deref(),
+            totals.last_date.as_deref(),
+            &today,
+            cursor_from.as_deref(),
+        )
+        .ok_or_else(|| ProfileError::Message("archive is empty; nothing to sync".into()))?
+    };
+
+    let prune = opts.prune;
+    let payload = build_sync_payload(
+        store,
+        SyncBuildArgs {
+            machine: &machine,
+            salt_id: &salt.id,
+            salt_key: &salt.key,
+            tz: tz_name,
+            window: window.clone(),
+            prune,
+            schema_v,
+            allowed_sources: sources.as_deref(),
+            allowed_confidence: confidence.as_deref(),
+        },
+    )?;
+    let canonical = payload.canonical_bytes()?;
+    let idempotency_key = hex_sha256(&canonical);
+
+    if opts.dry_run {
+        println!("{}", String::from_utf8_lossy(&canonical));
+        return Ok(SyncResult {
+            host,
+            window,
+            rows: payload.totals.rows,
+            idempotency_key,
+            dry_run: true,
+            schema_v,
+        });
+    }
+
+    let Some(token) = token else {
+        return Err(ProfileError::Message(
+            "not logged in. run `tokenstat login` first".into(),
+        ));
+    };
+    let body = gzip_bytes(&canonical)?;
+    let url = format!("{host}/api/v1/sync");
+
+    let mut attempt = 0u32;
+    let response_text = loop {
+        attempt += 1;
+        let resp = client
+            .post(&url)
+            .header("authorization", format!("Bearer {token}"))
+            .header("content-type", "application/json")
+            .header("content-encoding", "gzip")
+            .header("idempotency-key", &idempotency_key)
+            .body(body.clone())
+            .send();
+
+        let resp = match resp {
+            Ok(r) => r,
+            Err(_) if attempt < 4 => {
+                thread::sleep(Duration::from_secs(u64::from(attempt)));
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        let status = resp.status();
+        let retry_after = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
+        let text = resp.text().unwrap_or_default();
+
+        if status.is_success() {
+            break text;
+        }
+
+        // A 429 from the per-machine interval gate can be an hour away, so it is
+        // an answer, not a hiccup: sleeping on it would park the process for the
+        // whole window. Only a short Retry-After (the coarse abuse bucket, or a
+        // proxy) is worth waiting out in place.
+        if status.as_u16() == 429 {
+            let hold = pacing_from_body(&text, retry_after);
+            let short = retry_after.is_some_and(|s| s <= 30);
+            if short && attempt < 4 {
+                thread::sleep(Duration::from_secs(retry_after.unwrap_or(1).max(1)));
+                continue;
+            }
+            let _ = config::record_sync_hold(&host, hold.clone());
+            let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            let message = body
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("the server is not accepting a sync from this machine yet")
+                .to_string();
+            return Err(ProfileError::RateLimited {
+                message,
+                retry_after: hold.min_interval.or(retry_after),
+                next_allowed_at: hold.next_allowed_at,
+            });
+        }
+
+        if status.is_server_error() {
+            if attempt >= 4 {
+                return Err(map_sync_error(status, &text));
+            }
+            let wait = retry_after.unwrap_or(u64::from(attempt) * 2);
+            thread::sleep(Duration::from_secs(wait.max(1)));
+            continue;
+        }
+
+        return Err(map_sync_error(status, &text));
+    };
+
+    let last_sync_at = jiff::Timestamp::now()
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    // The success body carries the plan's interval and the next slot, so a
+    // scheduled run can pace itself without a second request.
+    let pacing = pacing_from_body(&response_text, None);
+    config::record_sync_cursor(&host, &window.from, &window.to, &last_sync_at, pacing)?;
+
+    Ok(SyncResult {
+        host,
+        window,
+        rows: payload.totals.rows,
+        idempotency_key,
+        dry_run: false,
+        schema_v,
+    })
+}
+
+/// Pull the pacing hints out of a sync response (success or 429).
+///
+/// Falls back to `Retry-After` when the body carries no absolute time, so an
+/// intermediary that rate-limits without our JSON still teaches us something.
+fn pacing_from_body(text: &str, retry_after: Option<u64>) -> config::SyncPacing {
+    let body: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+    let min_interval = body.get("min_interval").and_then(|v| v.as_u64());
+    let next_allowed_at = body
+        .get("next_allowed_at")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            let secs = retry_after?;
+            Some(
+                (jiff::Timestamp::now() + Duration::from_secs(secs))
+                    .strftime("%Y-%m-%dT%H:%M:%SZ")
+                    .to_string(),
+            )
+        });
+    config::SyncPacing {
+        next_allowed_at,
+        min_interval,
+    }
+}
+
+/// How wide the scheduled-sync jitter window is.
+///
+/// Timers on every platform here start counting from install or boot, so phases
+/// are already spread in practice. This covers the cases where they are not: a
+/// fleet that boots together, a systemd timer replaying after downtime, or
+/// someone driving `sync` from an on-the-hour cron entry.
+pub const JITTER_WINDOW_SECS: u64 = 180;
+
+/// Where inside the jitter window this machine belongs.
+///
+/// Derived from the machine id rather than drawn fresh each run, so a machine
+/// keeps its offset for life: the spread is even with ten clients as well as
+/// with ten thousand, and every run stays a full interval after the last one
+/// instead of walking around the clock. The server derives the same kind of
+/// offset from the same id, so the two agree without exchanging it.
+pub fn jitter_offset(machine: &str, window_secs: u64) -> u64 {
+    if window_secs == 0 {
+        return 0;
+    }
+    let digest = Sha256::digest(machine.as_bytes());
+    let n = u32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]);
+    u64::from(n) % window_secs
+}
+
+/// `TOKENSTAT_SYNC_JITTER` in seconds, for tests and for a first sync run right
+/// after login where waiting three minutes would just look broken. Capped at an
+/// hour so a typo cannot park a scheduled job indefinitely.
+fn jitter_override() -> Option<u64> {
+    let raw = std::env::var("TOKENSTAT_SYNC_JITTER").ok()?;
+    let secs = raw.trim().parse::<u64>().ok()?;
+    Some(secs.min(3600))
+}
+
+/// A few seconds on top of the fixed offset, so a machine that happens to land
+/// on an awkward second is not stuck there every single hour.
+fn jitter_smear() -> u64 {
+    let mut b = [0u8; 1];
+    if getrandom::fill(&mut b).is_err() {
+        return 0;
+    }
+    u64::from(b[0]) % 16
+}
+
+/// What a scheduled run did, so the caller can stay quiet about the boring cases.
+#[derive(Debug)]
+pub enum ScheduledOutcome {
+    /// No token for this host. Nothing to do, and not an error: the sync unit
+    /// can outlive a `tokenstat logout`.
+    NotLoggedIn,
+    /// The plan's interval has not elapsed. No request was made.
+    Held {
+        until: Option<String>,
+    },
+    Synced(Box<SyncResult>),
+}
+
+/// `sync` as a background job: jittered, self-paced, and quiet when there is
+/// nothing to do.
+///
+/// The pacing check happens before the sleep so a held-back machine costs
+/// nothing, and it is measured from when the request would actually go out.
+pub fn sync_scheduled(
+    store: &Store,
+    opts: SyncOptions<'_>,
+) -> Result<ScheduledOutcome, ProfileError> {
+    let host = resolve_api_host(opts.host_flag)?;
+    if keychain::load_token(&host)?.is_none() {
+        return Ok(ScheduledOutcome::NotLoggedIn);
+    }
+
+    let machine = config::ensure_machine_id()?;
+    let sleep_secs = match jitter_override() {
+        Some(secs) => secs,
+        None => jitter_offset(&machine, JITTER_WINDOW_SECS) + jitter_smear(),
+    };
+
+    if let Some(cursor) = config::cursor_for(&host)? {
+        if let Some(next) = cursor.next_allowed_at.as_deref() {
+            if let Ok(next_ts) = next.parse::<jiff::Timestamp>() {
+                // Measured from when the POST would land, and with the same
+                // grace the server allows, so a couple of seconds of timer drift
+                // never costs a whole interval.
+                let at = jiff::Timestamp::now() + Duration::from_secs(sleep_secs);
+                let grace = Duration::from_secs(SERVER_GRACE_SECS);
+                if at + grace < next_ts {
+                    return Ok(ScheduledOutcome::Held {
+                        until: Some(next.to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    thread::sleep(Duration::from_secs(sleep_secs));
+    match sync(store, opts) {
+        Ok(result) => Ok(ScheduledOutcome::Synced(Box::new(result))),
+        Err(ProfileError::RateLimited {
+            next_allowed_at, ..
+        }) => Ok(ScheduledOutcome::Held {
+            until: next_allowed_at,
+        }),
+        Err(err) => Err(err),
+    }
+}
+
+/// What the scheduler needs to know about sync, without touching the network.
+#[derive(Debug, Clone)]
+pub struct SchedulingInfo {
+    pub host: String,
+    pub logged_in: bool,
+    /// The interval the server last told us, if this machine has ever synced.
+    pub min_interval: Option<u64>,
+    /// Earliest time the server will accept the next sync, remembered locally.
+    pub next_allowed_at: Option<String>,
+}
+
+/// Read locally what sync's cadence should be.
+///
+/// Offline on purpose: installing a timer should not depend on the network being
+/// up, and the interval only needs to be right enough. The server enforces the
+/// real one and every response corrects us.
+pub fn scheduling_info(host_flag: Option<&str>) -> Result<SchedulingInfo, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let logged_in = keychain::load_token(&host)?.is_some();
+    let cursor = config::cursor_for(&host)?;
+    let min_interval = cursor.as_ref().and_then(|c| c.min_interval);
+    let next_allowed_at = cursor.and_then(|c| c.next_allowed_at);
+    Ok(SchedulingInfo {
+        host,
+        logged_in,
+        min_interval,
+        next_allowed_at,
+    })
+}
+
+/// The tolerance the server applies to its own interval check (lib/sync.js
+/// SYNC_GRACE_SECS). Kept in step by hand; erring low only costs a retry.
+const SERVER_GRACE_SECS: u64 = 60;
+
+fn map_sync_error(status: reqwest::StatusCode, text: &str) -> ProfileError {
+    let body: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+    let code = body.get("error").and_then(|v| v.as_str()).unwrap_or("");
+    let detail = body.get("message").and_then(|v| v.as_str()).unwrap_or(text);
+
+    let msg = match (status.as_u16(), code) {
+        (400, "unknown_field") => {
+            let field = body
+                .get("field")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            format!("bug: payload has a forbidden field ({field}). {detail}")
+        }
+        (400, "totals_mismatch") => {
+            "bug: client totals do not match rows. cursor not advanced.".into()
+        }
+        (400, "clock_skew") => {
+            "local clock is more than 24h off. fix the system time and retry.".into()
+        }
+        (400, "unsupported_schema") => {
+            let min_v = body
+                .get("min_v")
+                .and_then(|v| v.as_u64())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "?".into());
+            let max_v = body
+                .get("max_v")
+                .and_then(|v| v.as_u64())
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "?".into());
+            format!(
+                "unsupported_schema: server accepts v in [{min_v}, {max_v}]. \
+                 upgrade the CLI or wait for the server. {detail}"
+            )
+        }
+        (400, "invalid_schema") => format!("invalid schema: {detail}"),
+        (400, "session_not_allowed") => {
+            "server rejected a session cookie on a bearer route. bug in the HTTP client.".into()
+        }
+        (401, _) => "unauthorized. run `tokenstat login`".into(),
+        (403, _) => "forbidden. run `tokenstat login` again".into(),
+        (409, "prune_guard") => {
+            let mut bits = Vec::new();
+            if let Some(obj) = body.as_object() {
+                for (k, v) in obj {
+                    if k == "error" || k == "message" {
+                        continue;
+                    }
+                    bits.push(format!("{k}={v}"));
+                }
+            }
+            let extra = bits.join(", ");
+            format!(
+                "server refused a destructive replace ({extra}). \
+                 re-run `tokenstat sync --prune` after you confirm"
+            )
+        }
+        (413, _) => "window too large. shrink with --window from..to".into(),
+        (_, _) => format!("sync failed ({status}): {detail}"),
+    };
+    ProfileError::Message(msg)
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let dig = hasher.finalize();
+    let mut out = String::with_capacity(64);
+    for b in dig {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
+fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, ProfileError> {
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(bytes)?;
+    Ok(enc.finish()?)
+}
+
+fn open_browser(url: &str) -> Result<(), ProfileError> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).status();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status();
+    }
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokenstat_core::{
+        BillingMode, Confidence, Counters, EventId, Extras, SourceId, Timestamp, UsageEvent,
+    };
+
+    #[test]
+    fn a_pairing_code_is_accepted_however_it_was_pasted() {
+        // People paste from a web page: lowercase, dash eaten, a stray space or
+        // quote picked up by the selection. All the same code.
+        for raw in [
+            "WXYZ-1234",
+            "wxyz-1234",
+            "wxyz1234",
+            "  WXYZ-1234  ",
+            "\"WXYZ-1234\"",
+            "WXYZ 1234",
+        ] {
+            assert_eq!(
+                normalize_pairing_code(raw).unwrap(),
+                "WXYZ-1234",
+                "failed for {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_code_of_the_wrong_length_is_refused_before_the_network() {
+        for raw in ["WXYZ-123", "WXYZ-12345", "", "tokenstat login --code"] {
+            assert!(normalize_pairing_code(raw).is_err(), "accepted {raw:?}");
+        }
+    }
+
+    #[test]
+    fn the_jitter_offset_is_stable_for_a_machine_and_inside_the_window() {
+        let a = jitter_offset("m_0123456789abcdef", JITTER_WINDOW_SECS);
+        assert_eq!(a, jitter_offset("m_0123456789abcdef", JITTER_WINDOW_SECS));
+        assert!(a < JITTER_WINDOW_SECS);
+    }
+
+    #[test]
+    fn different_machines_land_on_different_offsets() {
+        // Not a guarantee for any two ids, but a spread this coarse would show up
+        // as an outright collision across a handful of them.
+        let offsets: Vec<u64> = [
+            "m_0000000000000001",
+            "m_0000000000000002",
+            "m_0000000000000003",
+            "m_0000000000000004",
+        ]
+        .iter()
+        .map(|m| jitter_offset(m, JITTER_WINDOW_SECS))
+        .collect();
+        let mut sorted = offsets.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), offsets.len(), "offsets collided: {offsets:?}");
+    }
+
+    #[test]
+    fn a_zero_window_asks_for_no_wait() {
+        assert_eq!(jitter_offset("m_0123456789abcdef", 0), 0);
+    }
+
+    #[test]
+    fn pacing_is_read_from_the_response_body() {
+        let body = r#"{"ok":true,"min_interval":1800,"next_allowed_at":"2026-07-30T09:00:00Z"}"#;
+        let p = pacing_from_body(body, None);
+        assert_eq!(p.min_interval, Some(1800));
+        assert_eq!(p.next_allowed_at.as_deref(), Some("2026-07-30T09:00:00Z"));
+    }
+
+    #[test]
+    fn retry_after_stands_in_for_a_missing_body() {
+        // An intermediary can rate-limit us without speaking our JSON.
+        let p = pacing_from_body("Too many requests", Some(120));
+        assert_eq!(p.min_interval, None);
+        assert!(p.next_allowed_at.is_some());
+    }
+
+    #[test]
+    fn pacing_from_an_unhelpful_response_is_empty_rather_than_wrong() {
+        let p = pacing_from_body("", None);
+        assert!(p.min_interval.is_none());
+        assert!(p.next_allowed_at.is_none());
+    }
+
+    #[test]
+    fn idempotency_key_stable_for_same_canonical_bytes() {
+        let bytes = br#"{"generated_at":"2026-07-29T00:00:00Z","machine":"m_0123456789abcdef","prune":false,"rows":[],"salt_id":"s_abcdef01","totals":{"cr":0,"cw":0,"in":0,"out":0,"rows":0},"tz":"UTC","v":1,"window":{"from":"2026-07-25","to":"2026-07-25"}}"#;
+        assert_eq!(hex_sha256(bytes), hex_sha256(bytes));
+        assert_eq!(hex_sha256(bytes).len(), 64);
+    }
+
+    #[test]
+    fn gzip_roundtrip_prefix() {
+        let gz = gzip_bytes(b"hello").unwrap();
+        assert_eq!(&gz[..2], &[0x1f, 0x8b]);
+    }
+
+    #[test]
+    fn build_path_hashes_project() {
+        let mut store = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let ms = 1_753_444_800_000i64;
+        let day = Timestamp::from_ms(ms).local_date(&tz);
+        store
+            .insert_events(
+                &[UsageEvent {
+                    id: EventId::derive(&["x"]),
+                    source: SourceId::ClaudeCode,
+                    ts: Timestamp::from_ms(ms),
+                    model: "claude-opus-4-8".into(),
+                    session: "s".into(),
+                    project: "/tmp/secret".into(),
+                    counters: Counters {
+                        input_fresh: Some(1),
+                        cache_read: Some(0),
+                        cache_write_5m: Some(0),
+                        cache_write_1h: None,
+                        output: Some(2),
+                    },
+                    extras: Extras::default(),
+                    billing: BillingMode::Plan,
+                    confidence: Confidence::Exact,
+                }],
+                &tz,
+            )
+            .unwrap();
+        let salt = [9u8; 32];
+        let payload = build_sync_payload(
+            &store,
+            SyncBuildArgs {
+                machine: "m_0123456789abcdef",
+                salt_id: "s_abcdef01",
+                salt_key: &salt,
+                tz: "UTC",
+                window: SyncWindow {
+                    from: day.clone(),
+                    to: day,
+                },
+                prune: false,
+                schema_v: 1,
+                allowed_sources: None,
+                allowed_confidence: None,
+            },
+        )
+        .unwrap();
+        assert!(!payload.prune);
+        assert!(payload.rows[0].proj.is_some());
+        let json = String::from_utf8(payload.canonical_bytes().unwrap()).unwrap();
+        assert!(!json.contains("/tmp/secret"));
+        assert!(json.contains("\"salt_id\":\"s_abcdef01\""));
+    }
+}
