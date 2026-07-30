@@ -145,12 +145,13 @@ membership (paid, yearly).
 4. Create an App Store Connect API key (Users and Access → Integrations →
    Team Keys) with access to notarization. Download the `.p8` and base64-encode
    it the same way.
-5. Add these repository secrets (values are per repository):
+5. Add these secrets on the GitHub **`release` environment** (Settings →
+   Environments → release), not as repository secrets:
 
 | Secret | Contents |
 | --- | --- |
-| `DEVELOPER_ID_P12_BASE64` | base64 of the `.p12` |
-| `DEVELOPER_ID_P12_PASSWORD` | password used when exporting the `.p12` |
+| `DEVELOPER_ID_P12_BASE64` | base64 of the `.p12` (`base64 -i cert.p12 | pbcopy`, no line wraps) |
+| `DEVELOPER_ID_P12_PASSWORD` | password used when exporting the `.p12` (no trailing newline) |
 | `KEYCHAIN_PASSWORD` | throwaway password for the CI keychain |
 | `DEVELOPER_ID_APP` | full identity, e.g. `Developer ID Application: Name (TEAMID)` |
 | `TEAM_ID` | 10-character Team ID |
@@ -158,9 +159,16 @@ membership (paid, yearly).
 | `NOTARY_KEY_ID` | Key ID from App Store Connect |
 | `NOTARY_ISSUER_ID` | Issuer UUID from App Store Connect |
 
-If `DEVELOPER_ID_P12_BASE64` is absent, the release still publishes unsigned
-macOS binaries. Gatekeeper will warn on first open until signing is wired.
-Notarization runs only when all three `NOTARY_*` secrets are set.
+`MAC verification failed during PKCS12 import (wrong password?)` means the
+password secret does not match the `.p12`, or a trailing newline crept into
+either secret. Re-export the cert, re-encode the file, and paste the password
+carefully.
+
+The release workflow asks for environment approval right after the tag is
+verified, before the build matrix starts. Builds only run once that is
+approved. If `DEVELOPER_ID_P12_BASE64` is absent, the release still publishes
+unsigned macOS binaries. Gatekeeper will warn on first open until signing is
+wired. Notarization runs only when all three `NOTARY_*` secrets are set.
 
 ### Self-update
 
