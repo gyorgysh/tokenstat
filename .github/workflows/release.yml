@@ -186,6 +186,7 @@ jobs:
           # Never enable xtrace here: passwords and PEM material must not hit logs.
           set -euo pipefail
           set +x
+          umask 077
           if [ -z "${DEVELOPER_ID_P12_BASE64}" ]; then
             echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set on the release environment)."
             exit 0
@@ -193,6 +194,8 @@ jobs:
 
           CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
           CERT_IMPORT="${RUNNER_TEMP}/developer-id-import.p12"
+          CERT_PEM="${RUNNER_TEMP}/developer-id-cert.pem"
+          KEY_PEM="${RUNNER_TEMP}/developer-id-key.pem"
           PASS_FILE="${RUNNER_TEMP}/p12.pass"
           KEYCHAIN="${RUNNER_TEMP}/tokenstat.keychain-db"
           # GitHub secret UIs often leave a trailing newline; that alone makes
@@ -228,14 +231,25 @@ jobs:
 
           # Apple's security(1) often rejects modern OpenSSL 3 P12 MACs even when
           # openssl accepts the same password ("MAC verification failed").
-          # Re-export with PBES1/SHA1 algorithms Security.framework still likes.
-          extract_pem() {
-            if openssl pkcs12 -in "${CERT_PATH}" -passin "file:${PASS_FILE}" -nodes 2>/dev/null; then
+          # Extract the identity certificate and private key separately, then
+          # re-export with PBES1/SHA1 algorithms Security.framework accepts.
+          extract_component() {
+            local output="$1"
+            shift
+            if openssl pkcs12 -in "${CERT_PATH}" -passin "file:${PASS_FILE}" \
+              "$@" -out "${output}" 2>/dev/null; then
               return 0
             fi
-            openssl pkcs12 -in "${CERT_PATH}" -passin "file:${PASS_FILE}" -nodes -legacy 2>/dev/null
+            openssl pkcs12 -in "${CERT_PATH}" -passin "file:${PASS_FILE}" \
+              "$@" -out "${output}" -legacy 2>/dev/null
           }
-          if ! extract_pem | openssl pkcs12 -export -out "${CERT_IMPORT}" \
+          if ! extract_component "${CERT_PEM}" -clcerts -nokeys \
+            || ! extract_component "${KEY_PEM}" -nocerts -nodes; then
+            echo "Failed to extract the Developer ID certificate and private key." >&2
+            exit 1
+          fi
+          if ! openssl pkcs12 -export -in "${CERT_PEM}" -inkey "${KEY_PEM}" \
+            -out "${CERT_IMPORT}" \
             -passout "file:${PASS_FILE}" \
             -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg SHA1; then
             echo "Failed to re-export PKCS12 into an Apple-compatible form." >&2
@@ -255,7 +269,7 @@ jobs:
           security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "${KEYCHAIN_PW}" "${KEYCHAIN}"
-          rm -f "${CERT_PATH}" "${CERT_IMPORT}" "${PASS_FILE}"
+          rm -f "${CERT_PATH}" "${CERT_IMPORT}" "${CERT_PEM}" "${KEY_PEM}" "${PASS_FILE}"
 
           IDENTITY="${DEVELOPER_ID_APP:-}"
           if [ -z "${IDENTITY}" ]; then
