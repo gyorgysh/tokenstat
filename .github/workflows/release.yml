@@ -9,10 +9,9 @@ name: release
 # pattern created empty "No jobs were run" failure runs on every push to main.
 # To re-run a failed release, move the tag and push again.
 #
-# Signing secrets are repository Actions secrets (Settings → Secrets → Actions).
-# The `release` environment is only for required reviewers: the `approve` job
-# uses it right after tag checks so you approve once before the build matrix.
-# `publish` does not use an environment, so there is no second approval prompt.
+# Signing secrets and required reviewers live on the `release` environment,
+# with deployment limited to tags matching `v*`. The build matrix cannot access
+# those secrets. GitHub asks once, before the publish job signs and releases.
 #
 # A tag containing a hyphen (v0.1.0-rc.1) publishes as a prerelease.
 
@@ -81,20 +80,9 @@ jobs:
             exit 1
           fi
 
-  # One approval, before builds. Same `release` environment you already have.
-  # publish does not reference an environment, so GitHub will not ask again.
-  approve:
-    name: await release approval
-    needs: verify
-    runs-on: ubuntu-latest
-    environment: release
-    steps:
-      - name: Release approved
-        run: echo "release ${{ github.ref_name }} approved; starting builds"
-
   build:
     name: build ${{ matrix.target }}
-    needs: [verify, approve]
+    needs: verify
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -126,9 +114,7 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
 
-      # Signing happens only in the publish job (environment: release), so these
-      # matrix builds never see Developer ID / notary secrets. A PR workflow
-      # cannot reach those secrets even if someone copies the secret names.
+      # Signing happens only in publish (release environment secrets).
       - name: Package
         id: package
         shell: bash
@@ -169,11 +155,9 @@ jobs:
 
   publish:
     name: publish github release
-    needs: [verify, approve, build]
-    # No `environment:` here: approval already happened in `approve`. Signing
-    # secrets must be repository Actions secrets (environment secrets are not
-    # visible to jobs without that environment).
+    needs: [verify, build]
     runs-on: macos-latest
+    environment: release
     permissions:
       contents: write
     steps:
@@ -203,7 +187,7 @@ jobs:
           set -euo pipefail
           set +x
           if [ -z "${DEVELOPER_ID_P12_BASE64}" ]; then
-            echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set as a repository secret)."
+            echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set on the release environment)."
             exit 0
           fi
 
@@ -219,7 +203,7 @@ jobs:
             KEYCHAIN_PW="$(openssl rand -base64 32)"
           fi
           if [ -z "${P12_PASS}" ]; then
-            echo "DEVELOPER_ID_P12_PASSWORD is empty (repository secret)." >&2
+            echo "DEVELOPER_ID_P12_PASSWORD is empty on the release environment." >&2
             exit 1
           fi
           printf '%s' "${P12_PASS}" > "${PASS_FILE}"
@@ -237,7 +221,7 @@ jobs:
             && ! openssl pkcs12 -in "${CERT_PATH}" -passin "file:${PASS_FILE}" -noout -legacy 2>/dev/null; then
             echo "PKCS12 rejected the password (or the .p12 is corrupt)." >&2
             echo "Re-export the Developer ID .p12, base64-encode it, and update" >&2
-            echo "DEVELOPER_ID_P12_BASE64 + DEVELOPER_ID_P12_PASSWORD as repository secrets." >&2
+            echo "DEVELOPER_ID_P12_BASE64 + DEVELOPER_ID_P12_PASSWORD on the release environment." >&2
             echo "Trim any trailing newline when pasting the password." >&2
             exit 1
           fi
@@ -362,15 +346,3 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/SHA256SUMS
-
-  # Homebrew tap and Scoop manifest updates hook in here once the artifact
-  # layout is stable. Both consume dist/SHA256SUMS from the published release,
-  # so no change to the build job is required.
-  #
-  # tap:
-  #   name: update homebrew tap
-  #   needs: [verify, publish]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Bump formula in gyorgysh/homebrew-tap
-  #       ...

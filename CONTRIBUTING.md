@@ -127,65 +127,18 @@ git push origin v0.1.0
 ```
 
 The workflow then builds all six targets, optionally signs and notarizes the
-macOS binaries when Apple secrets are present, writes `SHA256SUMS`, and
-publishes a GitHub Release. A tag containing a hyphen publishes as a prerelease.
-
-### macOS signing (optional, recommended for public downloads)
-
-Ad-hoc signing (`codesign --sign -`) is enough for local copies. Downloads from
-the internet need a **Developer ID Application** certificate and notarization,
-which require an [Apple Developer Program](https://developer.apple.com/programs/)
-membership (paid, yearly).
-
-1. Enrol in the Apple Developer Program.
-2. Create a **Developer ID Application** certificate in
-   [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/certificates/list).
-3. Export it as a `.p12` and base64-encode it for CI:
-   `base64 -i developer-id.p12 | pbcopy`
-4. Create an App Store Connect API key (Users and Access → Integrations →
-   Team Keys) with access to notarization. Download the `.p8` and base64-encode
-   it the same way.
-5. GitHub setup (Settings):
-
-- **Environment `release`**: required reviewers, deployment limited to tags
-  `v*`. Used only by the early approval job. No secrets needed here.
-- **Repository secrets** (Settings → Secrets and variables → Actions): the
-  signing values below. They must be repository secrets so `publish` can read
-  them without attaching the `release` environment again (which would ask for
-  a second approval). If you previously stored them on the environment, copy
-  them to repository secrets.
-
-| Secret | Contents |
-| --- | --- |
-| `DEVELOPER_ID_P12_BASE64` | base64 of the `.p12` (`base64 -i cert.p12 \| pbcopy`, no line wraps) |
-| `DEVELOPER_ID_P12_PASSWORD` | password used when exporting the `.p12` (no trailing newline) |
-| `KEYCHAIN_PASSWORD` | throwaway password for the CI keychain |
-| `DEVELOPER_ID_APP` | full identity, e.g. `Developer ID Application: Name (TEAMID)` |
-| `TEAM_ID` | 10-character Team ID |
-| `NOTARY_KEY_P8_BASE64` | base64 of the AuthKey `.p8` |
-| `NOTARY_KEY_ID` | Key ID from App Store Connect |
-| `NOTARY_ISSUER_ID` | Issuer UUID from App Store Connect |
-
-The publish job re-exports the `.p12` into an Apple-compatible form before
-`security import`. If import still fails, re-export the Developer ID cert from
-Keychain Access, re-encode the file, and paste the password with no trailing
-newline.
-
-The release workflow asks for `release` approval right after the tag is
-verified, before the build matrix starts. Builds only run once that is
-approved. Publish does not wait for a second approval. If
-`DEVELOPER_ID_P12_BASE64` is absent, the release still publishes unsigned
-macOS binaries. Gatekeeper will warn on first open until signing is wired.
-Notarization runs only when all three `NOTARY_*` secrets are set.
+macOS binaries when Apple secrets are present on the `release` environment,
+writes `SHA256SUMS`, and publishes a GitHub Release. A tag containing a hyphen
+publishes as a prerelease. Release signing and environment setup are
+maintainer-only; contributors do not need those secrets. GitHub asks for one
+`release` environment approval after the builds and before signing or publishing.
 
 ### Self-update
 
 `tokenstat update` downloads the matching asset from GitHub Releases, verifies
 `SHA256SUMS`, and replaces the running binary when the install path is writable
 (for example `~/.local/bin`). Cargo and system paths are refused. Automatic
-daily updates are on by default (schedule install persists that). Opt out with
-`tokenstat update --auto off`, `"update":{"auto":false}` in config.json, or
-`TOKENSTAT_AUTO_UPDATE=0`.
+daily updates are on by default. Opt out with `tokenstat update --auto off`.
 
 ## Before you open a pull request
 
