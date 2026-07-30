@@ -9,6 +9,10 @@ name: release
 # pattern created empty "No jobs were run" failure runs on every push to main.
 # To re-run a failed release, move the tag and push again.
 #
+# Signing secrets belong on the `release` environment (not repository secrets),
+# with deployment limited to tags matching `v*`. The publish job is the only
+# job that uses that environment, so PR / branch workflows cannot read them.
+#
 # A tag containing a hyphen (v0.1.0-rc.1) publishes as a prerelease.
 
 on:
@@ -110,74 +114,9 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
 
-      # secrets.* cannot appear in `if:` (GitHub rejects the workflow). Skip inside
-      # the script when the p12 secret is unset.
-      - name: Sign and notarize (macOS, optional)
-        if: runner.os == 'macOS'
-        env:
-          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
-          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
-          TEAM_ID: ${{ secrets.TEAM_ID }}
-          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          set -euo pipefail
-          if [ -z "${DEVELOPER_ID_P12_BASE64}" ]; then
-            echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set)."
-            exit 0
-          fi
-          BIN="target/${TARGET}/release/tokenstat"
-          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
-          KEYCHAIN="${RUNNER_TEMP}/tokenstat.keychain-db"
-          KEYCHAIN_PW="${KEYCHAIN_PASSWORD:-}"
-          if [ -z "${KEYCHAIN_PW}" ]; then
-            KEYCHAIN_PW="$(openssl rand -base64 32)"
-          fi
-          echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > "${CERT_PATH}"
-          security create-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
-          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
-          security unlock-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
-          security import "${CERT_PATH}" -k "${KEYCHAIN}" -P "${DEVELOPER_ID_P12_PASSWORD}" \
-            -T /usr/bin/codesign
-          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "${KEYCHAIN_PW}" "${KEYCHAIN}"
-          rm -f "${CERT_PATH}"
-          IDENTITY="${DEVELOPER_ID_APP:-}"
-          if [ -z "${IDENTITY}" ]; then
-            IDENTITY=$(security find-identity -v -p codesigning "${KEYCHAIN}" \
-              | awk -F'"' '/Developer ID Application/ {print $2; exit}')
-          fi
-          if [ -z "${IDENTITY}" ]; then
-            echo "No Developer ID Application identity (set DEVELOPER_ID_APP or fix the p12)." >&2
-            exit 1
-          fi
-          # TEAM_ID is unused for a bare binary but kept in env for future bundle signing.
-          : "${TEAM_ID:=}"
-          codesign --force --options runtime --timestamp \
-            --sign "${IDENTITY}" "${BIN}"
-          codesign --verify --verbose=2 "${BIN}"
-          # Notarize when an App Store Connect API key is configured.
-          if [ -n "${NOTARY_KEY_P8_BASE64}" ] && [ -n "${NOTARY_KEY_ID}" ] && [ -n "${NOTARY_ISSUER_ID}" ]; then
-            KEY_PATH="${RUNNER_TEMP}/AuthKey.p8"
-            echo "${NOTARY_KEY_P8_BASE64}" | base64 --decode > "${KEY_PATH}"
-            ZIP="${RUNNER_TEMP}/tokenstat-notarize.zip"
-            ditto -c -k --keepParent "${BIN}" "${ZIP}"
-            xcrun notarytool submit "${ZIP}" \
-              --key "${KEY_PATH}" \
-              --key-id "${NOTARY_KEY_ID}" \
-              --issuer "${NOTARY_ISSUER_ID}" \
-              --wait
-            xcrun stapler staple "${BIN}" || true
-            rm -f "${KEY_PATH}"
-          else
-            echo "Skipping notarization (NOTARY_* secrets not set)."
-          fi
-
+      # Signing happens only in the publish job (environment: release), so these
+      # matrix builds never see Developer ID / notary secrets. A PR workflow
+      # cannot reach those secrets even if someone copies the secret names.
       - name: Package
         id: package
         shell: bash
@@ -201,7 +140,6 @@ jobs:
             tar czf "${name}.tar.gz" "${name}"
             asset="${name}.tar.gz"
           fi
-          # Checksums let a Homebrew formula or Scoop manifest verify downloads.
           if command -v sha256sum > /dev/null; then
             sha256sum "$asset" > "${asset}.sha256"
           else
@@ -220,8 +158,9 @@ jobs:
   publish:
     name: publish github release
     needs: [verify, build]
-    runs-on: ubuntu-latest
-    # Pause here until a required reviewer approves (Settings → Environments → release).
+    # macOS: sign + notarize Darwin archives here, where environment secrets live.
+    # One approval unlocks every secret; build matrix never sees them.
+    runs-on: macos-latest
     environment: release
     permissions:
       contents: write
@@ -236,11 +175,109 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Sign and notarize macOS archives
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          DEVELOPER_ID_APP: ${{ secrets.DEVELOPER_ID_APP }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEVELOPER_ID_P12_BASE64}" ]; then
+            echo "Skipping signing (DEVELOPER_ID_P12_BASE64 not set on the release environment)."
+            exit 0
+          fi
+
+          CERT_PATH="${RUNNER_TEMP}/developer-id.p12"
+          KEYCHAIN="${RUNNER_TEMP}/tokenstat.keychain-db"
+          KEYCHAIN_PW="${KEYCHAIN_PASSWORD:-}"
+          if [ -z "${KEYCHAIN_PW}" ]; then
+            KEYCHAIN_PW="$(openssl rand -base64 32)"
+          fi
+          echo "${DEVELOPER_ID_P12_BASE64}" | base64 --decode > "${CERT_PATH}"
+          security create-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN}"
+          security unlock-keychain -p "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          security import "${CERT_PATH}" -k "${KEYCHAIN}" -P "${DEVELOPER_ID_P12_PASSWORD}" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "${KEYCHAIN}" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "${KEYCHAIN_PW}" "${KEYCHAIN}"
+          rm -f "${CERT_PATH}"
+
+          IDENTITY="${DEVELOPER_ID_APP:-}"
+          if [ -z "${IDENTITY}" ]; then
+            IDENTITY=$(security find-identity -v -p codesigning "${KEYCHAIN}" \
+              | awk -F'"' '/Developer ID Application/ {print $2; exit}')
+          fi
+          if [ -z "${IDENTITY}" ]; then
+            echo "No Developer ID Application identity (set DEVELOPER_ID_APP or fix the p12)." >&2
+            exit 1
+          fi
+          : "${TEAM_ID:=}"
+
+          NOTARY_KEY_PATH=""
+          if [ -n "${NOTARY_KEY_P8_BASE64}" ] && [ -n "${NOTARY_KEY_ID}" ] && [ -n "${NOTARY_ISSUER_ID}" ]; then
+            NOTARY_KEY_PATH="${RUNNER_TEMP}/AuthKey.p8"
+            echo "${NOTARY_KEY_P8_BASE64}" | base64 --decode > "${NOTARY_KEY_PATH}"
+          else
+            echo "Skipping notarization (NOTARY_* secrets not set)."
+          fi
+
+          sign_one() {
+            local target="$1"
+            local archive="dist/tokenstat-${VERSION}-${target}.tar.gz"
+            local work="${RUNNER_TEMP}/sign-${target}"
+            rm -rf "${work}"
+            mkdir -p "${work}"
+            tar xzf "${archive}" -C "${work}"
+            local bin
+            bin="$(find "${work}" -type f -name tokenstat | head -n1)"
+            if [ -z "${bin}" ]; then
+              echo "no tokenstat binary in ${archive}" >&2
+              exit 1
+            fi
+            codesign --force --options runtime --timestamp \
+              --sign "${IDENTITY}" "${bin}"
+            codesign --verify --verbose=2 "${bin}"
+            if [ -n "${NOTARY_KEY_PATH}" ]; then
+              local zip="${RUNNER_TEMP}/tokenstat-notarize-${target}.zip"
+              ditto -c -k --keepParent "${bin}" "${zip}"
+              xcrun notarytool submit "${zip}" \
+                --key "${NOTARY_KEY_PATH}" \
+                --key-id "${NOTARY_KEY_ID}" \
+                --issuer "${NOTARY_ISSUER_ID}" \
+                --wait
+              xcrun stapler staple "${bin}" || true
+              rm -f "${zip}"
+            fi
+            local dir
+            dir="$(dirname "${bin}")"
+            local base
+            base="$(basename "${dir}")"
+            tar czf "${archive}" -C "$(dirname "${dir}")" "${base}"
+          }
+
+          sign_one aarch64-apple-darwin
+          sign_one x86_64-apple-darwin
+          if [ -n "${NOTARY_KEY_PATH}" ]; then
+            rm -f "${NOTARY_KEY_PATH}"
+          fi
+
       - name: Collect checksums
         run: |
           cd dist
-          cat ./*.sha256 > SHA256SUMS
-          rm -f ./*.sha256
+          rm -f ./*.sha256 SHA256SUMS
+          for f in *.tar.gz *.zip; do
+            [ -f "$f" ] || continue
+            shasum -a 256 "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
 
       - name: Write release notes
         env:
