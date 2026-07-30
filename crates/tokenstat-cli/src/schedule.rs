@@ -97,9 +97,8 @@ pub const LABEL: &str = "ai.tokenstat.scan";
 /// Scanning is local, cheap, and wants to run often, because the logs it reads
 /// are deleted from under it. Syncing talks to a server that meters how often it
 /// will accept one, and only matters for people with an account. Updating
-/// replaces this binary and runs daily, and only for people who asked for that.
-/// One combined entry would tie the scan cadence to a plan, and would install
-/// machinery for the majority who never sign in or never opt into auto-update.
+/// replaces this binary and runs daily (on by default; `update --auto off`
+/// removes it). One combined entry would tie the scan cadence to a plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     Scan,
@@ -130,8 +129,8 @@ impl Unit {
             // --scheduled adds the jitter and the self-pacing, and keeps quiet
             // (exit 0) when there is no account or the interval has not elapsed.
             Unit::Sync => &["sync", "--scheduled"],
-            // Same idea: quiet when auto-update is off, and it verifies the
-            // downloaded binary before letting it replace this one.
+            // Quiet when the user opted out; otherwise verifies the downloaded
+            // binary before letting it replace this one.
             Unit::Update => &["update", "--scheduled"],
         }
     }
@@ -686,11 +685,14 @@ pub fn install_linked_units(
         .unwrap_or_else(|| Unit::Sync.default_interval());
     let want_update = tokenstat_sync::auto_apply_enabled();
     if want_update {
-        let persisted = tokenstat_sync::config::load()
+        // Scheduler does not inherit TOKENSTAT_AUTO_UPDATE; persist so the daily
+        // unit does not treat a missing config key as off after a future default
+        // change, and so an env-forced on survives into launchd/Task Scheduler.
+        if tokenstat_sync::config::load()
             .ok()
             .and_then(|c| c.update.auto)
-            .unwrap_or(false);
-        if !persisted {
+            != Some(true)
+        {
             let _ = tokenstat_sync::config::set_update_auto(true);
         }
     }

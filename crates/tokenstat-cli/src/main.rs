@@ -222,15 +222,15 @@ enum Command {
         /// Report only; do not download
         #[arg(long)]
         check: bool,
-        /// Apply even when `update.auto` is off (same as a plain `update`)
+        /// Apply even when automatic updates are off (same as a plain `update`)
         #[arg(long)]
         yes: bool,
-        /// Turn automatic daily updates on or off (persist the preference;
-        /// install the daily unit with `tokenstat schedule --install`)
+        /// Turn automatic daily updates on or off (default on; `--auto off` opts
+        /// out and removes the daily schedule entry)
         #[arg(long, value_name = "on|off")]
         auto: Option<String>,
-        /// Run as a background job: wait a spread-out delay, do nothing unless
-        /// automatic updates are on, and stay quiet about it
+        /// Run as a background job: wait a spread-out delay, skip when the user
+        /// opted out, and stay quiet about it
         #[arg(long)]
         scheduled: bool,
     },
@@ -373,7 +373,7 @@ fn main() -> Result<()> {
                 eprintln!("  remote fetch: {e}");
             }
         }
-        // Soft update check (24h TTL). Applies only when update.auto / env is on.
+        // Soft update check (24h TTL). Applies when auto-update is on (default).
         render::maybe_notify_update(cli.json);
         return Ok(());
     }

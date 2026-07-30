@@ -106,10 +106,11 @@ using a code from [tokenstat.ai/link](https://tokenstat.ai/link).
 `--version` and `--help`, then swaps it in. The old binary is moved aside and
 restored if the new one cannot run from its final path.
 
-Automatic daily updates are opt in:
+Automatic daily updates are on by default after `setup` / schedule install.
+They still verify checksum and run the new binary before replacing this one.
+Opt out:
 
 ```bash
-tokenstat update --auto on     # then: tokenstat schedule --install
 tokenstat update --auto off
 ```
 
@@ -208,7 +209,7 @@ writes the scheduler entry for your platform. The website installer runs
 `tokenstat setup`, which installs the scan schedule by default.
 
 With an account linked, a sync entry uploads on your plan interval (60 / 30 / 10
-minutes). With auto-update on, a daily update check runs with jitter and verifies
+minutes). A daily update check (on by default) runs with jitter and verifies
 the new binary before replacing the running one.
 
 ## Development

@@ -9,9 +9,9 @@
 //! from its final path, so a failed update leaves a working `tokenstat` instead
 //! of a hole.
 //!
-//! Opt-in auto-apply uses a 24h check stamp so scans stay quiet most of the time.
-//! `scheduled_update` is the daily-timer entry point and ignores that stamp,
-//! since the schedule is the cadence.
+//! Auto-apply is on by default (24h check stamp so scans stay quiet most of the
+//! time). `scheduled_update` is the daily-timer entry point and ignores that stamp,
+//! since the schedule is the cadence. Opt out with `update --auto off`.
 
 use std::fs;
 use std::io::Write;
@@ -719,16 +719,24 @@ pub fn scheduled_update() -> Result<ScheduledUpdate, UpdateError> {
     Ok(ScheduledUpdate::Applied(report))
 }
 
-/// Whether auto-apply is enabled (config / env). Default: off (notify only).
+/// Whether auto-apply is enabled (config / env). Default: on.
+///
+/// Opt out with `tokenstat update --auto off`, `"update":{"auto":false}` in
+/// config, or `TOKENSTAT_AUTO_UPDATE=0`.
 pub fn auto_apply_enabled() -> bool {
     if let Ok(v) = std::env::var("TOKENSTAT_AUTO_UPDATE") {
         let v = v.trim().to_ascii_lowercase();
-        return matches!(v.as_str(), "1" | "true" | "yes" | "on");
+        if matches!(v.as_str(), "0" | "false" | "no" | "off") {
+            return false;
+        }
+        if matches!(v.as_str(), "1" | "true" | "yes" | "on") {
+            return true;
+        }
     }
     crate::config::load()
         .ok()
         .and_then(|c| c.update.auto)
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 fn expected_sha256(sums: &str, asset_name: &str) -> Option<String> {

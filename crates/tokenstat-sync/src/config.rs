@@ -38,8 +38,9 @@ pub struct Config {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UpdateConfig {
-    /// When true, `scan` / scheduled runs apply a newer GitHub Release if the
+    /// Apply a newer GitHub Release from scan / the daily schedule when the
     /// binary path is writable (not cargo/homebrew system installs).
+    /// Omitted means on; set `false` to opt out (`tokenstat update --auto off`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto: Option<bool>,
 }
@@ -191,9 +192,8 @@ pub fn set_sync_host(host: &str) -> Result<(), ConfigError> {
 
 /// Turn automatic update applying on or off.
 ///
-/// Stored rather than inferred: a background job that replaces a binary is
-/// something the user has to have said yes to, and an env var would not survive
-/// the scheduler's own environment.
+/// Default is on. Persist an explicit value so a scheduler entry (which does
+/// not inherit shell env) matches the user's choice after `update --auto`.
 pub fn set_update_auto(on: bool) -> Result<(), ConfigError> {
     let mut cfg = load()?;
     cfg.update.auto = Some(on);

@@ -2486,9 +2486,7 @@ pub fn schedule(
             .and_then(|i| i.min_interval)
             .unwrap_or_else(|| Unit::Sync.default_interval()),
     };
-    // Only for people who turned auto-update on. Scheduling a daily job that
-    // would find an update and then decline to apply it is machinery for nothing:
-    // a scan already prints the hint.
+    // Default on. Opt out with `tokenstat update --auto off` (removes the unit).
     let want_update = tokenstat_sync::auto_apply_enabled();
     let update_interval = Unit::Update.default_interval();
 
@@ -2500,14 +2498,13 @@ pub fn schedule(
         println!();
 
         if want_update {
-            // auto_apply_enabled() also honours TOKENSTAT_AUTO_UPDATE, which the
-            // scheduler will not inherit. Persist the choice, or the unit we are
-            // about to write would wake up every day and decide it is switched off.
-            let persisted = tokenstat_sync::config::load()
+            // Scheduler does not inherit TOKENSTAT_AUTO_UPDATE. Persist on so the
+            // daily unit matches what we are about to install.
+            if tokenstat_sync::config::load()
                 .ok()
                 .and_then(|c| c.update.auto)
-                .unwrap_or(false);
-            if !persisted {
+                != Some(true)
+            {
                 let _ = tokenstat_sync::config::set_update_auto(true);
             }
         }
@@ -2604,7 +2601,7 @@ pub fn schedule(
         println!();
         println!("  {BOLD}And check for a new release once a day{BOLD:#}");
         println!();
-        println!("  {DIM}You have automatic updates on. This entry downloads a newer{DIM:#}");
+        println!("  {DIM}Automatic updates are on. This entry downloads a newer{DIM:#}");
         println!("  {DIM}release, checks its checksum, then runs it and confirms its{DIM:#}");
         println!("  {DIM}version before it replaces this binary. If the new one cannot{DIM:#}");
         println!("  {DIM}run, the old one goes back.{DIM:#}");
