@@ -406,14 +406,7 @@ fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Stri
         "probe-{}-{seq}.txt",
         args.first().unwrap_or(&"x").trim_start_matches('-')
     ));
-    let out = fs::File::create(&out_path)?;
-    let err = out.try_clone()?;
-    let mut child = Command::new(bin)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::from(out))
-        .stderr(std::process::Stdio::from(err))
-        .spawn()?;
+    let mut child = spawn_probe(bin, args, &out_path)?;
 
     let deadline = SystemTime::now() + timeout;
     let status = loop {
@@ -437,6 +430,48 @@ fn run_probe(bin: &Path, args: &[&str], timeout: Duration) -> Result<(bool, Stri
     let text = fs::read_to_string(&out_path).unwrap_or_default();
     let _ = fs::remove_file(&out_path);
     Ok((status.success(), text))
+}
+
+/// Spawn with a short ETXTBSY retry.
+///
+/// After `replace_executable` copies then renames a candidate into place, Linux
+/// can briefly refuse to exec the new inode ("Text file busy") while the writer
+/// side of the copy is still settling. A few retries are enough; other errors
+/// fail immediately.
+fn spawn_probe(
+    bin: &Path,
+    args: &[&str],
+    out_path: &Path,
+) -> Result<std::process::Child, UpdateError> {
+    let mut delay = Duration::from_millis(10);
+    for attempt in 0..8 {
+        // Recreate stdio each attempt: a failed spawn may have consumed the
+        // previous File handles.
+        let out = fs::File::create(out_path)?;
+        let err = out.try_clone()?;
+        match Command::new(bin)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(out))
+            .stderr(std::process::Stdio::from(err))
+            .spawn()
+        {
+            Ok(child) => return Ok(child),
+            Err(e) if is_etxtbsy(&e) && attempt + 1 < 8 => {
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(80));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(UpdateError::Message(format!(
+        "could not spawn {}: text file busy",
+        bin.display()
+    )))
+}
+
+fn is_etxtbsy(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::ExecutableFileBusy || err.raw_os_error() == Some(26)
 }
 
 /// Make a freshly extracted file executable so it can be probed.
