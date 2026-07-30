@@ -43,18 +43,21 @@ function Warn([string]$Msg) { Write-Host "! $Msg" -ForegroundColor Yellow }
 function Die([string]$Msg) { Write-Host "✖ $Msg" -ForegroundColor Red; exit 1 }
 
 function Get-TargetTriple {
-  $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-  switch ($arch) {
-    "X64" { return "x86_64-pc-windows-msvc" }
-    "Arm64" { return "aarch64-pc-windows-msvc" }
-    default {
-      # Older PowerShell: fall back to PROCESSOR_ARCHITECTURE
-      switch ($env:PROCESSOR_ARCHITECTURE) {
-        "AMD64" { return "x86_64-pc-windows-msvc" }
-        "ARM64" { return "aarch64-pc-windows-msvc" }
-        default { Die "unsupported Windows arch: $arch / $($env:PROCESSOR_ARCHITECTURE)" }
-      }
+  # Prefer the process env var: it exists on every Windows PowerShell, including
+  # 5.1 under StrictMode. RuntimeInformation.OSArchitecture is Core / newer
+  # Framework only and throws PropertyNotFoundException on older hosts.
+  $arch = $env:PROCESSOR_ARCHITECTURE
+  if (-not $arch) {
+    try {
+      $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    } catch {
+      $arch = ""
     }
+  }
+  switch -Regex ($arch) {
+    '^(AMD64|X64)$' { return "x86_64-pc-windows-msvc" }
+    '^(ARM64|Arm64)$' { return "aarch64-pc-windows-msvc" }
+    default { Die "unsupported Windows arch: $arch" }
   }
 }
 
