@@ -190,8 +190,8 @@ reports. Salted hashing applies to the sync payload only.
 
 ## Pricing
 
-Do not host a price book in this repository. The CLI fetches list rates from a
-public feed (`tokenstat pricing --refresh`) into the user's data directory.
+Do not host a price book in this repository. The CLI fetches a list-rate
+snapshot from tokenstat.ai (`tokenstat pricing --refresh`) into the user's data directory.
 `tokenstat-core` only reads that local snapshot. Usage covered by a subscription
 is reported as plan usage, separately from metered spend. Never present a plan
 figure as money charged.
