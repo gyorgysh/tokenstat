@@ -1,19 +1,21 @@
-//! Refresh list-rate prices from a public model-price feed into the local
-//! data directory. Core only reads the resulting file; it never fetches.
+//! Refresh the tokenstat.ai list-rate snapshot into the local data directory.
+//! Core only reads the resulting file, it never fetches.
 
-use std::collections::BTreeMap;
 use std::fs;
+use std::io::Write;
+use std::path::Path;
 
-use serde::Serialize;
-use serde_json::Value;
+use atomicwrites::{AllowOverwrite, AtomicFile};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokenstat_core::PriceTable;
 
-/// Community model-price feed (USD per token). Converted to our per-million
-/// snapshot shape on disk. Not hosted by tokenstat.ai.
-const FEED_URL: &str =
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
+use crate::{config, host};
 
-#[derive(Debug, Clone, Serialize)]
+const ETAG_FILE: &str = "current.etag";
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct OutModel {
     #[serde(rename = "match")]
     pattern: String,
@@ -24,11 +26,19 @@ struct OutModel {
     cache_write_1h: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct OutSnapshot {
     effective_from: String,
     note: String,
     models: Vec<OutModel>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct EtagMetadata {
+    etag: String,
+    snapshot_sha256: String,
 }
 
 #[derive(Debug)]
@@ -41,27 +51,66 @@ pub struct PricingRefresh {
     pub large_moves: Vec<String>,
 }
 
-/// Download the public feed, convert, and write `pricing/current.json`.
+/// Download the hosted list-rate snapshot and write `pricing/current.json`.
 ///
 /// When an existing snapshot is present, rates that jump more than 50% are
 /// rejected unless `force` is true, so a bad feed entry cannot silently rewrite
 /// every dollar column.
 pub fn refresh(force: bool) -> anyhow::Result<PricingRefresh> {
+    refresh_from_url(&pricing_url()?, force)
+}
+
+fn pricing_url() -> anyhow::Result<String> {
+    let env_host = std::env::var("TOKENSTAT_API_BASE")
+        .ok()
+        .filter(|host| !host.trim().is_empty());
+    let saved = config::load()?;
+    let base = host::resolve_host(None, env_host.as_deref(), saved.sync.host.as_deref())?;
+    Ok(format!("{base}/api/v1/pricing/current"))
+}
+
+fn refresh_from_url(url: &str, force: bool) -> anyhow::Result<PricingRefresh> {
+    let path = PriceTable::default_path().map_err(|e| anyhow::anyhow!("{e}"))?;
+    refresh_from_url_at(url, &path, force)
+}
+
+fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<PricingRefresh> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
-    let resp = client.get(FEED_URL).send()?;
-    if !resp.status().is_success() {
-        anyhow::bail!("price feed returned {}", resp.status());
+    let etag_path = path.with_file_name(ETAG_FILE);
+    let mut request = client.get(url);
+    if let Some(etag) = read_etag(path, &etag_path) {
+        request = request.header(reqwest::header::IF_NONE_MATCH, etag);
     }
+    let resp = request.send()?;
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        if !path.exists() {
+            anyhow::bail!("pricing API returned 304 but no local snapshot exists");
+        }
+        let snapshot = load_snapshot(path)?;
+        return Ok(PricingRefresh {
+            path: path.into(),
+            models: snapshot.models.len(),
+            effective_from: snapshot.effective_from,
+            large_moves: Vec::new(),
+        });
+    }
+    if !resp.status().is_success() {
+        anyhow::bail!("tokenstat.ai pricing API returned {}", resp.status());
+    }
+    let etag = resp
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let body = resp.text()?;
-    let snapshot = convert_feed(&body)?;
-    let path = PriceTable::default_path().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let large_moves = detect_large_moves(&path, &snapshot);
+    let snapshot = parse_snapshot(&body)?;
+    let large_moves = detect_large_moves(path, &snapshot);
     if !large_moves.is_empty() && !force {
         anyhow::bail!(
-            "price feed moved >50% for {} model(s), e.g. {}. Re-run with --force to accept.",
+            "pricing snapshot moved >50% for {} model(s), e.g. {}. Re-run with --force to accept.",
             large_moves.len(),
             large_moves
                 .iter()
@@ -71,25 +120,99 @@ pub fn refresh(force: bool) -> anyhow::Result<PricingRefresh> {
                 .join(", ")
         );
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string_pretty(&snapshot)?;
-    fs::write(&path, &json)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    write_private_atomically(path, &json)?;
+    if let Some(etag) = etag {
+        let metadata = EtagMetadata {
+            etag,
+            snapshot_sha256: snapshot_sha256(&json),
+        };
+        write_private_atomically(&etag_path, &serde_json::to_string(&metadata)?)?;
+    } else if etag_path.exists() {
+        fs::remove_file(&etag_path)?;
     }
     Ok(PricingRefresh {
-        path,
+        path: path.into(),
         models: snapshot.models.len(),
         effective_from: snapshot.effective_from,
         large_moves,
     })
 }
 
-fn detect_large_moves(path: &std::path::Path, next: &OutSnapshot) -> Vec<String> {
+fn read_etag(snapshot_path: &Path, etag_path: &Path) -> Option<String> {
+    let metadata: EtagMetadata = serde_json::from_str(&fs::read_to_string(etag_path).ok()?).ok()?;
+    let snapshot = fs::read_to_string(snapshot_path).ok()?;
+    (metadata.snapshot_sha256 == snapshot_sha256(&snapshot)).then_some(metadata.etag)
+}
+
+fn snapshot_sha256(snapshot: &str) -> String {
+    format!("{:x}", Sha256::digest(snapshot.as_bytes()))
+}
+
+fn load_snapshot(path: &Path) -> anyhow::Result<OutSnapshot> {
+    let body = fs::read_to_string(path)?;
+    parse_snapshot(&body)
+}
+
+fn parse_snapshot(body: &str) -> anyhow::Result<OutSnapshot> {
+    let snapshot: OutSnapshot =
+        serde_json::from_str(body).map_err(|e| anyhow::anyhow!("invalid pricing snapshot: {e}"))?;
+    if snapshot
+        .effective_from
+        .parse::<jiff::civil::Date>()
+        .is_err()
+    {
+        anyhow::bail!("invalid pricing snapshot: effective_from must be YYYY-MM-DD");
+    }
+    if snapshot.note.trim().is_empty() {
+        anyhow::bail!("invalid pricing snapshot: note must not be empty");
+    }
+    if snapshot.models.is_empty() {
+        anyhow::bail!("invalid pricing snapshot: models must not be empty");
+    }
+    let mut previous = "";
+    for model in &snapshot.models {
+        if model.pattern.trim().is_empty() {
+            anyhow::bail!("invalid pricing snapshot: model match must not be empty");
+        }
+        if model.pattern.as_str() <= previous {
+            anyhow::bail!("invalid pricing snapshot: models must be sorted and unique by match");
+        }
+        let rates = [
+            model.input,
+            model.output,
+            model.cache_read,
+            model.cache_write_5m,
+            model.cache_write_1h,
+        ];
+        if rates.iter().any(|rate| !rate.is_finite() || *rate < 0.0) {
+            anyhow::bail!("invalid pricing snapshot: model rates must be finite and non-negative");
+        }
+        previous = &model.pattern;
+    }
+    Ok(snapshot)
+}
+
+fn write_private_atomically(path: &Path, contents: &str) -> anyhow::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("pricing path has no parent directory"))?;
+    fs::create_dir_all(parent)?;
+    AtomicFile::new(path, AllowOverwrite)
+        .write(|file| {
+            file.write_all(contents.as_bytes())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                file.set_permissions(fs::Permissions::from_mode(0o600))?;
+            }
+            Ok::<(), std::io::Error>(())
+        })
+        .map_err(|err| anyhow::anyhow!("writing {} atomically: {err}", path.display()))?;
+    Ok(())
+}
+
+fn detect_large_moves(path: &Path, next: &OutSnapshot) -> Vec<String> {
     let Some(prev) = PriceTable::load_from(path) else {
         return Vec::new();
     };
@@ -97,17 +220,17 @@ fn detect_large_moves(path: &std::path::Path, next: &OutSnapshot) -> Vec<String>
         return Vec::new();
     }
     let mut out = Vec::new();
-    for m in &next.models {
-        let Some(old) = prev.get_exact(&m.pattern) else {
+    for model in &next.models {
+        let Some(old) = prev.get_exact(&model.pattern) else {
             continue;
         };
-        if moved_over_half(old.input, m.input)
-            || moved_over_half(old.output, m.output)
-            || moved_over_half(old.cache_read, m.cache_read)
-            || moved_over_half(old.cache_write_5m, m.cache_write_5m)
-            || moved_over_half(old.cache_write_1h, m.cache_write_1h)
+        if moved_over_half(old.input, model.input)
+            || moved_over_half(old.output, model.output)
+            || moved_over_half(old.cache_read, model.cache_read)
+            || moved_over_half(old.cache_write_5m, model.cache_write_5m)
+            || moved_over_half(old.cache_write_1h, model.cache_write_1h)
         {
-            out.push(m.pattern.clone());
+            out.push(model.pattern.clone());
         }
     }
     out.sort();
@@ -121,214 +244,185 @@ fn moved_over_half(old: f64, new: f64) -> bool {
     ((new - old).abs() / old) > 0.5
 }
 
-fn convert_feed(body: &str) -> anyhow::Result<OutSnapshot> {
-    let root: BTreeMap<String, Value> = serde_json::from_str(body)?;
-    let today = jiff::Timestamp::now()
-        .to_zoned(jiff::tz::TimeZone::UTC)
-        .date()
-        .to_string();
-
-    // Full feed names first, then bare aliases (`xai/grok-4.5` → also `grok-4.5`)
-    // so local log ids match without provider prefixes. Prefer canonical
-    // providers when two sources claim the same bare name.
-    let mut by_pattern: BTreeMap<String, (i32, OutModel)> = BTreeMap::new();
-    for (name, meta) in root {
-        if name.starts_with("sample_") || name == "error" {
-            continue;
-        }
-        let Some(obj) = meta.as_object() else {
-            continue;
-        };
-        let input_per = obj
-            .get("input_cost_per_token")
-            .and_then(Value::as_f64)
-            .or_else(|| {
-                obj.get("input_cost_per_token_batches")
-                    .and_then(Value::as_f64)
-            });
-        let output_per = obj
-            .get("output_cost_per_token")
-            .and_then(Value::as_f64)
-            .or_else(|| {
-                obj.get("output_cost_per_token_batches")
-                    .and_then(Value::as_f64)
-            });
-        let (Some(input_per), Some(output_per)) = (input_per, output_per) else {
-            continue;
-        };
-
-        let cache_read_per = obj
-            .get("cache_read_input_token_cost")
-            .and_then(Value::as_f64)
-            .unwrap_or(input_per * 0.1);
-        let cache_write_5m_per = obj
-            .get("cache_creation_input_token_cost")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.0);
-        let cache_write_1h_per = obj
-            .get("cache_creation_input_token_cost_above_1hr")
-            .and_then(Value::as_f64)
-            .unwrap_or(cache_write_5m_per);
-
-        let model = OutModel {
-            pattern: name.clone(),
-            input: input_per * 1_000_000.0,
-            output: output_per * 1_000_000.0,
-            cache_read: cache_read_per * 1_000_000.0,
-            cache_write_5m: cache_write_5m_per * 1_000_000.0,
-            cache_write_1h: cache_write_1h_per * 1_000_000.0,
-        };
-        let rank = provider_rank(&name);
-        insert_rate(&mut by_pattern, name, rank, model.clone());
-        for alias in bare_aliases(&model.pattern) {
-            let mut aliased = model.clone();
-            aliased.pattern = alias.clone();
-            // Aliases are slightly less preferred than a native bare entry.
-            insert_rate(&mut by_pattern, alias, rank + 10, aliased);
-        }
-    }
-
-    if by_pattern.is_empty() {
-        anyhow::bail!("price feed contained no usable model rates");
-    }
-
-    let mut models: Vec<OutModel> = by_pattern.into_values().map(|(_, m)| m).collect();
-    models.sort_by(|a, b| a.pattern.cmp(&b.pattern));
-
-    Ok(OutSnapshot {
-        effective_from: today,
-        note: "Fetched at runtime from a public model-price feed. Not hosted by tokenstat.ai."
-            .into(),
-        models,
-    })
-}
-
-/// Lower is better. Prefer first-party provider rows when filling bare aliases.
-fn provider_rank(name: &str) -> i32 {
-    if !name.contains('/') && !name.contains('.') {
-        return 0;
-    }
-    const FIRST: &[&str] = &[
-        "xai/",
-        "openai/",
-        "gemini/",
-        "anthropic.",
-        "vertex_ai/",
-        "amazon.nova",
-    ];
-    for (i, p) in FIRST.iter().enumerate() {
-        if name.starts_with(p) {
-            return 1 + i as i32;
-        }
-    }
-    50
-}
-
-fn insert_rate(
-    map: &mut BTreeMap<String, (i32, OutModel)>,
-    key: String,
-    rank: i32,
-    model: OutModel,
-) {
-    match map.get(&key) {
-        Some((existing, _)) if *existing <= rank => {}
-        _ => {
-            map.insert(key, (rank, model));
-        }
-    }
-}
-
-fn bare_aliases(name: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut push = |s: String| {
-        if s.len() >= 4 && s != name && !out.iter().any(|x| x == &s) {
-            out.push(s);
-        }
-    };
-    if let Some((_, rest)) = name.split_once('/') {
-        push(rest.to_string());
-        if let Some((_, leaf)) = rest.rsplit_once('/') {
-            push(leaf.to_string());
-        }
-    }
-    if let Some((head, rest)) = name.split_once('.') {
-        if head.chars().all(|c| c.is_ascii_alphabetic()) && rest.contains('-') {
-            push(rest.to_string());
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
     use super::*;
 
-    #[test]
-    fn converts_per_token_feed_into_per_million() {
-        let feed = r#"{
-          "claude-opus-4-8": {
-            "input_cost_per_token": 0.000015,
-            "output_cost_per_token": 0.000075,
-            "cache_read_input_token_cost": 0.0000015,
-            "cache_creation_input_token_cost": 0.00001875
-          },
-          "sample_skip": {"input_cost_per_token": 1.0, "output_cost_per_token": 1.0}
-        }"#;
-        let snap = convert_feed(feed).unwrap();
-        assert_eq!(snap.models.len(), 1);
-        let m = &snap.models[0];
-        assert_eq!(m.pattern, "claude-opus-4-8");
-        assert!((m.input - 15.0).abs() < 1e-9);
-        assert!((m.output - 75.0).abs() < 1e-9);
-        assert!((m.cache_read - 1.5).abs() < 1e-9);
-        assert!((m.cache_write_5m - 18.75).abs() < 1e-9);
-        // No separate 1h field: fall back to the 5m write rate.
-        assert!((m.cache_write_1h - 18.75).abs() < 1e-9);
+    static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
+
+    const SNAPSHOT: &str = r#"{
+      "effective_from": "2026-08-01",
+      "note": "List-rate snapshot generated by tokenstat.ai.",
+      "models": [{
+        "match": "example/model",
+        "input": 3.0,
+        "output": 15.0,
+        "cache_read": 0.3,
+        "cache_write_5m": 3.75,
+        "cache_write_1h": 0.0
+      }]
+    }"#;
+
+    fn temporary_snapshot_path() -> std::path::PathBuf {
+        let id = NEXT_PATH.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir()
+            .join(format!("tokenstat-pricing-{}-{id}", std::process::id()))
+            .join("pricing")
+            .join("current.json")
     }
 
-    #[test]
-    fn emits_bare_aliases_for_provider_paths() {
-        let feed = r#"{
-          "xai/grok-4.5": {
-            "input_cost_per_token": 0.000002,
-            "output_cost_per_token": 0.000006,
-            "cache_read_input_token_cost": 0.0000003
-          },
-          "azure_ai/grok-4.5": {
-            "input_cost_per_token": 0.000009,
-            "output_cost_per_token": 0.000009
-          }
-        }"#;
-        let snap = convert_feed(feed).unwrap();
-        let bare = snap
-            .models
+    fn write_etag(path: &Path, etag: &str) {
+        let snapshot = fs::read_to_string(path).unwrap();
+        let metadata = EtagMetadata {
+            etag: etag.into(),
+            snapshot_sha256: snapshot_sha256(&snapshot),
+        };
+        write_private_atomically(
+            &path.with_file_name(ETAG_FILE),
+            &serde_json::to_string(&metadata).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn server(
+        status: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let status = status.to_string();
+        let headers: Vec<(String, String)> = headers
             .iter()
-            .find(|m| m.pattern == "grok-4.5")
-            .expect("bare alias");
-        // Prefer xai/ over azure_ai/ for the bare name.
-        assert!((bare.input - 2.0).abs() < 1e-9);
-        assert!((bare.output - 6.0).abs() < 1e-9);
+            .map(|(name, value)| ((*name).into(), (*value).into()))
+            .collect();
+        let body = body.to_string();
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+                .unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0; 512];
+                let n = stream.read(&mut chunk).unwrap();
+                request.extend_from_slice(&chunk[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let mut response = format!(
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+                body.len()
+            );
+            for (name, value) in headers {
+                response.push_str(&format!("{name}: {value}\r\n"));
+            }
+            response.push_str("\r\n");
+            response.push_str(&body);
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (format!("http://{addr}/api/v1/pricing/current"), handle)
     }
 
     #[test]
-    fn uses_separate_1h_cache_write_when_present() {
-        let feed = r#"{
-          "claude-fable-5": {
-            "input_cost_per_token": 0.00001,
-            "output_cost_per_token": 0.00005,
-            "cache_read_input_token_cost": 0.000001,
-            "cache_creation_input_token_cost": 0.0000125,
-            "cache_creation_input_token_cost_above_1hr": 0.00002
-          }
-        }"#;
-        let snap = convert_feed(feed).unwrap();
-        let m = &snap.models[0];
-        assert_eq!(m.pattern, "claude-fable-5");
-        assert!((m.input - 10.0).abs() < 1e-9);
-        assert!((m.output - 50.0).abs() < 1e-9);
-        assert!((m.cache_read - 1.0).abs() < 1e-9);
-        assert!((m.cache_write_5m - 12.5).abs() < 1e-9);
-        assert!((m.cache_write_1h - 20.0).abs() < 1e-9);
+    fn writes_a_valid_snapshot_and_etag_from_the_api() {
+        let path = temporary_snapshot_path();
+        let (url, request) = server("200 OK", &[("ETag", "\"v1\"")], SNAPSHOT);
+
+        let refreshed = refresh_from_url_at(&url, &path, false).unwrap();
+
+        assert_eq!(refreshed.models, 1);
+        assert_eq!(
+            read_etag(&path, &path.with_file_name(ETAG_FILE)).as_deref(),
+            Some("\"v1\"")
+        );
+        assert!(PriceTable::load_from(&path).is_some());
+        assert!(
+            request
+                .join()
+                .unwrap()
+                .starts_with("GET /api/v1/pricing/current ")
+        );
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn not_modified_keeps_the_existing_snapshot() {
+        let path = temporary_snapshot_path();
+        write_private_atomically(&path, SNAPSHOT).unwrap();
+        write_etag(&path, "\"v1\"");
+        let before = fs::read_to_string(&path).unwrap();
+        let (url, request) = server("304 Not Modified", &[], "");
+
+        let refreshed = refresh_from_url_at(&url, &path, false).unwrap();
+
+        assert_eq!(refreshed.models, 1);
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        assert!(request.join().unwrap().contains("if-none-match: \"v1\""));
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn mismatched_etag_metadata_is_not_sent() {
+        let path = temporary_snapshot_path();
+        write_private_atomically(&path, SNAPSHOT).unwrap();
+        write_etag(&path, "\"v1\"");
+        write_private_atomically(&path, SNAPSHOT.replace("3.0", "4.0").as_str()).unwrap();
+        let (url, request) = server("200 OK", &[], SNAPSHOT);
+
+        refresh_from_url_at(&url, &path, true).unwrap();
+
+        assert!(!request.join().unwrap().contains("if-none-match:"));
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn response_without_etag_removes_prior_metadata() {
+        let path = temporary_snapshot_path();
+        write_private_atomically(&path, SNAPSHOT).unwrap();
+        write_etag(&path, "\"v1\"");
+        let (url, request) = server("200 OK", &[], SNAPSHOT);
+
+        refresh_from_url_at(&url, &path, true).unwrap();
+
+        assert!(!path.with_file_name(ETAG_FILE).exists());
+        request.join().unwrap();
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn invalid_response_does_not_replace_the_existing_snapshot() {
+        let path = temporary_snapshot_path();
+        write_private_atomically(&path, SNAPSHOT).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+        let (url, request) = server("200 OK", &[], "{\"models\":[]}");
+
+        assert!(refresh_from_url_at(&url, &path, false).is_err());
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        request.join().unwrap();
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn service_error_does_not_replace_the_existing_snapshot() {
+        let path = temporary_snapshot_path();
+        write_private_atomically(&path, SNAPSHOT).unwrap();
+        let before = fs::read_to_string(&path).unwrap();
+        let (url, request) = server("503 Service Unavailable", &[], "");
+
+        assert!(refresh_from_url_at(&url, &path, false).is_err());
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+        request.join().unwrap();
+        fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
     }
 
     #[test]

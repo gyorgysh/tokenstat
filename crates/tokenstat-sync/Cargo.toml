@@ -20,3 +20,4 @@ anyhow.workspace = true
 flate2 = { workspace = true }
 sha2 = { workspace = true }
 getrandom = { workspace = true }
+atomicwrites = "0.4.4"

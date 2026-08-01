@@ -185,7 +185,7 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// List-rate price book (fetched locally, not hosted by tokenstat.ai)
+    /// List-rate price book from tokenstat.ai's local snapshot
     Pricing {
         /// Download a fresh snapshot into the local data directory
         #[arg(long)]

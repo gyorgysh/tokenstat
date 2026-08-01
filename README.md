@@ -194,7 +194,7 @@ Filters: `--since`, `--until`, `--last N`, `--model`, `--project`. Every command
 accepts `--json`.
 
 List rates are not shipped in the binary. Run `tokenstat pricing --refresh` once
-to fetch a public model-price feed into your local data directory.
+to fetch tokenstat.ai's list-rate snapshot into your local data directory.
 
 ### Keeping your history
 

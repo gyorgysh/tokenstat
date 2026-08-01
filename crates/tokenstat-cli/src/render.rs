@@ -932,8 +932,9 @@ pub fn pricing(refresh: bool, force: bool, json: bool) -> Result<()> {
         let a = accent();
         println!("  {DIM}status{DIM:#}   no local snapshot");
         println!();
-        println!("  Run {a}tokenstat pricing --refresh{a:#} to fetch list rates.");
-        println!("  {DIM}tokenstat.ai does not host the price book.{DIM:#}");
+        println!(
+            "  Run {a}tokenstat pricing --refresh{a:#} to fetch the tokenstat.ai list-rate snapshot."
+        );
     } else {
         println!(
             "  {DIM}status{DIM:#}   {} models",
