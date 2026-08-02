@@ -1700,7 +1700,11 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let w = app
             .models
             .iter()
-            .map(|m| tokenstat_core::display_usage_model_id(&m.key).chars().count())
+            .map(|m| {
+                tokenstat_core::display_usage_model_id(&m.key)
+                    .chars()
+                    .count()
+            })
             .max()
             .unwrap_or(10)
             .clamp(8, 53);
@@ -1800,9 +1804,11 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             "List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.",
             Style::default().fg(MUTED),
         )));
-        if app.models.iter().any(|m| {
-            prices.is_estimate(&tokenstat_core::display_usage_model_id(&m.key))
-        }) {
+        if app
+            .models
+            .iter()
+            .any(|m| prices.is_estimate(&tokenstat_core::display_usage_model_id(&m.key)))
+        {
             lines.push(Line::from(Span::styled(
                 "~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).",
                 Style::default().fg(MUTED),
