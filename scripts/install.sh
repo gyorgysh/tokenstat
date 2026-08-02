@@ -87,6 +87,36 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "need '$1' on PATH"
 }
 
+# Global path for EXIT cleanup. Must not be `local`: macOS bash 3.2 keeps the
+# EXIT trap until the shell exits, by which time function locals are gone.
+# With set -u that made `rm -rf "$tmp"` fail as "tmp: unbound variable" after
+# a successful install. A global is visible on both bash 3.2 (macOS) and 4+
+# (typical Linux).
+TOKENSTAT_INSTALL_TMP=""
+
+# Remove only the directory we created with mktemp. Refuses empty paths,
+# common roots, and any path that does not match our template name.
+cleanup_install_tmp() {
+  local d
+  d="${TOKENSTAT_INSTALL_TMP:-}"
+  TOKENSTAT_INSTALL_TMP=""
+  case "$d" in
+    "" | "/" | "/tmp" | "/var" | "/var/tmp" | "/private/tmp" | "." | "..")
+      return 0
+      ;;
+  esac
+  # Only dirs from: mktemp -d ".../tokenstat-install.XXXXXX"
+  case "$d" in
+    */tokenstat-install.*) ;;
+    *) return 0 ;;
+  esac
+  # Directory only (never a plain file or missing path). -- so a leading
+  # dash in the path cannot be parsed as an rm option.
+  if [ -d "$d" ]; then
+    rm -rf -- "$d"
+  fi
+}
+
 detect_target() {
   local os arch
   os="$(uname -s)"
@@ -207,7 +237,7 @@ main() {
   need_cmd uname
   command -v sha256sum >/dev/null 2>&1 || need_cmd shasum
 
-  local target version asset archive_url sums_url tmp dest
+  local target version asset archive_url sums_url dest
   target="$(detect_target)"
   version="$(resolve_version)"
   asset="tokenstat-${version}-${target}.tar.gz"
@@ -215,25 +245,25 @@ main() {
   sums_url="https://github.com/${REPO}/releases/download/v${version}/SHA256SUMS"
 
   say "installing tokenstat v${version} (${target})"
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/tokenstat-install.XXXXXX")"
-  trap 'rm -rf "$tmp"' EXIT
+  TOKENSTAT_INSTALL_TMP="$(mktemp -d "${TMPDIR:-/tmp}/tokenstat-install.XXXXXX")"
+  trap cleanup_install_tmp EXIT
 
   say "downloading ${asset}"
-  curl -fsSL -o "$tmp/$asset" "$archive_url" \
+  curl -fsSL -o "${TOKENSTAT_INSTALL_TMP}/${asset}" "$archive_url" \
     || die "download failed: $archive_url"
-  curl -fsSL -o "$tmp/SHA256SUMS" "$sums_url" \
+  curl -fsSL -o "${TOKENSTAT_INSTALL_TMP}/SHA256SUMS" "$sums_url" \
     || die "download failed: $sums_url"
 
   local want got
-  want="$(expected_sha "$tmp/SHA256SUMS" "$asset")"
+  want="$(expected_sha "${TOKENSTAT_INSTALL_TMP}/SHA256SUMS" "$asset")"
   [ -n "$want" ] || die "SHA256SUMS has no entry for $asset"
-  got="$(sha256_file "$tmp/$asset")"
+  got="$(sha256_file "${TOKENSTAT_INSTALL_TMP}/${asset}")"
   [ "$got" = "$want" ] || die "checksum mismatch: expected $want, got $got"
   ok "checksum ok"
 
-  tar -xzf "$tmp/$asset" -C "$tmp"
+  tar -xzf "${TOKENSTAT_INSTALL_TMP}/${asset}" -C "${TOKENSTAT_INSTALL_TMP}"
   local extracted
-  extracted="$(find "$tmp" -type f -name tokenstat | head -n1)"
+  extracted="$(find "${TOKENSTAT_INSTALL_TMP}" -type f -name tokenstat | head -n1)"
   [ -n "$extracted" ] || die "archive did not contain tokenstat"
   chmod +x "$extracted"
 
@@ -276,6 +306,10 @@ main() {
   echo "  ${DIM}check:${R} tokenstat doctor"
   echo "  ${DIM}update:${R} tokenstat update"
   echo
+
+  # Drop the temp dir now; trap remains for early exit (die/download failure).
+  cleanup_install_tmp
+  trap - EXIT
 }
 
 main
