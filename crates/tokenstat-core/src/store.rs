@@ -665,7 +665,8 @@ impl Store {
                COALESCE(SUM(input_fresh), 0),
                COALESCE(SUM(output), 0),
                COALESCE(SUM(cache_read), 0),
-               COALESCE(SUM(cache_write_5m), 0) + COALESCE(SUM(cache_write_1h), 0),
+               COALESCE(SUM(cache_write_5m), 0),
+               COALESCE(SUM(cache_write_1h), 0),
                COUNT(*),
                MIN(CASE WHEN billing = 'plan' THEN 1 ELSE 0 END),
                MIN(CASE confidence
@@ -684,8 +685,8 @@ impl Store {
     pub fn sync_rollup(&self, from: &str, to: &str) -> Result<Vec<SyncRollupBucket>, CoreError> {
         let mut stmt = self.conn.prepare(Self::SYNC_ROLLUP_SQL)?;
         let rows = stmt.query_map(params![from, to], |r| {
-            let plan_all: i64 = r.get(9)?;
-            let conf_rank: i64 = r.get(10)?;
+            let plan_all: i64 = r.get(10)?;
+            let conf_rank: i64 = r.get(11)?;
             let conf = match conf_rank {
                 2 => "exact",
                 1 => "strong",
@@ -703,8 +704,9 @@ impl Store {
                 input: r.get::<_, i64>(4)? as u64,
                 out: r.get::<_, i64>(5)? as u64,
                 cr: r.get::<_, i64>(6)? as u64,
-                cw: r.get::<_, i64>(7)? as u64,
-                ev: r.get::<_, i64>(8)? as u64,
+                cw5: r.get::<_, i64>(7)? as u64,
+                cw1: r.get::<_, i64>(8)? as u64,
+                ev: r.get::<_, i64>(9)? as u64,
                 plan: plan_all == 1,
                 conf: conf.to_string(),
             })

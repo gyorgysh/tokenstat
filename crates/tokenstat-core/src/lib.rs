@@ -34,7 +34,7 @@ pub use model::{
     BillingMode, Confidence, Counters, Cumulative, Delta, EventId, Extras, SourceId, Timestamp,
     UsageEvent,
 };
-pub use pricing::{Charged, EquivalentValue, PriceTable, Rates};
+pub use pricing::{Charged, EquivalentValue, PriceTable, Rates, display_usage_model_id};
 pub use scan::{ScanReport, reconcile, scan};
 pub use sources::claude_stats::Reconciliation;
 pub use store::{BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, Query, Store, Totals, UsageBlock};

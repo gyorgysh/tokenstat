@@ -99,12 +99,8 @@ impl PriceTable {
         self.by_pattern.get(pattern).copied()
     }
 
-    /// Look up a model, tolerating vendor prefixes and capability suffixes.
-    ///
-    /// Logs say things like `claude-haiku-4-5-20251001`,
-    /// `cursor-grok-4.5-high-fast`, or `xai/grok-4.5`. The table may store any
-    /// of those shapes. We expand both sides and keep the longest match.
-    pub fn rates_for(&self, model: &str) -> Option<Rates> {
+    /// Look up a model in the on-disk snapshot only (no estimate fallbacks).
+    pub fn table_rates_for(&self, model: &str) -> Option<Rates> {
         let model_keys = lookup_keys(model);
         let mut best: Option<(usize, Rates)> = None;
         for (pattern, rates) in &self.by_pattern {
@@ -126,8 +122,38 @@ impl PriceTable {
         best.map(|(_, r)| r)
     }
 
+    /// Look up a model, tolerating vendor prefixes and capability suffixes.
+    ///
+    /// Logs say things like `claude-haiku-4-5-20251001`,
+    /// `cursor-grok-4.5-high-fast`, or `xai/grok-4.5`. The table may store any
+    /// of those shapes. We expand both sides and keep the longest match.
+    ///
+    /// When the table has no match, falls back to a small set of explicit
+    /// estimates (Cursor Auto → Composer 2.5 floor). Prefer [`table_rates_for`]
+    /// when you need to know whether the book itself had a row.
+    ///
+    /// Cursor Auto / router ids always use the estimate: renaming them to
+    /// `cursor-router-auto` would otherwise false-match LiteLLM rows like
+    /// `openrouter/switchpoint/router` via the `router` stem.
+    pub fn rates_for(&self, model: &str) -> Option<Rates> {
+        if is_cursor_router_id(model) {
+            return estimate_rates(model);
+        }
+        self.table_rates_for(model)
+            .or_else(|| estimate_rates(model))
+    }
+
     pub fn is_known(&self, model: &str) -> bool {
         self.rates_for(model).is_some()
+    }
+
+    /// True when value comes only from an estimate fallback (not the price book).
+    /// Used to mark figures with `~` so they are not mistaken for a published id.
+    pub fn is_estimate(&self, model: &str) -> bool {
+        if is_cursor_router_id(model) {
+            return true;
+        }
+        self.table_rates_for(model).is_none() && estimate_rates(model).is_some()
     }
 
     /// Value of these counters at list rates, in micros of a dollar.
@@ -143,6 +169,65 @@ impl PriceTable {
             + per(c.cache_write_1h, r.cache_write_1h);
         Some((dollars * 1_000_000.0).round() as i64)
     }
+}
+
+/// Composer 2.5 standard list rates (cursor.com/blog/composer-2-5), used as a
+/// floor estimate for Cursor Auto / router ids that never name the real model.
+const COMPOSER_STANDARD: Rates = Rates {
+    input: 0.5,
+    output: 2.5,
+    cache_read: 0.05,
+    cache_write_5m: 0.0,
+    cache_write_1h: 0.0,
+};
+
+/// Public label for a usage model id. Cursor Auto has no stable vendor/model
+/// slug on disk, only bare `default` / `auto`. Display renames that leaf to
+/// `cursor-router-auto` (same as tokenstat.ai). `gemini-default` stays as-is.
+pub fn display_usage_model_id(model: &str) -> String {
+    let raw = model.trim();
+    if raw.is_empty() {
+        return raw.to_string();
+    }
+    let leaf = raw.rsplit('/').next().unwrap_or(raw);
+    let leaf_l = leaf.to_ascii_lowercase();
+    let raw_l = raw.to_ascii_lowercase();
+    if matches!(
+        leaf_l.as_str(),
+        "default" | "auto" | "cursor-auto" | "cursor-default" | "cursor-router-auto"
+    ) || matches!(
+        raw_l.as_str(),
+        "cursor/default" | "cursor/auto" | "cursor/router-auto"
+    ) {
+        return "cursor-router-auto".into();
+    }
+    raw.to_string()
+}
+
+/// Cursor Auto / router ids (after lowercasing leaf checks).
+fn is_cursor_router_id(model: &str) -> bool {
+    let raw = model.trim().to_ascii_lowercase();
+    if raw.is_empty() {
+        return false;
+    }
+    let leaf = raw.rsplit('/').next().unwrap_or(raw.as_str());
+    matches!(
+        leaf,
+        "default" | "auto" | "cursor-auto" | "cursor-default" | "cursor-router-auto"
+    ) || matches!(
+        raw.as_str(),
+        "cursor/default" | "cursor/auto" | "cursor/router-auto"
+    )
+}
+
+/// Built-in estimate rates when the local price book has no row.
+/// Cursor Auto is priced at Composer 2.5 standard list rates: mostly Composer
+/// traffic with occasional external models, so this is a floor, not exact.
+fn estimate_rates(model: &str) -> Option<Rates> {
+    if is_cursor_router_id(model) {
+        return Some(COMPOSER_STANDARD);
+    }
+    None
 }
 
 /// Keys to try when resolving a log model id against the price book.
@@ -384,6 +469,42 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn cursor_auto_renames_and_prices_as_composer_floor() {
+        assert_eq!(display_usage_model_id("default"), "cursor-router-auto");
+        assert_eq!(display_usage_model_id("auto"), "cursor-router-auto");
+        assert_eq!(display_usage_model_id("cursor/auto"), "cursor-router-auto");
+        assert_eq!(display_usage_model_id("gemini-default"), "gemini-default");
+
+        let t = table(); // fixture has no composer / router rows
+        assert!(t.is_estimate("default"));
+        assert!(t.is_estimate("cursor-router-auto"));
+        let r = t.rates_for("default").expect("estimate rates");
+        assert!((r.input - 0.5).abs() < 1e-9);
+        assert!((r.output - 2.5).abs() < 1e-9);
+        assert!((r.cache_read - 0.05).abs() < 1e-9);
+        let v = EquivalentValue::price(&t, "auto", &counters(1_000_000, 1_000_000)).unwrap();
+        // 0.5 + 2.5 = $3.00 at list rates for 1M in + 1M out
+        assert!((v.dollars() - 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn cursor_router_auto_never_matches_unrelated_router_rows() {
+        // A book row whose stem is "router" must not win over the Composer-floor
+        // estimate after we rename bare default/auto → cursor-router-auto.
+        let raw = r#"{
+          "effective_from":"2026-01-01",
+          "models":[
+            {"match":"openrouter/switchpoint/router","input":0.85,"output":3.4,"cache_read":0.085,"cache_write_5m":0.0,"cache_write_1h":0.0}
+          ]
+        }"#;
+        let t = PriceTable::parse(raw).expect("parse");
+        assert!(t.is_estimate("cursor-router-auto"));
+        let r = t.rates_for("cursor-router-auto").expect("estimate");
+        assert!((r.input - 0.5).abs() < 1e-9);
+        assert!((r.output - 2.5).abs() < 1e-9);
     }
 
     #[test]

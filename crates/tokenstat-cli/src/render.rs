@@ -12,6 +12,7 @@ use anstream::println;
 use anyhow::{Context, Result};
 use tokenstat_core::{
     Bucket, Counters, EquivalentValue, GroupBy, PriceTable, Query, ScanReport, Store,
+    display_usage_model_id,
 };
 
 use crate::ui::{self, BOLD, DIM, accent, good, warn};
@@ -32,10 +33,21 @@ fn total_cell(c: &Counters) -> String {
 
 /// List-rate equivalent for a row, or `-` when the model is unknown / unpriced.
 /// Never a cash charge: subscription usage is valued the same way.
+/// Estimates (e.g. Cursor Auto → Composer floor) get a `~` prefix, same idea
+/// as tokenstat.ai and the upcoming CLI 0.1.2 note on opaque routers.
 fn price_cell(prices: &PriceTable, model: &str, c: &Counters) -> String {
-    EquivalentValue::price(prices, model, c)
-        .map(|v| ui::usd(v.dollars()))
-        .unwrap_or_else(|| "-".to_string())
+    let lookup = display_usage_model_id(model);
+    match EquivalentValue::price(prices, &lookup, c) {
+        Some(v) if prices.is_estimate(&lookup) && v.dollars() > 0.0 => {
+            format!("~{}", ui::usd(v.dollars()))
+        }
+        Some(v) => ui::usd(v.dollars()),
+        None => "-".to_string(),
+    }
+}
+
+fn model_label(model: &str) -> String {
+    display_usage_model_id(model)
 }
 
 /// Price only when `key` looks like a model id. Day/project buckets would
@@ -204,7 +216,13 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
 
     let key_w = rows
         .iter()
-        .map(|r| r.key.chars().count())
+        .map(|r| {
+            if group == GroupBy::Model {
+                model_label(&r.key).chars().count()
+            } else {
+                r.key.chars().count()
+            }
+        })
         .max()
         .unwrap_or(8)
         .clamp(label.len().max(10), 36);
@@ -232,9 +250,14 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
         let c = &r.counters;
         let frac = c.total() as f64 / max as f64;
         let a = accent();
+        let key_label = if group == GroupBy::Model {
+            model_label(&r.key)
+        } else {
+            r.key.clone()
+        };
         println!(
             "  {}  {}  {}  {}  {}  {}  {a}{}{a:#}",
-            ui::pad_right(&r.key, key_w),
+            ui::pad_right(&key_label, key_w),
             ui::pad_left(&cell(c.input_fresh), 8),
             ui::pad_left(&cell(c.output), 8),
             ui::pad_left(&cache_cell(c), 8),
@@ -255,6 +278,14 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
     );
     if group == GroupBy::Model {
         println!("  {DIM}value = list-rate equivalent, not billed dollars{DIM:#}");
+        if rows
+            .iter()
+            .any(|r| prices.is_estimate(&display_usage_model_id(&r.key)))
+        {
+            println!(
+                "  {DIM}~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).{DIM:#}"
+            );
+        }
     }
     println!();
 }
@@ -387,7 +418,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             .max(1);
         let w = models
             .iter()
-            .map(|m| m.key.chars().count())
+            .map(|m| model_label(&m.key).chars().count())
             .max()
             .unwrap_or(10)
             .clamp(8, 26);
@@ -405,12 +436,13 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
             let share = m.counters.total() as f64 / grand as f64;
             let a = accent();
             let c = &m.counters;
+            let label = model_label(&m.key);
             // What this model's usage would have cost at list rates. It was not
             // billed that way on a plan, so it is labelled as value, never as
-            // money charged.
+            // money charged. `~` marks estimate floors (Cursor Auto).
             println!(
                 "  {}  {}  {}  {}  {}  {}  {a}{}{a:#}",
-                ui::pad_right(&m.key, w),
+                ui::pad_right(&label, w),
                 ui::pad_left(&cell(c.input_fresh), 8),
                 ui::pad_left(&cell(c.output), 8),
                 ui::pad_left(&cache_cell(c), 8),
@@ -426,13 +458,18 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     let prices = PriceTable::load();
     let total_value: EquivalentValue = models
         .iter()
-        .filter_map(|m| EquivalentValue::price(&prices, &m.key, &m.counters))
+        .filter_map(|m| {
+            EquivalentValue::price(&prices, &display_usage_model_id(&m.key), &m.counters)
+        })
         .sum();
-    let missing: Vec<&str> = models
+    let missing: Vec<String> = models
         .iter()
-        .filter(|m| !prices.is_known(&m.key))
-        .map(|m| m.key.as_str())
+        .filter(|m| !prices.is_known(&display_usage_model_id(&m.key)))
+        .map(|m| model_label(&m.key))
         .collect();
+    let any_estimate = models
+        .iter()
+        .any(|m| prices.is_estimate(&display_usage_model_id(&m.key)));
 
     println!();
     println!(
@@ -442,6 +479,11 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     println!(
         "  {DIM}List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.{DIM:#}"
     );
+    if any_estimate {
+        println!(
+            "  {DIM}~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).{DIM:#}"
+        );
+    }
     if prices.is_empty() {
         let a = accent();
         println!(
@@ -623,7 +665,9 @@ pub fn wrapped(
     let prices = PriceTable::load();
     let value: EquivalentValue = models
         .iter()
-        .filter_map(|m| EquivalentValue::price(&prices, &m.key, &m.counters))
+        .filter_map(|m| {
+            EquivalentValue::price(&prices, &display_usage_model_id(&m.key), &m.counters)
+        })
         .sum();
     let busiest_day = days
         .iter()
@@ -640,7 +684,7 @@ pub fn wrapped(
             totals.days,
             in_out,
             value.dollars(),
-            json_opt(top_model.map(|m| m.key.as_str())),
+            json_opt(top_model.map(|m| model_label(&m.key)).as_deref()),
             json_opt(top_project.map(|p| p.key.as_str())),
             json_opt(busiest_day.map(|d| d.key.as_str())),
             peak.map(|h| h.to_string()).unwrap_or_else(|| "null".into()),
@@ -660,7 +704,7 @@ pub fn wrapped(
         ui::usd(value.dollars())
     );
     if let Some(m) = top_model {
-        println!("  {DIM}top model{DIM:#}    {}", m.key);
+        println!("  {DIM}top model{DIM:#}    {}", model_label(&m.key));
     }
     if let Some(p) = top_project {
         println!("  {DIM}top project{DIM:#}  {}", p.key);
@@ -2014,7 +2058,9 @@ pub fn statusline(
         let mut total = 0.0;
         let mut any = false;
         for r in rows {
-            if let Some(v) = EquivalentValue::price(&prices, &r.key, &r.counters) {
+            if let Some(v) =
+                EquivalentValue::price(&prices, &display_usage_model_id(&r.key), &r.counters)
+            {
                 total += v.dollars();
                 any = true;
             }

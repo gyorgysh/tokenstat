@@ -14,7 +14,10 @@ use crate::store::Store;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Highest schema version this CLI can emit.
-pub const SYNC_SCHEMA_VERSION: u32 = 1;
+///
+/// v1: single `cw` cache-write total (priced at the 5m rate on the server).
+/// v2: `cw5` + `cw1` split so 1-hour Anthropic writes use the 2x rate.
+pub const SYNC_SCHEMA_VERSION: u32 = 2;
 
 /// Maximum inclusive day span for one sync window (~13 months for heatmaps).
 pub const SYNC_WINDOW_MAX_DAYS: i64 = 400;
@@ -40,6 +43,8 @@ pub const ALLOWED_SYNC_KEYS: &[&str] = &[
     "out",
     "cr",
     "cw",
+    "cw1",
+    "cw5",
     "ev",
     "plan",
     "conf",
@@ -57,10 +62,14 @@ pub struct SyncWindow {
 }
 
 /// Client-side totals the server recomputes and must match.
+///
+/// Schema v2 fields (`cw5`/`cw1`). When emitting v1, [`SyncPayload`] maps these
+/// into a single `cw` via a custom serializer path in `build_sync_payload`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SyncTotals {
     pub cr: u64,
-    pub cw: u64,
+    pub cw1: u64,
+    pub cw5: u64,
     #[serde(rename = "in")]
     pub input: u64,
     pub out: u64,
@@ -70,11 +79,13 @@ pub struct SyncTotals {
 /// One day × source × model × opaque-project rollup row.
 ///
 /// Field declaration order is alphabetical so compact serde JSON is canonical.
+/// Schema v2: `cw5` (5-minute cache write) + `cw1` (1-hour cache write).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SyncRow {
     pub conf: String,
     pub cr: u64,
-    pub cw: u64,
+    pub cw1: u64,
+    pub cw5: u64,
     pub d: String,
     pub ev: u64,
     #[serde(rename = "in")]
@@ -112,7 +123,8 @@ pub struct SyncRollupBucket {
     pub input: u64,
     pub out: u64,
     pub cr: u64,
-    pub cw: u64,
+    pub cw5: u64,
+    pub cw1: u64,
     pub ev: u64,
     pub plan: bool,
     pub conf: String,
@@ -122,14 +134,16 @@ impl SyncTotals {
     pub fn from_rows(rows: &[SyncRow]) -> Self {
         let mut t = SyncTotals {
             cr: 0,
-            cw: 0,
+            cw1: 0,
+            cw5: 0,
             input: 0,
             out: 0,
             rows: rows.len() as u64,
         };
         for r in rows {
             t.cr = t.cr.saturating_add(r.cr);
-            t.cw = t.cw.saturating_add(r.cw);
+            t.cw5 = t.cw5.saturating_add(r.cw5);
+            t.cw1 = t.cw1.saturating_add(r.cw1);
             t.input = t.input.saturating_add(r.input);
             t.out = t.out.saturating_add(r.out);
         }
@@ -139,14 +153,63 @@ impl SyncTotals {
     pub fn matches_rows(&self, rows: &[SyncRow]) -> bool {
         self == &Self::from_rows(rows)
     }
+
+    /// Total cache-write tokens (both tiers).
+    pub fn cw_total(&self) -> u64 {
+        self.cw5.saturating_add(self.cw1)
+    }
 }
 
 impl SyncPayload {
+    /// Canonical JSON body for upload / hashing.
+    ///
+    /// Schema v2 serializes `cw5`/`cw1`. Schema v1 maps those into a single `cw`
+    /// so older servers keep working during the overlap window.
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, CoreError> {
-        serde_json::to_vec(self).map_err(|source| CoreError::Json {
-            context: "sync payload".into(),
-            source,
-        })
+        if self.v >= 2 {
+            serde_json::to_vec(self).map_err(|source| CoreError::Json {
+                context: "sync payload".into(),
+                source,
+            })
+        } else {
+            let v1 = SyncPayloadV1 {
+                generated_at: self.generated_at.clone(),
+                machine: self.machine.clone(),
+                prune: self.prune,
+                rows: self
+                    .rows
+                    .iter()
+                    .map(|r| SyncRowV1 {
+                        conf: r.conf.clone(),
+                        cr: r.cr,
+                        cw: r.cw5.saturating_add(r.cw1),
+                        d: r.d.clone(),
+                        ev: r.ev,
+                        input: r.input,
+                        model: r.model.clone(),
+                        out: r.out,
+                        plan: r.plan,
+                        proj: r.proj.clone(),
+                        src: r.src.clone(),
+                    })
+                    .collect(),
+                salt_id: self.salt_id.clone(),
+                totals: SyncTotalsV1 {
+                    cr: self.totals.cr,
+                    cw: self.totals.cw_total(),
+                    input: self.totals.input,
+                    out: self.totals.out,
+                    rows: self.totals.rows,
+                },
+                tz: self.tz.clone(),
+                v: 1,
+                window: self.window.clone(),
+            };
+            serde_json::to_vec(&v1).map_err(|source| CoreError::Json {
+                context: "sync payload v1".into(),
+                source,
+            })
+        }
     }
 
     pub fn assert_sealed(&self) -> Result<(), CoreError> {
@@ -336,10 +399,18 @@ pub fn build_sync_payload(
             }
         }
         let proj = project_key(args.salt_key, &b.project)?;
+        // Schema v1 only has a single write bucket: fold both tiers into cw5 so
+        // the server prices them at the 5m rate (the only rate it knows under v1).
+        let (cw5, cw1) = if args.schema_v >= 2 {
+            (b.cw5, b.cw1)
+        } else {
+            (b.cw5.saturating_add(b.cw1), 0)
+        };
         rows.push(SyncRow {
             conf: b.conf,
             cr: b.cr,
-            cw: b.cw,
+            cw1,
+            cw5,
             d: b.d,
             ev: b.ev,
             input: b.input,
@@ -375,6 +446,46 @@ pub fn build_sync_payload(
     Ok(payload)
 }
 
+/// Wire-only v1 row (single `cw`). Used by [`SyncPayload::canonical_bytes`].
+#[derive(Debug, Clone, Serialize)]
+struct SyncRowV1 {
+    conf: String,
+    cr: u64,
+    cw: u64,
+    d: String,
+    ev: u64,
+    #[serde(rename = "in")]
+    input: u64,
+    model: String,
+    out: u64,
+    plan: bool,
+    proj: Option<String>,
+    src: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SyncTotalsV1 {
+    cr: u64,
+    cw: u64,
+    #[serde(rename = "in")]
+    input: u64,
+    out: u64,
+    rows: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SyncPayloadV1 {
+    generated_at: String,
+    machine: String,
+    prune: bool,
+    rows: Vec<SyncRowV1>,
+    salt_id: String,
+    totals: SyncTotalsV1,
+    tz: String,
+    v: u32,
+    window: SyncWindow,
+}
+
 /// Merge rows that share the server uniqueness key `(d, src, model, proj)`.
 ///
 /// `plan` stays true only when every merged contributor was plan. Confidence
@@ -398,7 +509,8 @@ fn collapse_duplicate_row_keys(rows: Vec<SyncRow>) -> Vec<SyncRow> {
                 existing.input = existing.input.saturating_add(row.input);
                 existing.out = existing.out.saturating_add(row.out);
                 existing.cr = existing.cr.saturating_add(row.cr);
-                existing.cw = existing.cw.saturating_add(row.cw);
+                existing.cw5 = existing.cw5.saturating_add(row.cw5);
+                existing.cw1 = existing.cw1.saturating_add(row.cw1);
                 existing.ev = existing.ev.saturating_add(row.ev);
                 existing.plan = existing.plan && row.plan;
                 existing.conf = weaker_confidence(&existing.conf, &row.conf).to_string();
@@ -419,14 +531,15 @@ fn weaker_confidence<'a>(a: &'a str, b: &'a str) -> &'a str {
 
 /// Pick the highest CLI-supported `v` still inside `[min_v, max_v]`.
 pub fn choose_schema_v(min_v: u32, max_v: u32) -> Result<u32, CoreError> {
-    if SYNC_SCHEMA_VERSION < min_v || SYNC_SCHEMA_VERSION > max_v {
-        // Prefer emitting our version when the range still overlaps somehow.
-        // If our only version is outside the range, refuse.
+    if max_v < min_v {
         return Err(CoreError::UnsupportedSyncSchemaRange { min_v, max_v });
     }
-    // Today we only speak v=1; when we add v=2, take min(SYNC_SCHEMA_VERSION, max_v)
-    // while staying >= min_v.
-    Ok(SYNC_SCHEMA_VERSION.min(max_v).max(min_v))
+    // Highest version we speak that the server still accepts.
+    let chosen = SYNC_SCHEMA_VERSION.min(max_v);
+    if chosen < min_v {
+        return Err(CoreError::UnsupportedSyncSchemaRange { min_v, max_v });
+    }
+    Ok(chosen)
 }
 
 /// Choose the default inclusive window from archive span and an optional cursor.
@@ -634,7 +747,8 @@ mod tests {
             rows: vec![SyncRow {
                 conf: "exact".into(),
                 cr: 1,
-                cw: 2,
+                cw1: 0,
+                cw5: 2,
                 d: "2026-07-25".into(),
                 ev: 3,
                 input: 4,
@@ -647,13 +761,14 @@ mod tests {
             salt_id: "s_abcdef01".into(),
             totals: SyncTotals {
                 cr: 1,
-                cw: 2,
+                cw1: 0,
+                cw5: 2,
                 input: 4,
                 out: 5,
                 rows: 1,
             },
             tz: "UTC".into(),
-            v: 1,
+            v: 2,
             window: SyncWindow {
                 from: "2026-07-25".into(),
                 to: "2026-07-25".into(),
@@ -677,13 +792,14 @@ mod tests {
             salt_id: "s_abcdef01".into(),
             totals: SyncTotals {
                 cr: 0,
-                cw: 0,
+                cw1: 0,
+                cw5: 0,
                 input: 0,
                 out: 0,
                 rows: 0,
             },
             tz: "UTC".into(),
-            v: 1,
+            v: 2,
             window: SyncWindow {
                 from: "2026-07-25".into(),
                 to: "2026-07-25".into(),
@@ -708,7 +824,10 @@ mod tests {
     #[test]
     fn choose_schema_v_refuses_outside_range() {
         assert_eq!(choose_schema_v(1, 1).unwrap(), 1);
-        assert!(choose_schema_v(2, 3).is_err());
+        assert_eq!(choose_schema_v(1, 2).unwrap(), 2);
+        assert_eq!(choose_schema_v(2, 2).unwrap(), 2);
+        // Server only speaks v=3+ and we max out at SYNC_SCHEMA_VERSION.
+        assert!(choose_schema_v(3, 4).is_err());
     }
 
     #[test]
@@ -743,7 +862,8 @@ mod tests {
         let a = SyncRow {
             conf: "exact".into(),
             cr: 1,
-            cw: 0,
+            cw1: 0,
+            cw5: 0,
             d: "2026-07-25".into(),
             ev: 1,
             input: 10,

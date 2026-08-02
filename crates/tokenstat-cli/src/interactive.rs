@@ -1700,7 +1700,7 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let w = app
             .models
             .iter()
-            .map(|m| m.key.chars().count())
+            .map(|m| tokenstat_core::display_usage_model_id(&m.key).chars().count())
             .max()
             .unwrap_or(10)
             .clamp(8, 53);
@@ -1727,8 +1727,16 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         for m in visible {
             let share = m.counters.total() as f64 / grand as f64;
             let c = &m.counters;
-            let value = EquivalentValue::price(&prices, &m.key, c)
-                .map(|v| ui::usd(v.dollars()))
+            let lookup = tokenstat_core::display_usage_model_id(&m.key);
+            let value = EquivalentValue::price(&prices, &lookup, c)
+                .map(|v| {
+                    let body = ui::usd(v.dollars());
+                    if prices.is_estimate(&lookup) && v.dollars() > 0.0 {
+                        format!("~{body}")
+                    } else {
+                        body
+                    }
+                })
                 .unwrap_or_else(|| "-".to_string());
             let total = {
                 let t = ui::tokens(c.total());
@@ -1737,7 +1745,7 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             lines.push(Line::from(vec![
                 Span::raw(format!(
                     "{}  {:>8}  {:>8}  {:>8}  {:>9}  {:>8}  ",
-                    ui::pad_right(&m.key, w),
+                    ui::pad_right(&lookup, w),
                     opt_cell(c.input_fresh),
                     opt_cell(c.output),
                     opt_cell(c.cache_read),
@@ -1767,7 +1775,13 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
         let total_value: EquivalentValue = app
             .models
             .iter()
-            .filter_map(|m| EquivalentValue::price(&prices, &m.key, &m.counters))
+            .filter_map(|m| {
+                EquivalentValue::price(
+                    &prices,
+                    &tokenstat_core::display_usage_model_id(&m.key),
+                    &m.counters,
+                )
+            })
             .sum();
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
@@ -1786,6 +1800,14 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             "List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.",
             Style::default().fg(MUTED),
         )));
+        if app.models.iter().any(|m| {
+            prices.is_estimate(&tokenstat_core::display_usage_model_id(&m.key))
+        }) {
+            lines.push(Line::from(Span::styled(
+                "~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).",
+                Style::default().fg(MUTED),
+            )));
+        }
         if prices.is_empty() {
             lines.push(Line::from(Span::styled(
                 "No local price book yet. Run: tokenstat pricing --refresh",
@@ -1869,7 +1891,15 @@ fn table_lines(rows: &[Bucket], label: &str, price_as_model: bool) -> Vec<Line<'
 
     let key_w = rows
         .iter()
-        .map(|r| r.key.chars().count())
+        .map(|r| {
+            if price_as_model {
+                tokenstat_core::display_usage_model_id(&r.key)
+                    .chars()
+                    .count()
+            } else {
+                r.key.chars().count()
+            }
+        })
         .max()
         .unwrap_or(8)
         // Dates need the full YYYY-MM-DD width. The old upper clamp alone was
@@ -1896,6 +1926,7 @@ fn table_lines(rows: &[Bucket], label: &str, price_as_model: bool) -> Vec<Line<'
         Style::default().fg(MUTED),
     )));
 
+    let mut any_estimate = false;
     for r in rows {
         let c = &r.counters;
         let frac = c.total() as f64 / max as f64;
@@ -1903,16 +1934,28 @@ fn table_lines(rows: &[Bucket], label: &str, price_as_model: bool) -> Vec<Line<'
             let t = ui::tokens(c.total());
             if c.has_unknown() { format!("{t}+") } else { t }
         };
+        let key_label = if price_as_model {
+            tokenstat_core::display_usage_model_id(&r.key)
+        } else {
+            r.key.clone()
+        };
         let value = if price_as_model {
-            EquivalentValue::price(&prices, &r.key, c)
-                .map(|v| ui::usd(v.dollars()))
+            EquivalentValue::price(&prices, &key_label, c)
+                .map(|v| {
+                    if prices.is_estimate(&key_label) && v.dollars() > 0.0 {
+                        any_estimate = true;
+                        format!("~{}", ui::usd(v.dollars()))
+                    } else {
+                        ui::usd(v.dollars())
+                    }
+                })
                 .unwrap_or_else(|| "-".to_string())
         } else {
             "-".to_string()
         };
         let mut row = vec![Span::raw(format!(
             "{}  {:>8}  {:>8}  {:>8}  {:>9}  {:>8}  ",
-            ui::pad_right(&r.key, key_w),
+            ui::pad_right(&key_label, key_w),
             opt_cell(c.input_fresh),
             opt_cell(c.output),
             opt_cell(c.cache_read),
@@ -1927,6 +1970,12 @@ fn table_lines(rows: &[Bucket], label: &str, price_as_model: bool) -> Vec<Line<'
             "value = list-rate equivalent, not billed dollars",
             Style::default().fg(MUTED),
         )));
+        if any_estimate {
+            lines.push(Line::from(Span::styled(
+                "~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).",
+                Style::default().fg(MUTED),
+            )));
+        }
     }
     lines
 }
