@@ -23,6 +23,10 @@ pub const SYNC_SCHEMA_VERSION: u32 = 2;
 pub const SYNC_WINDOW_MAX_DAYS: i64 = 400;
 
 /// Closed set of JSON keys allowed anywhere in a sync document.
+///
+/// `cw` is the schema v1 single cache-write total (see [`SyncPayload::canonical_bytes`]
+/// when `v < 2`). `cw5` / `cw1` are the schema v2 split. All three stay on the
+/// allowlist so both wire shapes pass key checks during the overlap window.
 pub const ALLOWED_SYNC_KEYS: &[&str] = &[
     "v",
     "machine",

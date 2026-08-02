@@ -143,6 +143,12 @@ impl PriceTable {
             .or_else(|| estimate_rates(model))
     }
 
+    /// True when we can produce a list-rate or estimate figure for this model.
+    ///
+    /// Includes estimate fallbacks (Cursor Auto → Composer floor). That is
+    /// intentional: the "unknown models" UI should list only ids we cannot
+    /// price at all. Use [`Self::table_rates_for`] when you need to know whether
+    /// the on-disk book itself had a row.
     pub fn is_known(&self, model: &str) -> bool {
         self.rates_for(model).is_some()
     }
@@ -181,42 +187,41 @@ const COMPOSER_STANDARD: Rates = Rates {
     cache_write_1h: 0.0,
 };
 
-/// Public label for a usage model id. Cursor Auto has no stable vendor/model
-/// slug on disk, only bare `default` / `auto`. Display renames that leaf to
-/// `cursor-router-auto` (same as tokenstat.ai). `gemini-default` stays as-is.
+/// Public label for a usage model id.
+///
+/// Cursor Auto has no stable vendor/model slug on disk, only bare `default` /
+/// `auto` (and a few explicit Cursor-prefixed forms). Those map to
+/// `cursor-router-auto` so CLI, TUI, and tokenstat.ai share one label.
+///
+/// Matching is intentional and narrow: bare `default`/`auto`, the
+/// `cursor-*-auto`/`cursor-default` leaves, or `cursor/{default,auto,router-auto}`.
+/// Other tools' ids are left alone (`gemini-default`, `vendor/default`,
+/// `openrouter/.../auto` stay as written). If a non-Cursor source ever logs a
+/// bare `default`/`auto`, it will still hit this path; that is how Cursor
+/// writes the router, and no other supported source uses those bare leaves.
 pub fn display_usage_model_id(model: &str) -> String {
-    let raw = model.trim();
-    if raw.is_empty() {
-        return raw.to_string();
-    }
-    let leaf = raw.rsplit('/').next().unwrap_or(raw);
-    let leaf_l = leaf.to_ascii_lowercase();
-    let raw_l = raw.to_ascii_lowercase();
-    if matches!(
-        leaf_l.as_str(),
-        "default" | "auto" | "cursor-auto" | "cursor-default" | "cursor-router-auto"
-    ) || matches!(
-        raw_l.as_str(),
-        "cursor/default" | "cursor/auto" | "cursor/router-auto"
-    ) {
+    if is_cursor_router_id(model) {
         return "cursor-router-auto".into();
     }
-    raw.to_string()
+    model.trim().to_string()
 }
 
-/// Cursor Auto / router ids (after lowercasing leaf checks).
+/// Cursor Auto / router ids only (exact forms after trim + lowercase).
+///
+/// Does not treat an arbitrary path leaf `default`/`auto` as Auto, so a model
+/// id like `other/default` is not re-priced as the Composer floor.
 fn is_cursor_router_id(model: &str) -> bool {
     let raw = model.trim().to_ascii_lowercase();
-    if raw.is_empty() {
-        return false;
-    }
-    let leaf = raw.rsplit('/').next().unwrap_or(raw.as_str());
     matches!(
-        leaf,
-        "default" | "auto" | "cursor-auto" | "cursor-default" | "cursor-router-auto"
-    ) || matches!(
         raw.as_str(),
-        "cursor/default" | "cursor/auto" | "cursor/router-auto"
+        "default"
+            | "auto"
+            | "cursor-auto"
+            | "cursor-default"
+            | "cursor-router-auto"
+            | "cursor/default"
+            | "cursor/auto"
+            | "cursor/router-auto"
     )
 }
 
@@ -477,10 +482,16 @@ mod tests {
         assert_eq!(display_usage_model_id("auto"), "cursor-router-auto");
         assert_eq!(display_usage_model_id("cursor/auto"), "cursor-router-auto");
         assert_eq!(display_usage_model_id("gemini-default"), "gemini-default");
+        // Path leaves that are not the Cursor-only bare/prefixed set stay put.
+        assert_eq!(display_usage_model_id("other/default"), "other/default");
+        assert_eq!(display_usage_model_id("vendor/auto"), "vendor/auto");
 
         let t = table(); // fixture has no composer / router rows
         assert!(t.is_estimate("default"));
         assert!(t.is_estimate("cursor-router-auto"));
+        // Estimates still count as "known" so they do not land in the missing list.
+        assert!(t.is_known("default"));
+        assert!(t.table_rates_for("default").is_none());
         let r = t.rates_for("default").expect("estimate rates");
         assert!((r.input - 0.5).abs() < 1e-9);
         assert!((r.output - 2.5).abs() < 1e-9);
@@ -488,6 +499,9 @@ mod tests {
         let v = EquivalentValue::price(&t, "auto", &counters(1_000_000, 1_000_000)).unwrap();
         // 0.5 + 2.5 = $3.00 at list rates for 1M in + 1M out
         assert!((v.dollars() - 3.0).abs() < 0.001);
+        // Unrelated path leaves must not inherit the Composer floor estimate.
+        assert!(!t.is_estimate("other/default"));
+        assert!(t.rates_for("other/default").is_none());
     }
 
     #[test]

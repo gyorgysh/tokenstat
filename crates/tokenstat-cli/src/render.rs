@@ -280,7 +280,7 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
         println!("  {DIM}value = list-rate equivalent, not billed dollars{DIM:#}");
         if rows
             .iter()
-            .any(|r| prices.is_estimate(&display_usage_model_id(&r.key)))
+            .any(|r| prices.is_estimate(&model_label(&r.key)))
         {
             println!(
                 "  {DIM}~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).{DIM:#}"
@@ -456,20 +456,21 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     // Plan usage is not money. Saying so explicitly is a product requirement,
     // not a nicety.
     let prices = PriceTable::load();
+    let mut any_estimate = false;
+    let mut missing: Vec<String> = Vec::new();
     let total_value: EquivalentValue = models
         .iter()
         .filter_map(|m| {
-            EquivalentValue::price(&prices, &display_usage_model_id(&m.key), &m.counters)
+            let lookup = model_label(&m.key);
+            if prices.is_estimate(&lookup) {
+                any_estimate = true;
+            }
+            if !prices.is_known(&lookup) {
+                missing.push(lookup.clone());
+            }
+            EquivalentValue::price(&prices, &lookup, &m.counters)
         })
         .sum();
-    let missing: Vec<String> = models
-        .iter()
-        .filter(|m| !prices.is_known(&display_usage_model_id(&m.key)))
-        .map(|m| model_label(&m.key))
-        .collect();
-    let any_estimate = models
-        .iter()
-        .any(|m| prices.is_estimate(&display_usage_model_id(&m.key)));
 
     println!();
     println!(
@@ -663,16 +664,14 @@ pub fn wrapped(
     let days = store.report(GroupBy::Day, &q)?;
     let peak = store.peak_hour()?;
     let prices = PriceTable::load();
+    let top_model_label = models.first().map(|m| model_label(&m.key));
     let value: EquivalentValue = models
         .iter()
-        .filter_map(|m| {
-            EquivalentValue::price(&prices, &display_usage_model_id(&m.key), &m.counters)
-        })
+        .filter_map(|m| EquivalentValue::price(&prices, &model_label(&m.key), &m.counters))
         .sum();
     let busiest_day = days
         .iter()
         .max_by_key(|d| d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0));
-    let top_model = models.first();
     let top_project = projects.first();
     let in_out = totals.counters.input_fresh.unwrap_or(0) + totals.counters.output.unwrap_or(0);
 
@@ -684,7 +683,7 @@ pub fn wrapped(
             totals.days,
             in_out,
             value.dollars(),
-            json_opt(top_model.map(|m| model_label(&m.key)).as_deref()),
+            json_opt(top_model_label.as_deref()),
             json_opt(top_project.map(|p| p.key.as_str())),
             json_opt(busiest_day.map(|d| d.key.as_str())),
             peak.map(|h| h.to_string()).unwrap_or_else(|| "null".into()),
@@ -703,8 +702,8 @@ pub fn wrapped(
         "  {DIM}list value{DIM:#}   {}  {DIM}(not billed){DIM:#}",
         ui::usd(value.dollars())
     );
-    if let Some(m) = top_model {
-        println!("  {DIM}top model{DIM:#}    {}", model_label(&m.key));
+    if let Some(label) = top_model_label {
+        println!("  {DIM}top model{DIM:#}    {label}");
     }
     if let Some(p) = top_project {
         println!("  {DIM}top project{DIM:#}  {}", p.key);
@@ -2058,9 +2057,7 @@ pub fn statusline(
         let mut total = 0.0;
         let mut any = false;
         for r in rows {
-            if let Some(v) =
-                EquivalentValue::price(&prices, &display_usage_model_id(&r.key), &r.counters)
-            {
+            if let Some(v) = EquivalentValue::price(&prices, &model_label(&r.key), &r.counters) {
                 total += v.dollars();
                 any = true;
             }

@@ -1776,15 +1776,16 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 
         // Dollar total always follows the (possibly truncated) list so the
         // headline "how much in total" stays on screen when collapsed.
+        let mut any_estimate = false;
         let total_value: EquivalentValue = app
             .models
             .iter()
             .filter_map(|m| {
-                EquivalentValue::price(
-                    &prices,
-                    &tokenstat_core::display_usage_model_id(&m.key),
-                    &m.counters,
-                )
+                let lookup = tokenstat_core::display_usage_model_id(&m.key);
+                if prices.is_estimate(&lookup) {
+                    any_estimate = true;
+                }
+                EquivalentValue::price(&prices, &lookup, &m.counters)
             })
             .sum();
         lines.push(Line::from(""));
@@ -1804,11 +1805,7 @@ fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             "List-rate equivalent only. Plan usage is not money charged; metered API usage may have been.",
             Style::default().fg(MUTED),
         )));
-        if app
-            .models
-            .iter()
-            .any(|m| prices.is_estimate(&tokenstat_core::display_usage_model_id(&m.key)))
-        {
+        if any_estimate {
             lines.push(Line::from(Span::styled(
                 "~ values are estimates (Cursor Auto at Composer 2.5 list rates as a floor).",
                 Style::default().fg(MUTED),
