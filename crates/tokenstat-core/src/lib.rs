@@ -40,7 +40,7 @@ pub use budget::{BudgetLimits, BudgetStatus, list_value, status as budget_status
 pub use catalog::{
     CanonicalOffer, Catalog, CatalogModel, CheapestOffer, Plan, PlanLimit, PlanModel, Plans, Scores,
 };
-pub use engine::Engine;
+pub use engine::{Engine, PricedBucket};
 pub use error::{CoreError, Warning};
 pub use model::{
     BillingMode, Confidence, Counters, Cumulative, Delta, EventId, Extras, SourceId, Timestamp,
@@ -51,7 +51,9 @@ pub use pricing::{
 };
 pub use scan::{ScanReport, reconcile, scan};
 pub use sources::claude_stats::Reconciliation;
-pub use store::{BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, Query, Store, Totals, UsageBlock};
+pub use store::{
+    BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, ModelBucket, Query, Store, Totals, UsageBlock,
+};
 pub use sync_payload::{
     ALLOWED_SYNC_KEYS, FORBIDDEN_SYNC_KEYS, SYNC_SCHEMA_VERSION, SYNC_WINDOW_MAX_DAYS,
     SyncBuildArgs, SyncPayload, SyncRollupBucket, SyncRow, SyncTotals, SyncWindow,

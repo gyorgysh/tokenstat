@@ -424,6 +424,16 @@ impl EquivalentValue {
         table.value_micros(model, counters).map(EquivalentValue)
     }
 
+    /// Rebuild a value from micros already summed elsewhere.
+    ///
+    /// Exists for callers that fold several priced slices into one bucket.
+    /// There is deliberately no equivalent on [`Charged`]: a charge must only
+    /// ever come from [`Charged::price`], so that plan usage has no path to
+    /// becoming money.
+    pub fn from_micros(micros: i64) -> EquivalentValue {
+        EquivalentValue(micros)
+    }
+
     pub fn micros(self) -> i64 {
         self.0
     }

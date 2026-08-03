@@ -39,6 +39,22 @@ pub struct Bucket {
     pub sessions: u64,
 }
 
+/// One row of a report grouped by the requested key *and* by model.
+///
+/// Pricing needs a model id, so a day or project bucket cannot be valued from
+/// its own totals. Splitting one level deeper is what lets a caller price each
+/// slice at its own rate and then fold the results back up.
+#[derive(Debug, Clone)]
+pub struct ModelBucket {
+    /// The requested grouping key: a date, project path, source, and so on.
+    pub key: String,
+    /// Raw model id as recorded, before display normalization.
+    pub model: String,
+    pub counters: Counters,
+    pub events: u64,
+    pub sessions: u64,
+}
+
 /// One 5 hour usage block, gap-based like Claude's rate-limit windows.
 #[derive(Debug, Clone)]
 pub struct UsageBlock {
@@ -372,6 +388,59 @@ impl Store {
                 },
                 events: r.get::<_, i64>(6)? as u64,
                 sessions: r.get::<_, i64>(7)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Same grouping as [`Store::report`], split one level further by model.
+    ///
+    /// One query rather than a report followed by a per-key model query each,
+    /// which on a year of daily buckets is the difference between 1 and 366
+    /// round trips.
+    ///
+    /// Ordering is by key in the same direction [`Store::report`] uses, then by
+    /// tokens descending inside each key, so the largest model in a bucket
+    /// comes first.
+    pub fn report_by_model(
+        &self,
+        group: GroupBy,
+        q: &Query,
+    ) -> Result<Vec<ModelBucket>, CoreError> {
+        let (where_sql, args) = Self::where_clause(q);
+        let key_order = if matches!(group, GroupBy::Day | GroupBy::Week) {
+            "k ASC"
+        } else {
+            "k DESC"
+        };
+        let sql = format!(
+            r#"SELECT {col} AS k, model,
+                      SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
+                      SUM(cache_write_1h), SUM(output),
+                      COUNT(*), COUNT(DISTINCT session)
+               FROM event{where_sql}
+               GROUP BY k, model
+               ORDER BY {key_order},
+                        (COALESCE(SUM(input_fresh),0)+COALESCE(SUM(cache_read),0)
+                         +COALESCE(SUM(cache_write_5m),0)+COALESCE(SUM(cache_write_1h),0)
+                         +COALESCE(SUM(output),0)) DESC"#,
+            col = group.column(),
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt.query_map(params.as_slice(), |r| {
+            Ok(ModelBucket {
+                key: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                model: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                counters: Counters {
+                    input_fresh: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                    cache_read: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    cache_write_5m: r.get::<_, Option<i64>>(4)?.map(|v| v as u64),
+                    cache_write_1h: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                    output: r.get::<_, Option<i64>>(6)?.map(|v| v as u64),
+                },
+                events: r.get::<_, i64>(7)? as u64,
+                sessions: r.get::<_, i64>(8)? as u64,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
