@@ -19,11 +19,11 @@ and reports spend by model, project, tool, and time. Everything runs on your
 machine by default. Sync to a public profile is opt in.
 
 <p align="center">
-  <img src="docs/tui-summary.webp" alt="tokenstat interactive Summary view" width="720">
+  <img src="docs/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
 </p>
 
 <p align="center">
-  <img src="docs/tui-models.webp" alt="tokenstat interactive Models view" width="720">
+  See what a synced profile looks like: <a href="https://tokenstat.ai/gyorgy"><strong>tokenstat.ai/gyorgy</strong></a>
 </p>
 
 ## Highlights
@@ -33,7 +33,7 @@ machine by default. Sync to a public profile is opt in.
 - **One schema** — daily, weekly, monthly, and per-model views across every tool
 - **Activity heatmap** — rolling calendar with streaks, busiest day, and a purple-to-cyan ramp
 - **Model catalog** — context window, capabilities, and public benchmark scores per model
-- **Optional sync** — sealed aggregates to `tokenstat.ai/<handle>` when you link an account
+- **Optional sync** — sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
 - **Self-update** — verified GitHub Releases with rollback if the new binary cannot run
 
 ## Supported sources
@@ -105,7 +105,8 @@ tokenstat update
 on with it. Piped or scripted runs (including the install scripts) proceed with
 defaults without `--yes`. `--local-only` skips the account step,
 `--no-schedule` skips the hourly scan install, and `--code WXYZ-1234` connects
-using a code from [tokenstat.ai/link](https://tokenstat.ai/link).
+using a code from [tokenstat.ai/link](https://tokenstat.ai/link). A linked
+account publishes a page like [tokenstat.ai/gyorgy](https://tokenstat.ai/gyorgy).
 
 `update` verifies `SHA256SUMS`, runs the downloaded binary to confirm
 `--version` and `--help`, then swaps it in. The old binary is moved aside and
