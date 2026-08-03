@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 pub mod budget;
+pub mod catalog;
 pub mod engine;
 pub mod error;
 pub mod model;
@@ -28,13 +29,18 @@ pub mod sync_payload;
 pub mod watermark;
 
 pub use budget::{BudgetLimits, BudgetStatus, list_value, status as budget_status};
+pub use catalog::{
+    CanonicalOffer, Catalog, CatalogModel, CheapestOffer, Plan, PlanLimit, PlanModel, Plans, Scores,
+};
 pub use engine::Engine;
 pub use error::{CoreError, Warning};
 pub use model::{
     BillingMode, Confidence, Counters, Cumulative, Delta, EventId, Extras, SourceId, Timestamp,
     UsageEvent,
 };
-pub use pricing::{Charged, EquivalentValue, PriceTable, Rates, display_usage_model_id};
+pub use pricing::{
+    Charged, EquivalentValue, EstimateSource, PriceTable, Rates, display_usage_model_id,
+};
 pub use scan::{ScanReport, reconcile, scan};
 pub use sources::claude_stats::Reconciliation;
 pub use store::{BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, Query, Store, Totals, UsageBlock};

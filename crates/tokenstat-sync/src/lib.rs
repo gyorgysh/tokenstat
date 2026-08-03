@@ -19,6 +19,7 @@
 
 pub mod antigravity;
 pub mod antigravity_ide;
+pub mod catalog;
 pub mod config;
 pub mod creds;
 pub mod cursor;
@@ -28,6 +29,7 @@ pub mod keychain;
 pub mod pricing;
 pub mod profile;
 pub mod schema;
+pub mod snapshot;
 pub mod update;
 
 use std::time::Duration;

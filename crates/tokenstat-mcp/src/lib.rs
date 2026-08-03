@@ -194,7 +194,7 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
         "weekly" => bucket_tool(engine, GroupBy::Week, &q, &args)?,
         "projects" => bucket_tool(engine, GroupBy::Project, &q, &args)?,
         "budget_status" => {
-            let prices = tokenstat_core::PriceTable::load();
+            let prices = tokenstat_core::PriceTable::load_with_catalog();
             let st = tokenstat_core::budget_status(engine.store(), engine.timezone(), &prices)
                 .map_err(|e| e.to_string())?;
             json!({
