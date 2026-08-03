@@ -49,6 +49,11 @@ fixtures/local/          Real local data, git ignored
 .github/workflows/       CI and release
 ```
 
+Inside the CLI, `render/` and `interactive/` are module directories, split by
+what the reader is looking at rather than by widget type. `render/mod.rs` and
+`interactive/mod.rs` hold only what their submodules share. Keep new output code
+in the submodule that owns that screen.
+
 Keep logic in `tokenstat-core`. Front ends should contain argument parsing,
 formatting, and nothing else. Anything another client would also need belongs
 in the core crate. Every front end goes through one facade, `Engine`, rather
