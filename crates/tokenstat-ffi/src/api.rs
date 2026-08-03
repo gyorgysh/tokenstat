@@ -20,7 +20,7 @@ use tokenstat_core::{Engine, GroupBy, PriceTable, Query};
 use crate::PROTOCOL_VERSION;
 use crate::dto::{
     AccountDto, BlockDto, BucketDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
-    MachineDto, QueryDto, ScanReportDto, SyncResultDto, TotalsDto,
+    MachineDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
 };
 
 /// Process-wide handle.
@@ -67,6 +67,17 @@ struct ReportParams {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct QueryParams {
+    query: QueryDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SplitParams {
+    group: GroupByDto,
+    /// The second dimension. `project` split by `source` answers "which
+    /// harnesses ran in this folder".
+    split_by: GroupByDto,
+    #[serde(default)]
     query: QueryDto,
 }
 
@@ -182,6 +193,24 @@ fn dispatch(method: &str, params: &str) -> Result<Value, String> {
                     .priced_report(group, &Query::from(p.query), &b.prices)
                     .map_err(|e| e.to_string())?;
                 let dtos: Vec<BucketDto> = rows.into_iter().map(BucketDto::from).collect();
+                serde_json::to_value(dtos).map_err(|e| e.to_string())
+            })
+        }
+
+        // Two-level report: "which harnesses ran in which project", and any
+        // other cross-tabulation. One query, not one per key.
+        "report.split" => {
+            let p: SplitParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let group = GroupBy::from(p.group);
+            let split = GroupBy::from(p.split_by);
+            with_bridge(|b| {
+                let rows = b
+                    .engine
+                    .store()
+                    .report_split(group, split, &Query::from(p.query))
+                    .map_err(|e| e.to_string())?;
+                let dtos: Vec<SplitBucketDto> =
+                    rows.into_iter().map(SplitBucketDto::from).collect();
                 serde_json::to_value(dtos).map_err(|e| e.to_string())
             })
         }

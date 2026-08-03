@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use tokenstat_core::{
-    Counters, GroupBy, PricedBucket, Query, ScanReport, Totals, UsageBlock, Warning,
+    Counters, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals, UsageBlock, Warning,
 };
 use tokenstat_sync::DeviceLogin as SyncDeviceLogin;
 
@@ -329,6 +329,31 @@ impl MachineDto {
             id: field("id"),
             label: field("label"),
             last_sync_at: field("last_sync_at"),
+        }
+    }
+}
+
+/// One row of a two-level report: a key, and one slice of it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SplitBucketDto {
+    pub key: String,
+    /// Value of the second dimension, for example the harness that ran in a
+    /// project.
+    pub split: String,
+    pub counters: CountersDto,
+    pub events: u64,
+    pub sessions: u64,
+}
+
+impl From<SplitBucket> for SplitBucketDto {
+    fn from(b: SplitBucket) -> SplitBucketDto {
+        SplitBucketDto {
+            key: b.key,
+            split: b.split,
+            counters: CountersDto::from(&b.counters),
+            events: b.events,
+            sessions: b.sessions,
         }
     }
 }

@@ -52,7 +52,7 @@ pub use pricing::{
 pub use scan::{ScanReport, reconcile, scan};
 pub use sources::claude_stats::Reconciliation;
 pub use store::{
-    BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, ModelBucket, Query, Store, Totals, UsageBlock,
+    BLOCK_DURATION_MS, Bucket, EventRow, GroupBy, Query, SplitBucket, Store, Totals, UsageBlock,
 };
 pub use sync_payload::{
     ALLOWED_SYNC_KEYS, FORBIDDEN_SYNC_KEYS, SYNC_SCHEMA_VERSION, SYNC_WINDOW_MAX_DAYS,

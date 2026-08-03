@@ -39,17 +39,18 @@ pub struct Bucket {
     pub sessions: u64,
 }
 
-/// One row of a report grouped by the requested key *and* by model.
+/// One row of a report grouped by a key *and* by a second dimension.
 ///
-/// Pricing needs a model id, so a day or project bucket cannot be valued from
-/// its own totals. Splitting one level deeper is what lets a caller price each
-/// slice at its own rate and then fold the results back up.
+/// Two things need this. Pricing needs a model id, so a day or project bucket
+/// cannot be valued from its own totals and has to be split by model first.
+/// And any "what ran where" question is a split: which harnesses touched this
+/// project, which models a session used.
 #[derive(Debug, Clone)]
-pub struct ModelBucket {
+pub struct SplitBucket {
     /// The requested grouping key: a date, project path, source, and so on.
     pub key: String,
-    /// Raw model id as recorded, before display normalization.
-    pub model: String,
+    /// The second dimension's value, raw as recorded.
+    pub split: String,
     pub counters: Counters,
     pub events: u64,
     pub sessions: u64,
@@ -393,20 +394,24 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// Same grouping as [`Store::report`], split one level further by model.
+    /// [`Store::report`] split one level further, by any second dimension.
     ///
-    /// One query rather than a report followed by a per-key model query each,
+    /// One query rather than a report followed by a filtered query per key,
     /// which on a year of daily buckets is the difference between 1 and 366
     /// round trips.
     ///
     /// Ordering is by key in the same direction [`Store::report`] uses, then by
-    /// tokens descending inside each key, so the largest model in a bucket
+    /// tokens descending inside each key, so the largest slice of a bucket
     /// comes first.
-    pub fn report_by_model(
+    ///
+    /// Passing the same dimension twice is allowed and simply returns one slice
+    /// per bucket. It is not worth rejecting, since the result is still true.
+    pub fn report_split(
         &self,
         group: GroupBy,
+        split: GroupBy,
         q: &Query,
-    ) -> Result<Vec<ModelBucket>, CoreError> {
+    ) -> Result<Vec<SplitBucket>, CoreError> {
         let (where_sql, args) = Self::where_clause(q);
         let key_order = if matches!(group, GroupBy::Day | GroupBy::Week) {
             "k ASC"
@@ -414,24 +419,25 @@ impl Store {
             "k DESC"
         };
         let sql = format!(
-            r#"SELECT {col} AS k, model,
+            r#"SELECT {col} AS k, {split_col} AS s,
                       SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
                       SUM(cache_write_1h), SUM(output),
                       COUNT(*), COUNT(DISTINCT session)
                FROM event{where_sql}
-               GROUP BY k, model
+               GROUP BY k, s
                ORDER BY {key_order},
                         (COALESCE(SUM(input_fresh),0)+COALESCE(SUM(cache_read),0)
                          +COALESCE(SUM(cache_write_5m),0)+COALESCE(SUM(cache_write_1h),0)
                          +COALESCE(SUM(output),0)) DESC"#,
             col = group.column(),
+            split_col = split.column(),
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
         let rows = stmt.query_map(params.as_slice(), |r| {
-            Ok(ModelBucket {
+            Ok(SplitBucket {
                 key: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                model: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                split: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 counters: Counters {
                     input_fresh: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
                     cache_read: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
@@ -444,6 +450,16 @@ impl Store {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// [`Store::report_split`] against the model dimension, which is the split
+    /// pricing needs.
+    pub fn report_by_model(
+        &self,
+        group: GroupBy,
+        q: &Query,
+    ) -> Result<Vec<SplitBucket>, CoreError> {
+        self.report_split(group, GroupBy::Model, q)
     }
 
     pub fn totals(&self, q: &Query) -> Result<Totals, CoreError> {

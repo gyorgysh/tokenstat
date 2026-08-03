@@ -111,7 +111,7 @@ impl Engine {
 
         let mut value_by_key: HashMap<&str, (i64, bool, Vec<String>)> = HashMap::new();
         for row in &split {
-            let lookup = display_usage_model_id(&row.model);
+            let lookup = display_usage_model_id(&row.split);
             let entry = value_by_key.entry(row.key.as_str()).or_default();
             match EquivalentValue::price(prices, &lookup, &row.counters) {
                 Some(v) => {
@@ -219,6 +219,35 @@ mod tests {
         assert!((rows[0].value.dollars() - 30.0).abs() < 0.001);
         assert!(rows[0].is_complete());
         assert!(!rows[0].estimated);
+    }
+
+    #[test]
+    fn a_project_can_be_split_by_the_harness_that_ran_in_it() {
+        let mut e = engine();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut a = ev("a", "claude-opus-4-5", "s1");
+        let mut b = ev("b", "some-model", "s2");
+        b.source = SourceId::OpenCode;
+        a.project = "/work/alpha".into();
+        b.project = "/work/alpha".into();
+        let mut c = ev("c", "claude-opus-4-5", "s3");
+        c.project = "/work/beta".into();
+        e.store_mut().insert_events(&[a, b, c], &tz).unwrap();
+
+        let rows = e
+            .store()
+            .report_split(GroupBy::Project, GroupBy::Source, &Query::default())
+            .unwrap();
+
+        // Two harnesses in alpha, one in beta. This is the shape the sidebar
+        // tree is built from, and it must come from one query rather than a
+        // filtered query per project.
+        let alpha: Vec<_> = rows.iter().filter(|r| r.key == "/work/alpha").collect();
+        let beta: Vec<_> = rows.iter().filter(|r| r.key == "/work/beta").collect();
+        assert_eq!(alpha.len(), 2);
+        assert_eq!(beta.len(), 1);
+        assert!(alpha.iter().any(|r| r.split == "opencode"));
+        assert!(alpha.iter().any(|r| r.split == "claude_code"));
     }
 
     #[test]
