@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["crates/tokenstat-core", "crates/tokenstat-cli", "crates/tokenstat-sync", "crates/tokenstat-mcp", "xtask"]
+members = [
+    "crates/tokenstat-core",
+    "crates/tokenstat-cli",
+    "crates/tokenstat-sync",
+    "crates/tokenstat-mcp",
+    "crates/tokenstat-ffi",
+    "xtask",
+]
 
 [workspace.package]
 version = "0.1.3"
@@ -58,3 +65,16 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+# Static library for the Apple app. Differs from `release` in two ways, both
+# forced by handing the archive to a toolchain that is not this one:
+#
+# - No LTO. Thin LTO leaves LLVM metadata in the objects, and Rust's LLVM runs
+#   ahead of the one inside Xcode, so Apple's tools reject the archive with
+#   "Unknown attribute kind". Cross-crate LTO cannot reach past the C boundary
+#   anyway, so this costs nothing that matters here.
+# - No stripping. Xcode links against these symbols by name.
+[profile.release-ffi]
+inherits = "release"
+lto = false
+strip = "none"

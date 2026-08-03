@@ -1,0 +1,20 @@
+[package]
+name = "tokenstat-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "C ABI bridge exposing the tokenstat core to native front ends"
+
+[lib]
+# staticlib for linking into an Apple app bundle, rlib so the crate's own tests
+# can call the Rust side directly.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+tokenstat-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

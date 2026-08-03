@@ -1,0 +1,4 @@
+module TokenstatFFI {
+    header "tokenstat_ffi.h"
+    export *
+}
