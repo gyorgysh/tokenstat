@@ -32,6 +32,7 @@ machine by default. Sync to a public profile is opt in.
 - **Many sources** — Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, plus Cursor fetch
 - **One schema** — daily, weekly, monthly, and per-model views across every tool
 - **Activity heatmap** — rolling calendar with streaks, busiest day, and a purple-to-cyan ramp
+- **Model catalog** — context window, capabilities, and public benchmark scores per model
 - **Optional sync** — sealed aggregates to `tokenstat.ai/<handle>` when you link an account
 - **Self-update** — verified GitHub Releases with rollback if the new binary cannot run
 
@@ -49,6 +50,10 @@ Plan quota for Antigravity is reported separately and is never turned into fake 
 
 The website is a separate project. This repository is the CLI, shared core, and
 MCP server.
+
+<p align="center">
+  <img src="docs/flow.svg" alt="Local logs feed a terminal, opt-in sync sends only aggregate counters, and a public profile page renders them" width="900">
+</p>
 
 ```
 crates/
@@ -177,11 +182,14 @@ one-shot report.
 | `tokenstat wrapped` | Year-in-review from the local archive |
 | `tokenstat daily` / `weekly` / `monthly` | Usage per day, ISO week, or month |
 | `tokenstat models` / `projects` / `sessions` | Breakdowns |
+| `tokenstat models --detail` | Per model, with context window, capabilities, and benchmark scores |
 | `tokenstat blocks` | Five-hour usage windows |
 | `tokenstat budget` | Soft list-rate caps (`--daily` / `--monthly`) |
 | `tokenstat export` | CSV or JSON dump of events |
 | `tokenstat auth` / `fetch` | Vendor tokens and remote usage |
 | `tokenstat pricing` | Local list-rate snapshot (`--refresh` to fetch) |
+| `tokenstat catalog` | Local model catalog and plans snapshot (`--refresh` to fetch) |
+| `tokenstat plans` | Subscription plan prices next to your own list-rate equivalent |
 | `tokenstat mcp` | MCP server over stdio |
 | `tokenstat doctor` | Archive health and reconciliation |
 | `tokenstat statusline` | One line for a shell prompt |
@@ -193,8 +201,19 @@ one-shot report.
 Filters: `--since`, `--until`, `--last N`, `--model`, `--project`. Every command
 accepts `--json`.
 
-List rates are not shipped in the binary. Run `tokenstat pricing --refresh` once
-to fetch tokenstat.ai's list-rate snapshot into your local data directory.
+List rates are not shipped in the binary. `tokenstat setup` fetches them, or run
+`tokenstat pricing --refresh` and `tokenstat catalog --refresh` yourself. Both
+land in your local data directory and are read offline from then on.
+
+The two snapshots answer different questions and are kept apart on purpose. The
+price book is published list rates, and a figure taken from it is printed plain.
+The catalog carries provider offers, which is what lets a model the price book
+has never heard of still show a number: those are marked `~` and are never
+presented as a list rate.
+
+Terminals that cannot do 24-bit colour fall back to the 256-colour palette, and
+a non-UTF-8 locale swaps the box drawing and block characters for ASCII. Force
+the plain rendering with `TOKENSTAT_ASCII=1`.
 
 ### Keeping your history
 
