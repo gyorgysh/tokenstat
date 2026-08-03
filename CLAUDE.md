@@ -44,10 +44,13 @@ crates/tokenstat-core/   Parsing, normalization, pricing, aggregation. NO NETWOR
 crates/tokenstat-cli/    Command line front end
 crates/tokenstat-sync/   The only crate allowed to link a network stack
 crates/tokenstat-mcp/    MCP server over the core facade
+crates/tokenstat-ffi/    C ABI bridge for native apps. JSON in, JSON out.
+apps/mac/                SwiftUI universal app (macOS now, iOS/iPadOS later)
 xtask/                   Fixture redaction, benches
 fixtures/                Redacted test data, committed
 fixtures/local/          Real local data, git ignored
 .github/workflows/       CI and release
+docs/                    Design plans: desktop-app.md, licensing.md
 ```
 
 Inside the CLI, `render/` and `interactive/` are module directories, split by
@@ -76,6 +79,29 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
 cargo build --release
 cargo run -p tokenstat-cli -- --help
+```
+
+### The Mac app
+
+The Xcode project is generated from `apps/mac/project.yml` and is git ignored,
+so both steps are needed on a fresh checkout. The build script must run first:
+the app links the xcframework it produces.
+
+```bash
+scripts/build-ffi-xcframework.sh
+cd apps/mac && xcodegen && xcodebuild -scheme Tokenstat -destination 'platform=macOS' build
+```
+
+The static library builds under the `release-ffi` profile, not `release`. That
+profile exists because Rust's LLVM runs ahead of the one inside Xcode, and thin
+LTO leaves metadata in the archive that Apple's tools reject with "Unknown
+attribute kind". Do not point the script at `release` to save a rebuild.
+
+Add iOS slices when that target starts:
+
+```bash
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+scripts/build-ffi-xcframework.sh macos ios sim
 ```
 
 ### Local install for manual testing

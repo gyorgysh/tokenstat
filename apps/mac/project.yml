@@ -1,0 +1,61 @@
+name: Tokenstat
+
+# The Xcode project is generated, not committed. Committing a .xcodeproj means
+# resolving pbxproj merge conflicts by hand forever, and this file is the thing
+# a reviewer can actually read. Regenerate with `xcodegen` after changing it.
+#
+#   scripts/build-ffi-xcframework.sh   # must run first, the app links its output
+#   cd apps/mac && xcodegen
+
+options:
+  bundleIdPrefix: ai.tokenstat
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+    iOS: "17.0"
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.3"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Signed ad hoc so a fresh checkout builds and runs with no team set up.
+    # The shipped build is Developer ID signed by the release workflow instead,
+    # because the app spawns agent CLIs and reads arbitrary project
+    # directories, which the App Store sandbox does not permit.
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGNING_ALLOWED: NO
+
+targets:
+  Tokenstat:
+    type: application
+    # One target for every Apple platform rather than a target per platform.
+    # iPad and iPhone are meant to be the same app against a remote host, so
+    # they share these sources and branch on `#if os(macOS)` where the chrome
+    # genuinely differs.
+    supportedDestinations: [macOS, iOS]
+    sources:
+      - path: Sources
+    dependencies:
+      # Linked, not embedded: it is a static library, so it ends up inside the
+      # binary and there is nothing to copy into the bundle.
+      - framework: Vendor/TokenstatFFI.xcframework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.Tokenstat
+        PRODUCT_NAME: Tokenstat
+        # Synthesized from the INFOPLIST_KEY_* settings below, so there is no
+        # Info.plist to keep in sync by hand.
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: tokenstat
+        INFOPLIST_KEY_NSHumanReadableCopyright: "GPL-3.0"
+        # No sandbox. See CODE_SIGN_IDENTITY above for why.
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO

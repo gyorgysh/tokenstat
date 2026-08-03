@@ -55,3 +55,13 @@ desktop.ini
 # Build and release scratch
 /release-artifacts/
 /pkg/
+
+# Apple app. Everything here is generated, and committing any of it means
+# resolving pbxproj conflicts by hand forever. `apps/mac/project.yml` is the
+# source of truth, and the xcframework comes from
+# `scripts/build-ffi-xcframework.sh`.
+/apps/mac/Tokenstat.xcodeproj/
+/apps/mac/Vendor/
+/apps/*/DerivedData/
+xcuserdata/
+*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
