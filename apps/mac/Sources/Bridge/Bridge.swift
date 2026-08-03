@@ -172,3 +172,19 @@ extension Bridge {
 
 /// For methods whose result is only "it worked".
 private struct Ack: Codable, Sendable {}
+
+extension Bridge {
+    /// Two-level report. `project` split by `source` answers "which harnesses
+    /// ran in this folder", which is what the sidebar tree is.
+    static func reportSplit(
+        group: GroupBy,
+        splitBy: GroupBy,
+        query: Query = Query()
+    ) async throws -> [SplitBucket] {
+        try await background(
+            "report.split",
+            ["group": group.rawValue, "splitBy": splitBy.rawValue, "query": query.payload],
+            as: [SplitBucket].self
+        )
+    }
+}

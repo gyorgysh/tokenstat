@@ -36,14 +36,14 @@ struct InsightsView: View {
                 switch model.tab {
                 case .overview:
                     overview
-                case .models, .projects, .tools, .sessions:
+                case .models, .projects, .harnesses, .sessions:
                     BreakdownTable(
                         rows: model.rows,
                         selected: $model.selected,
                         showsValue: model.tab == .models,
                         // A session id or a project path is read character by
                         // character. A tool name is a word.
-                        monospaced: model.tab != .tools
+                        monospaced: model.tab != .harnesses
                     )
                 }
             }
@@ -65,7 +65,7 @@ struct InsightsView: View {
                 Card(title: "Top models", subtitle: "List-rate value") {
                     MiniList(rows: model.byModel, showsValue: true, monospaced: true)
                 }
-                Card(title: "By tool", subtitle: "Where the tokens came from") {
+                Card(title: "By harness", subtitle: "Which agent produced the tokens") {
                     MiniList(rows: model.bySource, showsValue: false, monospaced: false)
                 }
             }

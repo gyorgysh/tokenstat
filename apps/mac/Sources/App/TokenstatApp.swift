@@ -13,7 +13,7 @@ struct TokenstatApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .frame(minWidth: 900, minHeight: 560)
+                .frame(minWidth: 1040, minHeight: 620)
         }
         #if os(macOS)
         // Unified toolbar and a hidden title give the rounded, chrome-light

@@ -38,14 +38,14 @@ final class InsightsModel {
 
     /// Which breakdown the content pane is showing.
     enum Tab: String, CaseIterable, Hashable {
-        case overview, models, projects, tools, sessions
+        case overview, models, projects, harnesses, sessions
 
         var label: String {
             switch self {
             case .overview: return "Overview"
             case .models: return "Models"
             case .projects: return "Projects"
-            case .tools: return "Tools"
+            case .harnesses: return "Harnesses"
             case .sessions: return "Sessions"
             }
         }
@@ -55,7 +55,7 @@ final class InsightsModel {
             case .overview: return "square.grid.2x2"
             case .models: return "cpu"
             case .projects: return "folder"
-            case .tools: return "wrench.and.screwdriver"
+            case .harnesses: return "terminal"
             case .sessions: return "bubble.left.and.bubble.right"
             }
         }
@@ -69,6 +69,13 @@ final class InsightsModel {
     var bySource: [Bucket] = []
     var bySession: [Bucket] = []
     var activeBlock: Block?
+
+    /// Project folders with the harnesses that ran in each.
+    ///
+    /// This is what the sidebar tree is, and it is a preview of Workspaces:
+    /// the folders are real, and so is the list of agents that touched them.
+    /// Built from one two-level query rather than a query per project.
+    var workspaces: [Workspace] = []
 
     var tab: Tab = .overview {
         didSet { if tab != oldValue { selected = nil } }
@@ -84,7 +91,7 @@ final class InsightsModel {
         case .overview: return byModel
         case .models: return byModel
         case .projects: return byProject
-        case .tools: return bySource
+        case .harnesses: return bySource
         case .sessions: return bySession
         }
     }
@@ -148,6 +155,7 @@ final class InsightsModel {
             async let bySource = Bridge.report(group: .source, query: q)
             async let bySession = Bridge.report(group: .session, query: q)
             async let blocks = Bridge.blocks(q)
+            async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
 
             self.totals = try await totals
             self.daily = try await daily
@@ -156,6 +164,10 @@ final class InsightsModel {
             self.bySource = try await bySource
             self.bySession = try await bySession
             self.activeBlock = try await blocks.first(where: \.active)
+            self.workspaces = Self.buildWorkspaces(
+                projects: self.byProject,
+                split: try await split
+            )
             // A selection from before the reload may no longer exist, and a
             // stale row would sit in the inspector describing nothing.
             if let key = selected?.key {
@@ -178,6 +190,26 @@ final class InsightsModel {
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Attach each project's harnesses to it.
+    ///
+    /// Order comes from `projects`, which the archive already returns busiest
+    /// first, rather than from re-sorting the split. A project with no split
+    /// rows still appears: it has usage, so hiding it would be a lie about the
+    /// archive, even if the harness attribution is missing.
+    private static func buildWorkspaces(
+        projects: [Bucket],
+        split: [SplitBucket]
+    ) -> [Workspace] {
+        let byPath = Dictionary(grouping: split, by: \.key)
+        return projects.map { project in
+            Workspace(
+                path: project.key,
+                harnesses: byPath[project.key] ?? [],
+                tokens: project.counters.total
+            )
         }
     }
 

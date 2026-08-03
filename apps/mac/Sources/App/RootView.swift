@@ -54,6 +54,14 @@ struct RootView: View {
     @State private var model = InsightsModel()
     @State private var account = AccountModel()
     @State private var showInspector = true
+    /// Projects the user has collapsed. Stored as the exception rather than
+    /// the rule, so a newly discovered project arrives expanded.
+    @State private var collapsed: Set<String> = []
+
+    /// The archive holds every project ever touched, which on a working
+    /// machine is dozens. The sidebar shows the busiest and says how many it
+    /// left out rather than silently truncating.
+    private let workspaceLimit = 12
 
     var body: some View {
         NavigationSplitView {
@@ -99,77 +107,168 @@ struct RootView: View {
                     ) { destination = item }
                 }
 
-                // Tools come from the archive, so this list is the set of
-                // agents actually in use on this machine rather than a
-                // catalogue of what tokenstat could read.
-                SectionLabel(text: "Tools", count: model.bySource.count)
+                // Real folders from the archive, each with the harnesses that
+                // actually ran in it. Not a preview of Workspaces, the same
+                // data Workspaces will be built on.
+                SectionLabel(text: "Workspaces", count: model.workspaces.count)
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.top, Theme.Space.l)
                     .padding(.bottom, Theme.Space.xs)
 
-                if model.bySource.isEmpty {
-                    Text("Run a scan to see your tools.")
+                if model.workspaces.isEmpty {
+                    Text("Run a scan to see your projects.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, Theme.Space.m)
                         .padding(.vertical, Theme.Space.xs)
                 } else {
-                    ForEach(model.bySource) { row in
-                        SidebarRow(
-                            label: row.key.isEmpty ? "unknown" : row.key,
-                            symbol: "circle.fill",
-                            symbolSize: 6,
-                            trailing: formatTokens(row.counters.total),
-                            isSelected: destination == .insights
-                                && model.tab == .tools
-                                && model.selected?.key == row.key
-                        ) {
-                            destination = .insights
-                            model.tab = .tools
-                            model.selected = row
-                        }
+                    ForEach(model.workspaces.prefix(workspaceLimit)) { workspace in
+                        WorkspaceRow(
+                            workspace: workspace,
+                            isExpanded: expanded.contains(workspace.id),
+                            selectedHarness: selectedHarness(in: workspace),
+                            onToggle: { toggle(workspace) },
+                            onSelectProject: { select(project: workspace) },
+                            onSelectHarness: { select(harness: $0) }
+                        )
+                    }
+                    if model.workspaces.count > workspaceLimit {
+                        Text("and \(model.workspaces.count - workspaceLimit) more")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, Theme.Space.m)
+                            .padding(.vertical, Theme.Space.xs)
                     }
                 }
-
-                SectionLabel(text: "Account")
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.l)
-                    .padding(.bottom, Theme.Space.xs)
-
-                SidebarRow(
-                    label: account.account?.handle.map { "@\($0)" } ?? "Not signed in",
-                    symbol: Destination.account.symbol,
-                    isSelected: destination == .account
-                ) { destination = .account }
             }
             .padding(.bottom, Theme.Space.m)
         }
         .background(Theme.sidebar)
-        .navigationSplitViewColumnWidth(min: 190, ideal: 214, max: 280)
-        .safeAreaInset(edge: .bottom) { archiveFooter }
+        .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 300)
+        .safeAreaInset(edge: .bottom) { accountFooter }
     }
 
-    /// Which archive is on screen. A reporting tool that silently shows stale
-    /// numbers is worse than one that shows none, so this is chrome rather
-    /// than a detail view.
-    private var archiveFooter: some View {
+    /// Expanded by default, so the harnesses in a project are visible without
+    /// hunting. Collapsing is remembered per project instead.
+    private var expanded: Set<String> {
+        Set(model.workspaces.map(\.id)).subtracting(collapsed)
+    }
+
+    private func toggle(_ workspace: Workspace) {
+        if collapsed.contains(workspace.id) {
+            collapsed.remove(workspace.id)
+        } else {
+            collapsed.insert(workspace.id)
+        }
+    }
+
+    private func selectedHarness(in workspace: Workspace) -> String? {
+        guard destination == .insights, model.tab == .harnesses else { return nil }
+        return model.selected?.key
+    }
+
+    private func select(project workspace: Workspace) {
+        destination = .insights
+        model.tab = .projects
+        model.selected = model.byProject.first { $0.key == workspace.path }
+    }
+
+    private func select(harness row: SplitBucket) {
+        destination = .insights
+        model.tab = .harnesses
+        model.selected = model.bySource.first { $0.key == row.split }
+    }
+
+    /// Who is signed in, pinned to the bottom of the sidebar with a menu.
+    ///
+    /// The archive line that used to live here moved into the inspector, which
+    /// already had an Archive section. Two places saying where the numbers came
+    /// from was one too many, and this corner is where people look for their
+    /// account.
+    private var accountFooter: some View {
         VStack(spacing: 0) {
             Rectangle().fill(Theme.border).frame(height: 1)
-            HStack(spacing: Theme.Space.s) {
-                Circle()
-                    .fill(model.info == nil ? Color.secondary : Theme.secondary)
-                    .frame(width: 6, height: 6)
-                Text(model.info.map { "Local archive · \($0.timezone)" } ?? "Opening archive…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
+            Menu {
+                if account.signedIn {
+                    Button("Account settings") { destination = .account }
+                    Button("Sync now") { Task { await account.sync() } }
+                        .disabled(account.isSyncing)
+                    Divider()
+                    Button("Sign out") { Task { await account.signOut() } }
+                } else {
+                    Button("Sign in to tokenstat.ai") {
+                        destination = .account
+                        account.signIn()
+                    }
+                    Divider()
+                    Button("Account") { destination = .account }
+                }
+            } label: {
+                accountLabel
             }
-            .padding(.horizontal, Theme.Space.m)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
         }
         .background(Theme.sidebar)
+    }
+
+    /// Avatar, handle, plan, chevron.
+    ///
+    /// The plan sits beside the handle rather than as a badge on the avatar.
+    /// "Patron" is six characters and overflowed a 24pt circle, landing on top
+    /// of the name.
+    private var accountLabel: some View {
+        HStack(spacing: Theme.Space.s) {
+            ZStack {
+                Circle()
+                    .fill(account.signedIn ? Theme.accent.opacity(0.18) : Color.secondary.opacity(0.15))
+                if let initial = account.account?.handle?.first {
+                    Text(String(initial).uppercased())
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                } else {
+                    Image(systemName: "person.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 22, height: 22)
+
+            if account.isSyncing {
+                Text("Syncing…")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                HStack(spacing: Theme.Space.xs) {
+                    Text(account.account?.handle ?? "Not signed in")
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    if let tier = account.account?.tier, !tier.isEmpty {
+                        Text("·")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                        Text(tier.capitalized)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.accent)
+                            .lineLimit(1)
+                    }
+                }
+            }
+
+            Spacer(minLength: Theme.Space.xs)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 8))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, Theme.Space.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
     }
 
     // MARK: - Detail
@@ -223,6 +322,89 @@ struct RootView: View {
             )
         case .account:
             AccountView(model: account)
+        }
+    }
+}
+
+/// A project folder and the harnesses that ran in it.
+private struct WorkspaceRow: View {
+    var workspace: Workspace
+    var isExpanded: Bool
+    var selectedHarness: String?
+    var onToggle: () -> Void
+    var onSelectProject: () -> Void
+    var onSelectHarness: (SplitBucket) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: Theme.Space.xs) {
+                Button(action: onToggle) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 12)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                // Disabled rather than hidden, so rows stay aligned whether or
+                // not a project has harness attribution.
+                .disabled(workspace.harnesses.isEmpty)
+                .opacity(workspace.harnesses.isEmpty ? 0.25 : 1)
+
+                Button(action: onSelectProject) {
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Text(workspace.name)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: Theme.Space.xs)
+                        Text(formatTokens(workspace.tokens))
+                            .font(Theme.numeric(10))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                // The leaf name is what people call a project, but two
+                // checkouts of one repository share it, so the full path is a
+                // hover away.
+                .help(workspace.path)
+            }
+            .padding(.leading, Theme.Space.s)
+            .padding(.trailing, Theme.Space.m)
+            .padding(.vertical, 4)
+
+            if isExpanded {
+                ForEach(workspace.harnesses) { harness in
+                    Button {
+                        onSelectHarness(harness)
+                    } label: {
+                        HStack(spacing: Theme.Space.s) {
+                            Circle()
+                                .fill(Theme.secondary.opacity(0.7))
+                                .frame(width: 5, height: 5)
+                            Text(harnessName(harness.split))
+                                .font(.system(size: 11))
+                                .foregroundStyle(
+                                    selectedHarness == harness.split ? Color.primary : .secondary
+                                )
+                                .lineLimit(1)
+                            Spacer(minLength: Theme.Space.xs)
+                            Text(formatTokens(harness.counters.total))
+                                .font(Theme.numeric(10))
+                                .foregroundStyle(.quaternary)
+                        }
+                        .padding(.leading, 34)
+                        .padding(.trailing, Theme.Space.m)
+                        .padding(.vertical, 3)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 }

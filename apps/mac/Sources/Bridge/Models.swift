@@ -36,7 +36,7 @@ enum GroupBy: String, Sendable, CaseIterable, Identifiable {
         case .week: return "Week"
         case .model: return "Model"
         case .project: return "Project"
-        case .source: return "Tool"
+        case .source: return "Harness"
         case .session: return "Session"
         }
     }
@@ -319,4 +319,56 @@ func formatServerDate(_ raw: String?) -> String? {
         }
     }
     return raw
+}
+
+/// One row of a two-level report.
+struct SplitBucket: Codable, Sendable, Hashable, Identifiable {
+    var key: String
+    var split: String
+    var counters: Counters
+    var events: UInt64
+    var sessions: UInt64
+
+    var id: String { "\(key)\u{1}\(split)" }
+}
+
+/// A project folder with the harnesses that ran in it.
+struct Workspace: Identifiable, Hashable {
+    var path: String
+    var harnesses: [SplitBucket]
+    var tokens: UInt64
+
+    var id: String { path }
+
+    /// Last path component, which is what someone calls the project. The full
+    /// path stays available for the row's tooltip, since two checkouts of the
+    /// same repository share a leaf name.
+    var name: String {
+        let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
+        let leaf = trimmed.split(separator: "/").last.map(String.init)
+        return leaf?.isEmpty == false ? leaf! : (trimmed.isEmpty ? "unknown" : trimmed)
+    }
+}
+
+/// Display name for a harness, the agent CLI that produced the events.
+///
+/// The archive stores source ids like `claude_code`. These are shown to people,
+/// so they get the spelling the tool itself uses.
+func harnessName(_ id: String) -> String {
+    switch id {
+    case "claude_code": return "Claude Code"
+    case "claude_code_rollup": return "Claude Code (rollup)"
+    case "opencode": return "OpenCode"
+    case "codex": return "Codex"
+    case "cursor": return "Cursor"
+    case "copilot": return "Copilot"
+    case "antigravity": return "Antigravity"
+    case "antigravity_ide": return "Antigravity IDE"
+    case "grok": return "Grok"
+    case "cline": return "Cline"
+    case "zed": return "Zed"
+    case "openclaw": return "OpenClaw"
+    case "": return "unknown"
+    default: return id
+    }
 }
