@@ -36,13 +36,58 @@ final class InsightsModel {
         }
     }
 
+    /// Which breakdown the content pane is showing.
+    enum Tab: String, CaseIterable, Hashable {
+        case overview, models, projects, tools, sessions
+
+        var label: String {
+            switch self {
+            case .overview: return "Overview"
+            case .models: return "Models"
+            case .projects: return "Projects"
+            case .tools: return "Tools"
+            case .sessions: return "Sessions"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .overview: return "square.grid.2x2"
+            case .models: return "cpu"
+            case .projects: return "folder"
+            case .tools: return "wrench.and.screwdriver"
+            case .sessions: return "bubble.left.and.bubble.right"
+            }
+        }
+    }
+
     var info: Info?
     var totals: Totals?
     var daily: [Bucket] = []
     var byModel: [Bucket] = []
     var byProject: [Bucket] = []
     var bySource: [Bucket] = []
+    var bySession: [Bucket] = []
     var activeBlock: Block?
+
+    var tab: Tab = .overview {
+        didSet { if tab != oldValue { selected = nil } }
+    }
+
+    /// Row the inspector is describing. Cleared when the tab changes, because
+    /// a row from another breakdown would be describing something else.
+    var selected: Bucket?
+
+    /// Rows for the current tab. Overview has no single list of its own.
+    var rows: [Bucket] {
+        switch tab {
+        case .overview: return byModel
+        case .models: return byModel
+        case .projects: return byProject
+        case .tools: return bySource
+        case .sessions: return bySession
+        }
+    }
 
     var period: Period = .month {
         didSet { if period != oldValue { reload() } }
@@ -101,6 +146,7 @@ final class InsightsModel {
             async let byModel = Bridge.report(group: .model, query: q)
             async let byProject = Bridge.report(group: .project, query: q)
             async let bySource = Bridge.report(group: .source, query: q)
+            async let bySession = Bridge.report(group: .session, query: q)
             async let blocks = Bridge.blocks(q)
 
             self.totals = try await totals
@@ -108,7 +154,13 @@ final class InsightsModel {
             self.byModel = try await byModel
             self.byProject = try await byProject
             self.bySource = try await bySource
+            self.bySession = try await bySession
             self.activeBlock = try await blocks.first(where: \.active)
+            // A selection from before the reload may no longer exist, and a
+            // stale row would sit in the inspector describing nothing.
+            if let key = selected?.key {
+                selected = rows.first { $0.key == key }
+            }
         } catch is CancellationError {
             return
         } catch {

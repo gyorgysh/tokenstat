@@ -12,94 +12,63 @@ import SwiftUI
 struct InsightsView: View {
     @Bindable var model: InsightsModel
 
+    private var tabs: [(tab: InsightsModel.Tab, label: String, symbol: String)] {
+        InsightsModel.Tab.allCases.map { ($0, $0.label, $0.symbol) }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                if let message = model.errorMessage {
-                    ErrorBanner(message: message)
-                }
-
-                headline
-
-                Card(
-                    title: "Daily volume",
-                    subtitle: "Tokens per day, cache included"
-                ) {
-                    DailyChart(rows: model.daily)
-                }
-
-                HStack(alignment: .top, spacing: Theme.Space.l) {
-                    Card(title: "By model", subtitle: "List-rate value") {
-                        Breakdown(rows: model.byModel, showValue: true)
-                    }
-                    Card(title: "By tool", subtitle: "Where the tokens came from") {
-                        Breakdown(rows: model.bySource, showValue: false)
-                    }
-                }
-
-                Card(title: "By project", subtitle: "Local paths, never synced") {
-                    Breakdown(rows: model.byProject, showValue: false, limit: 8)
-                }
-
-                footnote
-            }
-            .padding(Theme.Space.l)
+        VStack(spacing: 0) {
+            TabStrip(tabs: tabs, selection: $model.tab)
+            content
         }
-        .navigationTitle("Insights")
+        .background(Theme.background)
         .toolbar { toolbar }
-        .overlay { if model.isLoading && model.totals == nil { ProgressView() } }
     }
 
-    private var headline: some View {
-        Card(
-            title: "This period",
-            subtitle: model.periodValue.caveat
-        ) {
-            HStack(alignment: .top, spacing: Theme.Space.l) {
-                Stat(
-                    label: "Value at list rates",
-                    value: model.periodValue.formatted,
-                    note: "not billed",
-                    tint: Theme.accent
-                )
-                Stat(
-                    label: "Tokens",
-                    value: formatTokens(model.totals?.counters.total ?? 0)
-                )
-                Stat(
-                    label: "Sessions",
-                    value: "\(model.totals?.sessions ?? 0)"
-                )
-                Stat(
-                    label: "Active days",
-                    value: "\(model.totals?.days ?? 0)"
-                )
+    @ViewBuilder
+    private var content: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let message = model.errorMessage {
+                    Banner(text: message)
+                }
+
+                switch model.tab {
+                case .overview:
+                    overview
+                case .models, .projects, .tools, .sessions:
+                    BreakdownTable(
+                        rows: model.rows,
+                        selected: $model.selected,
+                        showsValue: model.tab == .models,
+                        // A session id or a project path is read character by
+                        // character. A tool name is a word.
+                        monospaced: model.tab != .tools
+                    )
+                }
+            }
+            .padding(Theme.Space.m)
+        }
+        .overlay {
+            if model.isLoading && model.totals == nil {
+                ProgressView()
             }
         }
     }
 
-    /// The two facts that decide whether any number above can be trusted.
-    @ViewBuilder
-    private var footnote: some View {
-        if let info = model.info {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                if !info.hasPrices {
-                    Label(
-                        "No price book yet, so every value reads as zero. Run `tokenstat pricing --refresh`.",
-                        systemImage: "exclamationmark.triangle"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                } else {
-                    Text("Rates effective \(info.priceBookEffectiveFrom).")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Text("Everything here was read from this machine. Nothing left it.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+    private var overview: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
+                DailyChart(rows: model.daily)
             }
-            .padding(.top, Theme.Space.xs)
+            HStack(alignment: .top, spacing: Theme.Space.m) {
+                Card(title: "Top models", subtitle: "List-rate value") {
+                    MiniList(rows: model.byModel, showsValue: true, monospaced: true)
+                }
+                Card(title: "By tool", subtitle: "Where the tokens came from") {
+                    MiniList(rows: model.bySource, showsValue: false, monospaced: false)
+                }
+            }
         }
     }
 
@@ -129,16 +98,157 @@ struct InsightsView: View {
     }
 }
 
-private struct ErrorBanner: View {
-    var message: String
+// MARK: - Table
+
+/// The full breakdown for a tab. No sort controls: the archive already returns
+/// rows largest first, which is the order anyone wants.
+private struct BreakdownTable: View {
+    var rows: [Bucket]
+    @Binding var selected: Bucket?
+    var showsValue: Bool
+    var monospaced: Bool
 
     var body: some View {
-        Label(message, systemImage: "exclamationmark.triangle.fill")
-            .font(.callout)
-            .foregroundStyle(.orange)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        if rows.isEmpty {
+            EmptyHint(text: "Nothing recorded in this period.")
+        } else {
+            VStack(spacing: 0) {
+                header
+                ForEach(rows) { row in
+                    BreakdownRow(
+                        row: row,
+                        share: share(row),
+                        showsValue: showsValue,
+                        monospaced: monospaced,
+                        isSelected: selected?.key == row.key
+                    )
+                    .contentShape(.rect)
+                    .onTapGesture { selected = selected?.key == row.key ? nil : row }
+                    Divider().opacity(0.3)
+                }
+            }
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: Theme.Space.m) {
+            Text("NAME").frame(maxWidth: .infinity, alignment: .leading)
+            Text("SESSIONS").frame(width: 66, alignment: .trailing)
+            Text("TOKENS").frame(width: 66, alignment: .trailing)
+            if showsValue {
+                Text("VALUE").frame(width: 88, alignment: .trailing)
+            }
+        }
+        .font(Theme.sectionHeader)
+        .foregroundStyle(.tertiary)
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+
+    private func share(_ row: Bucket) -> Double {
+        let top = Double(rows.first?.counters.total ?? 1)
+        return min(1, Double(row.counters.total) / max(1, top))
+    }
+}
+
+private struct BreakdownRow: View {
+    var row: Bucket
+    var share: Double
+    var showsValue: Bool
+    var monospaced: Bool
+    var isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Space.m) {
+            Text(row.key.isEmpty ? "unknown" : row.key)
+                .font(monospaced ? Theme.mono(11) : .system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("\(row.sessions)")
+                .font(Theme.numeric(11))
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .trailing)
+
+            Text(formatTokens(row.counters.total))
+                .font(Theme.numeric(11))
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .trailing)
+
+            if showsValue {
+                Text(row.value.formatted)
+                    .font(Theme.numeric(11))
+                    .lineLimit(1)
+                    .frame(width: 88, alignment: .trailing)
+                    .help(row.value.caveat ?? "")
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .background(isSelected ? Theme.rowHighlight : .clear)
+        .overlay(alignment: .bottomLeading) {
+            // Share of the largest row, as a hairline along the bottom rather
+            // than its own column. The comparison is the point, the exact
+            // percentage is not.
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Theme.accent.opacity(0.55))
+                    .frame(width: geo.size.width * share, height: 1)
+                    .offset(y: geo.size.height - 1)
+            }
+        }
+    }
+}
+
+/// A short list for the overview cards.
+private struct MiniList: View {
+    var rows: [Bucket]
+    var showsValue: Bool
+    var monospaced: Bool
+    var limit: Int = 6
+
+    var body: some View {
+        if rows.isEmpty {
+            EmptyHint(text: "Nothing recorded yet.")
+        } else {
+            VStack(spacing: Theme.Space.s) {
+                ForEach(rows.prefix(limit)) { row in
+                    HStack(spacing: Theme.Space.m) {
+                        Text(row.key.isEmpty ? "unknown" : row.key)
+                            .font(monospaced ? Theme.mono(11) : .system(size: 12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(formatTokens(row.counters.total))
+                            .font(Theme.numeric(11))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 58, alignment: .trailing)
+                        if showsValue {
+                            Text(row.value.formatted)
+                                .font(Theme.numeric(11))
+                                .lineLimit(1)
+                                .frame(width: 84, alignment: .trailing)
+                                .help(row.value.caveat ?? "")
+                        }
+                    }
+                }
+                if rows.count > limit {
+                    Text("and \(rows.count - limit) more")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 }
 
@@ -155,7 +265,7 @@ private struct DailyChart: View {
                     y: .value("Tokens", Double(row.counters.total))
                 )
                 .foregroundStyle(Theme.accent.gradient)
-                .cornerRadius(2)
+                .cornerRadius(1)
             }
             .chartXAxis {
                 // One label per bar is unreadable at 90 days, and the exact
@@ -163,93 +273,27 @@ private struct DailyChart: View {
                 AxisMarks(values: .automatic(desiredCount: 6)) { value in
                     AxisValueLabel {
                         if let day = value.as(String.self) {
-                            Text(day.suffix(5))
-                                .font(.caption2)
+                            Text(day.suffix(5)).font(.caption2)
                         }
                     }
                 }
             }
             .chartYAxis {
                 AxisMarks { value in
-                    AxisGridLine()
+                    AxisGridLine().foregroundStyle(Theme.border)
                     AxisValueLabel {
                         if let tokens = value.as(Double.self) {
-                            Text(formatTokens(UInt64(max(0, tokens))))
-                                .font(.caption2)
+                            Text(formatTokens(UInt64(max(0, tokens)))).font(.caption2)
                         }
                     }
                 }
             }
-            .frame(height: 190)
+            .frame(height: 170)
         }
     }
 }
 
-private struct Breakdown: View {
-    var rows: [Bucket]
-    var showValue: Bool
-    var limit: Int = 6
-
-    private var shown: ArraySlice<Bucket> { rows.prefix(limit) }
-    private var maxTokens: Double {
-        Double(rows.first?.counters.total ?? 1)
-    }
-
-    var body: some View {
-        if rows.isEmpty {
-            EmptyHint(text: "Nothing recorded yet.")
-        } else {
-            VStack(spacing: Theme.Space.s) {
-                ForEach(shown) { row in
-                    HStack(spacing: Theme.Space.m) {
-                        Text(row.key.isEmpty ? "unknown" : row.key)
-                            .font(.callout)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Text(formatTokens(row.counters.total))
-                            .font(Theme.numeric(12))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 58, alignment: .trailing)
-
-                        if showValue {
-                            Text(row.value.formatted)
-                                .font(Theme.numeric(12))
-                                .lineLimit(1)
-                                .frame(width: 96, alignment: .trailing)
-                                .help(row.value.caveat ?? "")
-                        }
-                    }
-                    .overlay(alignment: .bottomLeading) {
-                        // A share bar behind the row rather than a separate
-                        // column: the comparison is the point, the exact
-                        // percentage is not.
-                        GeometryReader { geo in
-                            Capsule()
-                                .fill(Theme.secondary.opacity(0.22))
-                                .frame(
-                                    width: geo.size.width
-                                        * min(1, Double(row.counters.total) / max(1, maxTokens)),
-                                    height: 2
-                                )
-                        }
-                        .frame(height: 2)
-                        .offset(y: 3)
-                    }
-                }
-                if rows.count > limit {
-                    Text("and \(rows.count - limit) more")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-}
-
-private struct EmptyHint: View {
+struct EmptyHint: View {
     var text: String
 
     var body: some View {
@@ -258,5 +302,20 @@ private struct EmptyHint: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, Theme.Space.s)
+    }
+}
+
+struct Banner: View {
+    var text: String
+    var tint: Color = .orange
+    var symbol: String = "exclamationmark.triangle.fill"
+
+    var body: some View {
+        Label(text, systemImage: symbol)
+            .font(.callout)
+            .foregroundStyle(tint)
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 }

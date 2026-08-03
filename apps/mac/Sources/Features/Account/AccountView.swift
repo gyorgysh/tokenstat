@@ -196,18 +196,3 @@ private struct SignInCode: View {
         }
     }
 }
-
-private struct Banner: View {
-    var text: String
-    var tint: Color
-    var symbol: String
-
-    var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.callout)
-            .foregroundStyle(tint)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-    }
-}

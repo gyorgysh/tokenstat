@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-/// The four top level destinations from the desktop plan.
+/// The top level destinations from the desktop plan.
 ///
 /// Insights is the only one built. The rest are listed because the shape of the
 /// product is the point: this is a workspace runner that happens to know what
@@ -53,12 +53,17 @@ struct RootView: View {
     @State private var destination: Destination = .insights
     @State private var model = InsightsModel()
     @State private var account = AccountModel()
+    @State private var showInspector = true
 
     var body: some View {
         NavigationSplitView {
             sidebar
         } detail: {
             detail
+                .inspector(isPresented: inspectorBinding) {
+                    InspectorView(model: model)
+                        .inspectorColumnWidth(min: 240, ideal: 280, max: 380)
+                }
         }
         .task { await model.load() }
         // Loaded up front, not on first visit, so the sidebar can show the
@@ -66,36 +71,90 @@ struct RootView: View {
         .task { await account.load() }
     }
 
+    /// The inspector describes a report, so it only exists on Insights. Bound
+    /// through a computed binding rather than hidden, so toggling it on one
+    /// screen does not silently change another.
+    private var inspectorBinding: Binding<Bool> {
+        Binding(
+            get: { showInspector && destination == .insights },
+            set: { showInspector = $0 }
+        )
+    }
+
+    // MARK: - Sidebar
+
     private var sidebar: some View {
-        List(selection: $destination) {
-            Section {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel(text: "Workspace")
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.s)
+                    .padding(.bottom, Theme.Space.xs)
+
                 ForEach(Destination.workDestinations) { item in
-                    Label(item.label, systemImage: item.symbol)
-                        .tag(item)
+                    SidebarRow(
+                        label: item.label,
+                        symbol: item.symbol,
+                        isSelected: destination == item
+                    ) { destination = item }
                 }
-            }
-            Section {
-                Label {
-                    // The handle when there is one: an account screen that does
-                    // not say who is signed in makes you open it to find out.
-                    Text(account.account?.handle.map { "@\($0)" } ?? Destination.account.label)
-                } icon: {
-                    Image(systemName: Destination.account.symbol)
+
+                // Tools come from the archive, so this list is the set of
+                // agents actually in use on this machine rather than a
+                // catalogue of what tokenstat could read.
+                SectionLabel(text: "Tools", count: model.bySource.count)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.l)
+                    .padding(.bottom, Theme.Space.xs)
+
+                if model.bySource.isEmpty {
+                    Text("Run a scan to see your tools.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.vertical, Theme.Space.xs)
+                } else {
+                    ForEach(model.bySource) { row in
+                        SidebarRow(
+                            label: row.key.isEmpty ? "unknown" : row.key,
+                            symbol: "circle.fill",
+                            symbolSize: 6,
+                            trailing: formatTokens(row.counters.total),
+                            isSelected: destination == .insights
+                                && model.tab == .tools
+                                && model.selected?.key == row.key
+                        ) {
+                            destination = .insights
+                            model.tab = .tools
+                            model.selected = row
+                        }
+                    }
                 }
-                .tag(Destination.account)
+
+                SectionLabel(text: "Account")
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.l)
+                    .padding(.bottom, Theme.Space.xs)
+
+                SidebarRow(
+                    label: account.account?.handle.map { "@\($0)" } ?? "Not signed in",
+                    symbol: Destination.account.symbol,
+                    isSelected: destination == .account
+                ) { destination = .account }
             }
+            .padding(.bottom, Theme.Space.m)
         }
-        .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
+        .background(Theme.sidebar)
+        .navigationSplitViewColumnWidth(min: 190, ideal: 214, max: 280)
         .safeAreaInset(edge: .bottom) { archiveFooter }
     }
 
-    /// Which archive is on screen, and when it was last read.
-    ///
-    /// A reporting tool that silently shows stale numbers is worse than one
-    /// that shows none, so this is chrome rather than a detail view.
+    /// Which archive is on screen. A reporting tool that silently shows stale
+    /// numbers is worse than one that shows none, so this is chrome rather
+    /// than a detail view.
     private var archiveFooter: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Divider()
+        VStack(spacing: 0) {
+            Rectangle().fill(Theme.border).frame(height: 1)
             HStack(spacing: Theme.Space.s) {
                 Circle()
                     .fill(model.info == nil ? Color.secondary : Theme.secondary)
@@ -104,17 +163,32 @@ struct RootView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
             }
             .padding(.horizontal, Theme.Space.m)
-            .padding(.bottom, Theme.Space.s)
+            .padding(.vertical, Theme.Space.s)
         }
+        .background(Theme.sidebar)
     }
+
+    // MARK: - Detail
 
     @ViewBuilder
     private var detail: some View {
         switch destination {
         case .insights:
             InsightsView(model: model)
+                .toolbar {
+                    ToolbarItem {
+                        Button {
+                            showInspector.toggle()
+                        } label: {
+                            Label("Inspector", systemImage: "sidebar.trailing")
+                        }
+                        .help("Show or hide the details pane")
+                    }
+                }
         case .workspaces:
             NotBuiltYet(
                 title: "Workspaces",
@@ -150,5 +224,54 @@ struct RootView: View {
         case .account:
             AccountView(model: account)
         }
+    }
+}
+
+/// One row in the sidebar.
+///
+/// Hand rolled rather than a `List` row: the reference layout puts a stat on
+/// the trailing edge of every row, and `List` selection styling fights that
+/// with its own capsule.
+private struct SidebarRow: View {
+    var label: String
+    var symbol: String
+    var symbolSize: CGFloat = 11
+    var trailing: String?
+    var isSelected: Bool
+    var action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: symbol)
+                    .font(.system(size: symbolSize))
+                    .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                    .frame(width: 14)
+                Text(label)
+                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: Theme.Space.xs)
+                if let trailing {
+                    Text(trailing)
+                        .font(Theme.numeric(10))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, 5)
+            .background(background)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+
+    private var background: some View {
+        RoundedRectangle(cornerRadius: 5)
+            .fill(isSelected ? Theme.rowHighlight : (isHovering ? Theme.rowHighlight.opacity(0.5) : .clear))
+            .padding(.horizontal, Theme.Space.xs)
     }
 }
