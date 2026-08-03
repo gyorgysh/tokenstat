@@ -9,6 +9,15 @@ rust-version = "1.85"
 authors = ["tokenstat contributors"]
 repository = "https://github.com/gyorgysh/tokenstat"
 homepage = "https://tokenstat.ai"
+# Source-available, not open source: read it, study it, build it for yourself,
+# but publishing a copy or a build is reserved. SPDX has no identifier for
+# terms like these, so the licence text itself is the reference. The name is
+# not part of the grant either. See LICENSE and TRADEMARK.md.
+license-file = "LICENSE"
+# These crates are not published to crates.io. A registry upload is a
+# redistribution under a licence that does not permit one, so the manifest
+# refuses it rather than leaving it to a habit.
+publish = false
 
 [workspace.dependencies]
 tokenstat-core = { path = "crates/tokenstat-core", version = "0.1.3" }

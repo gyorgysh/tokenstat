@@ -1,5 +1,30 @@
 # Contributing
 
+## Code contributions are not accepted
+
+This repository does not take pull requests. Please do not open one: it will be
+closed unread, which wastes your time and is a rude way to treat work somebody
+did in good faith. Saying so here is the only way to prevent that.
+
+**Issues are very welcome**, and are the more useful thing anyway:
+
+- a harness tokenstat does not read yet, with the shape of its log files
+- counts that disagree with what the tool itself reports, with both numbers
+- a crash, or a parser that skips rows it should not
+- anything in the privacy claim that does not match what the code does
+
+Why closed. Every contributor keeps copyright in their work, so a merged patch
+makes them a co-owner. pueev OÜ ships the desktop and mobile applications, which
+is possible precisely because pueev owns all of this. One merged patch would end
+that permanently, and the rights cannot be collected afterwards. The alternative
+is a contributor licence agreement, which is a real imposition to place on
+somebody fixing a typo.
+
+So: the source is readable, the reports are open, and the door for patches is
+shut on purpose. The whole repository is source-available and not open source:
+read it, study it, fork it, build it, run your build. Publishing a copy or a
+build is reserved. See `LICENSE`.
+
 ## Language
 
 Everything in this repository is written in English: code, comments, commit

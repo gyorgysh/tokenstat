@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
+// licensed with the code. See TRADEMARK.md.
+
 //! Development tasks. Not shipped to users.
 //!
 //! `redact` turns a real session log into a committable fixture.

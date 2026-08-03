@@ -1,0 +1,46 @@
+# Trademark notice
+
+**"tokenstat", "tokenstat.ai", and the tokenstat logo and wordmark are
+trademarks of pueev OÜ.** They are not licensed with the source code.
+
+This notice restates section 5 of `LICENSE`, which grants no trademark rights.
+It restricts nothing about the code beyond what that licence already says.
+
+## What you may do
+
+The code is source-available: you may read it, study it, fork it, modify your
+own copy, and build and run it on your own machines. See `LICENSE` for the full
+terms. None of that requires any use of the marks.
+
+## What the marks do not permit
+
+Without written permission from pueev OÜ, you may not use the tokenstat name,
+logo, or wordmark:
+
+- as the name of a modified version, or of any product or service built from
+  this code,
+- in a way that suggests your version is the official one, is endorsed by
+  pueev OÜ, or is affiliated with it,
+- as, or as part of, the name of an application published to any app store or
+  software marketplace,
+- in a domain name, account handle, or package name that could be mistaken for
+  an official one.
+
+Nominative use stays fine. Saying that your project is "a fork of tokenstat",
+"compatible with tokenstat", or "based on tokenstat" is accurate description,
+not a trademark claim, and needs no permission.
+
+`LICENSE` does not let you distribute a modified version at all. If pueev OÜ
+ever grants written permission for one, it comes with a different name, so
+users can still tell whose build they are running.
+
+## Why this exists
+
+The guarantee tokenstat makes is about data: what is read, what is kept, and
+what may leave the machine. A user can only rely on that guarantee if they can
+tell an official build from a modified one. A name that anyone may apply to any
+build makes the promise unverifiable.
+
+## Contact
+
+Permission requests: the address listed at https://tokenstat.ai.

@@ -1,3 +1,11 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
+// licensed with the code. See TRADEMARK.md.
+
 //! MCP server over the local tokenstat archive.
 //!
 //! Speaks JSON-RPC 2.0 with MCP Content-Length framing on stdio. Read-only by

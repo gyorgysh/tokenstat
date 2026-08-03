@@ -13,7 +13,8 @@ This repository contains the CLI, the shared core library, and the MCP server.
 It does not contain the website. Native desktop apps, if any, will come later
 as separate clients over the core or CLI.
 
-Licensed GPL-3.0. Forks must stay open source. The hosted service is separate.
+Source-available under `LICENSE`, not open source: readable and auditable, not
+redistributable. The hosted service is separate.
 
 ## Start here
 

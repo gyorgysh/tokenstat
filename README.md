@@ -5,7 +5,7 @@
 Unified token usage for AI coding agents and LLM tools.
 
 [![CI](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml/badge.svg)](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml)
-[![License: GPL v3](https://img.shields.io/github/license/gyorgysh/tokenstat)](LICENSE)
+[![License: source-available](https://img.shields.io/badge/license-source--available-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/gyorgysh/tokenstat)](https://github.com/gyorgysh/tokenstat/releases)
 [![website](https://img.shields.io/badge/website-tokenstat.ai-9F68C7)](https://tokenstat.ai)
 
@@ -266,8 +266,28 @@ format, and release steps.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+**Source-available, not open source.** One licence covers the whole
+repository: see [LICENSE](LICENSE).
 
-The CLI and the core library stay open source. Forks and modifications are
-welcome and must remain under the same license, so nobody can turn this into a
-closed source paid product. The hosted profile service is a separate project.
+Every line is published so it can be read. tokenstat's claim is about what
+happens to your data, and a claim nobody can check is marketing. So: read it,
+study it, fork it on GitHub, build it, run your build on your own machines,
+and say publicly what you find. Trust, and verify.
+
+What is reserved is publication. You may not redistribute the source or a
+build of it, put it in another product, or offer it as a service. pueev OÜ
+ships the only builds of tokenstat, on every platform. The name is not part of
+the grant either: **"tokenstat" and the tokenstat logo are trademarks of
+pueev OÜ**. See [TRADEMARK.md](TRADEMARK.md).
+
+Releases up to v0.1.3 went out under GPL-3.0. That grant stands for those
+versions and cannot be withdrawn. The licence above governs everything from
+here.
+
+### Contributions
+
+This repository does not accept pull requests, so that pueev OÜ remains the sole
+copyright holder and can keep shipping the applications. **Issues are very
+welcome** and are the more useful thing anyway: a harness that is not read yet,
+counts that disagree with the tool itself, or anything in the privacy claim that
+does not match the code. See [CONTRIBUTING.md](CONTRIBUTING.md).
