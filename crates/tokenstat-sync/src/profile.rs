@@ -110,6 +110,10 @@ fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
     // No cookie jar: bearer routes must not attach a web session cookie.
     Ok(reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
+        // A dead network must fail fast, not eat the whole request timeout.
+        // `timeout` covers connect, but the OS default connect phase can be
+        // far longer than ten seconds on a network that drops packets.
+        .connect_timeout(Duration::from_secs(10))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::none())
         .build()?)

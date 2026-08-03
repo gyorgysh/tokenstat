@@ -14,9 +14,11 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::Deserialize;
 
+use crate::catalog::Catalog;
 use crate::error::CoreError;
 use crate::model::{BillingMode, Counters};
 
@@ -45,10 +47,23 @@ struct RawSnapshot {
 }
 
 /// A dated set of model prices.
+///
+/// Optionally backed by the model catalog. The catalog never widens the list
+/// rates: it is consulted only after the book comes up empty, and anything it
+/// answers is flagged by [`PriceTable::is_estimate`] so it renders with `~`.
 #[derive(Debug, Clone, Default)]
 pub struct PriceTable {
     pub effective_from: String,
     by_pattern: BTreeMap<String, Rates>,
+    /// Every matchable stem across all patterns (length ≥ 4), longest first,
+    /// built once at parse time.
+    ///
+    /// Matching walks this instead of recomputing `lookup_keys` for every
+    /// pattern on every call. The book is thousands of patterns wide, and
+    /// rebuilding that list per lookup was the single biggest cost in model
+    /// tables.
+    stems: Vec<(String, Rates)>,
+    catalog: Option<Arc<Catalog>>,
 }
 
 impl PriceTable {
@@ -74,15 +89,35 @@ impl PriceTable {
         Self::parse(&contents)
     }
 
+    /// Load the price book together with the model catalog, so models the book
+    /// has never heard of can still show a marked estimate.
+    pub fn load_with_catalog() -> PriceTable {
+        Self::load().with_catalog(Arc::new(Catalog::load()))
+    }
+
+    /// Attach an already loaded catalog. Cheap: the catalog is shared, not copied.
+    pub fn with_catalog(mut self, catalog: Arc<Catalog>) -> PriceTable {
+        self.catalog = (!catalog.is_empty()).then_some(catalog);
+        self
+    }
+
+    /// The attached catalog, if one was loaded.
+    pub fn catalog(&self) -> Option<&Catalog> {
+        self.catalog.as_deref()
+    }
+
     pub fn parse(contents: &str) -> Option<PriceTable> {
         let raw: RawSnapshot = serde_json::from_str(contents).ok()?;
+        let by_pattern: BTreeMap<String, Rates> = raw
+            .models
+            .into_iter()
+            .map(|m| (m.pattern, m.rates))
+            .collect();
         Some(PriceTable {
             effective_from: raw.effective_from,
-            by_pattern: raw
-                .models
-                .into_iter()
-                .map(|m| (m.pattern, m.rates))
-                .collect(),
+            stems: build_stems(&by_pattern),
+            by_pattern,
+            catalog: None,
         })
     }
 
@@ -102,24 +137,14 @@ impl PriceTable {
     /// Look up a model in the on-disk snapshot only (no estimate fallbacks).
     pub fn table_rates_for(&self, model: &str) -> Option<Rates> {
         let model_keys = lookup_keys(model);
-        let mut best: Option<(usize, Rates)> = None;
-        for (pattern, rates) in &self.by_pattern {
-            for pk in lookup_keys(pattern) {
-                // Skip tiny stems that would false-match too widely (`gpt`, `o1`).
-                if pk.len() < 4 {
-                    continue;
-                }
-                for mk in &model_keys {
-                    if mk.starts_with(pk.as_str()) {
-                        let score = pk.len();
-                        if best.map(|(s, _)| score > s).unwrap_or(true) {
-                            best = Some((score, *rates));
-                        }
-                    }
-                }
+        // Stems are sorted longest first, so the first match is the most
+        // specific pattern for this model. No need to keep scoring the rest.
+        for (stem, rates) in &self.stems {
+            if model_keys.iter().any(|mk| mk.starts_with(stem.as_str())) {
+                return Some(*rates);
             }
         }
-        best.map(|(_, r)| r)
+        None
     }
 
     /// Look up a model, tolerating vendor prefixes and capability suffixes.
@@ -140,7 +165,32 @@ impl PriceTable {
             return estimate_rates(model);
         }
         self.table_rates_for(model)
-            .or_else(|| estimate_rates(model))
+            .or_else(|| self.fallback_rates(model))
+    }
+
+    /// Rates from outside the price book: a built-in floor, then the catalog's
+    /// canonical offer. Everything here is an estimate by definition.
+    fn fallback_rates(&self, model: &str) -> Option<Rates> {
+        estimate_rates(model).or_else(|| self.catalog.as_ref()?.estimate_rates(model))
+    }
+
+    /// Where an estimated figure came from, for the note under a report.
+    ///
+    /// `None` when the model priced from the book, or did not price at all.
+    pub fn estimate_source(&self, model: &str) -> Option<EstimateSource> {
+        if is_cursor_router_id(model) {
+            return Some(EstimateSource::CursorRouterFloor);
+        }
+        if self.table_rates_for(model).is_some() {
+            return None;
+        }
+        if estimate_rates(model).is_some() {
+            return Some(EstimateSource::CursorRouterFloor);
+        }
+        self.catalog
+            .as_ref()?
+            .estimate_rates(model)
+            .map(|_| EstimateSource::Catalog)
     }
 
     /// True when we can produce a list-rate or estimate figure for this model.
@@ -159,7 +209,7 @@ impl PriceTable {
         if is_cursor_router_id(model) {
             return true;
         }
-        self.table_rates_for(model).is_none() && estimate_rates(model).is_some()
+        self.table_rates_for(model).is_none() && self.fallback_rates(model).is_some()
     }
 
     /// Value of these counters at list rates, in micros of a dollar.
@@ -175,6 +225,15 @@ impl PriceTable {
             + per(c.cache_write_1h, r.cache_write_1h);
         Some((dollars * 1_000_000.0).round() as i64)
     }
+}
+
+/// Why a figure is marked `~` rather than presented as a list rate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstimateSource {
+    /// Cursor Auto priced at the Composer 2.5 floor.
+    CursorRouterFloor,
+    /// A provider offer from the model catalog, not the list-rate book.
+    Catalog,
 }
 
 /// Composer 2.5 standard list rates (cursor.com/blog/composer-2-5), used as a
@@ -235,8 +294,33 @@ fn estimate_rates(model: &str) -> Option<Rates> {
     None
 }
 
+/// Flatten every pattern's matchable keys into one longest-first list.
+///
+/// A pattern contributes one entry per key it can match, so `claude-opus-5`
+/// and `claude` both point at the same rates. The longest stem that is a
+/// prefix of a model key decides the price, which preserves the old
+/// "longest match wins" rule without recomputing keys on every lookup.
+fn build_stems(by_pattern: &BTreeMap<String, Rates>) -> Vec<(String, Rates)> {
+    let mut stems: Vec<(String, Rates)> = Vec::new();
+    for (pattern, rates) in by_pattern {
+        for pk in lookup_keys(pattern) {
+            // Skip tiny stems that would false-match too widely (`gpt`, `o1`).
+            if pk.len() >= 4 {
+                stems.push((pk, *rates));
+            }
+        }
+    }
+    // Stable, so equal-length stems keep pattern order and ties break the way
+    // they always did.
+    stems.sort_by_key(|(stem, _)| std::cmp::Reverse(stem.len()));
+    stems
+}
+
 /// Keys to try when resolving a log model id against the price book.
-fn lookup_keys(model: &str) -> Vec<String> {
+///
+/// Shared with the catalog so a model id resolves the same way in both, and a
+/// row cannot be priced from one book but described from a different model.
+pub(crate) fn lookup_keys(model: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     let push = |keys: &mut Vec<String>, s: String| {
         let t = s.trim().to_ascii_lowercase();

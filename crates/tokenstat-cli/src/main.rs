@@ -81,7 +81,14 @@ enum Command {
     /// Usage per month
     Monthly(Window),
     /// Usage per model
-    Models(Window),
+    Models {
+        #[command(flatten)]
+        window: Window,
+        /// Add what the catalog knows: publisher, context window, capabilities,
+        /// and public benchmark scores. Needs `tokenstat catalog --refresh`.
+        #[arg(long)]
+        detail: bool,
+    },
     /// Usage per project
     Projects(Window),
     /// Usage per session, busiest first
@@ -193,6 +200,25 @@ enum Command {
         /// Accept rate moves greater than 50% vs the prior snapshot
         #[arg(long)]
         force: bool,
+    },
+    /// Model catalog from tokenstat.ai's local snapshot
+    ///
+    /// Publisher, context window, capabilities, and public benchmark scores for
+    /// the models in your archive. Also supplies a marked estimate for models
+    /// the list-rate book has never heard of, so they stop showing a dash.
+    Catalog {
+        /// Download fresh catalog and plans snapshots into the data directory
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// Subscription plans from tokenstat.ai's local snapshot
+    ///
+    /// Product prices, not API list rates, shown next to what your own usage
+    /// would have cost per token. Refresh them with `tokenstat catalog --refresh`.
+    Plans {
+        /// Only plans from this vendor, for example `anthropic`
+        #[arg(long)]
+        vendor: Option<String>,
     },
     /// Soft spend caps against list-rate equivalent value
     ///
@@ -393,6 +419,15 @@ fn main() -> Result<()> {
         return render::pricing(refresh, force, cli.json);
     }
 
+    if let Command::Catalog { refresh } = command {
+        return render::catalog(refresh, cli.json);
+    }
+
+    if let Command::Plans { ref vendor } = command {
+        let store = Store::open(&db_path)?;
+        return render::plans(&store, &tz, vendor.as_deref(), cli.json);
+    }
+
     if let Command::Budget {
         daily,
         monthly,
@@ -547,6 +582,8 @@ fn main() -> Result<()> {
         | Command::Fetch { .. }
         | Command::Auth { .. }
         | Command::Pricing { .. }
+        | Command::Catalog { .. }
+        | Command::Plans { .. }
         | Command::Budget { .. }
         | Command::Update { .. }
         | Command::Login { .. }
@@ -560,8 +597,13 @@ fn main() -> Result<()> {
             render::grouped(&store, GroupBy::Week, &w.to_query(&tz), "Week", cli.json)?
         }
         Command::Monthly(w) => render::monthly(&store, &w.to_query(&tz), cli.json)?,
-        Command::Models(w) => {
-            render::grouped(&store, GroupBy::Model, &w.to_query(&tz), "Model", cli.json)?
+        Command::Models { window, detail } => {
+            let q = window.to_query(&tz);
+            if detail {
+                render::models_detail(&store, &q, cli.json)?
+            } else {
+                render::grouped(&store, GroupBy::Model, &q, "Model", cli.json)?
+            }
         }
         Command::Projects(w) => render::grouped(
             &store,

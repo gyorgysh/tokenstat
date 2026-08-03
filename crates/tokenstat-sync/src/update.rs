@@ -119,6 +119,7 @@ pub fn current_target() -> &'static str {
 fn client() -> Result<reqwest::blocking::Client, UpdateError> {
     Ok(reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()?)
@@ -270,6 +271,7 @@ fn download_asset(
     let url = api_url.unwrap_or(browser_url);
     let no_redirect = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
         .redirect(reqwest::redirect::Policy::none())
         .build()?;

@@ -2,17 +2,12 @@
 //! Core only reads the resulting file, it never fetches.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
-use atomicwrites::{AllowOverwrite, AtomicFile};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tokenstat_core::PriceTable;
 
-use crate::{config, host};
-
-const ETAG_FILE: &str = "current.etag";
+use crate::snapshot::{self, Fetched, moved_over_half, validate_effective_from};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -32,13 +27,6 @@ struct OutSnapshot {
     effective_from: String,
     note: String,
     models: Vec<OutModel>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct EtagMetadata {
-    etag: String,
-    snapshot_sha256: String,
 }
 
 #[derive(Debug)]
@@ -61,12 +49,7 @@ pub fn refresh(force: bool) -> anyhow::Result<PricingRefresh> {
 }
 
 fn pricing_url() -> anyhow::Result<String> {
-    let env_host = std::env::var("TOKENSTAT_API_BASE")
-        .ok()
-        .filter(|host| !host.trim().is_empty());
-    let saved = config::load()?;
-    let base = host::resolve_host(None, env_host.as_deref(), saved.sync.host.as_deref())?;
-    Ok(format!("{base}/api/v1/pricing/current"))
+    snapshot::api_url("/api/v1/pricing/current")
 }
 
 fn refresh_from_url(url: &str, force: bool) -> anyhow::Result<PricingRefresh> {
@@ -75,37 +58,21 @@ fn refresh_from_url(url: &str, force: bool) -> anyhow::Result<PricingRefresh> {
 }
 
 fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<PricingRefresh> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
-        .build()?;
-    let etag_path = path.with_file_name(ETAG_FILE);
-    let mut request = client.get(url);
-    if let Some(etag) = read_etag(path, &etag_path) {
-        request = request.header(reqwest::header::IF_NONE_MATCH, etag);
-    }
-    let resp = request.send()?;
-    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
-        if !path.exists() {
-            anyhow::bail!("pricing API returned 304 but no local snapshot exists");
+    let (body, etag) = match snapshot::fetch_conditional(url, path, 60)? {
+        Fetched::NotModified => {
+            if !path.exists() {
+                anyhow::bail!("pricing API returned 304 but no local snapshot exists");
+            }
+            let snapshot = load_snapshot(path)?;
+            return Ok(PricingRefresh {
+                path: path.into(),
+                models: snapshot.models.len(),
+                effective_from: snapshot.effective_from,
+                large_moves: Vec::new(),
+            });
         }
-        let snapshot = load_snapshot(path)?;
-        return Ok(PricingRefresh {
-            path: path.into(),
-            models: snapshot.models.len(),
-            effective_from: snapshot.effective_from,
-            large_moves: Vec::new(),
-        });
-    }
-    if !resp.status().is_success() {
-        anyhow::bail!("tokenstat.ai pricing API returned {}", resp.status());
-    }
-    let etag = resp
-        .headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
-    let body = resp.text()?;
+        Fetched::Body { text, etag } => (text, etag),
+    };
     let snapshot = parse_snapshot(&body)?;
     let large_moves = detect_large_moves(path, &snapshot);
     if !large_moves.is_empty() && !force {
@@ -121,32 +88,13 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
         );
     }
     let json = serde_json::to_string_pretty(&snapshot)?;
-    write_private_atomically(path, &json)?;
-    if let Some(etag) = etag {
-        let metadata = EtagMetadata {
-            etag,
-            snapshot_sha256: snapshot_sha256(&json),
-        };
-        write_private_atomically(&etag_path, &serde_json::to_string(&metadata)?)?;
-    } else if etag_path.exists() {
-        fs::remove_file(&etag_path)?;
-    }
+    snapshot::store(path, &json, etag)?;
     Ok(PricingRefresh {
         path: path.into(),
         models: snapshot.models.len(),
         effective_from: snapshot.effective_from,
         large_moves,
     })
-}
-
-fn read_etag(snapshot_path: &Path, etag_path: &Path) -> Option<String> {
-    let metadata: EtagMetadata = serde_json::from_str(&fs::read_to_string(etag_path).ok()?).ok()?;
-    let snapshot = fs::read_to_string(snapshot_path).ok()?;
-    (metadata.snapshot_sha256 == snapshot_sha256(&snapshot)).then_some(metadata.etag)
-}
-
-fn snapshot_sha256(snapshot: &str) -> String {
-    format!("{:x}", Sha256::digest(snapshot.as_bytes()))
 }
 
 fn load_snapshot(path: &Path) -> anyhow::Result<OutSnapshot> {
@@ -157,13 +105,7 @@ fn load_snapshot(path: &Path) -> anyhow::Result<OutSnapshot> {
 fn parse_snapshot(body: &str) -> anyhow::Result<OutSnapshot> {
     let snapshot: OutSnapshot =
         serde_json::from_str(body).map_err(|e| anyhow::anyhow!("invalid pricing snapshot: {e}"))?;
-    if snapshot
-        .effective_from
-        .parse::<jiff::civil::Date>()
-        .is_err()
-    {
-        anyhow::bail!("invalid pricing snapshot: effective_from must be YYYY-MM-DD");
-    }
+    validate_effective_from(&snapshot.effective_from, "pricing")?;
     if snapshot.note.trim().is_empty() {
         anyhow::bail!("invalid pricing snapshot: note must not be empty");
     }
@@ -193,25 +135,6 @@ fn parse_snapshot(body: &str) -> anyhow::Result<OutSnapshot> {
     Ok(snapshot)
 }
 
-fn write_private_atomically(path: &Path, contents: &str) -> anyhow::Result<()> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("pricing path has no parent directory"))?;
-    fs::create_dir_all(parent)?;
-    AtomicFile::new(path, AllowOverwrite)
-        .write(|file| {
-            file.write_all(contents.as_bytes())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                file.set_permissions(fs::Permissions::from_mode(0o600))?;
-            }
-            Ok::<(), std::io::Error>(())
-        })
-        .map_err(|err| anyhow::anyhow!("writing {} atomically: {err}", path.display()))?;
-    Ok(())
-}
-
 fn detect_large_moves(path: &Path, next: &OutSnapshot) -> Vec<String> {
     let Some(prev) = PriceTable::load_from(path) else {
         return Vec::new();
@@ -237,13 +160,6 @@ fn detect_large_moves(path: &Path, next: &OutSnapshot) -> Vec<String> {
     out
 }
 
-fn moved_over_half(old: f64, new: f64) -> bool {
-    if old <= 0.0 {
-        return new > 0.0;
-    }
-    ((new - old).abs() / old) > 0.5
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Write};
@@ -252,6 +168,9 @@ mod tests {
     use std::thread;
 
     use super::*;
+    use crate::snapshot::{
+        EtagMetadata, etag_path, read_etag, sha256 as snapshot_sha256, write_private_atomically,
+    };
 
     static NEXT_PATH: AtomicUsize = AtomicUsize::new(0);
 
@@ -282,11 +201,8 @@ mod tests {
             etag: etag.into(),
             snapshot_sha256: snapshot_sha256(&snapshot),
         };
-        write_private_atomically(
-            &path.with_file_name(ETAG_FILE),
-            &serde_json::to_string(&metadata).unwrap(),
-        )
-        .unwrap();
+        write_private_atomically(&etag_path(path), &serde_json::to_string(&metadata).unwrap())
+            .unwrap();
     }
 
     fn server(
@@ -340,7 +256,7 @@ mod tests {
 
         assert_eq!(refreshed.models, 1);
         assert_eq!(
-            read_etag(&path, &path.with_file_name(ETAG_FILE)).as_deref(),
+            read_etag(&path, &etag_path(&path)).as_deref(),
             Some("\"v1\"")
         );
         assert!(PriceTable::load_from(&path).is_some());
@@ -392,7 +308,7 @@ mod tests {
 
         refresh_from_url_at(&url, &path, true).unwrap();
 
-        assert!(!path.with_file_name(ETAG_FILE).exists());
+        assert!(!etag_path(&path).exists());
         request.join().unwrap();
         fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
     }

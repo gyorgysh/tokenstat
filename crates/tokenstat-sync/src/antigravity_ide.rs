@@ -792,6 +792,7 @@ fn https_rpc_request(connection: &Connection, method: &str, body: &Value) -> any
         .danger_accept_invalid_certs(true)
         .no_proxy()
         .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
         .build()?;
     let response = client
         .post(url)
