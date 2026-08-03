@@ -290,6 +290,7 @@ fn resolve_token() -> anyhow::Result<Option<(String, TokenSource)>> {
 fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .user_agent("antigravity")
         .build()?;
 
@@ -385,6 +386,7 @@ fn try_refresh_from_oauth_file() -> anyhow::Result<Option<String>> {
     };
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
     let resp = client

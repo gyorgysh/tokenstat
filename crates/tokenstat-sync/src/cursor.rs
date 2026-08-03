@@ -123,6 +123,7 @@ fn looks_like_jwt(token: &str) -> bool {
 fn download_events_json(access_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
@@ -303,6 +304,7 @@ fn billing_from_kind(kind: Option<&str>) -> BillingMode {
 fn download_csv(session_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
