@@ -131,3 +131,44 @@ enum Bridge {
         try await background("scan", as: ScanReport.self)
     }
 }
+
+// MARK: - Account
+
+extension Bridge {
+    /// Who is signed in. Signed out is a normal result, not an error: the
+    /// bridge reports `signedIn: false` so the UI can offer sign-in rather
+    /// than show a failure.
+    static func account() async throws -> Account {
+        try await background("account.status", as: Account.self)
+    }
+
+    /// Begin a device authorization. Returns the code to show and the URL to
+    /// open. Opening the browser is this side's job.
+    static func startLogin() async throws -> DeviceLogin {
+        try await background("account.deviceStart", as: DeviceLogin.self)
+    }
+
+    /// Poll once. Never sleeps: the caller owns the cadence, which is what
+    /// keeps the window responsive and the flow cancellable.
+    static func pollLogin() async throws -> DevicePoll {
+        try await background("account.devicePoll", as: DevicePoll.self)
+    }
+
+    static func cancelLogin() async {
+        // Best effort. A stale pending login is harmless, it expires anyway,
+        // and failing to clear it must not surface as an error to the user.
+        _ = try? await background("account.cancelLogin", as: Ack.self)
+    }
+
+    static func signOut() async throws {
+        _ = try await background("account.logout", as: Ack.self)
+    }
+
+    /// Send the aggregate window to the account. Network-bound and slow.
+    static func sync(dryRun: Bool = false) async throws -> SyncOutcome {
+        try await background("sync.run", ["dryRun": dryRun], as: SyncOutcome.self)
+    }
+}
+
+/// For methods whose result is only "it worked".
+private struct Ack: Codable, Sendable {}

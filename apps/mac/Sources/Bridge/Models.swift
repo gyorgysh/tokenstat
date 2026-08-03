@@ -201,3 +201,122 @@ func formatTokens(_ n: UInt64) -> String {
         return "\(n)"
     }
 }
+
+// MARK: - Account
+
+/// A device authorization the user has not confirmed yet.
+///
+/// No device code here. That secret stays in the Rust bridge, which is why
+/// polling takes no arguments.
+struct DeviceLogin: Codable, Sendable, Hashable {
+    var host: String
+    /// The short code the user reads. Shown large, because reading it off a
+    /// screen is the one manual step in the whole flow.
+    var userCode: String
+    /// Where to send them. Usually already carries the code.
+    var openURL: String
+    var verificationURI: String
+    var expiresIn: UInt64
+    var interval: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case host
+        case userCode
+        case openURL = "openUrl"
+        case verificationURI = "verificationUri"
+        case expiresIn
+        case interval
+    }
+}
+
+/// One poll's answer.
+struct DevicePoll: Codable, Sendable, Hashable {
+    var state: String
+    var interval: UInt64?
+    var handle: String?
+    var host: String?
+    var machine: String?
+
+    var isConfirmed: Bool { state == "confirmed" }
+}
+
+/// Who is signed in.
+struct Account: Codable, Sendable, Hashable {
+    var signedIn: Bool
+    var host: String
+    var handle: String?
+    var tier: String?
+    var lastSyncAt: String?
+    /// Server-side machine records. The shape belongs to the API, so this
+    /// decodes the few fields the UI shows and ignores the rest.
+    var machines: [Machine]
+    var schemaCurrent: UInt32?
+}
+
+/// A machine on the account.
+///
+/// Field names follow the server (`id`, `label`, `last_sync_at`), not this
+/// app's preferences. Every one is optional because the shape belongs to the
+/// API: a machine that arrives with only an id still renders instead of
+/// failing the whole account decode.
+struct Machine: Codable, Sendable, Hashable, Identifiable {
+    var machineID: String?
+    var label: String?
+    var lastSyncAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case machineID = "id"
+        case label
+        case lastSyncAt
+    }
+
+    /// Falls back to the label so two unnamed machines do not collapse into
+    /// one row in a ForEach.
+    var id: String { machineID ?? label ?? "unidentified" }
+
+    var displayName: String {
+        switch (label, machineID) {
+        case let (label?, _) where !label.isEmpty:
+            return label
+        case let (_, id?):
+            return id
+        default:
+            return "unnamed machine"
+        }
+    }
+
+    /// The id, shown alongside a label rather than instead of it.
+    var subtitle: String? {
+        guard let machineID, label?.isEmpty == false else { return nil }
+        return machineID
+    }
+}
+
+/// Outcome of a sync.
+struct SyncOutcome: Codable, Sendable, Hashable {
+    var host: String
+    var rows: UInt64
+    var dryRun: Bool
+    var schemaV: UInt32
+    var from: String
+    var to: String
+}
+
+/// Render an ISO-8601 instant from the server as something readable.
+///
+/// Returns nil rather than a placeholder when it cannot be parsed, so the
+/// caller decides what absence looks like.
+func formatServerDate(_ raw: String?) -> String? {
+    guard let raw else { return nil }
+    let parsers = [ISO8601DateFormatter(), {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()]
+    for p in parsers {
+        if let date = p.date(from: raw) {
+            return date.formatted(date: .abbreviated, time: .shortened)
+        }
+    }
+    return raw
+}

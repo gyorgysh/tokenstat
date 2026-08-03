@@ -18,8 +18,15 @@ enum Destination: String, CaseIterable, Identifiable {
     case workspaces
     case automations
     case fleet
+    case account
 
     var id: String { rawValue }
+
+    /// Account sits apart from the rest: the others are the work, it is the
+    /// settings for it.
+    static var workDestinations: [Destination] {
+        allCases.filter { $0 != .account }
+    }
 
     var label: String {
         switch self {
@@ -27,6 +34,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
         case .fleet: return "Fleet"
+        case .account: return "Account"
         }
     }
 
@@ -36,6 +44,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .workspaces: return "square.stack.3d.up.fill"
         case .automations: return "bolt.fill"
         case .fleet: return "desktopcomputer"
+        case .account: return "person.crop.circle"
         }
     }
 }
@@ -43,6 +52,7 @@ enum Destination: String, CaseIterable, Identifiable {
 struct RootView: View {
     @State private var destination: Destination = .insights
     @State private var model = InsightsModel()
+    @State private var account = AccountModel()
 
     var body: some View {
         NavigationSplitView {
@@ -51,15 +61,28 @@ struct RootView: View {
             detail
         }
         .task { await model.load() }
+        // Loaded up front, not on first visit, so the sidebar can show the
+        // handle without the user opening the screen to populate it.
+        .task { await account.load() }
     }
 
     private var sidebar: some View {
         List(selection: $destination) {
             Section {
-                ForEach(Destination.allCases) { item in
+                ForEach(Destination.workDestinations) { item in
                     Label(item.label, systemImage: item.symbol)
                         .tag(item)
                 }
+            }
+            Section {
+                Label {
+                    // The handle when there is one: an account screen that does
+                    // not say who is signed in makes you open it to find out.
+                    Text(account.account?.handle.map { "@\($0)" } ?? Destination.account.label)
+                } icon: {
+                    Image(systemName: Destination.account.symbol)
+                }
+                .tag(Destination.account)
             }
         }
         .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
@@ -124,6 +147,8 @@ struct RootView: View {
                 """,
                 milestone: "Milestone 6, needs the remote transport decision"
             )
+        case .account:
+            AccountView(model: account)
         }
     }
 }
