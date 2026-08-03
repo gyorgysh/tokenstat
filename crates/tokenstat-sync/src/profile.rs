@@ -48,6 +48,27 @@ pub enum ProfileError {
     Message(String),
 }
 
+/// Shown when no token exists for the resolved host.
+pub const NOT_LOGGED_IN: &str = "not logged in. run `tokenstat login` first";
+
+/// Shown when the server rejects the token we do have.
+pub const TOKEN_REVOKED: &str = "token missing or revoked. run `tokenstat login`";
+
+impl ProfileError {
+    /// Whether this means "nobody is signed in" rather than something broke.
+    ///
+    /// A GUI needs the difference: one is a sign-in button, the other is an
+    /// error banner. The check lives here, next to the strings it matches, so
+    /// rewording a message cannot silently turn a sign-in prompt into an error
+    /// somewhere else in the tree.
+    pub fn is_unauthenticated(&self) -> bool {
+        match self {
+            ProfileError::Message(m) => m == NOT_LOGGED_IN || m == TOKEN_REVOKED,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoginResult {
     pub host: String,
@@ -206,8 +227,56 @@ fn normalize_pairing_code(raw: &str) -> Result<String, ProfileError> {
     Ok(format!("{}-{}", &cleaned[..4], &cleaned[4..]))
 }
 
-/// RFC 8628 device authorization grant against `{host}/api/v1/device/*`.
-pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
+/// A device authorization in progress.
+///
+/// Returned by [`device_start`] and handed back to [`device_poll`] until the
+/// user confirms. Holding it rather than a bare code keeps the caller from
+/// having to remember the host and schema range across the two calls.
+#[derive(Debug, Clone)]
+pub struct DeviceLogin {
+    pub host: String,
+    pub machine: String,
+    /// Shown to the user. Short, and the only part they have to read.
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: Option<String>,
+    /// Seconds until the authorization expires.
+    pub expires_in: u64,
+    /// Seconds the server asks the caller to wait between polls.
+    pub interval: u64,
+    /// Secret half of the grant. Never display this.
+    device_code: String,
+    schema_min_v: u32,
+    schema_max_v: u32,
+}
+
+impl DeviceLogin {
+    /// The URL to open. Prefers the pre-filled form when the server offers one,
+    /// so the user does not have to type the code at all.
+    pub fn open_url(&self) -> &str {
+        self.verification_uri_complete
+            .as_deref()
+            .unwrap_or(self.verification_uri.as_str())
+    }
+}
+
+/// Outcome of one poll.
+#[derive(Debug, Clone)]
+pub enum DeviceStatus {
+    /// Nobody has confirmed yet. Wait `interval` seconds and poll again. The
+    /// server can raise the interval, so use this value rather than the
+    /// original one.
+    Pending {
+        interval: u64,
+    },
+    Confirmed(Box<LoginResult>),
+}
+
+/// Begin an RFC 8628 device authorization against `{host}/api/v1/device/*`.
+///
+/// Split from the polling half so a GUI can show the user code in its own
+/// window and stay responsive. [`login`] composes the two for the CLI.
+pub fn device_start(host_flag: Option<&str>) -> Result<DeviceLogin, ProfileError> {
     let host = resolve_api_host(host_flag)?;
     let machine = config::ensure_machine_id()?;
     let _salt = config::ensure_project_salt()?;
@@ -218,9 +287,8 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
     let envelope = schema::fetch_schema(&client, &host)?;
     let _ = envelope.choose_payload_v()?;
 
-    let code_url = format!("{host}/api/v1/device/code");
     let resp = client
-        .post(&code_url)
+        .post(format!("{host}/api/v1/device/code"))
         .header("content-type", "application/json")
         .json(&serde_json::json!({ "machine": machine }))
         .send()?;
@@ -234,6 +302,87 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
     }
 
     let device: DeviceCodeResponse = resp.json()?;
+    Ok(DeviceLogin {
+        host,
+        machine,
+        user_code: device.user_code,
+        verification_uri: device.verification_uri,
+        verification_uri_complete: device.verification_uri_complete,
+        expires_in: device.expires_in.max(1),
+        interval: device.interval.max(1),
+        device_code: device.device_code,
+        schema_min_v: envelope.min_v,
+        schema_max_v: envelope.max_v,
+    })
+}
+
+/// Poll once for confirmation.
+///
+/// Does not sleep and does not loop: the caller decides how to wait, which is
+/// what lets a UI stay responsive and cancel. On success the token is written
+/// to the keychain, the same entry the CLI reads, so both see one account.
+pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
+    let client = http_client()?;
+    let poll = client
+        .post(format!("{}/api/v1/device/token", login.host))
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({ "device_code": login.device_code }))
+        .send()?;
+
+    let status = poll.status();
+    let text = poll.text()?;
+
+    if status.as_u16() == 428
+        || text.contains("authorization_pending")
+        || text.contains("slow_down")
+    {
+        // `slow_down` is the server asking for more room, so widen rather than
+        // keep hammering at the original interval.
+        let interval = if text.contains("slow_down") {
+            login.interval.saturating_add(5)
+        } else {
+            login.interval
+        };
+        return Ok(DeviceStatus::Pending { interval });
+    }
+
+    if status.is_success() {
+        let ok: TokenSuccess = serde_json::from_str(&text)?;
+        if !ok.token.starts_with("tsk_") {
+            return Err(ProfileError::Message(
+                "server returned a token that is not a tsk_ sync token".into(),
+            ));
+        }
+        keychain::store_token(&login.host, &ok.token)?;
+        config::set_sync_host(&login.host)?;
+        return Ok(DeviceStatus::Confirmed(Box::new(LoginResult {
+            host: login.host.clone(),
+            handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
+            machine: login.machine.clone(),
+            schema_min_v: login.schema_min_v,
+            schema_max_v: login.schema_max_v,
+        })));
+    }
+
+    let err: ApiErrorBody = serde_json::from_str(&text).unwrap_or(ApiErrorBody {
+        error: Some(format!("http_{}", status.as_u16())),
+        message: Some(text.clone()),
+    });
+    Err(ProfileError::Message(format!(
+        "login failed: {}{}",
+        err.error.unwrap_or_else(|| status.to_string()),
+        err.message.map(|m| format!(" ({m})")).unwrap_or_default()
+    )))
+}
+
+/// RFC 8628 device authorization grant, driven to completion for the CLI.
+///
+/// Prints the code, opens a browser, and blocks until the user confirms.
+/// A GUI wants [`device_start`] and [`device_poll`] instead: this one owns
+/// stdout and the clock.
+pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
+    let device = device_start(host_flag)?;
+
     println!("Open: {}", device.verification_uri);
     if let Some(complete) = &device.verification_uri_complete {
         println!("Or:   {complete}");
@@ -242,15 +391,10 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
     println!();
     println!("Waiting for confirmation…");
 
-    let open_url = device
-        .verification_uri_complete
-        .as_deref()
-        .unwrap_or(device.verification_uri.as_str());
-    let _ = open_browser(open_url);
+    let _ = open_browser(device.open_url());
 
-    let token_url = format!("{host}/api/v1/device/token");
-    let deadline = std::time::Instant::now() + Duration::from_secs(device.expires_in.max(1));
-    let mut interval = Duration::from_secs(device.interval.max(1));
+    let deadline = std::time::Instant::now() + Duration::from_secs(device.expires_in);
+    let mut interval = Duration::from_secs(device.interval);
 
     loop {
         if std::time::Instant::now() >= deadline {
@@ -260,53 +404,12 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
         }
         thread::sleep(interval);
 
-        let poll = client
-            .post(&token_url)
-            .header("content-type", "application/json")
-            .json(&serde_json::json!({ "device_code": device.device_code }))
-            .send()?;
-
-        let status = poll.status();
-        let text = poll.text()?;
-
-        if status.as_u16() == 428
-            || text.contains("authorization_pending")
-            || text.contains("slow_down")
-        {
-            if text.contains("slow_down") {
-                interval = interval.saturating_add(Duration::from_secs(5));
+        match device_poll(&device)? {
+            DeviceStatus::Pending { interval: next } => {
+                interval = Duration::from_secs(next);
             }
-            continue;
+            DeviceStatus::Confirmed(result) => return Ok(*result),
         }
-
-        if status.is_success() {
-            let ok: TokenSuccess = serde_json::from_str(&text)?;
-            if !ok.token.starts_with("tsk_") {
-                return Err(ProfileError::Message(
-                    "server returned a token that is not a tsk_ sync token".into(),
-                ));
-            }
-            keychain::store_token(&host, &ok.token)?;
-            config::set_sync_host(&host)?;
-            let handle = ok.handle.unwrap_or_else(|| "(unknown)".into());
-            return Ok(LoginResult {
-                host,
-                handle,
-                machine,
-                schema_min_v: envelope.min_v,
-                schema_max_v: envelope.max_v,
-            });
-        }
-
-        let err: ApiErrorBody = serde_json::from_str(&text).unwrap_or(ApiErrorBody {
-            error: Some(format!("http_{}", status.as_u16())),
-            message: Some(text.clone()),
-        });
-        return Err(ProfileError::Message(format!(
-            "login failed: {}{}",
-            err.error.unwrap_or_else(|| status.to_string()),
-            err.message.map(|m| format!(" ({m})")).unwrap_or_default()
-        )));
     }
 }
 
@@ -320,9 +423,8 @@ pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
 /// `GET /api/v1/me` with the bearer token.
 pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError> {
     let host = resolve_api_host(host_flag)?;
-    let token = keychain::load_token(&host)?.ok_or_else(|| {
-        ProfileError::Message("not logged in. run `tokenstat login` first".into())
-    })?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
     let client = http_client()?;
     let resp = client
         .get(format!("{host}/api/v1/me"))
@@ -331,9 +433,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
     let status = resp.status();
     let text = resp.text()?;
     if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(ProfileError::Message(
-            "token missing or revoked. run `tokenstat login`".into(),
-        ));
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
@@ -397,9 +497,10 @@ pub fn sync(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileE
     let token = if opts.dry_run {
         None
     } else {
-        Some(keychain::load_token(&host)?.ok_or_else(|| {
-            ProfileError::Message("not logged in. run `tokenstat login` first".into())
-        })?)
+        Some(
+            keychain::load_token(&host)?
+                .ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?,
+        )
     };
 
     let envelope = if opts.dry_run {
@@ -470,9 +571,7 @@ pub fn sync(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileE
     }
 
     let Some(token) = token else {
-        return Err(ProfileError::Message(
-            "not logged in. run `tokenstat login` first".into(),
-        ));
+        return Err(ProfileError::Message(NOT_LOGGED_IN.into()));
     };
     let body = gzip_bytes(&canonical)?;
     let url = format!("{host}/api/v1/sync");
@@ -1011,5 +1110,32 @@ mod tests {
         let json = String::from_utf8(payload.canonical_bytes().unwrap()).unwrap();
         assert!(!json.contains("/tmp/secret"));
         assert!(json.contains("\"salt_id\":\"s_abcdef01\""));
+    }
+}
+
+#[cfg(test)]
+mod auth_state_tests {
+    use super::*;
+
+    #[test]
+    fn the_signed_out_messages_are_recognised_as_signed_out() {
+        // A GUI shows a sign-in button for these and an error banner for
+        // anything else, so the two must not drift apart.
+        assert!(ProfileError::Message(NOT_LOGGED_IN.into()).is_unauthenticated());
+        assert!(ProfileError::Message(TOKEN_REVOKED.into()).is_unauthenticated());
+    }
+
+    #[test]
+    fn a_real_failure_is_not_mistaken_for_being_signed_out() {
+        assert!(!ProfileError::Message("status request failed (500)".into()).is_unauthenticated());
+        assert!(!ProfileError::Message(String::new()).is_unauthenticated());
+        assert!(
+            !ProfileError::RateLimited {
+                message: "slow down".into(),
+                retry_after: None,
+                next_allowed_at: None,
+            }
+            .is_unauthenticated()
+        );
     }
 }
