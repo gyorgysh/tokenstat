@@ -84,7 +84,7 @@ is what makes iPad, iPhone and Windows additive rather than rewrites.
 
 ```
 crates/tokenstat-core/       unchanged, no network              shared
-crates/tokenstat-sync/       unchanged                          shared
+crates/tokenstat-sync/       gained device_start/device_poll    shared
 crates/tokenstat-workspace/  NEW  workspace model, git status,
                                   graph, file tree, discovery   shared
 crates/tokenstat-pty/        NEW  portable-pty sessions,
@@ -93,7 +93,9 @@ crates/tokenstat-host/       NEW  the daemon. Owns workspaces
                                   and PTYs. Versioned JSON-RPC
                                   over a unix socket now, over
                                   the network later.
-crates/tokenstat-ffi/        DONE C ABI bridge, JSON in and out
+crates/tokenstat-ffi/        DONE C ABI bridge, JSON in and out.
+                                  Links a network stack, which core
+                                  must never do. Watch that boundary.
 crates/tokenstat-cli/        unchanged, becomes one more client
 apps/mac/                    DONE SwiftUI universal app
 ```
@@ -151,10 +153,25 @@ path or an installer, a Developer ID signed build in the release workflow, and
 a decision on whether the window should open on Insights or on Workspaces once
 the latter exists.
 
-**M2. Account.** `ASWebAuthenticationSession` for the social login, tokens in
-Keychain, handed to `tokenstat-sync`. Profile, machines, sessions, sync status.
-Do not implement OAuth in Rust: the platform gives it to you with better
-security properties than anything hand-rolled.
+**M2. Account. Built.** Sign in, profile, machines, sync status and sync now.
+
+This milestone was planned around `ASWebAuthenticationSession` and Keychain
+work in Swift. Both turned out to be wrong, in useful ways:
+
+- **The auth is a device-code grant (RFC 8628), not redirect-based OAuth.**
+  `ASWebAuthenticationSession` exists to catch a redirect back to a custom URL
+  scheme, and there is no redirect here. The right shape is the one the CLI
+  already uses: ask the server for a code, show it, open the system browser,
+  poll until it is confirmed. So the app shows the user code and polls.
+- **The token was already in the Keychain**, written by `tokenstat-sync`. The
+  app needed to store nothing. Better than the plan: the app and the CLI read
+  one entry, so signing in on either signs in both, and there is no second
+  copy of a credential to leak or to go stale.
+
+What did need building was splitting `profile::login` into `device_start` and
+`device_poll`. The original owned stdout and the clock, printing the code and
+blocking until confirmation, which a window cannot do. `login` now composes the
+two halves, so the CLI is unchanged.
 
 **M3. The daemon.** Extract `tokenstat-host` and move M1's reads through it.
 Boring, invisible to the user, and much cheaper before the terminal exists than
