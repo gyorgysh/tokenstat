@@ -19,10 +19,10 @@ prev="$(
 if [ -n "$prev" ]; then
   range="${prev}..HEAD"
   compared="Changes since ${prev}"
-  subjects="$(git log --format='%s' "$range")"
+  subjects="$(git log --no-merges --format='%s' "$range")"
 else
   compared="Initial public release"
-  subjects="$(git log --format='%s' HEAD)"
+  subjects="$(git log --no-merges --format='%s' HEAD)"
 fi
 
 section() {
