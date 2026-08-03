@@ -68,8 +68,17 @@ commit. Never commit `fixtures/local/` or real session logs.
 
 **`tokenstat-core` must never gain a network dependency**, directly or
 transitively. This is not a style preference, it is the mechanism behind the
-privacy claim, and CI enforces it. Anything that makes a request belongs in
-`tokenstat-sync`.
+privacy claim. Anything that makes a request belongs in `tokenstat-sync`.
+
+`scripts/check-no-network.sh` enforces this, in CI as the `privacy boundary`
+job and runnable locally. It walks the resolved tree, so a transitive HTTP
+client fails it exactly like a direct one. Guarded today: `tokenstat-core` and
+`tokenstat-mcp`. Deliberately not guarded: `tokenstat-sync`, which is the one
+crate allowed a network stack, and `tokenstat-ffi`, which depends on it so the
+app can offer account and sync.
+
+Add a crate to the `GUARDED` list when it should never make a request. Do not
+remove one to make a build pass.
 
 ## Commands
 

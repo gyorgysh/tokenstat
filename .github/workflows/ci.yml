@@ -52,6 +52,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+  # Separate job rather than a step in `lint`, so a formatting failure never
+  # hides a breach of the privacy guarantee, and so the red check names the
+  # thing that actually broke.
+  no-network:
+    name: privacy boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Core and MCP must not reach the network
+        run: bash scripts/check-no-network.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
