@@ -2142,6 +2142,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokenstat-core",
+ "tokenstat-sync",
 ]
 
 [[package]]

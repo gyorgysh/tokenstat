@@ -16,5 +16,11 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 tokenstat-core.workspace = true
+# The bridge links a network stack, because account and sync belong to the app.
+# That is allowed here and forbidden in `tokenstat-core`, which is the crate the
+# privacy claim rests on: the code that reads your logs cannot send them
+# anywhere. Keep it that way. Nothing network-shaped may move down into core to
+# make a call here more convenient.
+tokenstat-sync.workspace = true
 serde.workspace = true
 serde_json.workspace = true

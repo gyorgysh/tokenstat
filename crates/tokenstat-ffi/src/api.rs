@@ -18,7 +18,10 @@ use serde_json::{Value, json};
 use tokenstat_core::{Engine, GroupBy, PriceTable, Query};
 
 use crate::PROTOCOL_VERSION;
-use crate::dto::{BlockDto, BucketDto, GroupByDto, InfoDto, QueryDto, ScanReportDto, TotalsDto};
+use crate::dto::{
+    AccountDto, BlockDto, BucketDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
+    MachineDto, QueryDto, ScanReportDto, SyncResultDto, TotalsDto,
+};
 
 /// Process-wide handle.
 ///
@@ -30,6 +33,12 @@ use crate::dto::{BlockDto, BucketDto, GroupByDto, InfoDto, QueryDto, ScanReportD
 struct Bridge {
     engine: Engine,
     prices: PriceTable,
+    /// Device authorization awaiting confirmation.
+    ///
+    /// Kept here rather than handed to the front end because it carries the
+    /// secret half of the grant. The app shows a short user code and polls,
+    /// and never holds the device code at all.
+    pending_login: Option<tokenstat_sync::DeviceLogin>,
 }
 
 static BRIDGE: OnceLock<Mutex<Option<Bridge>>> = OnceLock::new();
@@ -59,6 +68,17 @@ struct ReportParams {
 #[serde(rename_all = "camelCase", default)]
 struct QueryParams {
     query: QueryDto,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct SyncParams {
+    /// Build and validate the payload without sending it.
+    dry_run: bool,
+    /// Ask the server to drop rows outside the window.
+    prune: bool,
+    /// Window expression, for example `30d`. Server default when absent.
+    window: Option<String>,
 }
 
 fn ok(result: Value) -> String {
@@ -100,6 +120,7 @@ fn open_bridge(p: &OpenParams) -> Result<Bridge, String> {
     Ok(Bridge {
         engine,
         prices: PriceTable::load_with_catalog(),
+        pending_login: None,
     })
 }
 
@@ -182,6 +203,134 @@ fn dispatch(method: &str, params: &str) -> Result<Value, String> {
             let r = b.engine.scan().map_err(|e| e.to_string())?;
             serde_json::to_value(ScanReportDto::from(r)).map_err(|e| e.to_string())
         }),
+
+        // Signed out is a state, not a failure. The bridge reports
+        // `signedIn: false` so the app can offer sign-in, and reserves the
+        // error path for a host that is unreachable or a token that was
+        // revoked, which need different words.
+        "account.status" => {
+            let host =
+                tokenstat_sync::profile::resolve_api_host(None).map_err(|e| e.to_string())?;
+            match tokenstat_sync::sync_status(None) {
+                Ok(s) => serde_json::to_value(AccountDto {
+                    signed_in: true,
+                    host: s.host,
+                    handle: s.handle,
+                    tier: s.tier,
+                    last_sync_at: s.last_sync_at,
+                    machines: s.machines.iter().map(MachineDto::from_value).collect(),
+                    schema_current: s.schema_current,
+                })
+                .map_err(|e| e.to_string()),
+                Err(e) if e.is_unauthenticated() => serde_json::to_value(AccountDto {
+                    signed_in: false,
+                    host,
+                    handle: None,
+                    tier: None,
+                    last_sync_at: None,
+                    machines: Vec::new(),
+                    schema_current: None,
+                })
+                .map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            }
+        }
+
+        // Begin a device authorization. Returns the code to show and the URL to
+        // open. Opening the browser is the front end's job: this crate has no
+        // business deciding how a window behaves.
+        "account.deviceStart" => {
+            let device = tokenstat_sync::device_start(None).map_err(|e| e.to_string())?;
+            let dto = DeviceLoginDto::from(&device);
+            with_bridge(|b| {
+                b.pending_login = Some(device);
+                Ok(())
+            })?;
+            serde_json::to_value(dto).map_err(|e| e.to_string())
+        }
+
+        // Poll once. Never sleeps, so the caller controls the cadence and can
+        // cancel. On confirmation the token lands in the keychain, the same
+        // entry the CLI reads.
+        "account.devicePoll" => {
+            let pending = with_bridge(|b| {
+                b.pending_login
+                    .clone()
+                    .ok_or_else(|| "no sign-in is in progress".to_string())
+            })?;
+            match tokenstat_sync::device_poll(&pending).map_err(|e| e.to_string())? {
+                tokenstat_sync::DeviceStatus::Pending { interval } => {
+                    serde_json::to_value(DevicePollDto {
+                        state: "pending",
+                        interval: Some(interval),
+                        handle: None,
+                        host: None,
+                        machine: None,
+                    })
+                    .map_err(|e| e.to_string())
+                }
+                tokenstat_sync::DeviceStatus::Confirmed(result) => {
+                    with_bridge(|b| {
+                        b.pending_login = None;
+                        Ok(())
+                    })?;
+                    serde_json::to_value(DevicePollDto {
+                        state: "confirmed",
+                        interval: None,
+                        handle: Some(result.handle),
+                        host: Some(result.host),
+                        machine: Some(result.machine),
+                    })
+                    .map_err(|e| e.to_string())
+                }
+            }
+        }
+
+        "account.cancelLogin" => {
+            with_bridge(|b| {
+                b.pending_login = None;
+                Ok(())
+            })?;
+            Ok(json!({"cancelled": true}))
+        }
+
+        "account.logout" => {
+            let host = tokenstat_sync::logout(None).map_err(|e| e.to_string())?;
+            with_bridge(|b| {
+                b.pending_login = None;
+                Ok(())
+            })?;
+            Ok(json!({"host": host}))
+        }
+
+        // Long running and it talks to the network. Same rule as `scan`: not
+        // from a thread that draws.
+        "sync.run" => {
+            let p: SyncParams = parse(params)?;
+            with_bridge(|b| {
+                let tz = b.engine.timezone().iana_name().map(str::to_string);
+                let r = tokenstat_sync::sync(
+                    b.engine.store(),
+                    tokenstat_sync::SyncOptions {
+                        host_flag: None,
+                        prune: p.prune,
+                        window: p.window.as_deref(),
+                        dry_run: p.dry_run,
+                        tz_name: tz.as_deref(),
+                    },
+                )
+                .map_err(|e| e.to_string())?;
+                serde_json::to_value(SyncResultDto {
+                    host: r.host,
+                    rows: r.rows,
+                    dry_run: r.dry_run,
+                    schema_v: r.schema_v,
+                    from: r.window.from,
+                    to: r.window.to,
+                })
+                .map_err(|e| e.to_string())
+            })
+        }
 
         other => Err(format!("unknown method: {other}")),
     }
@@ -279,6 +428,48 @@ mod tests {
         let v: Value = serde_json::from_str(&call("report", "{}")).unwrap();
         assert_eq!(v["ok"], false);
         assert!(v["error"]["message"].as_str().unwrap().contains("group"));
+    }
+
+    #[test]
+    fn account_methods_answer_without_a_network() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        open_temp();
+        // No server is reachable in a test run, so these must fail as an
+        // envelope rather than hang or panic. The point is the contract, not
+        // the verdict: a caller always gets decodable JSON back.
+        for method in [
+            "account.status",
+            "account.deviceStart",
+            "account.devicePoll",
+        ] {
+            let out = call(method, "{}");
+            let v: Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("{method} returned non-JSON: {out} ({e})"));
+            assert!(v["ok"].is_boolean(), "{method}: {out}");
+        }
+    }
+
+    #[test]
+    fn polling_without_a_started_login_says_so() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        open_temp();
+        let v: Value = serde_json::from_str(&call("account.devicePoll", "{}")).unwrap();
+        assert_eq!(v["ok"], false);
+        assert!(
+            v["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("no sign-in is in progress"),
+            "{v}"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_login_is_safe_when_none_is_pending() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+        open_temp();
+        let v: Value = serde_json::from_str(&call("account.cancelLogin", "{}")).unwrap();
+        assert_eq!(v["ok"], true, "{v}");
     }
 
     #[test]

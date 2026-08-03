@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokenstat_core::{
     Counters, GroupBy, PricedBucket, Query, ScanReport, Totals, UsageBlock, Warning,
 };
+use tokenstat_sync::DeviceLogin as SyncDeviceLogin;
 
 /// Filters accepted by every reporting method.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -229,4 +230,105 @@ pub struct InfoDto {
     /// False when no price book has been fetched yet, which means every value
     /// in every report will be zero for a reason the user can fix.
     pub has_prices: bool,
+}
+
+/// A device authorization the user has not confirmed yet.
+///
+/// The device code itself is deliberately absent. It is the secret half of the
+/// grant, the front end has no use for it, and the bridge holds the pending
+/// login so polling needs no arguments.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLoginDto {
+    pub host: String,
+    /// Short code the user reads off the screen.
+    pub user_code: String,
+    /// Where to send the user. Already pre-filled with the code when the server
+    /// offers that form, so most people never type it.
+    pub open_url: String,
+    pub verification_uri: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+impl From<&SyncDeviceLogin> for DeviceLoginDto {
+    fn from(d: &SyncDeviceLogin) -> DeviceLoginDto {
+        DeviceLoginDto {
+            host: d.host.clone(),
+            user_code: d.user_code.clone(),
+            open_url: d.open_url().to_string(),
+            verification_uri: d.verification_uri.clone(),
+            expires_in: d.expires_in,
+            interval: d.interval,
+        }
+    }
+}
+
+/// Result of one poll. `state` is `pending` or `confirmed`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevicePollDto {
+    pub state: &'static str,
+    /// Seconds to wait before polling again. Only meaningful while pending, and
+    /// the server may raise it, so use this rather than the original interval.
+    pub interval: Option<u64>,
+    pub handle: Option<String>,
+    pub host: Option<String>,
+    pub machine: Option<String>,
+}
+
+/// Who is signed in, and what the server knows about this account.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDto {
+    /// False when there is no token for this host. Everything below is then
+    /// absent, and the caller should offer sign-in rather than an error.
+    pub signed_in: bool,
+    pub host: String,
+    pub handle: Option<String>,
+    pub tier: Option<String>,
+    pub last_sync_at: Option<String>,
+    pub machines: Vec<MachineDto>,
+    pub schema_current: Option<u32>,
+}
+
+/// Outcome of a sync.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResultDto {
+    pub host: String,
+    pub rows: u64,
+    pub dry_run: bool,
+    pub schema_v: u32,
+    /// Window actually sent, mirroring the payload's own `from`/`to`.
+    pub from: String,
+    pub to: String,
+}
+
+/// One machine on the account.
+///
+/// Normalized rather than passed through. The server speaks snake_case and may
+/// add fields; this contract is camelCase and stable, and translating here is
+/// the whole reason the DTO layer exists. Every field is optional so an
+/// unfamiliar record still renders instead of failing the account decode.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineDto {
+    pub id: Option<String>,
+    pub label: Option<String>,
+    pub last_sync_at: Option<String>,
+}
+
+impl MachineDto {
+    /// Read one server record. Anything that is not an object becomes an empty
+    /// machine rather than an error: one odd row must not cost the user the
+    /// whole list.
+    pub fn from_value(v: &serde_json::Value) -> MachineDto {
+        let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+        MachineDto {
+            id: field("id"),
+            label: field("label"),
+            last_sync_at: field("last_sync_at"),
+        }
+    }
 }
