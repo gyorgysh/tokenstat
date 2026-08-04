@@ -130,6 +130,10 @@ jobs:
             cp "target/${TARGET}/release/tokenstat" "dist/${name}/"
           fi
           cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
+          # The permissive dependencies ask that their notices travel with the
+          # binary. Generated here rather than tracked, see xtask/src/notices.rs.
+          cargo run --release --locked -p xtask -- notices \
+            "dist/${name}/THIRD-PARTY-NOTICES.md" tokenstat-cli
           cd dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             7z a "${name}.zip" "${name}" > /dev/null

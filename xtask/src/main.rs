@@ -8,7 +8,8 @@
 
 //! Development tasks. Not shipped to users.
 //!
-//! `redact` turns a real session log into a committable fixture.
+//! `redact` turns a real session log into a committable fixture, and `notices`
+//! writes the third party attribution that ships beside a release binary.
 //!
 //! Hand redaction does not scale. A single project directory here holds nearly
 //! two thousand files, and one missed field publishes somebody's source code.
@@ -22,6 +23,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
+
+mod notices;
 
 /// Keys kept for Claude Code transcripts, as paths from the record root.
 ///
@@ -77,11 +80,22 @@ fn main() -> Result<()> {
             let max = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
             redact(Path::new(&input), Path::new(&output), max)
         }
+        Some("notices") => {
+            // Generated into target/ on purpose: a tracked generated file is
+            // what check-no-artifacts.sh exists to reject.
+            let out = args
+                .next()
+                .unwrap_or_else(|| "target/THIRD-PARTY-NOTICES.md".to_string());
+            let root = args.next().unwrap_or_else(|| "tokenstat-cli".to_string());
+            notices::generate(&root, Path::new(&out))
+        }
         Some(other) => bail!("unknown task: {other}"),
         None => {
             eprintln!("tasks:");
             eprintln!("  redact <input.jsonl|dir> <output-dir> [max-files]");
             eprintln!("      build a committable fixture (default 8 files)");
+            eprintln!("  notices [output] [root-crate]");
+            eprintln!("      write third party attribution for a shipped binary");
             Ok(())
         }
     }
