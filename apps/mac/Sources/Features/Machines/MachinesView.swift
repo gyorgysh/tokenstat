@@ -10,8 +10,14 @@ import SwiftUI
 /// This machine, who may reach it, and who it can reach.
 ///
 /// The screen is ordered by what somebody came here to do: decide about a
-/// machine that is knocking, then check this machine's own fingerprint against
-/// the one shown on the other end, then pair something new.
+/// machine that is knocking, then read this machine's own two words to compare
+/// with the other end, then add something new.
+///
+/// It says nothing about ports, addresses or keys. A person setting up their
+/// second computer has a laptop and a desktop, not a host and a socket, and the
+/// vocabulary here follows `docs/remote-transport.md`: a name, two words to
+/// compare, and one code to paste. The raw facts stay one disclosure away for
+/// whoever is debugging their own network.
 struct MachinesView: View {
     @Bindable var model: MachinesModel
 
@@ -53,20 +59,26 @@ struct MachinesView: View {
     private var thisMachine: some View {
         Card(
             title: "This machine",
-            subtitle: "How other machines reach it, and what they check against."
+            subtitle: "What the other machine sees when it finds this one."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
                     LabeledContent("Name") { Text(identity.label) }
-                    LabeledContent("Fingerprint") {
-                        Text(identity.fingerprint)
-                            .font(Theme.mono(12))
-                            .textSelection(.enabled)
+                    if let words = model.words {
+                        LabeledContent("Known as") {
+                            // The comparison a person actually performs. The
+                            // fingerprint and the key still exist and are one
+                            // disclosure away, under Connection details.
+                            Text(words)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                                .textSelection(.enabled)
+                        }
                     }
-                    if let link = model.connectLink {
-                        LabeledContent("Connect link") {
+                    if let code = model.pairingCode {
+                        LabeledContent("Pairing code") {
                             HStack(spacing: Theme.Space.xs) {
-                                Text(link)
+                                Text(code)
                                     .font(Theme.mono(10))
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -74,13 +86,14 @@ struct MachinesView: View {
                                     .textSelection(.enabled)
                                 Button {
                                     NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(link, forType: .string)
+                                    NSPasteboard.general.setString(code, forType: .string)
+                                    model.noticeMessage = "Pairing code copied."
                                 } label: {
                                     Image(systemName: "doc.on.doc")
                                 }
                                 .buttonStyle(.plain)
                                 .foregroundStyle(.secondary)
-                                .help("Copy the link to paste on another machine")
+                                .help("Copy it, then paste it on the other machine")
                             }
                         }
                     }
@@ -88,13 +101,49 @@ struct MachinesView: View {
                 Divider()
                 serving
                 Text("""
-                Machines on the same network appear under Found nearby, so there \
-                is nothing to type. Anywhere else, copy this link and paste it \
-                into the other machine's Connect box.
+                Machines on the same network find each other, so there is \
+                nothing to type. Anywhere else, copy the pairing code and paste \
+                it into the other machine.
                 """)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+
+                connectionDetails
             }
+        }
+    }
+
+    /// The addresses, ports and keys, for whoever is debugging their own
+    /// network.
+    ///
+    /// Present but closed. Hiding them entirely would mean the honest version of
+    /// this screen is the one we do not show, and somebody whose connection is
+    /// failing needs exactly these three facts.
+    @ViewBuilder
+    private var connectionDetails: some View {
+        if let identity = model.identity {
+            DisclosureGroup("Connection details") {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    LabeledContent("Fingerprint") {
+                        Text(identity.fingerprint)
+                            .font(Theme.mono(11))
+                            .textSelection(.enabled)
+                    }
+                    if let status = model.status {
+                        LabeledContent("Port") { Text("\(status.port)") }
+                        if let address = status.address, status.listening {
+                            LabeledContent("Address") {
+                                Text(address)
+                                    .font(Theme.mono(11))
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, Theme.Space.xs)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -121,16 +170,16 @@ struct MachinesView: View {
 
                 // The setting and the truth are different facts. A port already
                 // in use leaves the first on and the second off, and a screen
-                // that showed only the setting would be lying.
+                // that showed only the setting would be lying. Which port is
+                // under Connection details, where somebody debugging will look.
                 if status.serving && !status.listening {
                     Banner(
-                        text: "Turned on, but not listening. Port \(status.port) is probably in use.",
+                        text: """
+                        Turned on, but not reachable. Something else on this \
+                        machine is using the same port.
+                        """,
                         severity: .warning
                     )
-                } else if let address = status.address {
-                    Text("Listening on \(address)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -140,8 +189,8 @@ struct MachinesView: View {
 
     private var discoveredMachines: some View {
         Card(
-            title: "Found nearby",
-            subtitle: "These daemons are advertising on the local network."
+            title: "Machines nearby",
+            subtitle: "Found on this network. Nothing to type."
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.discovered) { daemon in
@@ -151,12 +200,14 @@ struct MachinesView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(daemon.label)
                                 .font(.callout.weight(.medium))
-                            Text(daemon.fingerprint)
-                                .font(Theme.mono(11))
-                                .foregroundStyle(.secondary)
-                            Text(daemon.address ?? "Resolving address...")
+                            Text(daemon.words ?? daemon.fingerprint)
                                 .font(.caption)
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
+                            if daemon.address == nil {
+                                Text("Still finding it…")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
                         Spacer()
                         Button("Connect") { Task { await model.pair(daemon) } }
@@ -170,7 +221,10 @@ struct MachinesView: View {
                             .strokeBorder(Theme.border, lineWidth: 1)
                     )
                 }
-                Text("The fingerprint is compared with the one shown on that machine before it can reach this one.")
+                Text("""
+                Check the two words against the ones on that machine's screen \
+                before it can reach this one.
+                """)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -194,9 +248,8 @@ struct MachinesView: View {
                     }
                 }
                 Text("""
-                Check the fingerprint against the one shown on that machine \
-                before approving. They match, or something is answering in its \
-                place.
+                Check the two words against the ones on that machine before \
+                approving. They match, or something is answering in its place.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -261,17 +314,13 @@ private struct PeerRow<Actions: View>: View {
                         .font(.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
-                // The fingerprint rather than the key, because this line exists
-                // to be compared with another screen by a person.
-                Text(peer.fingerprint)
-                    .font(Theme.mono(11))
+                // The words rather than the key or the fingerprint: this line
+                // exists to be compared with another screen by a person, and
+                // that is the form they will read whole.
+                Text(peer.words ?? peer.fingerprint)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                if let address = peer.address {
-                    Text(address)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
             }
             Spacer()
             actions
@@ -324,12 +373,12 @@ private struct TrustBadge: View {
 
 // MARK: - Pairing by hand
 
-/// Connect to a machine by pasting its link.
+/// Connect to a machine by pasting its pairing code.
 ///
-/// One field accepts the whole thing, `key@host:port` or just the key. This
-/// path works with no account and no network service at all, which is why it
-/// is on the screen rather than behind an "advanced" disclosure: it is the
-/// thing that makes the privacy claim checkable instead of promised.
+/// One field, whatever the other machine showed. This path works with no
+/// account and no network service at all, which is why it is on the screen
+/// rather than behind an "advanced" disclosure: it is the thing that makes the
+/// privacy claim checkable instead of promised.
 private struct PairingForm: View {
     var pair: (String, String, String) async -> Void
 
@@ -340,13 +389,13 @@ private struct PairingForm: View {
     var body: some View {
         Card(
             title: "Add a machine",
-            subtitle: "Paste a connect link, or the key alone, from its Machines screen."
+            subtitle: "Paste the pairing code from its Machines screen."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField(
-                    "Connect link or key",
+                    "Pairing code",
                     text: $link,
-                    prompt: Text("key@host:port, or just the key")
+                    prompt: Text("Paste the code from the other machine")
                 )
                 .font(Theme.mono(11))
                 TextField("Name", text: $label, prompt: Text("What you call that machine"))
@@ -372,8 +421,7 @@ private struct PairingForm: View {
                 Text("""
                 Connecting here approves that machine to reach this one. The \
                 other machine has to approve this one too, and its own screen \
-                will show this machine waiting. A key is a 64 character hex \
-                string; the address after the @ is where to dial it.
+                will show this machine waiting.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)

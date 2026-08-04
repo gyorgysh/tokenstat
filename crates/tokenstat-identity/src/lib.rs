@@ -145,6 +145,56 @@ pub fn fingerprint(public: &PublicKey) -> String {
         .join("-")
 }
 
+/// The same key as two words, for a person to compare at a glance.
+///
+/// Nobody compares `a41f-88c2-...` carefully. They compare the first group, the
+/// last group, and assume. Two words out of a fixed list are read whole, said
+/// aloud over a phone, and noticed when they differ, which is the entire job
+/// this string has: two people, two screens, one question.
+///
+/// It is not a shorter fingerprint and does not replace one. The machines pin
+/// the full 32 bytes and compare those; both of these strings exist only for
+/// the human check, and this one is the version a human will actually do. The
+/// full fingerprint stays available for anyone who wants it.
+///
+/// 16 bits of adjective and 16 bits of noun is not collision resistant and is
+/// not meant to be. It catches the realistic case, which is a machine that is
+/// not the one you think, not an adversary grinding keys for a colour.
+pub fn key_words(public: &PublicKey) -> String {
+    let mut hasher = blake3::Hasher::new();
+    // Separate domain from `fingerprint`, so the two displays of one key cannot
+    // be turned into each other.
+    hasher.update(b"tokenstat machine words v1\0");
+    hasher.update(public);
+    let digest = hasher.finalize();
+    let bytes = digest.as_bytes();
+    let first = u16::from_be_bytes([bytes[0], bytes[1]]) as usize;
+    let second = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+    format!(
+        "{}-{}",
+        ADJECTIVES[first % ADJECTIVES.len()],
+        NOUNS[second % NOUNS.len()]
+    )
+}
+
+/// Short, common, and hard to mishear. No two entries share a prefix, so a word
+/// half read is still unambiguous.
+const ADJECTIVES: [&str; 32] = [
+    "amber", "brave", "calm", "dusty", "eager", "fair", "glad", "hollow", "icy", "jolly", "keen",
+    "lucky", "mellow", "noble", "olive", "proud", "quiet", "rapid", "solid", "tidy", "upper",
+    "vivid", "warm", "young", "zesty", "bold", "crisp", "deep", "early", "fresh", "gentle",
+    "hardy",
+];
+
+/// Animals, because they are concrete and people picture them, which is what
+/// makes a mismatch obvious rather than a detail to squint at.
+const NOUNS: [&str; 32] = [
+    "otter", "falcon", "badger", "cedar", "dolphin", "ember", "fox", "gecko", "heron", "ibis",
+    "jaguar", "kestrel", "lynx", "marten", "newt", "osprey", "puffin", "quail", "raven", "seal",
+    "tapir", "urchin", "viper", "walrus", "yak", "zebra", "bison", "crane", "dingo", "egret",
+    "finch", "gull",
+];
+
 /// Parse a public key written as hex.
 pub fn public_key_from_hex(text: &str) -> Result<PublicKey, IdentityError> {
     let cleaned: String = text
@@ -295,6 +345,30 @@ mod tests {
     #[test]
     fn different_keys_do_not_share_a_fingerprint() {
         assert_ne!(fingerprint(&[1u8; 32]), fingerprint(&[2u8; 32]));
+    }
+
+    #[test]
+    fn a_key_reads_as_two_words_and_keeps_reading_as_them() {
+        let key = [7u8; 32];
+        let words = key_words(&key);
+        assert_eq!(words, key_words(&key), "the same key must read the same");
+        let parts: Vec<&str> = words.split('-').collect();
+        assert_eq!(parts.len(), 2, "{words}");
+        assert!(parts.iter().all(|p| !p.is_empty()));
+        assert!(
+            words.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+            "read aloud, so no punctuation and no case to get wrong: {words}"
+        );
+        assert_ne!(key_words(&[1u8; 32]), key_words(&[2u8; 32]));
+    }
+
+    /// The two displays of one key must not be derivable from each other, or
+    /// the words become a lossy fingerprint rather than a separate check.
+    #[test]
+    fn the_words_are_not_a_slice_of_the_fingerprint() {
+        let key = [0xabu8; 32];
+        let words = key_words(&key).replace('-', "");
+        assert!(!fingerprint(&key).replace('-', "").contains(&words));
     }
 
     /// Truncating the key itself would let a fingerprint leak the first bytes

@@ -1116,6 +1116,9 @@ struct MachineIdentity: Codable, Sendable {
     let key: String
     /// The short form somebody reads aloud to check two ends match.
     let fingerprint: String
+    /// The same key as two words. What the screen leads with, because it is
+    /// the comparison a person performs rather than skims.
+    let words: String?
     let label: String
 }
 
@@ -1133,6 +1136,7 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
 
     let key: String
     let fingerprint: String
+    let words: String?
     let label: String
     let trust: Trust
     /// Where it was reached or seen from. A hint for dialling, never a
@@ -1155,6 +1159,7 @@ struct RemoteStatus: Codable, Sendable {
     let port: Int
     let key: String
     let fingerprint: String
+    let words: String?
     let label: String
 }
 

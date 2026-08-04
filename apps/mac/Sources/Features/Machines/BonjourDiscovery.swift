@@ -10,6 +10,9 @@ import Foundation
 struct DiscoveredDaemon: Identifiable, Hashable, Sendable {
     let key: String
     let fingerprint: String
+    /// From the advertisement, so a machine found nearby is named the same way
+    /// on both screens without this process hashing anything.
+    let words: String?
     let label: String
     let address: String?
 
@@ -74,6 +77,7 @@ final class BonjourDiscovery {
             next.append(DiscoveredDaemon(
                 key: key,
                 fingerprint: fingerprint,
+                words: value(for: "words", in: txt),
                 label: label,
                 address: address
             ))
@@ -117,6 +121,7 @@ final class BonjourDiscovery {
                 self.daemons[index] = DiscoveredDaemon(
                     key: self.daemons[index].key,
                     fingerprint: self.daemons[index].fingerprint,
+                    words: self.daemons[index].words,
                     label: self.daemons[index].label,
                     address: address
                 )

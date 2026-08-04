@@ -179,9 +179,10 @@ mod bonjour {
         port: u16,
         key: &str,
         fingerprint: &str,
+        words: &str,
         label: &str,
     ) -> Result<Advertisement, String> {
-        let txt = txt_record(key, fingerprint, label)?;
+        let txt = txt_record(key, fingerprint, words, label)?;
         let service_type = b"_tokenstat._tcp\0";
         let mut service = std::ptr::null_mut();
         let error = unsafe {
@@ -243,9 +244,22 @@ mod bonjour {
         })
     }
 
-    fn txt_record(key: &str, fingerprint: &str, label: &str) -> Result<Vec<u8>, String> {
+    fn txt_record(
+        key: &str,
+        fingerprint: &str,
+        words: &str,
+        label: &str,
+    ) -> Result<Vec<u8>, String> {
         let mut record = Vec::new();
-        for (name, value) in [("key", key), ("fingerprint", fingerprint), ("label", label)] {
+        // The words travel with the advertisement so a machine found nearby can
+        // be named the same way on both screens without the finder having to
+        // hash anything.
+        for (name, value) in [
+            ("key", key),
+            ("fingerprint", fingerprint),
+            ("words", words),
+            ("label", label),
+        ] {
             let entry = format!("{name}={value}");
             if entry.len() > u8::MAX as usize {
                 return Err(format!("Bonjour TXT entry {name} is too long"));
@@ -271,10 +285,10 @@ mod bonjour {
 
         #[test]
         fn txt_record_contains_the_identity_fields() {
-            let record = txt_record("key", "fingerprint", "label").unwrap();
+            let record = txt_record("key", "fingerprint", "words", "label").unwrap();
             assert_eq!(
                 record,
-                b"\x07key=key\x17fingerprint=fingerprint\x0blabel=label"
+                b"\x07key=key\x17fingerprint=fingerprint\x0bwords=words\x0blabel=label"
             );
         }
 
@@ -293,6 +307,7 @@ mod bonjour {
         _port: u16,
         _key: &str,
         _fingerprint: &str,
+        _words: &str,
         _label: &str,
     ) -> Result<Advertisement, String> {
         Ok(Advertisement)
@@ -371,6 +386,7 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
         advertised_port,
         &identity.public_key_hex(),
         &identity.fingerprint(),
+        &tokenstat_identity::key_words(&identity.public_key()),
         &tokenstat_identity::machine_label(),
     )
     .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
@@ -629,6 +645,10 @@ fn status() -> Result<Value, String> {
         "port": settings.port,
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
+        // The check a person will actually perform. See
+        // `tokenstat_identity::key_words`: same key, said in a way somebody
+        // reads aloud instead of skimming.
+        "words": tokenstat_identity::key_words(&identity.public_key()),
         "label": tokenstat_identity::machine_label(),
     }))
 }

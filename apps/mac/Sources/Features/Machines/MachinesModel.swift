@@ -41,16 +41,23 @@ final class MachinesModel {
         peers.filter { $0.trust == .approved && $0.address?.isEmpty == false }
     }
 
-    /// The string to paste on another machine to connect. Carries the key
-    /// always and the address when this machine is listening, so the other
-    /// side can dial without typing a host and port by hand.
-    var connectLink: String? {
+    /// The one string to move to the other machine.
+    ///
+    /// It carries the key always and the address when this machine is
+    /// listening, so the far end can dial without anybody reading an address
+    /// aloud. Deliberately not called a key on screen: it is the thing you
+    /// paste, and what is inside it is our problem rather than the user's.
+    var pairingCode: String? {
         guard let identity else { return nil }
         if let address = status?.address, status?.listening == true {
             return "\(identity.key)@\(address)"
         }
         return identity.key
     }
+
+    /// The two words for this machine, which is what a person compares against
+    /// the other screen.
+    var words: String? { identity?.words ?? status?.words }
 
     func load() async {
         discovery.changed = { [weak self] daemons in
@@ -95,7 +102,7 @@ final class MachinesModel {
         do {
             let outcome = try await Bridge.setServing(enabled, port: status.port)
             showNotice(outcome.serving
-                ? "Other machines can reach this one at \(outcome.address ?? "the chosen port")."
+                ? "Other machines can now reach this one."
                 : "This machine no longer accepts connections.")
             errorMessage = nil
             await load()

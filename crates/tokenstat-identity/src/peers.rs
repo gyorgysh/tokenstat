@@ -70,6 +70,14 @@ impl Peer {
             Err(_) => "unreadable".into(),
         }
     }
+
+    /// The same key as two words, which is the comparison a person makes.
+    pub fn words(&self) -> String {
+        match public_key_from_hex(&self.key) {
+            Ok(key) => crate::key_words(&key),
+            Err(_) => "unreadable".into(),
+        }
+    }
 }
 
 /// Every peer, on disk.

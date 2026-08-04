@@ -58,6 +58,10 @@ fn identity() -> Result<Value, String> {
     Ok(json!({
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
+        // Two words over a hex fingerprint, because that is the comparison a
+        // person performs instead of skims. Both are sent: the screen leads
+        // with the words and keeps the fingerprint for whoever wants it.
+        "words": tokenstat_identity::key_words(&identity.public_key()),
         "label": tokenstat_identity::machine_label(),
     }))
 }
@@ -72,6 +76,7 @@ fn peer_json(peer: &tokenstat_identity::Peer) -> Value {
     json!({
         "key": peer.key,
         "fingerprint": peer.fingerprint(),
+        "words": peer.words(),
         "label": peer.label,
         "trust": match peer.trust {
             Trust::Pending => "pending",
