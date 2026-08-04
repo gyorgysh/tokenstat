@@ -9,14 +9,14 @@ import SwiftUI
 
 /// The top level destinations from the desktop plan.
 ///
-/// Insights is the only one built. The rest are listed because the shape of the
-/// product is the point: this is a workspace runner that happens to know what
-/// everything costs, not a reporting tool that might grow a terminal.
+/// Workspaces opens first: this is a place to work, like an IDE, not a report.
+/// Insights sits last, after the work surfaces, because that is what it is:
+/// the accounting for the work, looked at when the work is done.
 enum Destination: String, CaseIterable, Identifiable {
-    case insights
     case workspaces
     case automations
     case fleet
+    case insights
     case account
 
     var id: String { rawValue }
@@ -29,37 +29,39 @@ enum Destination: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .insights: return "Insights"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
         case .fleet: return "Fleet"
+        case .insights: return "Insights"
         case .account: return "Account"
         }
     }
 
     var symbol: String {
         switch self {
-        case .insights: return "chart.bar.fill"
         case .workspaces: return "square.stack.3d.up.fill"
         case .automations: return "bolt.fill"
         case .fleet: return "desktopcomputer"
+        case .insights: return "chart.bar.fill"
         case .account: return "person.crop.circle"
         }
     }
 }
 
 struct RootView: View {
-    @State private var destination: Destination = .insights
+    @State private var destination: Destination = .workspaces
     @State private var model = InsightsModel()
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
-    @State private var showInspector = true
+    #if os(macOS)
+    @State private var terminals = TerminalsModel()
+    #endif
     var body: some View {
         NavigationSplitView {
             sidebar
         } detail: {
             detail
-                .inspector(isPresented: inspectorBinding) {
+                .inspector(isPresented: showsInspector) {
                     Group {
                         switch destination {
                         case .workspaces:
@@ -76,14 +78,18 @@ struct RootView: View {
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
         .task { await workspaces.load() }
+        #if os(macOS)
+        .task { await terminals.load() }
+        #endif
     }
 
-    /// Insights and Workspaces each have something to put in the right pane.
-    /// The rest do not, so it collapses rather than showing an empty column.
-    private var inspectorBinding: Binding<Bool> {
+    /// Which destinations have something for the right pane. The pane is part
+    /// of the layout and is not user-closeable; it simply does not exist for
+    /// screens that have nothing to put in it.
+    private var showsInspector: Binding<Bool> {
         Binding(
-            get: { showInspector && (destination == .insights || destination == .workspaces) },
-            set: { showInspector = $0 }
+            get: { destination == .insights || destination == .workspaces },
+            set: { _ in }
         )
     }
 
@@ -255,20 +261,12 @@ struct RootView: View {
     @ViewBuilder
     private var detail: some View {
         switch destination {
-        case .insights:
-            InsightsView(model: model)
-                .toolbar {
-                    ToolbarItem {
-                        Button {
-                            showInspector.toggle()
-                        } label: {
-                            Label("Inspector", systemImage: "sidebar.trailing")
-                        }
-                        .help("Show or hide the details pane")
-                    }
-                }
         case .workspaces:
+            #if os(macOS)
+            WorkspacesView(model: workspaces, terminals: terminals)
+            #else
             WorkspacesView(model: workspaces)
+            #endif
         case .automations:
             NotBuiltYet(
                 title: "Automations",
@@ -292,6 +290,8 @@ struct RootView: View {
             )
         case .account:
             AccountView(model: account)
+        case .insights:
+            InsightsView(model: model)
         }
     }
 }

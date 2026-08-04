@@ -9,18 +9,26 @@ import SwiftUI
 
 /// The centre pane for a workspace.
 ///
-/// The terminal belongs here and is not built yet, so this says so rather than
-/// filling the space with something else. Everything below the tab strip is
-/// what the terminal will sit above.
+/// The workspace header, then the terminal surface: a session strip, the
+/// selected session's terminal, and the launches offered when a folder has no
+/// session. On macOS the host owns the process; on iOS there is no host yet,
+/// so the pane keeps its placeholder.
 struct WorkspacesView: View {
     @Bindable var model: WorkspacesModel
+    #if os(macOS)
+    @Bindable var terminals: TerminalsModel
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
             if let folder = model.selected {
                 header(folder)
                 Divider()
+                #if os(macOS)
+                TerminalPane(folder: folder, terminals: terminals)
+                #else
                 terminalPlaceholder(folder)
+                #endif
             } else {
                 empty
             }

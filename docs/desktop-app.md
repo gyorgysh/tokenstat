@@ -197,9 +197,11 @@ remote case, which belongs with M6 rather than here.
 and Changes panels. Still no terminal. Product identity gets decided here, so
 give it room.
 
-**M5. Sessions.** SwiftTerm over host PTY sessions, agent launch profiles, the
-tab bar, and the live per-session meter. This is the milestone the product is
-actually for.
+**M5. Sessions. Mostly built.** SwiftTerm over host PTY sessions, a session
+strip, and agent launch profiles in the Workspaces pane. Keystrokes, output and
+resize all flow through the host's `pty.*` methods over the existing bridge.
+Still ahead: the live per-session token and cost meter in the tab bar, which
+needs a tail-follow or scan-on-change feed that the archive does not have yet.
 
 **M6. Fleet.** A second machine's workspaces in the same sidebar. Once this
 works, the iPad client is mostly a layout exercise.

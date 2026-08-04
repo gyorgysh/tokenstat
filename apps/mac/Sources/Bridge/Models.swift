@@ -481,3 +481,54 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
         return git.partial ? "\(plus)\(minus)+" : "\(plus)\(minus)"
     }
 }
+
+// MARK: - Terminals
+
+/// A pty session as the host reports it.
+///
+/// The process is owned by the host, not by the app: a session survives the
+/// window closing, and a client that reconnects resumes by offset. Field names
+/// follow the Rust `SessionInfo`, which is the single definition of the shape.
+struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// The command as launched, for a tab label.
+    var command: String
+    var cwd: String
+    /// Workspace this belongs to, so sessions can be grouped by folder.
+    var workspaceID: String?
+    var rows: Int
+    var cols: Int
+    var alive: Bool
+    /// Set once the process has exited. `nil` while it still runs, which is
+    /// not the same as having exited with status 0.
+    var exitCode: Int?
+    /// Total bytes ever produced. A client's read offset is against this.
+    var totalBytes: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case command
+        case cwd
+        // The host spells it `workspaceId`, serde's camelCase for
+        // `workspace_id`. Swift's own camelCase writes `workspaceID`.
+        case workspaceID = "workspaceId"
+        case rows
+        case cols
+        case alive
+        case exitCode
+        case totalBytes
+    }
+}
+
+/// One poll's worth of terminal output.
+///
+/// `data` is base64 because the bytes are not valid UTF-8 in general: an
+/// escape sequence can be cut in half at a read boundary.
+struct PtyChunk: Codable, Sendable {
+    var data: String
+    /// Offset to ask for next time.
+    var nextOffset: UInt64
+    /// Bytes dropped before this chunk because this reader fell behind the
+    /// host's bounded buffer. Zero in normal use, and never silently ignored.
+    var dropped: UInt64
+}

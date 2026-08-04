@@ -213,3 +213,69 @@ extension Bridge {
 
 private struct Removed: Codable, Sendable { let removed: Bool }
 private struct Renamed: Codable, Sendable { let renamed: Bool }
+
+// MARK: - Terminals
+
+extension Bridge {
+    /// Launch a command in the workspace's folder. The process is owned by the
+    /// host, so it outlives this window and any tab switch.
+    static func ptySpawn(
+        workspaceID: String,
+        command: String,
+        args: [String],
+        rows: Int,
+        cols: Int
+    ) async throws -> PtySessionInfo {
+        try await background("pty.spawn", [
+            "workspaceId": workspaceID,
+            "command": command,
+            "args": args,
+            "rows": rows,
+            "cols": cols,
+        ], as: PtySessionInfo.self)
+    }
+
+    static func ptyList() async throws -> [PtySessionInfo] {
+        try await background("pty.list", as: [PtySessionInfo].self)
+    }
+
+    static func ptyInfo(id: String) async throws -> PtySessionInfo {
+        try await background("pty.info", ["id": id], as: PtySessionInfo.self)
+    }
+
+    /// Output after `offset`. Returns immediately, empty when there is none.
+    /// Poll, do not push.
+    static func ptyRead(id: String, offset: UInt64) async throws -> PtyChunk {
+        try await background("pty.read", ["id": id, "offset": offset], as: PtyChunk.self)
+    }
+
+    /// Keystrokes. Bytes, not text: an escape sequence is a byte stream.
+    static func ptyWrite(id: String, bytes: [UInt8]) async throws {
+        _ = try await background(
+            "pty.write",
+            ["id": id, "data": Data(bytes).base64EncodedString()],
+            as: PtyWriteAck.self
+        )
+    }
+
+    static func ptyResize(id: String, rows: Int, cols: Int) async throws {
+        _ = try await background(
+            "pty.resize",
+            ["id": id, "rows": rows, "cols": cols],
+            as: PtySizeAck.self
+        )
+    }
+
+    /// Stop the process. Killing an already dead session is not an error.
+    static func ptyKill(id: String) async throws {
+        _ = try await background("pty.kill", ["id": id], as: Ack.self)
+    }
+
+    /// Kill and forget. The host's buffer goes with it.
+    static func ptyClose(id: String) async throws {
+        _ = try await background("pty.close", ["id": id], as: Ack.self)
+    }
+}
+
+private struct PtyWriteAck: Codable, Sendable { let written: Int }
+private struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }

@@ -15,6 +15,20 @@ options:
     iOS: "17.0"
   groupSortPosition: top
 
+packages:
+  # The terminal emulator. MIT licensed, from wezterm's author. It renders an
+  # arbitrary byte stream rather than owning a process, which is exactly what a
+  # view fed from the host's pty.read needs.
+  #
+  # Pinned to 1.11.2, the last release before the Metal renderer landed. 1.12+
+  # compiles a .metal shader as a package resource, so every build needs the
+  # `metal` compiler from the Metal toolchain component, which is not installed
+  # on a stock Xcode. Bump when the app ships and the renderer is measured; a
+  # fresh checkout must build without downloading extra toolchains.
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    exactVersion: 1.11.2
+
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -47,6 +61,9 @@ targets:
       # binary and there is nothing to copy into the bundle.
       - framework: Vendor/TokenstatFFI.xcframework
         embed: false
+      # The terminal view. Resolved through Swift Package Manager; the package
+      # declaration is under `packages:` at the top of this file.
+      - package: SwiftTerm
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.Tokenstat
