@@ -593,6 +593,53 @@ extension Bridge {
     static func automationTranscript(id: String, offset: UInt64) async throws -> TranscriptChunk {
         try await background("automation.transcript", ["id": id, "offset": offset], as: TranscriptChunk.self)
     }
+
+    /// Stop a run before its budget. Used by the todo board's Stop.
+    static func automationKill(runID: String) async throws {
+        _ = try await background("automation.kill", ["id": runID], as: Ack.self)
+    }
+}
+
+// MARK: - Todo
+
+extension Bridge {
+    static func todoCards() async throws -> [TodoCard] {
+        try await background("todo.list", as: [TodoCard].self)
+    }
+
+    static func todoCreate(
+        title: String, notes: String, column: String, backend: String,
+        workspaceID: String, budgetSeconds: UInt64
+    ) async throws -> TodoCard {
+        try await background("todo.create", [
+            "title": title, "notes": notes, "column": column, "backend": backend,
+            "workspaceId": workspaceID, "budgetSeconds": budgetSeconds,
+        ], as: TodoCard.self)
+    }
+
+    static func todoUpdate(
+        id: String, column: String? = nil, title: String? = nil, notes: String? = nil
+    ) async throws -> TodoCard {
+        var params: [String: Any] = ["id": id]
+        if let column { params["column"] = column }
+        if let title { params["title"] = title }
+        if let notes { params["notes"] = notes }
+        return try await background("todo.update", params, as: TodoCard.self)
+    }
+
+    static func todoRemove(id: String) async throws {
+        _ = try await background("todo.remove", ["id": id], as: Removed.self)
+    }
+
+    /// Hand the card to an agent. The card moves to Doing and the run starts.
+    static func todoDelegate(id: String) async throws -> TodoCard {
+        try await background("todo.delegate", ["id": id], as: TodoCard.self)
+    }
+
+    /// Stop a delegated run.
+    static func todoStop(id: String) async throws -> TodoCard {
+        try await background("todo.stop", ["id": id], as: TodoCard.self)
+    }
 }
 
 private extension Automation {

@@ -938,6 +938,61 @@ struct AgentBackend: Codable, Sendable, Identifiable {
     var command: String
 }
 
+// MARK: - Todo
+
+/// A card on the kanban board.
+struct TodoCard: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var title: String
+    var notes: String
+    var column: String
+    var order: Int64
+    var priority: String
+    var backend: String
+    var workspaceID: String
+    var budgetSeconds: UInt64
+    var createdAtMs: Int64
+    var updatedAtMs: Int64
+    var delegate: TodoDelegate?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, notes, column, order, priority, backend
+        case workspaceID = "workspaceId", budgetSeconds, createdAtMs, updatedAtMs, delegate
+    }
+
+    var columnLabel: String {
+        switch column {
+        case "doing": return "Doing"
+        case "done": return "Done"
+        default: return "To Do"
+        }
+    }
+}
+
+/// The live state of a card handed to an agent.
+struct TodoDelegate: Codable, Sendable, Hashable {
+    var runId: String
+    var status: String
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case runId, status, startedAtMs, endedAtMs, error
+    }
+
+    var isRunning: Bool { status == "running" }
+    var label: String {
+        switch status {
+        case "running": return "Running"
+        case "ok": return "Done"
+        case "stopped": return "Stopped"
+        case "error": return "Failed"
+        default: return status
+        }
+    }
+}
+
 // MARK: - Terminals
 
 /// A pty session as the host reports it.

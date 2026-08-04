@@ -1,0 +1,430 @@
+//! A kanban board of work, with cards that can be delegated to an agent.
+//!
+//! The board is a list of columns with cards in order. A card is work a person
+//! is tracking; delegating it hands it to the same agent runner automations
+//! use, as a one-shot job whose transcript lands in the runs history. Nothing
+//! here writes to a repository. It moves cards.
+
+use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
+
+use serde::{Deserialize, Serialize};
+
+use crate::session::Session;
+
+/// The columns, in order. Fixed, because a board with user-editable columns is
+/// a settings screen, and this milestone is the cards.
+pub const COLUMNS: [&str; 3] = ["backlog", "doing", "done"];
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Priority {
+    #[default]
+    Normal,
+    Low,
+    High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delegate {
+    pub run_id: String,
+    /// running, ok, error, or stopped. Mirrors the run status.
+    pub status: String,
+    pub started_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Card {
+    pub id: String,
+    pub title: String,
+    pub notes: String,
+    pub column: String,
+    pub order: i64,
+    pub priority: Priority,
+    /// Where a delegated run happens. Chosen once at create.
+    pub backend: String,
+    pub workspace_id: String,
+    pub budget_seconds: u64,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub delegate: Option<Delegate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct File {
+    #[serde(default)]
+    cards: Vec<Card>,
+}
+
+/// The fields a caller may change on a card.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CardUpdate {
+    pub column: Option<String>,
+    pub title: Option<String>,
+    pub notes: Option<String>,
+    pub backend: Option<String>,
+    pub workspace_id: Option<String>,
+    pub budget_seconds: Option<u64>,
+}
+
+pub struct Board {
+    path: PathBuf,
+    cards: Mutex<Vec<Card>>,
+}
+
+pub fn shared() -> std::sync::Arc<Board> {
+    static BOARD: std::sync::OnceLock<std::sync::Arc<Board>> = std::sync::OnceLock::new();
+    std::sync::Arc::clone(BOARD.get_or_init(|| std::sync::Arc::new(Board::load())))
+}
+
+impl Board {
+    #[cfg(test)]
+    fn at(path: PathBuf) -> Board {
+        Board {
+            path,
+            cards: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn load() -> Board {
+        let path = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+            .map(|d| d.data_dir().join("todo.json"))
+            .unwrap_or_else(|| PathBuf::from("todo.json"));
+        let cards = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<File>(&text).ok())
+            .map(|file| file.cards)
+            .unwrap_or_default();
+        Board {
+            path,
+            cards: Mutex::new(cards),
+        }
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let cards = self
+            .cards
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let body = serde_json::to_string_pretty(&File { cards }).map_err(|e| e.to_string())?;
+        if let Some(parent) = self.path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let tmp = self.path.with_extension("json.tmp");
+        std::fs::write(&tmp, &body).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| e.to_string())
+    }
+
+    fn now_ms() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Reconcile delegated cards against the runs history, so a card that
+    /// finished while the app was closed stops saying it is running.
+    pub fn reconcile(&self) {
+        let runs = crate::automations::shared().runs();
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut changed = false;
+        for card in cards.iter_mut() {
+            if let Some(delegate) = card.delegate.as_mut() {
+                if delegate.status == "running" {
+                    if let Some(run) = runs.iter().find(|r| r.id == delegate.run_id) {
+                        if run.status != "running" {
+                            delegate.status = run.status.clone();
+                            delegate.ended_at_ms = run.ended_at_ms;
+                            if run.status == "error" {
+                                delegate.error = Some("the run failed".into());
+                            }
+                            card.updated_at_ms = Self::now_ms();
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+        drop(cards);
+        if changed {
+            let _ = self.save();
+        }
+    }
+
+    pub fn list(&self) -> Vec<Card> {
+        self.reconcile();
+        let mut cards = self
+            .cards
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        cards.sort_by(|a, b| {
+            let ac = COLUMNS
+                .iter()
+                .position(|c| *c == a.column)
+                .unwrap_or(usize::MAX);
+            let bc = COLUMNS
+                .iter()
+                .position(|c| *c == b.column)
+                .unwrap_or(usize::MAX);
+            (ac, a.order).cmp(&(bc, b.order))
+        });
+        cards
+    }
+
+    pub fn create(&self, mut card: Card) -> Result<Card, String> {
+        if card.title.trim().is_empty() {
+            return Err("a card needs a title".into());
+        }
+        if !COLUMNS.contains(&card.column.as_str()) {
+            card.column = "backlog".into();
+        }
+        if card.workspace_id.is_empty() {
+            return Err("a card needs a workspace".into());
+        }
+        if card.budget_seconds == 0 {
+            card.budget_seconds = 900;
+        }
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        if card.id.is_empty() {
+            card.id = format!("todo-{}", Self::now_ms());
+        }
+        if cards.iter().any(|c| c.id == card.id) {
+            return Err(format!("a card with id {} already exists", card.id));
+        }
+        card.created_at_ms = Self::now_ms();
+        card.updated_at_ms = card.created_at_ms;
+        card.order = cards.iter().filter(|c| c.column == card.column).count() as i64;
+        cards.push(card.clone());
+        drop(cards);
+        self.save()?;
+        Ok(card)
+    }
+
+    pub fn update(&self, id: &str, changes: &CardUpdate) -> Result<Card, String> {
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let card = cards
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("no card with id {id}"))?;
+        if let Some(title) = changes.title.as_deref() {
+            if title.trim().is_empty() {
+                return Err("a card needs a title".into());
+            }
+            card.title = title.to_string();
+        }
+        if let Some(notes) = changes.notes.as_deref() {
+            card.notes = notes.to_string();
+        }
+        if let Some(backend) = changes.backend.as_deref() {
+            card.backend = backend.to_string();
+        }
+        if let Some(workspace_id) = changes.workspace_id.as_deref() {
+            card.workspace_id = workspace_id.to_string();
+        }
+        if let Some(budget_seconds) = changes.budget_seconds {
+            if budget_seconds > 0 {
+                card.budget_seconds = budget_seconds;
+            }
+        }
+        if let Some(column) = changes.column.as_deref() {
+            if COLUMNS.contains(&column) {
+                card.column = column.to_string();
+            }
+        }
+        card.updated_at_ms = Self::now_ms();
+        // Order is recomputed outside the borrow, so the column's cards can be
+        // counted without touching the card being moved.
+        let (idx, column) = {
+            let idx = cards.iter().position(|c| c.id == id).unwrap();
+            (idx, cards[idx].column.clone())
+        };
+        cards[idx].order = cards
+            .iter()
+            .filter(|c| c.column == column && c.id != id)
+            .count() as i64;
+        let result = cards[idx].clone();
+        drop(cards);
+        self.save()?;
+        Ok(result)
+    }
+
+    pub fn remove(&self, id: &str) -> Result<bool, String> {
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let old = cards.len();
+        cards.retain(|c| c.id != id);
+        let changed = old != cards.len();
+        drop(cards);
+        if changed {
+            self.save()?;
+        }
+        Ok(changed)
+    }
+
+    /// Hand a card to an agent. The run is a one-shot automation whose
+    /// transcript lands in the runs history.
+    pub fn delegate(
+        self: &std::sync::Arc<Board>,
+        id: &str,
+        session: &Session,
+    ) -> Result<Card, String> {
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let (job, title) = {
+            let card = cards
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or_else(|| format!("no card with id {id}"))?;
+            if card
+                .delegate
+                .as_ref()
+                .is_some_and(|d| d.status == "running")
+            {
+                return Err(format!("{} is already running", card.title));
+            }
+            (
+                crate::automations::Automation {
+                    id: format!("todo-{}", card.id),
+                    name: card.title.clone(),
+                    backend: card.backend.clone(),
+                    workspace_id: card.workspace_id.clone(),
+                    prompt: format!("{}\n\n{}", card.title, card.notes),
+                    schedule: crate::automations::ScheduleSpec::default(),
+                    budget_seconds: card.budget_seconds,
+                    enabled: false,
+                    last_run_at_ms: None,
+                    next_run_at_ms: None,
+                    last_run_id: None,
+                },
+                card.title.clone(),
+            )
+        };
+        // The run starts while the board is locked, but it touches only the
+        // automation store, so nothing here can deadlock.
+        let run = crate::automations::shared().run_adhoc(job, session)?;
+        let idx = cards.iter().position(|c| c.id == id).unwrap();
+        cards[idx].delegate = Some(Delegate {
+            run_id: run.id.clone(),
+            status: "running".into(),
+            started_at_ms: run.started_at_ms,
+            ended_at_ms: None,
+            error: None,
+        });
+        cards[idx].column = "doing".into();
+        cards[idx].order = cards
+            .iter()
+            .filter(|c| c.column == "doing" && c.id != id)
+            .count() as i64;
+        cards[idx].updated_at_ms = Self::now_ms();
+        let result = cards[idx].clone();
+        drop(cards);
+        self.save()?;
+        let _ = title;
+        Ok(result)
+    }
+
+    /// Stop a delegated run by its card. Kills the pty behind the run.
+    pub fn stop(&self, id: &str) -> Result<Card, String> {
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let card = cards
+            .iter_mut()
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("no card with id {id}"))?;
+        if let Some(delegate) = card.delegate.as_mut() {
+            if delegate.status == "running" {
+                let _ = crate::automations::shared().kill_run(&delegate.run_id);
+            }
+        }
+        let result = card.clone();
+        drop(cards);
+        Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn card(id: &str) -> Card {
+        Card {
+            id: id.into(),
+            title: "a card".into(),
+            notes: String::new(),
+            column: "backlog".into(),
+            order: 0,
+            priority: Priority::Normal,
+            backend: "claude".into(),
+            workspace_id: "w".into(),
+            budget_seconds: 900,
+            created_at_ms: 0,
+            updated_at_ms: 0,
+            delegate: None,
+        }
+    }
+
+    #[test]
+    fn a_card_needs_a_title_and_a_workspace() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-test");
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("a");
+        c.title = "  ".into();
+        assert!(board.create(c.clone()).is_err());
+        c.title = "ok".into();
+        c.workspace_id = String::new();
+        assert!(board.create(c).is_err());
+    }
+
+    #[test]
+    fn unknown_columns_fall_back_to_backlog() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-test2");
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("a");
+        c.column = "somewhere-else".into();
+        let created = board.create(c).unwrap();
+        assert_eq!(created.column, "backlog");
+    }
+
+    #[test]
+    fn moving_a_card_updates_its_order() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-test3");
+        let board = Board::at(dir.join("todo.json"));
+        board.create(card("a")).unwrap();
+        board.create(card("b")).unwrap();
+        let moved = board
+            .update(
+                "a",
+                &CardUpdate {
+                    column: Some("doing".into()),
+                    ..CardUpdate::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(moved.column, "doing");
+        let all = board.list();
+        // Columns sort backlog first, so the card moved to doing sits after the
+        // one still in backlog.
+        let pos_b = all.iter().position(|c| c.id == "b").unwrap();
+        let pos_a = all.iter().position(|c| c.id == "a").unwrap();
+        assert!(pos_b < pos_a);
+    }
+
+    #[test]
+    fn delegate_requires_a_real_workspace() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-test4");
+        let board = std::sync::Arc::new(Board::at(dir.join("todo.json")));
+        board.create(card("a")).unwrap();
+        let session = Session::open(&crate::session::OpenParams {
+            db_path: Some(dir.join("archive.db").display().to_string()),
+            timezone: Some("UTC".into()),
+        })
+        .unwrap();
+        // Workspace "w" does not exist, so delegation fails with words.
+        let err = board.delegate("a", &session).unwrap_err();
+        assert!(err.contains("no workspace"), "{err}");
+    }
+}

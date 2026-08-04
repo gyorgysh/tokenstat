@@ -242,6 +242,8 @@ pub struct RunRecord {
     /// running, ok, error, or stopped (by budget).
     pub status: String,
     pub transcript_path: String,
+    /// The live pty, kept so a run can be stopped before its budget.
+    pub pty_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -469,13 +471,13 @@ impl Store {
 
     // MARK: running
 
-    /// Run one job immediately, or one due job from the scheduler.
-    pub fn run(self: &Arc<Store>, id: &str, session: &Session) -> Result<Automation, String> {
-        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-        let job = jobs
-            .iter_mut()
-            .find(|job| job.id == id)
-            .ok_or_else(|| format!("no automation with id {id}"))?;
+    /// Run a job that is not part of the stored list: the todo board's
+    /// delegate path. Returns the run so the caller can link it to its card.
+    pub fn run_adhoc(
+        self: &Arc<Store>,
+        job: Automation,
+        session: &Session,
+    ) -> Result<RunRecord, String> {
         let workspace = session
             .workspaces
             .get(&job.workspace_id)
@@ -503,14 +505,15 @@ impl Store {
         let run = RunRecord {
             id: run_id.clone(),
             job_id: job.id.clone(),
-            name: job.name.clone(),
-            backend: job.backend.clone(),
+            name: job.name,
+            backend: job.backend,
             workspace_id: workspace.id.clone(),
             started_at_ms: now_ms(),
             ended_at_ms: None,
             exit_code: None,
             status: "running".into(),
             transcript_path: transcript_path.display().to_string(),
+            pty_id: Some(info.id.clone()),
         };
 
         // The pty id and budget are captured, and the transcript is drained on
@@ -521,6 +524,18 @@ impl Store {
         let me = Arc::clone(self);
         std::thread::spawn(move || me.drain(&pty_id, &transcript_path, budget, &run_id));
 
+        self.push_run(run.clone())?;
+        Ok(run)
+    }
+
+    /// Run one stored job immediately, or one due job from the scheduler.
+    pub fn run(self: &Arc<Store>, id: &str, session: &Session) -> Result<Automation, String> {
+        let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        let job = jobs
+            .iter_mut()
+            .find(|job| job.id == id)
+            .ok_or_else(|| format!("no automation with id {id}"))?;
+        let run = self.run_adhoc(job.clone(), session)?;
         job.last_run_at_ms = Some(run.started_at_ms);
         job.last_run_id = Some(run.id.clone());
         job.next_run_at_ms = if job.enabled {
@@ -531,8 +546,22 @@ impl Store {
         let result = job.clone();
         drop(jobs);
         self.save()?;
-        self.push_run(run)?;
         Ok(result)
+    }
+
+    /// Kill the pty behind a run, by its run id. The drain then records the
+    /// run as stopped when the process is gone.
+    pub fn kill_run(&self, run_id: &str) -> Result<(), String> {
+        let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let run = runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .ok_or("no run with that id")?;
+        let pty_id = run.pty_id.clone().ok_or("that run has no live pty")?;
+        drop(runs);
+        tokenstat_pty::manager()
+            .kill(&pty_id)
+            .map_err(|e| e.to_string())
     }
 
     /// Drain a run's pty into its transcript file, kill on budget, then record
@@ -770,6 +799,7 @@ mod tests {
             exit_code: None,
             status: "running".into(),
             transcript_path: transcript_path.display().to_string(),
+            pty_id: None,
         };
         store.push_run(run).unwrap();
 
@@ -817,6 +847,7 @@ mod tests {
             exit_code: None,
             status: "running".into(),
             transcript_path: transcript_path.display().to_string(),
+            pty_id: None,
         };
         store.push_run(run).unwrap();
 

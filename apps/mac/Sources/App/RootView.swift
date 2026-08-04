@@ -21,6 +21,7 @@ import SwiftUI
 /// section: three headings for two ideas.
 enum Destination: String, CaseIterable, Identifiable {
     case home
+    case todo
     case automations
     case machines
     case insights
@@ -36,12 +37,13 @@ enum Destination: String, CaseIterable, Identifiable {
     /// look for their account. Workspaces is not among them either, for the
     /// reason above.
     static var navigable: [Destination] {
-        [.home, .automations, .machines, .insights]
+        [.home, .todo, .automations, .machines, .insights]
     }
 
     var label: String {
         switch self {
         case .home: return "Home"
+        case .todo: return "Todo"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
         case .machines: return "Machines"
@@ -53,6 +55,7 @@ enum Destination: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .home: return "house.fill"
+        case .todo: return "checklist"
         case .workspaces: return "square.stack.3d.up.fill"
         case .automations: return "bolt.fill"
         case .machines: return "desktopcomputer"
@@ -70,6 +73,7 @@ struct RootView: View {
     @State private var workspaces = WorkspacesModel()
     @State private var machines = MachinesModel()
     @State private var automations = AutomationsModel()
+    @State private var todo = TodoModel()
     @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -405,6 +409,8 @@ struct RootView: View {
             }
         case .automations:
             AutomationsView(model: automations, folders: workspaces.folders)
+        case .todo:
+            TodoView(model: todo, folders: workspaces.folders)
         case .machines:
             MachinesView(model: machines)
         case .account:

@@ -156,6 +156,19 @@ struct AutomationParams {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+struct TodoParams {
+    id: Option<String>,
+    title: Option<String>,
+    notes: Option<String>,
+    column: Option<String>,
+    priority: Option<crate::todo::Priority>,
+    backend: Option<String>,
+    workspace_id: Option<String>,
+    budget_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct HighlightParams {
     /// The buffer to colour, which is what is on screen rather than what is on
     /// disk. `highlight.syntax` leaves it empty.
@@ -916,6 +929,67 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let (text, next) =
                 crate::automations::shared().transcript(&id, p.offset.unwrap_or(0))?;
             Ok(json!({"text": text, "nextOffset": next}))
+        }
+        "automation.kill" => {
+            let p: AutomationParams = parse(params)?;
+            crate::automations::shared()
+                .kill_run(&p.id.ok_or("automation.kill needs a run id")?)?;
+            Ok(json!({"killed": true}))
+        }
+
+        "todo.list" => {
+            serde_json::to_value(crate::todo::shared().list()).map_err(|e| e.to_string())
+        }
+        "todo.create" => {
+            let p: TodoParams = parse(params)?;
+            let card = crate::todo::Card {
+                id: String::new(),
+                title: p.title.ok_or("todo.create needs a title")?,
+                notes: p.notes.unwrap_or_default(),
+                column: p.column.unwrap_or_else(|| "backlog".into()),
+                order: 0,
+                priority: p.priority.unwrap_or_default(),
+                backend: p.backend.unwrap_or_else(|| "claude".into()),
+                workspace_id: p.workspace_id.ok_or("todo.create needs a workspace")?,
+                budget_seconds: p.budget_seconds.unwrap_or(900),
+                created_at_ms: 0,
+                updated_at_ms: 0,
+                delegate: None,
+            };
+            serde_json::to_value(crate::todo::shared().create(card)?).map_err(|e| e.to_string())
+        }
+        "todo.update" => {
+            let p: TodoParams = parse(params)?;
+            let changes = crate::todo::CardUpdate {
+                column: p.column,
+                title: p.title,
+                notes: p.notes,
+                backend: p.backend,
+                workspace_id: p.workspace_id,
+                budget_seconds: p.budget_seconds,
+            };
+            serde_json::to_value(
+                crate::todo::shared().update(&p.id.ok_or("todo.update needs an id")?, &changes)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "todo.remove" => {
+            let p: TodoParams = parse(params)?;
+            Ok(
+                json!({"removed": crate::todo::shared().remove(&p.id.ok_or("todo.remove needs an id")?)?}),
+            )
+        }
+        "todo.delegate" => {
+            let p: TodoParams = parse(params)?;
+            serde_json::to_value(
+                crate::todo::shared().delegate(&p.id.ok_or("todo.delegate needs an id")?, s)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "todo.stop" => {
+            let p: TodoParams = parse(params)?;
+            serde_json::to_value(crate::todo::shared().stop(&p.id.ok_or("todo.stop needs an id")?)?)
+                .map_err(|e| e.to_string())
         }
 
         other => match sessionless(other, params) {
