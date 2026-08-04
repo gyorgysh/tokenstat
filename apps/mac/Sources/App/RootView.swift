@@ -87,7 +87,11 @@ struct RootView: View {
                             InspectorView(model: model)
                         }
                     }
-                    .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
+                    // Wider than it was. At 300 the Changes list wrapped every
+                    // path onto two lines and a commit subject onto three,
+                    // which is a column of text pretending to be a panel. The
+                    // minimum went up with it: nothing here reads at 240.
+                    .inspectorColumnWidth(min: 280, ideal: 360, max: 520)
                 }
         }
         .task { await model.load() }
