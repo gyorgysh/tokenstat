@@ -564,6 +564,10 @@ extension Bridge {
         try await background("automation.create", ["job": job.payload], as: Automation.self)
     }
 
+    static func updateAutomation(_ job: Automation) async throws -> Automation {
+        try await background("automation.update", ["job": job.payload], as: Automation.self)
+    }
+
     static func setAutomation(_ id: String, enabled: Bool) async throws -> Automation {
         try await background(enabled ? "automation.enable" : "automation.disable", ["id": id], as: Automation.self)
     }
@@ -575,15 +579,37 @@ extension Bridge {
     static func removeAutomation(_ id: String) async throws {
         _ = try await background("automation.remove", ["id": id], as: Removed.self)
     }
+
+    static func automationRuns() async throws -> [RunRecord] {
+        try await background("automation.runs", as: [RunRecord].self)
+    }
+
+    /// The agent backends a job can choose, as the daemon knows them.
+    static func automationBackends() async throws -> [AgentBackend] {
+        try await background("automation.backends", as: [AgentBackend].self)
+    }
+
+    /// Output a run produced after `offset`. Poll while the run is running.
+    static func automationTranscript(id: String, offset: UInt64) async throws -> TranscriptChunk {
+        try await background("automation.transcript", ["id": id, "offset": offset], as: TranscriptChunk.self)
+    }
 }
 
 private extension Automation {
     var payload: [String: Any] {
         [
-            "id": id, "name": name, "workspaceId": workspaceID, "command": command,
-            "args": args, "intervalSeconds": intervalSeconds, "budgetSeconds": budgetSeconds,
-            "enabled": enabled, "lastRunAtMs": lastRunAtMs as Any,
-            "nextRunAtMs": nextRunAtMs as Any, "lastRunID": lastRunID as Any,
+            "id": id, "name": name, "backend": backend, "workspaceId": workspaceID,
+            "prompt": prompt,
+            "schedule": [
+                "kind": schedule.kind.rawValue,
+                "everySeconds": schedule.everySeconds,
+                "hour": schedule.hour,
+                "minute": schedule.minute,
+                "weekday": schedule.weekday,
+            ],
+            "budgetSeconds": budgetSeconds, "enabled": enabled,
+            "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,
+            "lastRunID": lastRunID as Any,
         ]
     }
 }

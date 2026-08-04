@@ -404,7 +404,7 @@ struct RootView: View {
                 destination = .insights
             }
         case .automations:
-            AutomationsView(model: automations)
+            AutomationsView(model: automations, folders: workspaces.folders)
         case .machines:
             MachinesView(model: machines)
         case .account:

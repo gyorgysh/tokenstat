@@ -1,27 +1,225 @@
-//! Daemon-owned recurring jobs.
+//! Daemon-owned agent jobs: a backend, a prompt, a schedule, and a budget.
 //!
 //! Automations are deliberately separate from `tokenstat_workspace::gitwrite`.
-//! This module owns persistence, scheduling, and the PTY budget. A job may run
+//! This module owns persistence, scheduling, and the run budget. A job may run
 //! an agent that changes a repository, but no timer calls a gitwrite function.
+//!
+//! A run is an agent CLI launched headless in a pty, exactly as a person would
+//! launch it in a terminal. Output drains into a transcript file as it is
+//! produced, so a run can be watched live and replayed later. The pty is owned
+//! by the host and killed when the budget expires, so an automation can never
+//! run away.
 
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::session::Session;
+
+/// How many completed runs to remember per machine.
+const RUNS_KEPT: usize = 100;
+
+/// How often the scheduler looks for due jobs.
+const TICK: Duration = Duration::from_secs(5);
+
+/// How fast the transcript drain polls the pty buffer.
+const DRAIN_POLL: Duration = Duration::from_millis(20);
+
+// MARK: - Schedule
+
+/// The kinds a schedule can take.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ScheduleKind {
+    /// Fire once, when Run now is pressed. Never fires on its own.
+    #[default]
+    Once,
+    Interval,
+    Daily,
+    Weekly,
+}
+
+/// When a job fires. A plain struct rather than a tagged enum so the wire shape
+/// is one thing a client can edit field by field.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ScheduleSpec {
+    pub kind: ScheduleKind,
+    /// Interval only. Seconds between runs, floored at one minute.
+    pub every_seconds: u64,
+    /// Daily and weekly only. Local wall-clock hour, 0..24.
+    pub hour: u8,
+    /// Daily and weekly only. Local wall-clock minute, 0..60.
+    pub minute: u8,
+    /// Weekly only. 0 = Monday, matching the calendar the app draws.
+    pub weekday: u8,
+}
+
+impl ScheduleSpec {
+    fn validate(&self) -> Result<(), String> {
+        match self.kind {
+            ScheduleKind::Once => Ok(()),
+            ScheduleKind::Interval => {
+                if self.every_seconds < 60 {
+                    Err("an interval must be at least a minute".into())
+                } else {
+                    Ok(())
+                }
+            }
+            ScheduleKind::Daily | ScheduleKind::Weekly => {
+                if self.hour > 23 || self.minute > 59 {
+                    Err("a schedule time must be a real hour and minute".into())
+                } else if self.kind == ScheduleKind::Weekly && self.weekday > 6 {
+                    Err("a weekday must be Monday to Sunday".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// The next time this fires, or None for a once job.
+    fn next_run_ms(&self, from: i64) -> Option<i64> {
+        match self.kind {
+            ScheduleKind::Once => None,
+            ScheduleKind::Interval => Some(from + self.every_seconds as i64 * 1000),
+            ScheduleKind::Daily => next_wall_clock(from, self.hour, self.minute, None),
+            ScheduleKind::Weekly => {
+                next_wall_clock(from, self.hour, self.minute, Some(self.weekday))
+            }
+        }
+    }
+}
+
+/// Next local occurrence of hour:minute, optionally restricted to a weekday.
+///
+/// 0 = Monday so the picker matches the calendar the app already draws. The
+/// result is strictly after `from_ms`.
+fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, weekday: Option<u8>) -> Option<i64> {
+    use jiff::civil::DateTime;
+    use jiff::tz::TimeZone;
+
+    let from = jiff::Timestamp::from_millisecond(from_ms).ok()?;
+    let tz = TimeZone::system();
+    let zoned = from.to_zoned(tz.clone());
+    let mut day = zoned.date();
+    // A schedule within a year of today is far more than anybody asks for.
+    for _ in 0..400 {
+        let on_weekday = weekday
+            .map(|w| day.weekday().to_monday_zero_offset() as u8 == w)
+            .unwrap_or(true);
+        if on_weekday {
+            let dt = DateTime::new(
+                day.year(),
+                day.month(),
+                day.day(),
+                hour as i8,
+                minute as i8,
+                0,
+                0,
+            )
+            .ok()?;
+            let z = dt.to_zoned(tz.clone()).ok()?;
+            let ms = z.timestamp().as_millisecond();
+            if ms > from_ms {
+                return Some(ms);
+            }
+        }
+        day = day.tomorrow().ok()?;
+    }
+    None
+}
+
+// MARK: - Backends
+
+/// The agent CLIs a job can run, with the flags that make them headless.
+///
+/// Each launches in the workspace folder, reads the prompt from argv, and
+/// prints to stdout. That is the whole contract: if the CLI has a print mode,
+/// the automation uses it. `--` before the prompt stops a prompt that starts
+/// with `-` from being parsed as a flag.
+pub fn agent_command(backend: &str, prompt: &str) -> Result<Vec<String>, String> {
+    let p = prompt.trim();
+    if p.is_empty() {
+        return Err("an automation needs a prompt".into());
+    }
+    let args: Vec<&str> = match backend {
+        "sh" => vec!["/bin/sh", "-c", p],
+        "claude" => vec![
+            "claude",
+            "-p",
+            p,
+            "--output-format",
+            "stream-json",
+            "--dangerously-skip-permissions",
+        ],
+        "codex" => vec![
+            "codex",
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "workspace-write",
+            "--json",
+            "--",
+            p,
+        ],
+        "grok" => vec![
+            "grok",
+            "-p",
+            p,
+            "--output-format",
+            "streaming-json",
+            "--permission-mode",
+            "bypassPermissions",
+        ],
+        "cursor" => vec![
+            "cursor-agent",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--stream-partial-output",
+            "--trust",
+            "--",
+            p,
+        ],
+        "agy" => vec!["agy", "--print", p, "--print-timeout", "30m"],
+        "opencode" => vec!["opencode", "run", p],
+        other => return Err(format!("unknown backend {other}")),
+    };
+    Ok(args.into_iter().map(str::to_string).collect())
+}
+
+/// The backends a client can choose from, in picker order.
+pub fn backends() -> Vec<serde_json::Value> {
+    [
+        ("sh", "Shell", "sh -c \"…\""),
+        ("claude", "Claude", "claude -p \"…\""),
+        ("codex", "Codex", "codex exec … -- \"…\""),
+        ("grok", "Grok", "grok -p \"…\""),
+        ("cursor", "Cursor", "cursor-agent -p …"),
+        ("agy", "Antigravity", "agy --print \"…\""),
+        ("opencode", "OpenCode", "opencode run \"…\""),
+    ]
+    .into_iter()
+    .map(|(id, label, command)| serde_json::json!({"id": id, "label": label, "command": command}))
+    .collect()
+}
+
+// MARK: - The job
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Automation {
     pub id: String,
     pub name: String,
+    pub backend: String,
     pub workspace_id: String,
-    pub command: String,
+    pub prompt: String,
     #[serde(default)]
-    pub args: Vec<String>,
-    pub interval_seconds: u64,
+    pub schedule: ScheduleSpec,
     pub budget_seconds: u64,
     pub enabled: bool,
     pub last_run_at_ms: Option<i64>,
@@ -29,15 +227,41 @@ pub struct Automation {
     pub last_run_id: Option<String>,
 }
 
+/// One completed or still-running agent run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunRecord {
+    pub id: String,
+    pub job_id: String,
+    pub name: String,
+    pub backend: String,
+    pub workspace_id: String,
+    pub started_at_ms: i64,
+    pub ended_at_ms: Option<i64>,
+    pub exit_code: Option<i32>,
+    /// running, ok, error, or stopped (by budget).
+    pub status: String,
+    pub transcript_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct File {
+struct JobsFile {
     #[serde(default)]
     jobs: Vec<Automation>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RunsFile {
+    #[serde(default)]
+    runs: Vec<RunRecord>,
+}
+
 pub struct Store {
     path: PathBuf,
+    runs_path: PathBuf,
+    runs_dir: PathBuf,
     jobs: Mutex<Vec<Automation>>,
+    runs: Mutex<Vec<RunRecord>>,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -47,44 +271,65 @@ pub fn shared() -> Arc<Store> {
 
 impl Store {
     #[cfg(test)]
-    fn from_path(path: PathBuf) -> Store {
+    fn at(path: PathBuf) -> Store {
+        let runs_dir = path.parent().unwrap_or(&path).join("runs");
         Store {
-            jobs: Mutex::new(Vec::new()),
             path,
+            runs_path: runs_dir.join("runs.json"),
+            runs_dir,
+            jobs: Mutex::new(Vec::new()),
+            runs: Mutex::new(Vec::new()),
         }
     }
 
     pub fn load() -> Store {
-        let path = Self::default_path().unwrap_or_else(|_| PathBuf::from("automations.json"));
+        let dir = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+            .map(|d| d.data_dir().to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let path = dir.join("automations.json");
         let jobs = std::fs::read_to_string(&path)
             .ok()
-            .and_then(|text| serde_json::from_str::<File>(&text).ok())
+            .and_then(|text| serde_json::from_str::<JobsFile>(&text).ok())
             .map(|file| file.jobs)
+            .unwrap_or_default();
+        let runs_dir = dir.join("runs");
+        let runs_path = runs_dir.join("runs.json");
+        let runs = std::fs::read_to_string(&runs_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<RunsFile>(&text).ok())
+            .map(|file| file.runs)
             .unwrap_or_default();
         Store {
             path,
+            runs_path,
+            runs_dir,
             jobs: Mutex::new(jobs),
+            runs: Mutex::new(runs),
         }
     }
 
-    fn default_path() -> Result<PathBuf, String> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .ok_or("no data directory on this platform")?;
-        Ok(dirs.data_dir().join("automations.json"))
+    fn save(&self) -> Result<(), String> {
+        let jobs = self
+            .jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let body = serde_json::to_string_pretty(&JobsFile { jobs }).map_err(|e| e.to_string())?;
+        write_atomic(&self.path, &body)
     }
 
-    fn save(&self, jobs: &[Automation]) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        let tmp = self.path.with_extension("json.tmp");
-        let body = serde_json::to_string_pretty(&File {
-            jobs: jobs.to_vec(),
-        })
-        .map_err(|e| e.to_string())?;
-        std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| format!("{}: {e}", self.path.display()))
+    fn save_runs(&self) -> Result<(), String> {
+        let runs = self
+            .runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        std::fs::create_dir_all(&self.runs_dir).map_err(|e| e.to_string())?;
+        let body = serde_json::to_string_pretty(&RunsFile { runs }).map_err(|e| e.to_string())?;
+        write_atomic(&self.runs_path, &body)
     }
+
+    // MARK: jobs
 
     pub fn list(&self) -> Vec<Automation> {
         self.jobs
@@ -95,6 +340,7 @@ impl Store {
 
     pub fn create(&self, mut job: Automation) -> Result<Automation, String> {
         validate(&job)?;
+        job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         if jobs.iter().any(|existing| existing.id == job.id) {
             return Err(format!("an automation with id {} already exists", job.id));
@@ -103,15 +349,17 @@ impl Store {
             job.id = format!("automation-{}", now_ms());
         }
         if job.enabled {
-            job.next_run_at_ms = Some(now_ms() + job.interval_seconds as i64 * 1000);
+            job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
         }
         jobs.push(job.clone());
-        self.save(&jobs)?;
+        drop(jobs);
+        self.save()?;
         Ok(job)
     }
 
-    pub fn update(&self, job: Automation) -> Result<Automation, String> {
+    pub fn update(&self, mut job: Automation) -> Result<Automation, String> {
         validate(&job)?;
+        job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let current = jobs
             .iter_mut()
@@ -119,16 +367,17 @@ impl Store {
             .ok_or_else(|| format!("no automation with id {}", job.id))?;
         let last_run_at_ms = current.last_run_at_ms;
         let last_run_id = current.last_run_id.clone();
-        *current = job;
-        current.last_run_at_ms = last_run_at_ms;
-        current.last_run_id = last_run_id;
-        if !current.enabled {
-            current.next_run_at_ms = None;
-        } else if current.next_run_at_ms.is_none() {
-            current.next_run_at_ms = Some(now_ms() + current.interval_seconds as i64 * 1000);
+        job.last_run_at_ms = last_run_at_ms;
+        job.last_run_id = last_run_id;
+        if !job.enabled {
+            job.next_run_at_ms = None;
+        } else if job.next_run_at_ms.is_none() {
+            job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
         }
+        *current = job;
         let result = current.clone();
-        self.save(&jobs)?;
+        drop(jobs);
+        self.save()?;
         Ok(result)
     }
 
@@ -139,9 +388,14 @@ impl Store {
             .find(|job| job.id == id)
             .ok_or_else(|| format!("no automation with id {id}"))?;
         job.enabled = enabled;
-        job.next_run_at_ms = enabled.then_some(now_ms() + job.interval_seconds as i64 * 1000);
+        job.next_run_at_ms = if enabled {
+            job.schedule.next_run_ms(now_ms())
+        } else {
+            None
+        };
         let result = job.clone();
-        self.save(&jobs)?;
+        drop(jobs);
+        self.save()?;
         Ok(result)
     }
 
@@ -149,14 +403,74 @@ impl Store {
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let old = jobs.len();
         jobs.retain(|job| job.id != id);
-        if old != jobs.len() {
-            self.save(&jobs)?;
+        let changed = old != jobs.len();
+        if changed {
+            drop(jobs);
+            self.save()?;
         }
-        Ok(old != jobs.len())
+        Ok(changed)
     }
 
+    // MARK: runs
+
+    pub fn runs(&self) -> Vec<RunRecord> {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Insert a job without recomputing its schedule. Tests only.
+    #[cfg(test)]
+    fn seed(&self, job: Automation) {
+        self.jobs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(job);
+    }
+
+    fn push_run(&self, run: RunRecord) -> Result<(), String> {
+        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        runs.insert(0, run);
+        runs.truncate(RUNS_KEPT);
+        drop(runs);
+        self.save_runs()
+    }
+
+    /// The drain thread calls this when a run's process has exited.
+    pub fn finish_run(&self, id: &str, exit_code: Option<i32>, status: &str) {
+        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(run) = runs.iter_mut().find(|run| run.id == id) {
+            run.exit_code = exit_code;
+            run.status = status.to_string();
+            run.ended_at_ms = Some(now_ms());
+        }
+    }
+
+    /// Bytes of a run's transcript after `offset`.
+    ///
+    /// The offset is against the file, not the pty, so a transcript outlives
+    /// the pty the run was watched through.
+    pub fn transcript(&self, run_id: &str, offset: u64) -> Result<(String, u64), String> {
+        let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        let run = runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .ok_or("no run with that id")?;
+        let path = Path::new(&run.transcript_path);
+        if !path.is_absolute() {
+            return Err("a run transcript is not absolute".into());
+        }
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let start = (offset as usize).min(bytes.len());
+        let text = String::from_utf8_lossy(&bytes[start..]).to_string();
+        Ok((text, bytes.len() as u64))
+    }
+
+    // MARK: running
+
     /// Run one job immediately, or one due job from the scheduler.
-    pub fn run(&self, id: &str, session: &Session) -> Result<Automation, String> {
+    pub fn run(self: &Arc<Store>, id: &str, session: &Session) -> Result<Automation, String> {
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let job = jobs
             .iter_mut()
@@ -172,33 +486,100 @@ impl Store {
                 workspace.path.display()
             ));
         }
+        let argv = agent_command(&job.backend, &job.prompt)?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: job.command.clone(),
-                args: job.args.clone(),
+                command: argv[0].clone(),
+                args: argv[1..].to_vec(),
                 cwd: workspace.path.clone(),
                 workspace_id: Some(workspace.id.clone()),
                 rows: 24,
-                cols: 80,
+                cols: 120,
             })
             .map_err(|e| e.to_string())?;
-        let id_for_budget = info.id.clone();
+
+        let run_id = format!("run-{}", now_ms());
+        let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
+        let run = RunRecord {
+            id: run_id.clone(),
+            job_id: job.id.clone(),
+            name: job.name.clone(),
+            backend: job.backend.clone(),
+            workspace_id: workspace.id.clone(),
+            started_at_ms: now_ms(),
+            ended_at_ms: None,
+            exit_code: None,
+            status: "running".into(),
+            transcript_path: transcript_path.display().to_string(),
+        };
+
+        // The pty id and budget are captured, and the transcript is drained on
+        // a background thread: the pty buffer is bounded, so a run nobody is
+        // looking at must still be written down before it falls out.
+        let pty_id = info.id.clone();
         let budget = job.budget_seconds;
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(budget));
-            let _ = tokenstat_pty::manager().kill(&id_for_budget);
-        });
-        job.last_run_at_ms = Some(now_ms());
-        job.last_run_id = Some(info.id);
-        job.next_run_at_ms = job
-            .enabled
-            .then_some(now_ms() + job.interval_seconds as i64 * 1000);
+        let me = Arc::clone(self);
+        std::thread::spawn(move || me.drain(&pty_id, &transcript_path, budget, &run_id));
+
+        job.last_run_at_ms = Some(run.started_at_ms);
+        job.last_run_id = Some(run.id.clone());
+        job.next_run_at_ms = if job.enabled {
+            job.schedule.next_run_ms(now_ms())
+        } else {
+            None
+        };
         let result = job.clone();
-        self.save(&jobs)?;
+        drop(jobs);
+        self.save()?;
+        self.push_run(run)?;
         Ok(result)
     }
 
-    pub fn run_due(&self, session: &Session) {
+    /// Drain a run's pty into its transcript file, kill on budget, then record
+    /// the outcome and close the pty. Runs on its own thread.
+    pub fn drain(&self, pty_id: &str, path: &Path, budget_seconds: u64, run_id: &str) {
+        let manager = tokenstat_pty::manager();
+        let deadline = Instant::now() + Duration::from_secs(budget_seconds);
+        let mut file = std::fs::File::create(path).ok();
+        let mut offset = 0u64;
+        let mut stopped_by_budget = false;
+
+        loop {
+            let alive = manager.info(pty_id).map(|i| i.alive).unwrap_or(false);
+            if !alive {
+                if let Ok(chunk) = manager.read(pty_id, offset) {
+                    if let Some(f) = &mut file {
+                        let _ = f.write_all(&chunk.bytes);
+                    }
+                }
+                break;
+            }
+            if let Ok(chunk) = manager.read(pty_id, offset) {
+                offset = chunk.next_offset;
+                if let Some(f) = &mut file {
+                    let _ = f.write_all(&chunk.bytes);
+                }
+            }
+            if Instant::now() >= deadline {
+                let _ = manager.kill(pty_id);
+                stopped_by_budget = true;
+            }
+            std::thread::sleep(DRAIN_POLL);
+        }
+
+        let exit_code = manager.info(pty_id).ok().and_then(|i| i.exit_code);
+        let status = if stopped_by_budget {
+            "stopped"
+        } else if exit_code == Some(0) {
+            "ok"
+        } else {
+            "error"
+        };
+        let _ = manager.close(pty_id);
+        self.finish_run(run_id, exit_code, status);
+    }
+
+    pub fn run_due(self: &Arc<Store>, session: &Session) {
         let now = now_ms();
         let ids: Vec<String> = self
             .list()
@@ -212,6 +593,10 @@ impl Store {
     }
 }
 
+// MARK: - Scheduler
+
+/// Start the recurring scheduler. Only the daemon server calls this; the
+/// in-process bridge never runs jobs on a timer.
 pub fn start_scheduler(session: Arc<Mutex<Session>>) {
     let store = shared();
     std::thread::spawn(move || {
@@ -219,10 +604,12 @@ pub fn start_scheduler(session: Arc<Mutex<Session>>) {
             if let Ok(guard) = session.lock() {
                 store.run_due(&guard);
             }
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(TICK);
         }
     });
 }
+
+// MARK: - Helpers
 
 fn validate(job: &Automation) -> Result<(), String> {
     if job.name.trim().is_empty() {
@@ -231,16 +618,21 @@ fn validate(job: &Automation) -> Result<(), String> {
     if job.workspace_id.is_empty() {
         return Err("an automation needs a workspace".into());
     }
-    if job.command.trim().is_empty() {
-        return Err("an automation needs a command".into());
-    }
-    if job.interval_seconds == 0 {
-        return Err("interval must be at least one second".into());
-    }
     if job.budget_seconds == 0 {
-        return Err("budget must be at least one second".into());
+        return Err("a budget must be at least one second".into());
     }
+    // backend and prompt are checked where the command is built, so both errors
+    // are the ones a user sees when they try to run it.
     Ok(())
+}
+
+fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, body).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn now_ms() -> i64 {
@@ -253,58 +645,237 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    #[test]
-    fn validation_rejects_unbounded_jobs() {
-        let job = Automation {
-            id: "a".into(),
-            name: "a".into(),
+    static DIR_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let n = DIR_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "tokenstat-automation-{tag}-{}-{n}",
+            std::process::id()
+        ))
+    }
+
+    fn job(id: &str, schedule: ScheduleSpec, budget: u64) -> Automation {
+        Automation {
+            id: id.into(),
+            name: "test".into(),
+            backend: "claude".into(),
             workspace_id: "w".into(),
-            command: "sh".into(),
-            args: vec![],
-            interval_seconds: 0,
-            budget_seconds: 1,
-            enabled: false,
+            prompt: "do the thing".into(),
+            schedule,
+            budget_seconds: budget,
+            enabled: true,
             last_run_at_ms: None,
             next_run_at_ms: None,
             last_run_id: None,
-        };
-        assert!(validate(&job).is_err());
+        }
     }
 
     #[test]
-    fn budget_kills_the_host_owned_pty() {
-        let dir = std::env::temp_dir().join(format!("tokenstat-automation-{}", now_ms()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn validation_rejects_unbounded_jobs() {
+        assert!(validate(&job("a", ScheduleSpec::default(), 0)).is_err());
+    }
+
+    #[test]
+    fn an_interval_floors_at_a_minute() {
+        let mut s = ScheduleSpec {
+            kind: ScheduleKind::Interval,
+            every_seconds: 10,
+            ..ScheduleSpec::default()
+        };
+        assert!(s.validate().is_err());
+        s.every_seconds = 60;
+        assert!(s.validate().is_ok());
+    }
+
+    #[test]
+    fn once_jobs_never_fire_on_their_own() {
+        let s = ScheduleSpec::default();
+        assert_eq!(s.next_run_ms(now_ms()), None);
+    }
+
+    #[test]
+    fn an_interval_advances_by_its_own_length() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Interval,
+            every_seconds: 120,
+            ..ScheduleSpec::default()
+        };
+        assert_eq!(s.next_run_ms(1_000), Some(121_000));
+    }
+
+    #[test]
+    fn a_daily_schedule_is_always_in_the_future() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Daily,
+            hour: 9,
+            ..ScheduleSpec::default()
+        };
+        let from = now_ms();
+        let next = s.next_run_ms(from).unwrap();
+        assert!(next > from, "next run must be after now");
+    }
+
+    #[test]
+    fn a_weekly_schedule_stays_on_its_weekday() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Weekly,
+            weekday: 0,
+            hour: 9,
+            ..ScheduleSpec::default()
+        };
+        let from = now_ms();
+        let next = s.next_run_ms(from).unwrap();
+        assert!(next > from);
+    }
+
+    #[test]
+    fn every_backend_builds_a_command() {
+        for backend in ["claude", "codex", "grok", "cursor", "agy", "opencode"] {
+            let argv = agent_command(backend, "do it").unwrap();
+            assert!(!argv.is_empty(), "{backend} produced no command");
+            assert!(argv.iter().any(|a| a == "do it"));
+        }
+        assert!(agent_command("nope", "do it").is_err());
+        assert!(agent_command("claude", "   ").is_err());
+    }
+
+    fn sh_workspace(dir: &Path) -> (Session, String) {
         let mut session = Session::open(&crate::session::OpenParams {
             db_path: Some(dir.join("archive.db").display().to_string()),
             timezone: Some("UTC".into()),
         })
         .unwrap();
-        let workspace = session.workspaces.add(&dir, now_ms()).unwrap();
-        let store = Store::from_path(dir.join("jobs.json"));
-        let job = store
-            .create(Automation {
-                id: "budget-test".into(),
-                name: "budget test".into(),
-                workspace_id: workspace.id,
+        let ws = session.workspaces.add(dir, now_ms()).unwrap();
+        (session, ws.id)
+    }
+
+    #[test]
+    fn a_run_drains_into_a_transcript_and_records_the_outcome() {
+        let dir = temp_dir("run");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let run_id = "run-test";
+        let transcript_path = dir.join("runs").join("run-test.txt");
+        let run = RunRecord {
+            id: run_id.into(),
+            job_id: "j".into(),
+            name: "echo".into(),
+            backend: "sh".into(),
+            workspace_id: "w".into(),
+            started_at_ms: now_ms(),
+            ended_at_ms: None,
+            exit_code: None,
+            status: "running".into(),
+            transcript_path: transcript_path.display().to_string(),
+        };
+        store.push_run(run).unwrap();
+
+        let info = tokenstat_pty::manager()
+            .spawn(&tokenstat_pty::Spawn {
                 command: "/bin/sh".into(),
-                args: vec!["-c".into(), "sleep 30".into()],
-                interval_seconds: 60,
-                budget_seconds: 1,
-                enabled: false,
-                last_run_at_ms: None,
-                next_run_at_ms: None,
-                last_run_id: None,
+                args: vec!["-c".into(), "printf hello".into()],
+                cwd: dir.clone(),
+                workspace_id: None,
+                rows: 24,
+                cols: 80,
             })
             .unwrap();
-        let run = store.run(&job.id, &session).unwrap();
-        std::thread::sleep(Duration::from_millis(1_200));
+        let pty_id = info.id.clone();
+        store.drain(&pty_id, &transcript_path, 30, run_id);
+
+        let record = store
+            .runs()
+            .iter()
+            .find(|r| r.id == run_id)
+            .unwrap()
+            .clone();
+        assert_eq!(record.status, "ok");
+        let (text, _) = store.transcript(run_id, 0).unwrap();
+        assert!(text.contains("hello"), "transcript holds the output");
+        assert!(transcript_path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_budget_kills_a_long_running_run() {
+        let dir = temp_dir("run");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let run_id = "run-budget";
+        let transcript_path = dir.join("runs").join("run-budget.txt");
+        let run = RunRecord {
+            id: run_id.into(),
+            job_id: "j".into(),
+            name: "sleep".into(),
+            backend: "sh".into(),
+            workspace_id: "w".into(),
+            started_at_ms: now_ms(),
+            ended_at_ms: None,
+            exit_code: None,
+            status: "running".into(),
+            transcript_path: transcript_path.display().to_string(),
+        };
+        store.push_run(run).unwrap();
+
         let info = tokenstat_pty::manager()
-            .info(run.last_run_id.as_deref().unwrap())
+            .spawn(&tokenstat_pty::Spawn {
+                command: "/bin/sh".into(),
+                args: vec!["-c".into(), "sleep 30".into()],
+                cwd: dir.clone(),
+                workspace_id: None,
+                rows: 24,
+                cols: 80,
+            })
             .unwrap();
-        assert!(!info.alive, "budget did not kill {}", info.id);
-        let _ = tokenstat_pty::manager().close(&info.id);
+        let pty_id = info.id.clone();
+        store.drain(&pty_id, &transcript_path, 1, run_id);
+
+        let record = store
+            .runs()
+            .iter()
+            .find(|r| r.id == run_id)
+            .unwrap()
+            .clone();
+        assert_eq!(record.status, "stopped", "budget stopped the run");
+        assert!(
+            record.ended_at_ms.is_some(),
+            "the stopped run has an end time"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_scheduler_runs_only_due_jobs() {
+        let dir = temp_dir("sched");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (session, workspace_id) = sh_workspace(&dir);
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+
+        // A job due long ago on the harmless shell backend, enabled. Seeded
+        // directly because `create` would recompute the schedule.
+        let mut due = job("due", ScheduleSpec::default(), 30);
+        due.workspace_id = workspace_id.clone();
+        due.backend = "sh".into();
+        due.prompt = "true".into();
+        due.enabled = true;
+        due.next_run_at_ms = Some(now_ms() - 60_000);
+        store.seed(due);
+
+        let mut never = job("never", ScheduleSpec::default(), 30);
+        never.workspace_id = workspace_id;
+        never.enabled = true;
+        never.next_run_at_ms = Some(now_ms() + 60_000);
+        store.seed(never);
+
+        store.run_due(&session);
+        let jobs = store.list();
+        let due = jobs.iter().find(|j| j.id == "due").unwrap();
+        assert!(due.last_run_at_ms.is_some(), "the due job ran");
+        let never = jobs.iter().find(|j| j.id == "never").unwrap();
+        assert!(never.last_run_at_ms.is_none(), "the future job did not run");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

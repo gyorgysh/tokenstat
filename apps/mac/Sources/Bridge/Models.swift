@@ -843,15 +843,17 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 
 // MARK: - Automations
 
-/// A daemon-owned recurring command. The daemon persists the definition and
-/// owns the PTY, so it continues when this window closes.
+/// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a
+/// schedule with a budget the run stops at.
 struct Automation: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var name: String
+    /// One of the ids `automation.backends` reports. The daemon owns the argv
+    /// for each backend, so a client never builds a command line.
+    var backend: String
     var workspaceID: String
-    var command: String
-    var args: [String]
-    var intervalSeconds: UInt64
+    var prompt: String
+    var schedule: AutomationSchedule
     var budgetSeconds: UInt64
     var enabled: Bool
     var lastRunAtMs: Int64?
@@ -859,11 +861,81 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRunID: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, workspaceID = "workspaceId", command, args
-        case intervalSeconds, budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID
+        case id, name, backend, workspaceID = "workspaceId", prompt, schedule
+        case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+    var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+}
+
+/// When a job fires, as a plain struct so the form edits one field at a time.
+struct AutomationSchedule: Codable, Sendable, Hashable {
+    var kind: ScheduleKind
+    /// Interval only, seconds.
+    var everySeconds: UInt64
+    /// Daily and weekly only, local wall clock.
+    var hour: Int
+    var minute: Int
+    /// Weekly only, 0 = Monday to 6 = Sunday.
+    var weekday: Int
+
+    enum CodingKeys: String, CodingKey {
+        case kind, everySeconds, hour, minute, weekday
+    }
+
+    static let `default` = AutomationSchedule(kind: .once, everySeconds: 3600, hour: 9, minute: 0, weekday: 0)
+}
+
+enum ScheduleKind: String, Codable, Sendable, Hashable {
+    case once
+    case interval
+    case daily
+    case weekly
+}
+
+/// One completed or still-running agent run.
+struct RunRecord: Codable, Sendable, Identifiable {
+    var id: String
+    var jobId: String
+    var name: String
+    var backend: String
+    var workspaceID: String
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+    var exitCode: Int?
+    var status: String
+    var transcriptPath: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, jobId, name, backend, workspaceID = "workspaceId"
+        case startedAtMs, endedAtMs, exitCode, status, transcriptPath
+    }
+
+    var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
+    var isRunning: Bool { status == "running" }
+    var endedLabel: String {
+        switch status {
+        case "running": return "Running"
+        case "ok": return "Done"
+        case "stopped": return "Stopped at budget"
+        case "error": return "Failed"
+        default: return status
+        }
+    }
+}
+
+/// A slice of a run's transcript, asked for by byte offset.
+struct TranscriptChunk: Codable, Sendable {
+    var text: String
+    var nextOffset: UInt64
+}
+
+/// One agent CLI a job can run on, as the daemon advertises it.
+struct AgentBackend: Codable, Sendable, Identifiable {
+    var id: String
+    var label: String
+    var command: String
 }
 
 // MARK: - Terminals

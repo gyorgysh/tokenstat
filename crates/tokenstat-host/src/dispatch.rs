@@ -150,6 +150,8 @@ struct AutomationParams {
     id: Option<String>,
     job: Option<Automation>,
     enabled: Option<bool>,
+    /// `automation.transcript` only: where the caller got to last time.
+    offset: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -903,6 +905,17 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?, s)?,
             )
             .map_err(|e| e.to_string())
+        }
+        "automation.runs" => {
+            serde_json::to_value(crate::automations::shared().runs()).map_err(|e| e.to_string())
+        }
+        "automation.backends" => Ok(serde_json::Value::Array(crate::automations::backends())),
+        "automation.transcript" => {
+            let p: AutomationParams = parse(params)?;
+            let id = p.id.ok_or("automation.transcript needs a run id")?;
+            let (text, next) =
+                crate::automations::shared().transcript(&id, p.offset.unwrap_or(0))?;
+            Ok(json!({"text": text, "nextOffset": next}))
         }
 
         other => match sessionless(other, params) {
