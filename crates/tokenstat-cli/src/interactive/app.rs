@@ -24,6 +24,7 @@ impl App {
             totals: Totals::default(),
             models: Vec::new(),
             days: Vec::new(),
+            day_cost: Vec::new(),
             weeks: Vec::new(),
             months: Vec::new(),
             projects: Vec::new(),
@@ -68,6 +69,7 @@ impl App {
         if self.empty {
             self.models.clear();
             self.days.clear();
+            self.day_cost.clear();
             self.weeks.clear();
             self.months.clear();
             self.projects.clear();
@@ -85,6 +87,10 @@ impl App {
         }
         self.models = store.report(GroupBy::Model, &q)?;
         self.days = store.report(GroupBy::Day, &q)?;
+        self.day_cost = tokenstat_core::activity::cost_by_day(
+            &store.report_by_model(GroupBy::Day, &q)?,
+            &self.prices,
+        );
         self.weeks = store.report(GroupBy::Week, &q)?;
         self.months = rollup_months(&self.days);
         self.projects = store.report(GroupBy::Project, &q)?;

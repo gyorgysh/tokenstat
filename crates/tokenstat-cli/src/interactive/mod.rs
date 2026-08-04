@@ -244,6 +244,9 @@ struct App {
     totals: Totals,
     models: Vec<Bucket>,
     days: Vec<Bucket>,
+    /// `(YYYY-MM-DD, microdollars)` for the heatmap. The grid ramps on spend,
+    /// so it needs the day x model split that `days` has already flattened.
+    day_cost: Vec<(String, u64)>,
     weeks: Vec<Bucket>,
     months: Vec<Bucket>,
     projects: Vec<Bucket>,

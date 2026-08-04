@@ -35,10 +35,28 @@ use std::io::Write;
 
 use anyhow::Result;
 use tokenstat_core::{
-    Bucket, Counters, EquivalentValue, GroupBy, PriceTable, display_usage_model_id,
+    Bucket, Counters, EquivalentValue, GroupBy, PriceTable, Query, Store, display_usage_model_id,
 };
 
 use crate::ui;
+
+/// `(YYYY-MM-DD, microdollars)` pairs for the activity heatmap.
+///
+/// The grid ramps on spend, so the busiest day is the most expensive one, not
+/// the one that happened to move the most cache tokens.
+pub(super) fn daily_cost(
+    store: &Store,
+    q: &Query,
+    prices: &PriceTable,
+) -> Result<Vec<(String, u64)>> {
+    let split = store.report_by_model(GroupBy::Day, q)?;
+    Ok(tokenstat_core::activity::cost_by_day(&split, prices))
+}
+
+/// Microdollars as money, for heatmap headlines.
+pub(super) fn micros_usd(micros: u64) -> String {
+    ui::usd(micros as f64 / 1_000_000.0)
+}
 
 /// Render `Some(n)` compactly, `None` as a dash.
 pub(super) fn cell(v: Option<u64>) -> String {

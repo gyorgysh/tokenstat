@@ -18,6 +18,37 @@
 //! behind in the CLI is the part that is genuinely about a terminal: the column
 //! width, the month header string, and the weekday gutter labels.
 
+use crate::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
+use crate::store::SplitBucket;
+
+/// List-rate spend per calendar day, in microdollars, ready for [`calendar`].
+///
+/// The heat ramp is money rather than tokens, so a day of cheap high-volume
+/// completions does not out-burn a day on an expensive model. Pricing runs on
+/// the day x model split because a date cannot be looked up as a model, and a
+/// day bucket on its own has no rate to apply.
+///
+/// A day whose models are all unpriced comes back as zero and draws idle. That
+/// is the honest answer: with no rate there is no spend to show.
+pub fn cost_by_day(split: &[SplitBucket], prices: &PriceTable) -> Vec<(String, u64)> {
+    let mut out: Vec<(String, u64)> = Vec::new();
+    let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for row in split {
+        let lookup = display_usage_model_id(&row.split);
+        let micros = EquivalentValue::price(prices, &lookup, &row.counters)
+            .map(|v| v.micros().max(0) as u64)
+            .unwrap_or(0);
+        match index.get(row.key.as_str()) {
+            Some(&i) => out[i].1 = out[i].1.saturating_add(micros),
+            None => {
+                index.insert(row.key.as_str(), out.len());
+                out.push((row.key.clone(), micros));
+            }
+        }
+    }
+    out
+}
+
 /// Today, in the user's timezone.
 ///
 /// The calendar anchors on this rather than on the newest day with data, so a
@@ -267,6 +298,60 @@ mod tests {
     /// Wednesday 2026-07-29, the anchor most of these cases hang off.
     fn anchor() -> jiff::civil::Date {
         jiff::civil::date(2026, 7, 29)
+    }
+
+    const PRICES: &str = r#"{
+      "effective_from": "2026-07-29",
+      "models": [
+        {"match":"claude-opus-4-5","input":5.0,"output":25.0,"cache_read":0.5,"cache_write_5m":6.25,"cache_write_1h":10.0}
+      ]
+    }"#;
+
+    fn split(day: &str, model: &str, input: u64, output: u64) -> SplitBucket {
+        SplitBucket {
+            key: day.to_string(),
+            split: model.to_string(),
+            counters: crate::model::Counters {
+                input_fresh: Some(input),
+                output: Some(output),
+                ..Default::default()
+            },
+            events: 1,
+            sessions: 1,
+        }
+    }
+
+    #[test]
+    fn a_day_costs_the_sum_of_its_models() {
+        let prices = PriceTable::parse(PRICES).unwrap();
+        let rows = [
+            split("2026-07-29", "claude-opus-4-5", 1_000_000, 0),
+            split("2026-07-29", "claude-opus-4-5", 0, 1_000_000),
+            split("2026-07-28", "claude-opus-4-5", 1_000_000, 0),
+        ];
+        let costs = cost_by_day(&rows, &prices);
+        assert_eq!(
+            costs,
+            vec![
+                ("2026-07-29".to_string(), 30_000_000),
+                ("2026-07-28".to_string(), 5_000_000),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unpriced_model_contributes_nothing_rather_than_a_guess() {
+        let prices = PriceTable::parse(PRICES).unwrap();
+        let rows = [split(
+            "2026-07-29",
+            "some-unknown-model",
+            1_000_000,
+            1_000_000,
+        )];
+        assert_eq!(
+            cost_by_day(&rows, &prices),
+            vec![("2026-07-29".to_string(), 0)]
+        );
     }
 
     #[test]

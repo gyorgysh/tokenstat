@@ -80,17 +80,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
 
     if !app.days.is_empty() {
         lines.push(Line::from(""));
-        let pairs: Vec<(String, u64)> = app
-            .days
-            .iter()
-            .map(|d| {
-                let c = &d.counters;
-                (
-                    d.key.clone(),
-                    c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0),
-                )
-            })
-            .collect();
+        let pairs = &app.day_cost;
         // Purple→cyan heat: idle cells stay muted, hot days peak in cyan so
         // the grid sits with the electric purple chrome instead of fighting it.
         let weeks = usize::from(width)
@@ -98,7 +88,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
         let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
-        if let Some(cal) = ui::heat_calendar(&pairs, weeks, today) {
+        if let Some(cal) = ui::heat_calendar(pairs, weeks, today) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
                 Style::default().fg(secondary()),
@@ -129,7 +119,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                         "{}busiest {} ({})  ·  streak {} days, best {}",
                         " ".repeat(ui::HEAT_GUTTER),
                         b.date,
-                        ui::tokens(b.value),
+                        ui::usd(b.value as f64 / 1_000_000.0),
                         cal.streak_current,
                         cal.streak_best,
                     ),
@@ -720,31 +710,21 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         )));
         return lines;
     }
-    let pairs: Vec<(String, u64)> = app
-        .days
-        .iter()
-        .map(|d| {
-            let c = &d.counters;
-            (
-                d.key.clone(),
-                c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0),
-            )
-        })
-        .collect();
+    let pairs = &app.day_cost;
     let weeks = usize::from(width)
         .saturating_sub(2 + ui::HEAT_GUTTER)
         .div_ceil(ui::HEAT_COL)
         .clamp(8, 53);
     let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
-    let Some(cal) = ui::heat_calendar(&pairs, weeks, today) else {
+    let Some(cal) = ui::heat_calendar(pairs, weeks, today) else {
         return lines;
     };
 
     lines.push(Line::from(vec![
         Span::styled(
             format!(
-                "{} tokens over {} active days",
-                ui::tokens(cal.total),
+                "{} over {} active days",
+                ui::usd(cal.total as f64 / 1_000_000.0),
                 ui::exact(cal.active_days as u64)
             ),
             Style::default().fg(SELECTED).add_modifier(Modifier::BOLD),
@@ -758,7 +738,9 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         format!(
             "busiest {} ({})  ·  streak {} days, best {}",
             cal.busiest.map(|b| b.date.to_string()).unwrap_or_default(),
-            cal.busiest.map(|b| ui::tokens(b.value)).unwrap_or_default(),
+            cal.busiest
+                .map(|b| ui::usd(b.value as f64 / 1_000_000.0))
+                .unwrap_or_default(),
             cal.streak_current,
             cal.streak_best,
         ),
@@ -846,9 +828,10 @@ pub(super) fn wrapped_detail_lines(
         .sum();
     let top_model = models.first().map(|m| display_usage_model_id(&m.key));
     let top_project = projects.first().map(|p| p.key.clone());
-    let busiest = days
-        .iter()
-        .max_by_key(|d| d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0));
+    // Busiest by spend, so this row agrees with the heatmap under it.
+    let day_cost =
+        tokenstat_core::activity::cost_by_day(&store.report_by_model(GroupBy::Day, &q)?, prices);
+    let busiest = day_cost.iter().max_by_key(|(_, micros)| *micros);
 
     let rows = [
         ("requests", ui::exact(totals.events)),
@@ -864,9 +847,8 @@ pub(super) fn wrapped_detail_lines(
         (
             "busiest day",
             busiest
-                .map(|d| {
-                    let io = d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0);
-                    format!("{}  ({})", d.key, ui::tokens(io))
+                .map(|(date, micros)| {
+                    format!("{}  ({})", date, ui::usd(*micros as f64 / 1_000_000.0))
                 })
                 .unwrap_or_else(|| "-".into()),
         ),
@@ -886,15 +868,6 @@ pub(super) fn wrapped_detail_lines(
 
     if !days.is_empty() {
         lines.push(Line::from(""));
-        let pairs: Vec<(String, u64)> = days
-            .iter()
-            .map(|d| {
-                (
-                    d.key.clone(),
-                    d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0),
-                )
-            })
-            .collect();
         let year_end = jiff::civil::date(year as i16, 12, 31);
         let now = jiff::Timestamp::now().to_zoned(tz.clone()).date();
         let anchor = if now < year_end { now } else { year_end };
@@ -905,7 +878,7 @@ pub(super) fn wrapped_detail_lines(
             .saturating_sub(2 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
-        if let Some(cal) = ui::heat_calendar(&pairs, weeks.min(fit), anchor) {
+        if let Some(cal) = ui::heat_calendar(&day_cost, weeks.min(fit), anchor) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
                 Style::default().fg(MUTED),

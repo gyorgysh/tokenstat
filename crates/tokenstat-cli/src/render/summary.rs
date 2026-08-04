@@ -66,26 +66,17 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         println!("  {DIM}{first} to {last}{peak_txt}{DIM:#}");
     }
 
+    // One load for the heatmap, the table, and the notes below it. The catalog
+    // is a megabyte of JSON, so parsing it twice per report is not free.
+    let prices = PriceTable::load_with_catalog();
+
     if !days.is_empty() {
         println!();
-        let pairs: Vec<(String, u64)> = days
-            .iter()
-            .map(|d| {
-                let c = &d.counters;
-                (
-                    d.key.clone(),
-                    c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0),
-                )
-            })
-            .collect();
+        let pairs = daily_cost(store, q, &prices)?;
         if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz)) {
             heat_block(&cal, false);
         }
     }
-
-    // One load for the table and the notes below it. The catalog is a megabyte
-    // of JSON, so parsing it twice per report is not free.
-    let prices = PriceTable::load_with_catalog();
 
     if !models.is_empty() {
         println!();
@@ -255,14 +246,8 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     if days.is_empty() {
         return empty_range(json);
     }
-    let pairs: Vec<(String, u64)> = days
-        .iter()
-        .map(|d| {
-            let c = &d.counters;
-            let in_out = c.input_fresh.unwrap_or(0) + c.output.unwrap_or(0);
-            (d.key.clone(), in_out)
-        })
-        .collect();
+    let prices = PriceTable::load_with_catalog();
+    let pairs = daily_cost(store, q, &prices)?;
     let weeks = if json { 53 } else { heat_weeks(53) };
     let Some(cal) = ui::heat_calendar(&pairs, weeks, today(tz)) else {
         return empty_range(json);
@@ -273,13 +258,15 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
             .days()
             .map(|c| {
                 format!(
-                    r#"{{"date":"{}","in_out":{},"level":{}}}"#,
+                    r#"{{"date":"{}","cost_micros":{},"level":{}}}"#,
                     c.date, c.value, c.level
                 )
             })
             .collect();
+        // Money in microdollars, so the profile page can render exact figures
+        // without a float ever touching the wire.
         println!(
-            r#"{{"days":[{}],"weeks":{},"in_out":{},"active_days":{},"streak_current":{},"streak_best":{},"busiest_day":{}}}"#,
+            r#"{{"days":[{}],"weeks":{},"cost_micros":{},"active_days":{},"streak_current":{},"streak_best":{},"busiest_day":{}}}"#,
             cells.join(","),
             cal.weeks,
             cal.total,
@@ -295,27 +282,29 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     println!();
     println!("  {DIM}ACTIVITY{DIM:#}");
     println!(
-        "  {BOLD}{a}{}{a:#} tokens over {a}{}{a:#} active days{BOLD:#}",
-        ui::tokens(cal.total),
+        "  {BOLD}{a}{}{a:#} over {a}{}{a:#} active days{BOLD:#}",
+        micros_usd(cal.total),
         cal.active_days,
     );
     let mut sub = format!(
         "Averaging {} on a day worked.",
-        ui::tokens(cal.total / cal.active_days.max(1) as u64)
+        micros_usd(cal.total / cal.active_days.max(1) as u64)
     );
     if let Some(b) = cal.busiest {
         sub.push_str(&format!(
             " Busiest was {} at {}.",
             b.date,
-            ui::tokens(b.value)
+            micros_usd(b.value)
         ));
     }
     if cal.streak_current > 1 {
         sub.push_str(&format!(" On a {} day streak.", cal.streak_current));
     }
     println!("  {DIM}{sub}{DIM:#}");
+    // Say what the ramp measures, and say that it is not a bill. Plan usage is
+    // valued at list rates here exactly as everywhere else.
     println!(
-        "  {DIM}{} to {} {} input+output per day{DIM:#}",
+        "  {DIM}{} to {} {} list-rate value per day, not money charged{DIM:#}",
         cal.first,
         cal.last,
         ui::separator()
@@ -363,9 +352,10 @@ pub fn wrapped(
         .iter()
         .filter_map(|m| EquivalentValue::price(&prices, &model_label(&m.key), &m.counters))
         .sum();
-    let busiest_day = days
-        .iter()
-        .max_by_key(|d| d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0));
+    // Busiest by spend, so this line and the heatmap below it agree on which
+    // day was the big one.
+    let day_cost = daily_cost(store, &q, &prices)?;
+    let busiest_day = day_cost.iter().max_by_key(|(_, micros)| *micros);
     let top_project = projects.first();
     let in_out = totals.counters.input_fresh.unwrap_or(0) + totals.counters.output.unwrap_or(0);
 
@@ -379,7 +369,7 @@ pub fn wrapped(
             value.dollars(),
             json_opt(top_model_label.as_deref()),
             json_opt(top_project.map(|p| p.key.as_str())),
-            json_opt(busiest_day.map(|d| d.key.as_str())),
+            json_opt(busiest_day.map(|(d, _)| d.as_str())),
             peak.map(|h| h.to_string()).unwrap_or_else(|| "null".into()),
         );
         return Ok(());
@@ -402,31 +392,25 @@ pub fn wrapped(
     if let Some(p) = top_project {
         println!("  {DIM}top project{DIM:#}  {}", p.key);
     }
-    if let Some(d) = busiest_day {
-        let io = d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0);
-        println!("  {DIM}busiest day{DIM:#}  {}  ({})", d.key, ui::tokens(io));
+    if let Some((date, micros)) = busiest_day {
+        println!(
+            "  {DIM}busiest day{DIM:#}  {}  ({})",
+            date,
+            micros_usd(*micros)
+        );
     }
     if let Some(h) = peak {
         println!("  {DIM}peak hour{DIM:#}    {h:02}:00");
     }
     if !days.is_empty() {
         println!();
-        let pairs: Vec<(String, u64)> = days
-            .iter()
-            .map(|d| {
-                (
-                    d.key.clone(),
-                    d.counters.input_fresh.unwrap_or(0) + d.counters.output.unwrap_or(0),
-                )
-            })
-            .collect();
         // Wrapped is a calendar year, not a rolling window: anchor on the last
         // day of the year that has already happened, and reach back to January.
         let year_end = jiff::civil::date(y as i16, 12, 31);
         let now = today(tz);
         let anchor = if now < year_end { now } else { year_end };
         let weeks = (anchor.day_of_year() as usize).div_ceil(7) + 1;
-        if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(weeks), anchor) {
+        if let Some(cal) = ui::heat_calendar(&day_cost, heat_weeks(weeks), anchor) {
             heat_block(&cal, true);
         }
     }
