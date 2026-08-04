@@ -55,6 +55,7 @@ struct RootView: View {
     @State private var workspaces = WorkspacesModel()
     #if os(macOS)
     @State private var terminals = TerminalsModel()
+    @State private var collapsedWorkspaces: Set<String> = []
     #endif
     var body: some View {
         NavigationSplitView {
@@ -65,7 +66,7 @@ struct RootView: View {
                     Group {
                         switch destination {
                         case .workspaces:
-                            WorkspaceChangesView(folder: workspaces.selected)
+                            WorkspaceInspector(model: workspaces)
                         default:
                             InspectorView(model: model)
                         }
@@ -142,6 +143,46 @@ struct RootView: View {
                         .padding(.vertical, Theme.Space.xs)
                 } else {
                     ForEach(workspaces.folders) { folder in
+                        #if os(macOS)
+                        let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
+                        HStack(spacing: 0) {
+                            Button {
+                                if collapsedWorkspaces.contains(folder.id) {
+                                    collapsedWorkspaces.remove(folder.id)
+                                } else {
+                                    collapsedWorkspaces.insert(folder.id)
+                                }
+                            } label: {
+                                Image(systemName: collapsedWorkspaces.contains(folder.id)
+                                      ? "chevron.right" : "chevron.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 18, height: 24)
+                                    .contentShape(.rect)
+                            }
+                            .buttonStyle(.plain)
+                            .help(collapsedWorkspaces.contains(folder.id) ? "Expand workspace" : "Collapse workspace")
+
+                            SidebarRow(
+                                label: folder.name,
+                                symbol: folder.exists ? "folder" : "questionmark.folder",
+                                trailing: folder.diffStat,
+                                isSelected: destination == .workspaces
+                                    && workspaces.selectedID == folder.id
+                            ) {
+                                destination = .workspaces
+                                workspaces.selectedID = folder.id
+                            }
+                        }
+                        .contextMenu {
+                            Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
+                            Divider()
+                            // "Remove" and not "Delete": the folder stays.
+                            Button("Remove from tokenstat") {
+                                Task { await workspaces.remove(folder) }
+                            }
+                        }
+                        #else
                         SidebarRow(
                             label: folder.name,
                             symbol: folder.exists ? "folder" : "questionmark.folder",
@@ -154,15 +195,28 @@ struct RootView: View {
                         }
                         .help(folder.path)
                         .contextMenu {
-                            #if os(macOS)
-                            Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
-                            #endif
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
                             Button("Remove from tokenstat") {
                                 Task { await workspaces.remove(folder) }
                             }
                         }
+                        #endif
+
+                        #if os(macOS)
+                        if !collapsedWorkspaces.contains(folder.id) {
+                            ForEach(activeSessions) { session in
+                                ActiveSessionRow(
+                                    session: session,
+                                    workspaceName: folder.name
+                                ) {
+                                    destination = .workspaces
+                                    workspaces.selectedID = folder.id
+                                    terminals.select(session)
+                                }
+                            }
+                        }
+                        #endif
                     }
                 }
             }
@@ -344,3 +398,48 @@ private struct SidebarRow: View {
             .padding(.horizontal, Theme.Space.xs)
     }
 }
+
+#if os(macOS)
+/// A shortcut to a running session, independent of which workspace is open.
+private struct ActiveSessionRow: View {
+    let session: TerminalSession
+    let workspaceName: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                if let harnessID = session.harnessID {
+                    HarnessMark(id: harnessID, size: 18)
+                } else {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 18, height: 18)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(session.title?.isEmpty == false ? session.title! : session.command)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(workspaceName)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: Theme.Space.xs)
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+            }
+            .padding(.leading, Theme.Space.l)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, 5)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(session.cwd)
+    }
+}
+#endif

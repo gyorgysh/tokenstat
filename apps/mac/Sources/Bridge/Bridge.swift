@@ -209,6 +209,46 @@ extension Bridge {
     static func renameWorkspace(id: String, name: String) async throws {
         _ = try await background("workspace.rename", ["id": id, "name": name], as: Renamed.self)
     }
+
+    /// Recent commits, newest first. Empty for a folder that is not a
+    /// repository, and for one whose first commit has not happened yet.
+    static func workspaceLog(id: String, limit: Int = 100) async throws -> [Commit] {
+        try await background("workspace.log", ["id": id, "limit": limit], as: [Commit].self)
+    }
+
+    /// One directory of the file tree. Lazy: pass the relative path of the
+    /// folder being opened, or "" for the workspace root.
+    static func workspaceTree(id: String, path: String = "") async throws -> [TreeEntry] {
+        try await background("workspace.tree", ["id": id, "path": path], as: [TreeEntry].self)
+    }
+
+    /// One file's diff against HEAD, staged and unstaged together.
+    static func workspaceDiff(id: String, path: String) async throws -> FileDiff {
+        try await background("workspace.diff", ["id": id, "path": path], as: FileDiff.self)
+    }
+}
+
+// MARK: - Git, the parts that write
+
+/// These change the repository, so every one of them is called from a button
+/// and never from a timer, a watcher, or a refresh. See
+/// `tokenstat_workspace::gitwrite` for why that split is kept in the Rust too.
+extension Bridge {
+    static func stage(id: String, paths: [String]) async throws -> GitOutcome {
+        try await background("workspace.stage", ["id": id, "paths": paths], as: GitOutcome.self)
+    }
+
+    static func unstage(id: String, paths: [String]) async throws -> GitOutcome {
+        try await background("workspace.unstage", ["id": id, "paths": paths], as: GitOutcome.self)
+    }
+
+    static func commit(id: String, message: String) async throws -> GitOutcome {
+        try await background("workspace.commit", ["id": id, "message": message], as: GitOutcome.self)
+    }
+
+    static func push(id: String) async throws -> GitOutcome {
+        try await background("workspace.push", ["id": id], as: GitOutcome.self)
+    }
 }
 
 private struct Removed: Codable, Sendable { let removed: Bool }

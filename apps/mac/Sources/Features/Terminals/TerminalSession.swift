@@ -19,11 +19,12 @@ import SwiftUI
 /// the host daemon. This side only reads output and sends keystrokes and
 /// resize events, all over the same JSON bridge every other surface uses.
 ///
-/// Output is read by offset and polled, never pushed, so a session keeps up
-/// even while its tab is hidden and a view that appears later resumes exactly
-/// where the stream is rather than missing what ran before it. The SwiftTerm
-/// view is created once and reused, so the emulator's scrollback survives tab
-/// switches and leaving the screen.
+/// Output is read by offset and polled, never pushed. The SwiftTerm view is
+/// created with the session rather than on first display, and the stream is fed
+/// into it whether or not it is the session on screen, so a background session
+/// keeps its scrollback, drains the host's bounded buffer, and is already drawn
+/// the moment its tab is selected. Nothing here is lazy, because "load it when
+/// you look at it" is exactly what makes a terminal feel like a web page.
 @MainActor
 @Observable
 final class TerminalSession: TerminalViewDelegate, Identifiable {
@@ -33,6 +34,18 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated let command: String
     /// Folder the session runs in, as the host reported it.
     nonisolated let cwd: String
+
+    /// The archive source id when this command is a known harness.
+    var harnessID: String? {
+        switch URL(fileURLWithPath: command).lastPathComponent {
+        case "claude": return "claude_code"
+        case "codex": return "codex"
+        case "opencode": return "opencode"
+        case "grok": return "grok"
+        case "copilot": return "copilot"
+        default: return nil
+        }
+    }
 
     /// True while the process is running. Set from `pty.info` polls.
     var alive: Bool
@@ -52,18 +65,26 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// rather than pretending the output never existed.
     var droppedOutput = false
 
-    /// The SwiftTerm view. Created on first display and kept, so the terminal
-    /// emulator's state is never lost to a tab switch.
-    private(set) var view: TerminalView?
+    /// The SwiftTerm view, owned for the session's whole life. It exists before
+    /// anything displays it, so the emulator's state is never a function of
+    /// what the window happens to be showing.
+    let view: TerminalView
 
-    /// Where this reader is in the output stream. Always read from here, fed
-    /// only when a view exists, so a view that appears later resumes exactly
-    /// where the output is rather than missing what ran before it.
+    /// Where this reader is in the output stream.
     private var offset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     private var writerTask: Task<Void, Never>?
-    private var pollsSinceInfo = 0
     private var colorSchemeApplied: ColorScheme?
+
+    /// How long to wait before the next read. Held at the floor while output is
+    /// flowing and backed off when it is not, because a fixed fast poll is a
+    /// bridge round trip per session per frame forever, and idle sessions are
+    /// the normal case.
+    private var pollDelay = minPollDelay
+    private static let minPollDelay = 8
+    private static let maxPollDelay = 250
+    /// Milliseconds of polling since the last liveness check.
+    private var sinceInfo = 0
 
     /// Keystrokes and resizes land here in the order the UI produced them,
     /// then a single writer task sends them to the pty one at a time. Without
@@ -86,23 +107,20 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
-    }
 
-    /// The view to place in the hierarchy. Creates it on first call, wires it
-    /// to this session, and returns the same instance afterwards so the
-    /// emulator's scrollback is never lost to a tab switch.
-    func makeView() -> TerminalView {
-        if let view { return view }
-        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
-        view.terminalDelegate = self
-        view.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        view.font = TerminalMetrics.font
         // Option-as-meta is how every terminal worth using behaves on a Mac,
         // and the agent CLIs are written assuming it.
         view.optionAsMetaKey = true
-        self.view = view
-        start()
-        return view
+        // SwiftTerm defaults to 500 lines, which a build log passes in seconds.
+        view.terminal.changeHistorySize(Self.scrollbackLines)
+        view.terminalDelegate = self
     }
+
+    /// Scrollback kept for the normal buffer. Enough to hold a long build or a
+    /// test run, which is what anyone scrolling up is looking for.
+    private static let scrollbackLines = 20_000
 
     /// Re-theme the view when the system appearance changed.
     func applyColors(scheme: ColorScheme, to view: TerminalView) {
@@ -161,14 +179,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             do {
                 let chunk = try await Bridge.ptyRead(id: id, offset: offset)
                 if chunk.dropped > 0 { droppedOutput = true }
-                if let view, !chunk.data.isEmpty, let bytes = Data(base64Encoded: chunk.data) {
-                    view.terminal.feed(byteArray: [UInt8](bytes))
+                if !chunk.data.isEmpty, let bytes = Data(base64Encoded: chunk.data) {
+                    feed(bytes)
                     offset = chunk.nextOffset
+                    // Output is flowing, so stay at the floor: this is where
+                    // typing latency comes from.
+                    pollDelay = Self.minPollDelay
+                } else {
+                    pollDelay = min(pollDelay * 2, Self.maxPollDelay)
                 }
-                // With no view yet the offset stays where it is, so the bytes
-                // remain in the host buffer until there is something to render
-                // them. A view that appears later resumes from this offset
-                // rather than missing everything that ran before it.
             } catch {
                 // The session is gone on the host side; nothing more to read.
                 break
@@ -177,9 +196,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             // Liveness a few times a second, not on every poll: an info call is
             // a reaping opportunity, and the process needs to be reaped for its
             // exit code to be known.
-            pollsSinceInfo += 1
-            if pollsSinceInfo >= 4 {
-                pollsSinceInfo = 0
+            sinceInfo += pollDelay
+            if sinceInfo >= 250 {
+                sinceInfo = 0
                 if let info = try? await Bridge.ptyInfo(id: id) {
                     rows = info.rows
                     cols = info.cols
@@ -191,7 +210,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                             if final.dropped > 0 { droppedOutput = true }
                             if let bytes = Data(base64Encoded: final.data), !bytes.isEmpty {
                                 offset = final.nextOffset
-                                view?.terminal.feed(byteArray: [UInt8](bytes))
+                                feed(bytes)
                             }
                         }
                         break
@@ -199,9 +218,28 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 }
             }
 
-            try? await Task.sleep(for: .milliseconds(16))
+            try? await Task.sleep(for: .milliseconds(pollDelay))
         }
         pollTask = nil
+    }
+
+    /// Hand output to the terminal.
+    ///
+    /// `view.feed`, never `view.terminal.feed`. They look interchangeable and
+    /// are not: the emulator's own `feed` updates the buffer and stops there,
+    /// while the view's wraps it in `feedPrepare`/`feedFinish`, and it is
+    /// `feedFinish` that asks for a repaint. Feeding the emulator directly
+    /// leaves a terminal that takes input, runs the command, and shows nothing
+    /// until an unrelated click or resize happens to invalidate the view.
+    private func feed(_ bytes: Data) {
+        view.feed(byteArray: ArraySlice(bytes))
+    }
+
+    /// Drop back to the fast poll. Called when the user does something that
+    /// should produce output right away, so the first keystroke after an idle
+    /// stretch does not wait out a backed-off delay.
+    func wake() {
+        pollDelay = Self.minPollDelay
     }
 
     // MARK: - TerminalViewDelegate
@@ -210,6 +248,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// is a byte stream, which is why the transport base64s it. The write is
     /// queued, not sent here, so ordering survives the bridge.
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        // AppKit delivers keystrokes on the main thread, where the actor lives.
+        MainActor.assumeIsolated { wake() }
         eventStream.continuation.yield(.write(Array(data)))
     }
 
@@ -218,10 +258,17 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// so a resize cannot interleave with input out of order.
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         // AppKit calls this on the main thread, which is where the actor lives.
-        MainActor.assumeIsolated {
+        let changed = MainActor.assumeIsolated {
+            guard newCols != cols || newRows != rows else { return false }
             cols = newCols
             rows = newRows
+            return true
         }
+        // A resize the pty already has is not a no-op: it still raises SIGWINCH,
+        // and a shell reprints its prompt and a full screen program repaints
+        // everything. The first layout of a session spawned at the right size
+        // reports exactly the size it already is, so this is the common case.
+        guard changed else { return }
         eventStream.continuation.yield(.resize(rows: newRows, cols: newCols))
     }
 

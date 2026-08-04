@@ -22,6 +22,13 @@ final class TerminalsModel {
     var sessions: [TerminalSession] = []
     var selectedID: String?
     var errorMessage: String?
+    private var selectedByWorkspace: [String: String] = [:]
+
+    init() {
+        // The wheel is a terminal-wide concern, not a per-session one, so it is
+        // wired up once here rather than by whichever session appears first.
+        TerminalWheelForwarder.install()
+    }
 
     var selected: TerminalSession? {
         sessions.first { $0.id == selectedID }
@@ -29,6 +36,25 @@ final class TerminalsModel {
 
     func sessions(in workspaceID: String) -> [TerminalSession] {
         sessions.filter { $0.workspaceID == workspaceID }
+    }
+
+    /// The last session selected in a workspace, falling back to its first
+    /// session. Selection belongs to the workspace, not the current pane, so
+    /// switching projects does not lose the place the user was working in.
+    func active(in workspaceID: String) -> TerminalSession? {
+        let available = sessions(in: workspaceID)
+        if let id = selectedByWorkspace[workspaceID],
+           let session = available.first(where: { $0.id == id }) {
+            return session
+        }
+        return available.first
+    }
+
+    func select(_ session: TerminalSession) {
+        selectedID = session.id
+        if !session.workspaceID.isEmpty {
+            selectedByWorkspace[session.workspaceID] = session.id
+        }
     }
 
     /// Reconcile against the host. Spawned and closed elsewhere show up and
@@ -48,12 +74,17 @@ final class TerminalsModel {
 
             // Adopt sessions that appeared since we last looked (another
             // surface, or the host itself).
+            // Reading starts here, not when a view first appears. A session
+            // nobody has opened yet still has to drain the host's bounded
+            // buffer, or its earliest output is dropped before anyone looks.
             let known = Set(sessions.map(\.id))
             for info in list where !known.contains(info.id) {
-                sessions.append(TerminalSession(info: info))
+                let session = TerminalSession(info: info)
+                session.start()
+                sessions.append(session)
             }
 
-            if selectedID == nil { selectedID = sessions.first?.id }
+            if selectedID == nil, let first = sessions.first { select(first) }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -62,20 +93,28 @@ final class TerminalsModel {
 
     /// Launch a command in a workspace's folder and select it.
     @discardableResult
-    func start(workspace: WorkspaceFolder, command: String, args: [String]) async -> TerminalSession? {
+    func start(
+        workspace: WorkspaceFolder,
+        command: String,
+        args: [String],
+        rows: Int = 24,
+        cols: Int = 80
+    ) async -> TerminalSession? {
         do {
-            // 24x80 until the view lays out; sizeChanged then resizes the pty
-            // to the real surface, which is where the shell gets its SIGWINCH.
+            // The caller measures the pane and passes its grid, so the shell
+            // prints its first prompt at the size it will keep. Spawning at
+            // 24x80 and letting the first layout correct it makes every session
+            // draw once and then repaint, which is the flash on launch.
             let info = try await Bridge.ptySpawn(
                 workspaceID: workspace.id,
                 command: command,
                 args: args,
-                rows: 24,
-                cols: 80
+                rows: rows,
+                cols: cols
             )
             let session = TerminalSession(info: info)
             sessions.append(session)
-            selectedID = session.id
+            select(session)
             errorMessage = nil
             session.start()
             return session
@@ -90,7 +129,12 @@ final class TerminalsModel {
         try? await Bridge.ptyClose(id: session.id)
         session.stop()
         sessions.removeAll { $0.id == session.id }
-        if selectedID == session.id { selectedID = sessions.first?.id }
+        if selectedID == session.id {
+            if !session.workspaceID.isEmpty {
+                selectedByWorkspace[session.workspaceID] = sessions(in: session.workspaceID).first?.id
+            }
+            selectedID = sessions.first?.id
+        }
     }
 }
 #endif

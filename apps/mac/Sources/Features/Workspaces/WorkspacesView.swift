@@ -25,7 +25,7 @@ struct WorkspacesView: View {
                 header(folder)
                 Divider()
                 #if os(macOS)
-                TerminalPane(folder: folder, terminals: terminals)
+                TerminalPane(folder: folder, terminals: terminals, workspaces: model)
                 #else
                 terminalPlaceholder(folder)
                 #endif
@@ -34,7 +34,6 @@ struct WorkspacesView: View {
             }
         }
         .background(Theme.background)
-        .toolbar { toolbar }
     }
 
     private func header(_ folder: WorkspaceFolder) -> some View {
@@ -126,17 +125,6 @@ struct WorkspacesView: View {
         .padding(Theme.Space.xl)
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem {
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .help("Re-read git state for every workspace")
-        }
-    }
 }
 
 /// Branch, and how far it has drifted from its upstream.
@@ -164,33 +152,37 @@ struct BranchChip: View {
     }
 }
 
-/// The right pane for a workspace: what changed, grouped by directory.
-///
-/// The same shape as the reference layout's Files panel, because that is the
-/// question someone actually has when looking at a workspace.
+/// The Changes tab of the workspace inspector: what changed, grouped by
+/// directory. The tab already says "Changes", so nothing here repeats it.
 struct WorkspaceChangesView: View {
+    @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let folder {
-                    content(folder)
-                } else {
-                    Text("Select a workspace.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let folder {
+                        content(folder)
+                    } else {
+                        Text("Select a workspace.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(Theme.Space.m)
             }
-            .padding(Theme.Space.m)
+            #if os(macOS)
+            if let folder, folder.exists, folder.git?.isRepo == true {
+                CommitBox(model: model, folder: folder)
+            }
+            #endif
         }
         .background(Theme.sidebar)
     }
 
     @ViewBuilder
     private func content(_ folder: WorkspaceFolder) -> some View {
-        SectionLabel(text: "Changes")
-
         if !folder.exists {
             Text("The folder is missing, so there is nothing to read.")
                 .font(.caption)
@@ -202,6 +194,9 @@ struct WorkspaceChangesView: View {
                     .foregroundStyle(.secondary)
             } else {
                 summary(git)
+                #if os(macOS)
+                selectAll(git, in: folder)
+                #endif
                 ForEach(groupByDirectory(git.files), id: \.directory) { group in
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text(group.directory.isEmpty ? "ROOT" : group.directory.uppercased())
@@ -211,7 +206,13 @@ struct WorkspaceChangesView: View {
                             .truncationMode(.head)
                             .padding(.top, Theme.Space.s)
                         ForEach(group.files) { file in
-                            ChangeRow(file: file)
+                            ChangeRow(
+                                file: file,
+                                isStaged: model.isStaged(file.path, in: folder.id),
+                                isOpen: model.activeFile[folder.id] == file.path,
+                                onToggle: { model.toggleStaged(file.path, in: folder.id) },
+                                onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
+                            )
                         }
                     }
                 }
@@ -222,6 +223,21 @@ struct WorkspaceChangesView: View {
                 .foregroundStyle(.secondary)
         }
     }
+
+    #if os(macOS)
+    /// Tick or clear everything at once. The label says which way it will go,
+    /// rather than being a tri-state box that makes you guess.
+    private func selectAll(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
+        let selected = model.stagedSelection[folder.id]?.count ?? 0
+        let all = selected == git.files.count
+        return Button(all ? "Clear all" : "Select all") {
+            model.setAllStaged(!all, in: folder)
+        }
+        .buttonStyle(.plain)
+        .font(.caption)
+        .foregroundStyle(Theme.accent)
+    }
+    #endif
 
     private func summary(_ git: GitStatus) -> some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -247,18 +263,115 @@ struct WorkspaceChangesView: View {
     }
 }
 
+#if os(macOS)
+/// Message, commit, push. Pinned to the bottom of the Changes tab, which is
+/// where every tool that does this puts it.
+///
+/// Staging and committing are one action here rather than two buttons. The
+/// index is not something this panel shows, so a half-staged repository left
+/// behind by a click would be a state the user cannot see and did not ask for.
+private struct CommitBox: View {
+    @Bindable var model: WorkspacesModel
+    let folder: WorkspaceFolder
+
+    private var message: Binding<String> {
+        Binding(
+            get: { model.commitMessage[folder.id] ?? "" },
+            set: { model.commitMessage[folder.id] = $0 }
+        )
+    }
+
+    private var selectedCount: Int {
+        model.stagedSelection[folder.id]?.count ?? 0
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+
+            if let outcome = model.gitOutcome {
+                Text(outcome.message.isEmpty ? "Done." : outcome.message)
+                    .font(.caption)
+                    .foregroundStyle(outcome.ok ? .green : .red)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, Theme.Space.m)
+            }
+
+            TextField("Commit message", text: message, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(2 ... 5)
+                .padding(Theme.Space.s)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
+                )
+                .padding(.horizontal, Theme.Space.m)
+
+            HStack(spacing: Theme.Space.s) {
+                if let git = folder.git, git.ahead > 0 {
+                    Button {
+                        Task { await model.push(folder) }
+                    } label: {
+                        Label("Push \(git.ahead)", systemImage: "arrow.up")
+                            .font(.caption)
+                    }
+                    .disabled(model.isCommitting)
+                    .help("Push the current branch")
+                }
+                Spacer()
+                Button {
+                    Task { await model.commit(folder) }
+                } label: {
+                    Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .disabled(model.isCommitting || selectedCount == 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+        }
+        .padding(.bottom, Theme.Space.m)
+        .background(Theme.sidebar)
+    }
+}
+#endif
+
+/// One changed file: a tick for the next commit, and the name opens its diff.
 private struct ChangeRow: View {
     var file: FileChange
+    var isStaged: Bool
+    var isOpen: Bool
+    var onToggle: () -> Void
+    var onOpen: () -> Void
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
+            #if os(macOS)
+            Button(action: onToggle) {
+                Image(systemName: isStaged ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 11))
+                    .foregroundStyle(isStaged ? Theme.accent : Color.secondary)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(isStaged ? "Will be committed" : "Include in the next commit")
+            #endif
+
             Image(systemName: file.kind.symbol)
                 .font(.system(size: 10))
                 .foregroundStyle(file.kind.tint)
-            Text(file.fileName)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Button(action: onOpen) {
+                Text(file.fileName)
+                    .font(.system(size: 12, weight: isOpen ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Open the diff")
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
                 Text("+\(added)").font(Theme.numeric(10)).foregroundStyle(.green)

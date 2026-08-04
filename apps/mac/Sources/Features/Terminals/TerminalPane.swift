@@ -14,18 +14,39 @@ import SwiftUI
 struct TerminalPane: View {
     let folder: WorkspaceFolder
     @Bindable var terminals: TerminalsModel
+    @Bindable var workspaces: WorkspacesModel
 
     private var sessions: [TerminalSession] {
         terminals.sessions(in: folder.id)
     }
 
+    /// Files open in this pane beside the terminals.
+    private var openFiles: [String] {
+        workspaces.openFiles[folder.id] ?? []
+    }
+
+    /// The file on screen, or nil when a terminal is.
+    private var activeFile: String? {
+        workspaces.activeFile[folder.id]
+    }
+
+    /// Size of the terminal area, measured rather than assumed.
+    @State private var paneSize: CGSize = .zero
+
+    /// The grid a new session should start at.
+    ///
+    /// Spawning at 24x80 and letting the first layout correct it means the
+    /// shell prints its prompt at one size and immediately redraws at another,
+    /// and an agent CLI repaints its whole interface. That is the flash when a
+    /// session opens. Measuring first costs nothing and removes it.
+    private var spawnGrid: (rows: Int, cols: Int) {
+        TerminalMetrics.grid(fitting: paneSize)
+    }
+
     /// The session to display: the globally selected one when it belongs to
     /// this folder, otherwise the folder's first.
     private var active: TerminalSession? {
-        if let selected = terminals.selected, sessions.contains(where: { $0.id == selected.id }) {
-            return selected
-        }
-        return sessions.first
+        terminals.active(in: folder.id)
     }
 
     var body: some View {
@@ -33,26 +54,61 @@ struct TerminalPane: View {
             if folder.exists {
                 strip
                 Divider()
-                if let active {
+                surface
+                if activeFile == nil, let active {
                     TerminalHost(session: active)
-                } else {
-                    LaunchSurface(folder: folder, terminals: terminals)
                 }
             } else {
                 missingFolder
-            }
-        }
-        .onChange(of: folder.id) {
-            // Coming back to a folder selects one of its own sessions, not
-            // whatever is running in another workspace.
-            if let first = sessions.first, terminals.selectedID != first.id {
-                terminals.selectedID = first.id
             }
         }
         .alert("Could not start session", isPresented: launchFailed) {
             Button("OK", role: .cancel) {}
         } message: {
             Text(terminals.errorMessage ?? "")
+        }
+    }
+
+    /// Every session in this folder, mounted at once, with the selected one in
+    /// front.
+    ///
+    /// Not `if session == active`, which is the obvious way and the wrong one.
+    /// Removing a terminal from the hierarchy and putting it back makes AppKit
+    /// lay it out again, which resizes the pty, which raises SIGWINCH, which
+    /// makes a full screen program repaint from scratch. That is the flicker
+    /// and the pause on every tab switch. Keeping them all mounted at the same
+    /// size means switching changes nothing about the terminal at all: no
+    /// relayout, no resize, no repaint.
+    private var surface: some View {
+        // The size comes from the reader, and every child is given exactly it.
+        // Letting a stack work the size out from its children does not survive
+        // a second child being added: a terminal view has no useful intrinsic
+        // width, so the stack settles on something tiny and the terminal
+        // renders one character per line.
+        GeometryReader { proxy in
+            let size = proxy.size
+            ZStack {
+                TerminalStack(
+                    sessions: sessions,
+                    // Nothing is shown while a file is open, so the terminals
+                    // stay mounted underneath rather than being torn down.
+                    activeID: activeFile == nil ? active?.id : nil
+                )
+                .frame(width: size.width, height: size.height)
+
+                if let path = activeFile {
+                    fileSurface(path)
+                        .frame(width: size.width, height: size.height)
+                } else if sessions.isEmpty {
+                    LaunchSurface(folder: folder, terminals: terminals, grid: spawnGrid)
+                        .frame(width: size.width, height: size.height)
+                }
+            }
+            .frame(width: size.width, height: size.height)
+            // Also the size a new session is spawned at, so it never opens at
+            // 24x80 and jumps.
+            .onAppear { paneSize = size }
+            .onChange(of: size) { _, new in paneSize = new }
         }
     }
 
@@ -65,21 +121,53 @@ struct TerminalPane: View {
 
     // MARK: - Session strip
 
+    @ViewBuilder
+    private func fileSurface(_ path: String) -> some View {
+        if let diff = workspaces.diff(for: path, in: folder.id) {
+            DiffView(diff: diff)
+                .id(path)
+        } else {
+            VStack {
+                Spacer()
+                Text("Reading \(path)…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background)
+        }
+    }
+
     private var strip: some View {
         HStack(spacing: Theme.Space.s) {
             ForEach(sessions) { session in
                 SessionChip(
                     session: session,
-                    isSelected: session.id == active?.id
+                    isSelected: activeFile == nil && session.id == active?.id
                 ) {
-                    terminals.selectedID = session.id
+                    // Selecting a terminal puts it back in front without
+                    // closing whatever files are open.
+                    workspaces.showTerminal(in: folder.id)
+                    terminals.select(session)
                 } onClose: {
                     Task { await terminals.close(session) }
                 }
             }
 
+            ForEach(openFiles, id: \.self) { path in
+                FileChip(
+                    path: path,
+                    isSelected: activeFile == path
+                ) {
+                    Task { await workspaces.openFile(path, in: folder.id) }
+                } onClose: {
+                    workspaces.closeFile(path, in: folder.id)
+                }
+            }
+
             Menu {
-                ForEach(LaunchProfile.all.filter(\.available)) { profile in
+                ForEach(LaunchProfile.available) { profile in
                     Button {
                         start(profile)
                     } label: {
@@ -109,7 +197,19 @@ struct TerminalPane: View {
     }
 
     private func start(_ profile: LaunchProfile) {
-        Task { await terminals.start(workspace: folder, command: profile.command, args: profile.args) }
+        // A new session is what the user now wants to look at, so get any open
+        // file out of the way.
+        workspaces.showTerminal(in: folder.id)
+        let grid = spawnGrid
+        Task {
+            await terminals.start(
+                workspace: folder,
+                command: profile.command,
+                args: profile.args,
+                rows: grid.rows,
+                cols: grid.cols
+            )
+        }
     }
 
     // MARK: - Missing folder
@@ -138,9 +238,14 @@ private struct SessionChip: View {
         HStack(spacing: 2) {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.xs) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
+                    if let harnessID = session.harnessID {
+                        HarnessMark(id: harnessID, size: 16)
+                    } else {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 16, height: 16)
+                    }
                     Text(label)
                         .font(.system(size: 11, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
@@ -178,24 +283,70 @@ private struct SessionChip: View {
         return session.command
     }
 
-    private var statusColor: Color {
-        if session.alive { return .green }
-        if session.exitCode == 0 { return .gray }
-        return .red
+}
+
+/// An open file's tab, next to the session tabs.
+///
+/// A different icon from a session on purpose: these live in the same strip,
+/// and a terminal and a file are not the same kind of thing to close.
+private struct FileChip: View {
+    let path: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: onSelect) {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 16, height: 16)
+                    Text(String(path.split(separator: "/").last ?? ""))
+                        .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, 3)
+                .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
+                )
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(path)
+
+            if isSelected {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 14, height: 14)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Close this file")
+            }
+        }
     }
 }
 
-/// The terminal itself, with a thin status line under it for the two facts a
-/// terminal should never hide: that its process ended, and that output was
-/// dropped because the reader fell behind.
+/// A thin line under the terminal for the two facts a terminal should never
+/// hide: that its process ended, and that output was dropped because the reader
+/// fell behind.
+///
+/// Separate from the terminal view, which is owned by `TerminalStack` in AppKit
+/// so that switching sessions never relayouts it.
 struct TerminalHost: View {
     let session: TerminalSession
 
     var body: some View {
         VStack(spacing: 0) {
-            TerminalViewRepresentable(session: session)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Theme.background)
             if session.exitCode != nil || session.droppedOutput {
                 statusLine
             }
@@ -233,6 +384,9 @@ struct TerminalHost: View {
 private struct LaunchSurface: View {
     let folder: WorkspaceFolder
     let terminals: TerminalsModel
+    /// The grid to spawn at, measured by the pane. Passed in rather than
+    /// guessed, so the first session opens at the size it will keep.
+    let grid: (rows: Int, cols: Int)
 
     var body: some View {
         VStack(spacing: Theme.Space.l) {
@@ -252,7 +406,7 @@ private struct LaunchSurface: View {
                 columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                 spacing: Theme.Space.m
             ) {
-                ForEach(LaunchProfile.all.filter(\.available)) { profile in
+                ForEach(LaunchProfile.available) { profile in
                     launchButton(profile)
                 }
             }
@@ -272,7 +426,15 @@ private struct LaunchSurface: View {
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
         Button {
-            Task { await terminals.start(workspace: folder, command: profile.command, args: profile.args) }
+            Task {
+                await terminals.start(
+                    workspace: folder,
+                    command: profile.command,
+                    args: profile.args,
+                    rows: grid.rows,
+                    cols: grid.cols
+                )
+            }
         } label: {
             VStack(spacing: Theme.Space.s) {
                 if let harness = profile.harnessID {
@@ -316,17 +478,23 @@ private struct LaunchProfile: Identifiable {
     let harnessID: String?
     let symbol: String?
 
-    var available: Bool {
+    /// The profiles whose command is actually installed.
+    ///
+    /// Resolved once. Working out what is on the PATH means a stat per
+    /// directory per command, and this list is read by the session strip, which
+    /// redraws on every keystroke in every terminal. Doing it per redraw put a
+    /// filesystem walk on the main thread sixty times a second.
+    static let available: [LaunchProfile] = all.filter {
         // The shell is an absolute path; everything else is looked up on PATH.
-        command.hasPrefix("/") || commandAvailable(command)
+        $0.command.hasPrefix("/") || commandAvailable($0.command)
     }
 
     static let all: [LaunchProfile] = [
         LaunchProfile(
             id: "shell",
             name: "Shell",
-            command: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
-            args: [],
+            command: shellCommand,
+            args: shellArguments,
             harnessID: nil,
             symbol: "terminal"
         ),
@@ -336,6 +504,14 @@ private struct LaunchProfile: Identifiable {
         LaunchProfile(id: "grok", name: "Grok Build", command: "grok", args: [], harnessID: "grok", symbol: nil),
         LaunchProfile(id: "copilot", name: "Copilot CLI", command: "copilot", args: [], harnessID: "copilot", symbol: nil),
     ]
+
+    private static var shellCommand: String {
+        ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    }
+
+    private static var shellArguments: [String] {
+        URL(fileURLWithPath: shellCommand).lastPathComponent == "zsh" ? ["-f"] : []
+    }
 }
 
 /// Whether an executable is reachable on the PATH.

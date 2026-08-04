@@ -459,6 +459,91 @@ struct GitStatus: Codable, Sendable, Hashable {
     var partial: Bool
 }
 
+/// One entry in a workspace's file tree.
+struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    /// Path relative to the workspace root, with `/` separators.
+    var path: String
+    var isDir: Bool
+    /// True when git would ignore this. Shown dimmed rather than hidden:
+    /// `target/` and a generated project file are things people look for.
+    var ignored: Bool
+
+    var id: String { path }
+}
+
+/// What one line of a diff is.
+enum DiffLineKind: String, Codable, Sendable {
+    case context, added, removed
+
+    var tint: Color {
+        switch self {
+        case .added: return .green
+        case .removed: return .red
+        case .context: return .secondary
+        }
+    }
+}
+
+/// One line of a diff, with the numbers each side shows in its gutter.
+struct DiffLine: Codable, Sendable, Hashable, Identifiable {
+    var kind: DiffLineKind
+    var oldLine: UInt32?
+    var newLine: UInt32?
+    /// The line without its leading `+`, `-` or space.
+    var text: String
+
+    /// Unique within a hunk: a line is one or the other, never neither.
+    var id: String { "\(oldLine.map(String.init) ?? "")-\(newLine.map(String.init) ?? "")" }
+}
+
+struct DiffHunk: Codable, Sendable, Hashable, Identifiable {
+    var header: String
+    var lines: [DiffLine]
+
+    var id: String { header }
+}
+
+/// One file's diff against HEAD.
+struct FileDiff: Codable, Sendable, Hashable {
+    var path: String
+    var hunks: [DiffHunk]
+    /// True when git refused to diff it as text. Showing nothing without saying
+    /// why looks like an empty file.
+    var binary: Bool
+    /// True when the file is not tracked, so every line reads as added.
+    var untracked: Bool
+
+    var fileName: String { String(path.split(separator: "/").last ?? "") }
+}
+
+/// What a git command that changed something reported.
+struct GitOutcome: Codable, Sendable, Hashable {
+    var ok: Bool
+    /// Git's own words. Shown verbatim on failure: they name the file, the
+    /// hook, or the conflict, and rewording loses that.
+    var message: String
+}
+
+/// One commit in a workspace's history.
+struct Commit: Codable, Sendable, Hashable, Identifiable {
+    /// Full hash. Abbreviating is the view's job.
+    var id: String
+    var subject: String
+    var author: String
+    /// Author time in unix seconds: when the work was done, not when a rebase
+    /// last touched it.
+    var timestamp: Int64
+    /// True while the commit is not on the upstream branch yet. False when
+    /// there is no upstream at all, because then nothing is known either way.
+    var unpushed: Bool
+
+    /// The seven characters everyone actually reads.
+    var shortID: String { String(id.prefix(7)) }
+
+    var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+}
+
 /// A folder the user registered.
 struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var id: String
