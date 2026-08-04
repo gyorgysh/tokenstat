@@ -165,6 +165,13 @@ struct HomeView: View {
                     }
                     HeatmapView(calendar: calendar, onSelect: onSelectDay)
                 }
+            } else if model.errorMessage != nil {
+                // "We could not look" and "there is nothing" are different
+                // answers, and telling someone with a full archive that they
+                // have never scanned is the wrong one.
+                EmptyHint(text: "The activity could not be read. See the message above.")
+            } else if model.isLoading {
+                EmptyHint(text: "Reading the archive…")
             } else {
                 // A brand new install, not a failure. Saying so beats an empty
                 // grid that looks like a year of doing nothing.
