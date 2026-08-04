@@ -68,6 +68,7 @@ struct RootView: View {
     @State private var home = HomeModel()
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
+    @State private var machines = MachinesModel()
     @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -99,6 +100,7 @@ struct RootView: View {
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
         .task { await workspaces.load() }
+        .task { await machines.load() }
         #if os(macOS)
         .task { await terminals.load() }
         #endif
@@ -406,16 +408,7 @@ struct RootView: View {
                 milestone: "Milestone 9"
             )
         case .machines:
-            NotBuiltYet(
-                title: "Machines",
-                symbol: "desktopcomputer",
-                summary: """
-                Every machine signed in to your account, its workspaces, and its \
-                sessions. This is what makes an iPad a client of your Mac rather \
-                than a second place to read numbers.
-                """,
-                milestone: "Milestone 8, needs the remote transport decision"
-            )
+            MachinesView(model: machines)
         case .account:
             AccountView(model: account)
         case .insights:

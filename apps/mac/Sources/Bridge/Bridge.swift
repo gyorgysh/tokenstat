@@ -457,3 +457,81 @@ extension Bridge {
 
 private struct PtyWriteAck: Codable, Sendable { let written: Int }
 private struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }
+
+// MARK: - Machines
+
+/// This machine's identity, the peers it knows, and calls forwarded to them.
+///
+/// A front end never speaks the machine-to-machine protocol itself. It asks its
+/// own daemon, and the daemon reaches the peer. That is why there is no
+/// handshake anywhere in this app, and why an iPad client will not need one
+/// either. See `docs/remote-transport.md`.
+extension Bridge {
+    static func machineIdentity() async throws -> MachineIdentity {
+        try await background("machine.identity", as: MachineIdentity.self)
+    }
+
+    static func peers() async throws -> [Peer] {
+        try await background("machine.peers", as: [Peer].self)
+    }
+
+    /// Pair with a machine whose key was typed or pasted. Approved outright:
+    /// entering a key by hand is the approval.
+    static func pair(key: String, label: String, address: String) async throws -> Peer {
+        try await background(
+            "machine.pair",
+            ["key": key, "label": label, "address": address],
+            as: Peer.self
+        )
+    }
+
+    static func approve(key: String) async throws {
+        _ = try await background("machine.approve", ["key": key], as: Changed.self)
+    }
+
+    static func revoke(key: String) async throws {
+        _ = try await background("machine.revoke", ["key": key], as: Changed.self)
+    }
+
+    /// Forget a peer entirely, so it arrives as a stranger next time. Different
+    /// from revoking, which remembers that it was turned away.
+    static func forget(key: String) async throws {
+        _ = try await background("machine.forget", ["key": key], as: Forgotten.self)
+    }
+
+    static func remoteStatus() async throws -> RemoteStatus {
+        try await background("remote.status", as: RemoteStatus.self)
+    }
+
+    /// Start or stop serving other machines.
+    ///
+    /// Slow enough to await: it binds or unbinds a port. Never called on a
+    /// timer, and never on launch: whether this machine serves is the user's
+    /// standing decision, stored by the daemon.
+    static func setServing(_ enabled: Bool, port: Int) async throws -> ServingOutcome {
+        try await background(
+            "remote.serve", ["enable": enabled, "port": port], as: ServingOutcome.self
+        )
+    }
+
+    /// Ask a peer a question, through this machine's daemon.
+    ///
+    /// The result is the peer's own, unwrapped: a failure over there is a
+    /// failure here, so a caller has one error path whether the call was local
+    /// or remote.
+    static func onPeer<T: Decodable & Sendable>(
+        _ peer: String,
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as type: T.Type
+    ) async throws -> T {
+        try await background(
+            "remote.call",
+            ["peer": peer, "method": method, "params": params],
+            as: type
+        )
+    }
+}
+
+private struct Changed: Codable, Sendable { let changed: Bool }
+private struct Forgotten: Codable, Sendable { let forgotten: Bool }

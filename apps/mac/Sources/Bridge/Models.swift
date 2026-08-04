@@ -885,3 +885,58 @@ struct PtyChunk: Codable, Sendable {
     /// host's bounded buffer. Zero in normal use, and never silently ignored.
     var dropped: UInt64
 }
+
+// MARK: - Machines
+
+/// Who this machine is to another one.
+struct MachineIdentity: Codable, Sendable {
+    /// The public key as hex. Long, and the thing that is actually pinned.
+    let key: String
+    /// The short form somebody reads aloud to check two ends match.
+    let fingerprint: String
+    let label: String
+}
+
+/// A machine this one knows about.
+struct Peer: Codable, Sendable, Identifiable, Hashable {
+    enum Trust: String, Codable, Sendable {
+        /// It made contact and nobody has decided yet. The only state a new
+        /// peer can arrive in.
+        case pending
+        case approved
+        /// Somebody withdrew access. Remembered rather than deleted, so the
+        /// same machine coming back is known as one that was turned away.
+        case revoked
+    }
+
+    let key: String
+    let fingerprint: String
+    let label: String
+    let trust: Trust
+    /// Where it was reached or seen from. A hint for dialling, never a
+    /// credential: an address proves nothing about who is at it.
+    let address: String?
+    let firstSeen: String
+    let lastSeen: String
+
+    var id: String { key }
+}
+
+/// Whether this machine is reachable by others.
+struct RemoteStatus: Codable, Sendable {
+    /// What the user chose.
+    let serving: Bool
+    /// What is actually true. These differ when the port is taken, and a screen
+    /// showing only the first would claim to be serving when it is not.
+    let listening: Bool
+    let address: String?
+    let port: Int
+    let key: String
+    let fingerprint: String
+    let label: String
+}
+
+struct ServingOutcome: Codable, Sendable {
+    let serving: Bool
+    let address: String?
+}
