@@ -35,7 +35,7 @@ struct HeatmapView: View {
             // card empty.
             GeometryReader { proxy in
                 let cell = cellSize(for: proxy.size.width)
-                let gap = cell * gapRatio
+                let gap = gapSize(for: proxy.size.width, cell: cell)
                 VStack(alignment: .leading, spacing: gap) {
                     months(cell: cell, gap: gap)
                     ForEach(0 ..< calendar.rows.count, id: \.self) { row in
@@ -58,33 +58,53 @@ struct HeatmapView: View {
         }
     }
 
-    /// Square size that makes `weeks` columns span the width exactly.
+    /// The largest a square is allowed to get.
     ///
-    /// Solved rather than guessed. The gap is a fraction of the cell, so the
-    /// width is `gutter + gap + weeks × (cell + gap)`, and with `gap = k·cell`
-    /// that rearranges to the expression below. Picking a size and hoping is
-    /// what left a year of squares ending two thirds across a full-screen
-    /// window.
+    /// The grid is seven rows tall whatever the width, so an uncapped cell size
+    /// makes a wide window grow the heatmap vertically until it is the tallest
+    /// thing on the screen. It also overran the height reserved for it and drew
+    /// through the legend underneath.
+    private let maxCell: CGFloat = 16
+
+    /// Square size that makes `weeks` columns span the width, up to `maxCell`.
     ///
-    /// The lower bound is real: under about seven points the five heat levels
-    /// stop being distinguishable. There is no upper bound, because on a wide
-    /// display the alternative to large squares is empty space.
+    /// Solved rather than guessed. With `gap = k·cell` the width is
+    /// `gutter + gap + weeks × (cell + gap)`, which rearranges to this. Picking
+    /// a size and hoping is what left a year of squares ending two thirds
+    /// across a full-screen window.
+    ///
+    /// The lower bound is real too: under about seven points the five heat
+    /// levels stop being distinguishable.
     private func cellSize(for width: CGFloat) -> CGFloat {
         guard calendar.weeks > 0, width > 0 else { return 11 }
         let columns = CGFloat(calendar.weeks)
         let fitted = (width - gutter) / (gapRatio + columns * (1 + gapRatio))
-        return max(fitted, 7)
+        return min(max(fitted, 7), maxCell)
     }
 
-    /// Reserved height: the month strip, then seven rows at the largest cell
-    /// the card is likely to give.
+    /// Gap that spends whatever width the capped cells did not.
     ///
-    /// Fixed rather than measured, because the grid is inside a
-    /// `GeometryReader` and a reader that sizes itself from its own content has
-    /// nothing to read.
+    /// Once the cell hits its ceiling the leftover width has to go somewhere,
+    /// and widening the gaps keeps the grid spanning the card without making it
+    /// taller. Capped in turn, or a very wide window scatters the squares.
+    private func gapSize(for width: CGFloat, cell: CGFloat) -> CGFloat {
+        guard calendar.weeks > 0, width > 0 else { return cell * gapRatio }
+        let columns = CGFloat(calendar.weeks)
+        let spare = (width - gutter - columns * cell) / (columns + 1)
+        return min(max(spare, cell * gapRatio), cell * maxGapRatio)
+    }
+
+    private let maxGapRatio: CGFloat = 0.5
+
+    /// Reserved height: the month strip, then seven rows at their largest.
+    ///
+    /// Computed from the ceilings rather than measured, because the grid is
+    /// inside a `GeometryReader` and a reader that sizes itself from its own
+    /// content has nothing to read. The real grid is never taller than this,
+    /// which is the point: it used to be, and it drew over the legend.
     private var gridHeight: CGFloat {
-        let cell: CGFloat = 22
-        return 11 + cell * gapRatio + 7 * (cell * (1 + gapRatio))
+        let gap = maxCell * maxGapRatio
+        return 11 + gap + 7 * (maxCell + gap)
     }
 
     private func months(cell: CGFloat, gap: CGFloat) -> some View {
