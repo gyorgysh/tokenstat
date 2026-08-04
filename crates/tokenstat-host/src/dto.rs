@@ -361,3 +361,24 @@ impl From<SplitBucket> for SplitBucketDto {
         }
     }
 }
+
+/// A registered folder, with whatever git says about it.
+///
+/// Workspaces are chosen by the user, never inferred from the usage archive.
+/// The archive's `project` is a display label recovered from a slug that lost
+/// the difference between `/` and `-`, so it cannot name a folder on disk, and
+/// a folder an agent touched once is not somewhere anyone wants a terminal.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDto {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub added_at_ms: i64,
+    /// False when the folder is gone. Kept and marked rather than dropped: an
+    /// unplugged disk is not a decision to forget it.
+    pub exists: bool,
+    /// Absent when the folder is missing, so a caller cannot mistake "we did
+    /// not look" for "no changes".
+    pub git: Option<tokenstat_workspace::GitStatus>,
+}

@@ -1,0 +1,20 @@
+[package]
+name = "tokenstat-workspace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Workspace folders, git state, and the changes in them"
+
+# No git library. `git` itself is on any machine that has a checkout to look at,
+# `--porcelain=v2` is a documented machine-readable contract, and libgit2 would
+# add a large C dependency whose licence would have to be argued about every
+# time scripts/check-app-licences.sh runs. Every command here is read-only.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+directories.workspace = true
+thiserror.workspace = true
