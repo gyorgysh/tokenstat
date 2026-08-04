@@ -159,8 +159,10 @@ struct AutomationParams {
 struct TodoParams {
     id: Option<String>,
     title: Option<String>,
+    kind: Option<crate::todo::CardKind>,
     notes: Option<String>,
     column: Option<String>,
+    order: Option<i64>,
     priority: Option<crate::todo::Priority>,
     backend: Option<String>,
     workspace_id: Option<String>,
@@ -945,9 +947,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let card = crate::todo::Card {
                 id: String::new(),
                 title: p.title.ok_or("todo.create needs a title")?,
+                kind: p.kind.unwrap_or_default(),
                 notes: p.notes.unwrap_or_default(),
                 column: p.column.unwrap_or_else(|| "backlog".into()),
-                order: 0,
+                order: p.order.unwrap_or(0),
                 priority: p.priority.unwrap_or_default(),
                 backend: p.backend.unwrap_or_else(|| "claude".into()),
                 workspace_id: p.workspace_id.ok_or("todo.create needs a workspace")?,
@@ -962,7 +965,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let p: TodoParams = parse(params)?;
             let changes = crate::todo::CardUpdate {
                 column: p.column,
+                order: p.order,
                 title: p.title,
+                kind: p.kind,
                 notes: p.notes,
                 backend: p.backend,
                 workspace_id: p.workspace_id,

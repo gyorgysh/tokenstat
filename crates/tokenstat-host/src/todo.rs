@@ -16,6 +16,15 @@ use crate::session::Session;
 /// a settings screen, and this milestone is the cards.
 pub const COLUMNS: [&str; 3] = ["backlog", "doing", "done"];
 
+/// Whether a card is executable work or a private reminder.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CardKind {
+    #[default]
+    Task,
+    Note,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum Priority {
@@ -41,6 +50,8 @@ pub struct Delegate {
 pub struct Card {
     pub id: String,
     pub title: String,
+    #[serde(default)]
+    pub kind: CardKind,
     pub notes: String,
     pub column: String,
     pub order: i64,
@@ -65,7 +76,9 @@ struct File {
 #[serde(rename_all = "camelCase", default)]
 pub struct CardUpdate {
     pub column: Option<String>,
+    pub order: Option<i64>,
     pub title: Option<String>,
+    pub kind: Option<CardKind>,
     pub notes: Option<String>,
     pub backend: Option<String>,
     pub workspace_id: Option<String>,
@@ -185,7 +198,7 @@ impl Board {
         if !COLUMNS.contains(&card.column.as_str()) {
             card.column = "backlog".into();
         }
-        if card.workspace_id.is_empty() {
+        if card.kind == CardKind::Task && card.workspace_id.is_empty() {
             return Err("a card needs a workspace".into());
         }
         if card.budget_seconds == 0 {
@@ -222,6 +235,9 @@ impl Board {
         if let Some(notes) = changes.notes.as_deref() {
             card.notes = notes.to_string();
         }
+        if let Some(kind) = changes.kind {
+            card.kind = kind;
+        }
         if let Some(backend) = changes.backend.as_deref() {
             card.backend = backend.to_string();
         }
@@ -237,6 +253,9 @@ impl Board {
             if COLUMNS.contains(&column) {
                 card.column = column.to_string();
             }
+        }
+        if let Some(order) = changes.order {
+            card.order = order.max(0);
         }
         card.updated_at_ms = Self::now_ms();
         // Order is recomputed outside the borrow, so the column's cards can be
@@ -286,6 +305,9 @@ impl Board {
                 .is_some_and(|d| d.status == "running")
             {
                 return Err(format!("{} is already running", card.title));
+            }
+            if card.kind == CardKind::Note {
+                return Err("notes cannot be delegated to an agent".into());
             }
             (
                 crate::automations::Automation {
@@ -342,6 +364,7 @@ impl Board {
         }
         let result = card.clone();
         drop(cards);
+        self.save()?;
         Ok(result)
     }
 }
@@ -354,6 +377,7 @@ mod tests {
         Card {
             id: id.into(),
             title: "a card".into(),
+            kind: CardKind::Task,
             notes: String::new(),
             column: "backlog".into(),
             order: 0,
@@ -377,6 +401,17 @@ mod tests {
         c.title = "ok".into();
         c.workspace_id = String::new();
         assert!(board.create(c).is_err());
+    }
+
+    #[test]
+    fn a_note_does_not_need_a_workspace() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-note-test");
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("note");
+        c.kind = CardKind::Note;
+        c.workspace_id.clear();
+        let created = board.create(c).unwrap();
+        assert_eq!(created.kind, CardKind::Note);
     }
 
     #[test]

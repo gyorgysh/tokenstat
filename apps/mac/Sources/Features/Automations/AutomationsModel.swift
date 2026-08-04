@@ -21,10 +21,12 @@ final class AutomationsModel {
 
     /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
+    private(set) var selectedRunID: String?
     /// Transcript text assembled so far for the watched run.
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var noticeGeneration = 0
 
     func load() async {
         do {
@@ -46,6 +48,11 @@ final class AutomationsModel {
         runs.first(where: \.isRunning) ?? runs.first
     }
 
+    var selectedRun: RunRecord? {
+        guard let selectedRunID else { return liveRun }
+        return runs.first { $0.id == selectedRunID }
+    }
+
     func create(
         name: String,
         backend: String,
@@ -61,7 +68,7 @@ final class AutomationsModel {
         )
         do {
             _ = try await Bridge.createAutomation(job)
-            noticeMessage = "\(name) will run \(scheduleSummary(schedule))."
+            showNotice("\(name) will run \(scheduleSummary(schedule)).")
             errorMessage = nil
             await load()
         } catch {
@@ -81,7 +88,7 @@ final class AutomationsModel {
     func run(_ job: Automation) async {
         do {
             _ = try await Bridge.runAutomation(job.id)
-            noticeMessage = "Started \(job.name)."
+            showNotice("Started \(job.name).")
             errorMessage = nil
             await load()
         } catch {
@@ -99,6 +106,7 @@ final class AutomationsModel {
     }
 
     func watch(_ run: RunRecord) {
+        selectedRunID = run.id
         watchingRunID = run.id
         transcriptText = ""
         transcriptOffset = 0
@@ -107,7 +115,7 @@ final class AutomationsModel {
 
     /// Start or stop the transcript poll to match what is on screen.
     func syncWatching() {
-        guard let live = liveRun else {
+        guard let live = selectedRun ?? liveRun else {
             stopPolling()
             return
         }
@@ -156,6 +164,17 @@ final class AutomationsModel {
         } catch {
             // A just-finished run may still have its file in flight; the next
             // load() refreshes runs and the poll stops then.
+        }
+    }
+
+    private func showNotice(_ message: String) {
+        noticeGeneration += 1
+        let generation = noticeGeneration
+        noticeMessage = message
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.noticeGeneration == generation else { return }
+            self.noticeMessage = nil
         }
     }
 

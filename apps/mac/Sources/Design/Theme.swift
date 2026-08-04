@@ -463,6 +463,27 @@ struct Banner: View {
     }
 }
 
+/// A short-lived confirmation that does not push the content column down.
+struct TransientToast: View {
+    @Binding var message: String?
+    var severity: Banner.Severity = .success
+
+    var body: some View {
+        if let message {
+            Label(message, systemImage: severity.symbol)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(severity.tint)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(severity.tint.opacity(0.35), lineWidth: 1))
+                .shadow(color: .black.opacity(0.2), radius: 14, y: 6)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .animation(.snappy(duration: 0.25), value: message)
+        }
+    }
+}
+
 /// Explains a surface that is planned but not built, without pretending to be
 /// one. Showing invented workspaces here would make the app a demo rather than
 /// a tool, and would be impossible to tell apart from a bug once real data

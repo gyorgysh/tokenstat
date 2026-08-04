@@ -920,6 +920,7 @@ struct RunRecord: Codable, Sendable, Identifiable {
         case "ok": return "Done"
         case "stopped": return "Stopped at budget"
         case "error": return "Failed"
+        case "interrupted": return "Interrupted by restart"
         default: return status
         }
     }
@@ -940,10 +941,16 @@ struct AgentBackend: Codable, Sendable, Identifiable {
 
 // MARK: - Todo
 
+enum TodoKind: String, Codable, Sendable, Hashable {
+    case task
+    case note
+}
+
 /// A card on the kanban board.
 struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var title: String
+    var kind: TodoKind
     var notes: String
     var column: String
     var order: Int64
@@ -957,7 +964,25 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, notes, column, order, priority, backend
+        case kind
         case workspaceID = "workspaceId", budgetSeconds, createdAtMs, updatedAtMs, delegate
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        kind = try values.decodeIfPresent(TodoKind.self, forKey: .kind) ?? .task
+        notes = try values.decode(String.self, forKey: .notes)
+        column = try values.decode(String.self, forKey: .column)
+        order = try values.decode(Int64.self, forKey: .order)
+        priority = try values.decode(String.self, forKey: .priority)
+        backend = try values.decode(String.self, forKey: .backend)
+        workspaceID = try values.decode(String.self, forKey: .workspaceID)
+        budgetSeconds = try values.decode(UInt64.self, forKey: .budgetSeconds)
+        createdAtMs = try values.decode(Int64.self, forKey: .createdAtMs)
+        updatedAtMs = try values.decode(Int64.self, forKey: .updatedAtMs)
+        delegate = try values.decodeIfPresent(TodoDelegate.self, forKey: .delegate)
     }
 
     var columnLabel: String {
@@ -967,6 +992,8 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         default: return "To Do"
         }
     }
+
+    var isNote: Bool { kind == .note }
 }
 
 /// The live state of a card handed to an agent.

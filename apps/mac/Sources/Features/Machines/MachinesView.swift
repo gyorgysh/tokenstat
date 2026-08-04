@@ -21,10 +21,6 @@ struct MachinesView: View {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
-                if let notice = model.noticeMessage {
-                    Banner(text: notice, severity: .success)
-                }
-
                 // First, because it is the only thing here that is waiting on a
                 // person. Everything else can be read at leisure.
                 if !model.pending.isEmpty {
@@ -45,6 +41,10 @@ struct MachinesView: View {
         }
         .navigationTitle("Machines")
         .background(Theme.background)
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(message: $model.noticeMessage, severity: .success)
+                .padding(Theme.Space.l)
+        }
         .task { if model.identity == nil { await model.load() } }
     }
 

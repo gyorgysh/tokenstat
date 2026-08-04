@@ -304,7 +304,7 @@ struct RootView: View {
     /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
-            if let status = account.lastSyncSummary ?? account.errorMessage {
+            if let status = account.syncNotice ?? account.errorMessage {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: account.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     Text(status)

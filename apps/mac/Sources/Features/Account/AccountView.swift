@@ -16,10 +16,6 @@ struct AccountView: View {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
-                if let summary = model.lastSyncSummary {
-                    Banner(text: summary, severity: .success)
-                }
-
                 if let device = model.pendingLogin {
                     SignInCode(device: device) { model.cancelSignIn() }
                 } else if model.signedIn, let account = model.account {
@@ -37,6 +33,10 @@ struct AccountView: View {
             .padding(Theme.Space.m)
         }
         .navigationTitle("Account")
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(message: $model.syncNotice, severity: .success)
+                .padding(Theme.Space.l)
+        }
         .task { if model.account == nil { await model.load() } }
     }
 

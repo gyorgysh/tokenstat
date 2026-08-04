@@ -21,6 +21,10 @@ struct InsightsView: View {
             content
         }
         .background(Theme.background)
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(message: $model.actionMessage, severity: .success)
+                .padding(Theme.Space.l)
+        }
         .toolbar { toolbar }
     }
 
@@ -30,9 +34,6 @@ struct InsightsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
-                }
-                if let message = model.actionMessage {
-                    Banner(text: message, severity: .success)
                 }
                 // A day arrived from Home's heatmap. It has to be visible and
                 // dismissable, or every figure on the screen is quietly about
@@ -321,6 +322,7 @@ private struct MiniList: View {
 
 private struct DailyChart: View {
     var rows: [Bucket]
+    @State private var selectedDay: String?
 
     /// Every nth day, so labels never collide however long the period is.
     private var labelledDays: [String] {
@@ -352,6 +354,29 @@ private struct DailyChart: View {
                 )
                 .foregroundStyle(Theme.accent.gradient)
                 .cornerRadius(2)
+                if selectedDay == row.key {
+                    RuleMark(x: .value("Selected day", row.key))
+                        .foregroundStyle(Theme.secondary)
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
+                        .annotation(position: .top, alignment: .leading) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(shortDay(row.key))
+                                    .font(.caption.weight(.semibold))
+                                Text("\(formatTokens(row.counters.total)) tokens")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(row.value.formatted)
+                                    .font(Theme.numeric(10, weight: .medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                            .padding(Theme.Space.s)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: Theme.Space.s)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
+                            )
+                        }
+                }
             }
             .chartXAxis {
                 // Chart's automatic count still crowds: with 30 categorical
@@ -379,6 +404,7 @@ private struct DailyChart: View {
                     }
                 }
             }
+            .chartXSelection(value: $selectedDay)
             .frame(height: 170)
         }
     }

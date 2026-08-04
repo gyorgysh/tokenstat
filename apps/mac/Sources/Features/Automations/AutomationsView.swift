@@ -22,10 +22,6 @@ struct AutomationsView: View {
                 if let error = model.errorMessage {
                     Banner(text: error, severity: .warning)
                 }
-                if let notice = model.noticeMessage {
-                    Banner(text: notice, severity: .success)
-                }
-
                 runsCard
                 if !model.jobs.isEmpty {
                     jobsCard
@@ -36,6 +32,10 @@ struct AutomationsView: View {
         }
         .navigationTitle("Automations")
         .background(Theme.background)
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(message: $model.noticeMessage, severity: .success)
+                .padding(Theme.Space.l)
+        }
         .task {
             await model.load()
             model.syncWatching()
@@ -47,9 +47,9 @@ struct AutomationsView: View {
     private var runsCard: some View {
         Card(
             title: "Runs",
-            subtitle: model.liveRun?.isRunning == true
+            subtitle: model.selectedRun?.isRunning == true
                 ? "The latest run, live as its transcript is written."
-                : "Recent runs. Transcripts are kept on this machine."
+                : "Select a run to inspect its transcript and result."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if model.runs.isEmpty {
@@ -60,8 +60,8 @@ struct AutomationsView: View {
                     ForEach(Array(model.runs.prefix(6))) { run in
                         runRow(run)
                     }
-                    if let live = model.liveRun, live.isRunning {
-                        liveTranscript(live)
+                    if let selected = model.selectedRun {
+                        liveTranscript(selected)
                     }
                 }
             }
@@ -89,7 +89,10 @@ struct AutomationsView: View {
                 .background(statusTint(run.status).opacity(0.15), in: Capsule())
                 .foregroundStyle(statusTint(run.status))
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, Theme.Space.xs)
+        .background(model.selectedRunID == run.id ? Theme.accentSoft : .clear,
+                    in: RoundedRectangle(cornerRadius: Theme.Space.xs))
         .contentShape(.rect)
         .onTapGesture { model.watch(run) }
     }
@@ -113,6 +116,21 @@ struct AutomationsView: View {
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
+            HStack(spacing: Theme.Space.s) {
+                Label(run.status == "running" ? "Live output" : run.endedLabel,
+                      systemImage: run.status == "running" ? "waveform" : "doc.text")
+                    .font(.caption)
+                    .foregroundStyle(statusTint(run.status))
+                if let exitCode = run.exitCode {
+                    Text("Exit \(exitCode)")
+                        .font(Theme.numeric(11))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -122,6 +140,7 @@ struct AutomationsView: View {
         case "ok": return Theme.success
         case "stopped": return Theme.warning
         case "error": return Theme.danger
+        case "interrupted": return Theme.warning
         default: return .secondary
         }
     }
@@ -141,6 +160,7 @@ struct AutomationsView: View {
     private func jobRow(_ job: Automation) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
+                FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
                 Text(job.name)
                     .font(.callout.weight(.medium))
                 Text(model.backends.first { $0.id == job.backend }?.label ?? job.backend)
@@ -170,6 +190,12 @@ struct AutomationsView: View {
                     Text("Next \(next.formatted(date: .abbreviated, time: .shortened))")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                }
+                if let folder = folders.first(where: { $0.id == job.workspaceID }) {
+                    Label(folder.name, systemImage: "folder")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Button("Run now") { Task { await model.run(job) } }

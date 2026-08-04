@@ -608,21 +608,24 @@ extension Bridge {
     }
 
     static func todoCreate(
-        title: String, notes: String, column: String, backend: String,
+        title: String, kind: TodoKind, notes: String, column: String, backend: String,
         workspaceID: String, budgetSeconds: UInt64
     ) async throws -> TodoCard {
         try await background("todo.create", [
-            "title": title, "notes": notes, "column": column, "backend": backend,
+            "title": title, "kind": kind.rawValue, "notes": notes, "column": column, "backend": backend,
             "workspaceId": workspaceID, "budgetSeconds": budgetSeconds,
         ], as: TodoCard.self)
     }
 
     static func todoUpdate(
-        id: String, column: String? = nil, title: String? = nil, notes: String? = nil
+        id: String, column: String? = nil, order: Int64? = nil, title: String? = nil,
+        kind: TodoKind? = nil, notes: String? = nil
     ) async throws -> TodoCard {
         var params: [String: Any] = ["id": id]
         if let column { params["column"] = column }
+        if let order { params["order"] = order }
         if let title { params["title"] = title }
+        if let kind { params["kind"] = kind.rawValue }
         if let notes { params["notes"] = notes }
         return try await background("todo.update", params, as: TodoCard.self)
     }

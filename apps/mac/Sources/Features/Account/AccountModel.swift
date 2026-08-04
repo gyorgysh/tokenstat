@@ -28,9 +28,11 @@ final class AccountModel {
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
+    var syncNotice: String?
     var syncCooldownUntil: Date?
 
     private var pollTask: Task<Void, Never>?
+    private var noticeGeneration = 0
 
     var signedIn: Bool { account?.signedIn == true }
 
@@ -118,10 +120,22 @@ final class AccountModel {
         do {
             let result = try await Bridge.sync()
             lastSyncSummary = "Sent \(result.rows) rows for \(result.from) to \(result.to)."
+            showSyncNotice(lastSyncSummary!)
             startSyncCooldown()
             await load()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func showSyncNotice(_ message: String) {
+        noticeGeneration += 1
+        let generation = noticeGeneration
+        syncNotice = message
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.noticeGeneration == generation else { return }
+            self.syncNotice = nil
         }
     }
 

@@ -42,6 +42,21 @@ struct HarnessMark: View {
     }
 }
 
+/// A product-owned vector mark for a feature surface.
+struct FeatureMark: View {
+    var name: String
+    var tint: Color = Theme.accent
+    var size: CGFloat = 18
+
+    var body: some View {
+        Image(name)
+            .renderable(size: size * 0.62)
+            .foregroundStyle(tint)
+            .frame(width: size, height: size)
+            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: size * 0.28))
+    }
+}
+
 private extension Image {
     /// Template-rendered and scaled to fit, which is what a monochrome mark
     /// needs to sit on a tinted tile.

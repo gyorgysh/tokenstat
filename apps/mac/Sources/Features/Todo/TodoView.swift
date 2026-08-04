@@ -14,15 +14,12 @@ struct TodoView: View {
     private static let columns: [(String, String)] = [
         ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
     ]
+    @State private var dropTarget: String?
 
     var body: some View {
         VStack(spacing: 0) {
             if let error = model.errorMessage {
                 Banner(text: error, severity: .warning)
-                    .padding(Theme.Space.m)
-            }
-            if let notice = model.noticeMessage {
-                Banner(text: notice, severity: .success)
                     .padding(Theme.Space.m)
             }
             ScrollView(.horizontal) {
@@ -36,13 +33,24 @@ struct TodoView: View {
         }
         .background(Theme.background)
         .navigationTitle("Todo")
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(message: $model.noticeMessage, severity: .success)
+                .padding(Theme.Space.l)
+        }
         .task { await model.load() }
     }
 
     private func column(_ id: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack {
-                SectionLabel(text: label, count: model.cards(in: id).count)
+            HStack(spacing: Theme.Space.s) {
+                FeatureMark(name: id == "doing" ? "mark_automation" : (id == "done" ? "mark_note" : "mark_todo"), tint: tint(for: id))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(label)
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("\(model.cards(in: id).count) card\(model.cards(in: id).count == 1 ? "" : "s")")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
             }
             .padding(.horizontal, Theme.Space.s)
@@ -51,7 +59,7 @@ struct TodoView: View {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
                     ForEach(model.cards(in: id)) { card in
-                        CardView(model: model, card: card)
+                        CardView(model: model, card: card, folders: folders)
                     }
                     if model.cards(in: id).isEmpty {
                         Text(id == "done" ? "Nothing done yet" : "No cards")
@@ -70,11 +78,44 @@ struct TodoView: View {
         }
         .frame(width: 300)
         .padding(Theme.Space.s)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(
+            Theme.panel.opacity(dropTarget == id ? 0.82 : 1),
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
+                .strokeBorder(dropTarget == id ? Theme.accent : Theme.border, lineWidth: 1)
         )
+        .dropDestination(for: String.self) { ids, _ in
+            guard let cardID = ids.first,
+                  let card = model.cards.first(where: { $0.id == cardID }) else { return false }
+            Task { await model.reorder(card, to: id, order: Int64(model.cards(in: id).count)) }
+            return true
+        } isTargeted: { targeted in
+            // The column's background stays calm until a card is actually over
+            // it. The drop target itself supplies the interaction affordance.
+            if targeted {
+                dropTarget = id
+            } else if dropTarget == id {
+                dropTarget = nil
+            }
+        }
+    }
+
+    private func symbol(for id: String) -> String {
+        switch id {
+        case "doing": return "bolt.fill"
+        case "done": return "checkmark.circle.fill"
+        default: return "tray"
+        }
+    }
+
+    private func tint(for id: String) -> Color {
+        switch id {
+        case "doing": return Theme.secondary
+        case "done": return Theme.success
+        default: return Theme.accent
+        }
     }
 }
 
@@ -83,6 +124,12 @@ struct TodoView: View {
 private struct CardView: View {
     @Bindable var model: TodoModel
     var card: TodoCard
+    var folders: [WorkspaceFolder]
+
+    @State private var editingTitle = false
+    @State private var editingNotes = false
+    @State private var titleDraft = ""
+    @State private var notesDraft = ""
 
     private var tint: Color {
         switch card.delegate?.status {
@@ -97,9 +144,23 @@ private struct CardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.xs) {
-                Text(card.title)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(2)
+                FeatureMark(name: card.isNote ? "mark_note" : "mark_todo",
+                            tint: card.isNote ? Theme.secondary : Theme.accent,
+                            size: 16)
+                if editingTitle {
+                    TextField("Title", text: $titleDraft)
+                        .textFieldStyle(.plain)
+                        .font(.callout.weight(.medium))
+                        .onSubmit { saveTitle() }
+                } else {
+                    Text(card.title)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(2)
+                        .onTapGesture {
+                            titleDraft = card.title
+                            editingTitle = true
+                        }
+                }
                 Spacer()
                 if card.priority == "high" {
                     Image(systemName: "exclamationmark")
@@ -107,20 +168,49 @@ private struct CardView: View {
                         .foregroundStyle(Theme.warning)
                 }
             }
-            if !card.notes.isEmpty {
+            if editingNotes {
+                TextField("Note", text: $notesDraft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.caption)
+                    .lineLimit(2...4)
+                    .onSubmit { saveNotes() }
+            } else if !card.notes.isEmpty {
                 Text(card.notes)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .onTapGesture {
+                        notesDraft = card.notes
+                        editingNotes = true
+                    }
+            } else {
+                Text(card.isNote ? "Click to add a note" : "Click to add a note")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .onTapGesture {
+                        notesDraft = ""
+                        editingNotes = true
+                    }
             }
             if let delegate = card.delegate {
                 delegateStatus(delegate)
             }
             HStack(spacing: Theme.Space.xs) {
-                Text(model.backends.first { $0.id == card.backend }?.label ?? card.backend)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Group {
+                    if card.isNote {
+                        Label("Note", systemImage: "bookmark")
+                    } else {
+                        Label(model.backends.first { $0.id == card.backend }?.label ?? card.backend,
+                              systemImage: "cpu")
+                        if let folder = folders.first(where: { $0.id == card.workspaceID }) {
+                            Text(folder.name)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+                .font(.caption2)
                 Spacer()
                 controls
             }
@@ -131,6 +221,25 @@ private struct CardView: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(card.delegate == nil ? Theme.border : tint.opacity(0.4), lineWidth: 1)
         )
+        .onExitCommand {
+            editingTitle = false
+            editingNotes = false
+        }
+        .onAppear {
+            titleDraft = card.title
+            notesDraft = card.notes
+        }
+        .draggable(card.id)
+    }
+
+    private func saveTitle() {
+        editingTitle = false
+        Task { await model.updateTitle(card, title: titleDraft) }
+    }
+
+    private func saveNotes() {
+        editingNotes = false
+        Task { await model.updateNotes(card, notes: notesDraft) }
     }
 
     private func delegateStatus(_ delegate: TodoDelegate) -> some View {
@@ -169,8 +278,10 @@ private struct CardView: View {
                 Button("Move to Done") { Task { await model.move(card, to: "done") } }
             }
             Divider()
-            Button("Delegate to agent", systemImage: "paperplane") {
-                Task { await model.delegate(card) }
+            if !card.isNote {
+                Button("Delegate to agent", systemImage: "paperplane") {
+                    Task { await model.delegate(card) }
+                }
             }
             Button("Delete", role: .destructive) { Task { await model.remove(card) } }
         } label: {
@@ -194,53 +305,59 @@ private struct NewCardForm: View {
     @State private var workspaceID = ""
     @State private var budget = "900"
     @State private var expanded = false
+    @State private var kind: TodoKind = .task
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Button {
                 expanded.toggle()
             } label: {
-                Label(expanded ? "New card" : "Add a card", systemImage: "plus")
+                Label(expanded ? "New card" : "Add a card", systemImage: expanded ? "chevron.up" : "plus")
                     .font(.caption.weight(.medium))
             }
             .buttonStyle(.plain)
 
             if expanded {
-                TextField("Title", text: $title)
-                TextField("Notes", text: $notes, axis: .vertical)
+                Picker("Type", selection: $kind) {
+                    Label("Task", systemImage: "checkmark.square").tag(TodoKind.task)
+                    Label("Note", systemImage: "note.text").tag(TodoKind.note)
+                }
+                .pickerStyle(.segmented)
+                TextField(kind == .note ? "What do you want to remember?" : "Task title", text: $title)
+                TextField("Note", text: $notes, axis: .vertical)
                     .lineLimit(2...4)
-                HStack(spacing: Theme.Space.xs) {
-                    Picker("", selection: $backendID) {
-                        ForEach(model.backends) { backend in
-                            Text(backend.label).tag(backend.id)
+                if kind == .task {
+                    HStack(spacing: Theme.Space.xs) {
+                        Picker("Agent", selection: $backendID) {
+                            ForEach(model.backends) { backend in
+                                Text(backend.label).tag(backend.id)
+                            }
                         }
-                    }
-                    .frame(maxWidth: .infinity)
-                    Picker("", selection: $workspaceID) {
-                        Text("Folder").tag("")
-                        ForEach(folders) { folder in
-                            Text(folder.name).tag(folder.id)
+                        .frame(maxWidth: .infinity)
+                        Picker("Workspace", selection: $workspaceID) {
+                            Text("Choose workspace").tag("")
+                            ForEach(folders) { folder in
+                                Text(folder.name).tag(folder.id)
+                            }
                         }
+                        .frame(maxWidth: .infinity)
                     }
-                    .frame(maxWidth: .infinity)
+                    HStack {
+                        TextField("Budget seconds", text: $budget)
+                            .frame(width: 110)
+                        Spacer()
+                    }
                 }
                 HStack {
-                    TextField("Budget s", text: $budget)
-                        .frame(width: 70)
+                    Button("Cancel") { cancel() }
+                        .buttonStyle(.borderless)
                     Spacer()
-                    Button("Add") {
-                        Task {
-                            await model.create(
-                                title: title, notes: notes, backend: backendID,
-                                workspaceID: workspaceID, budgetSeconds: UInt64(budget) ?? 900
-                            )
-                            title = ""
-                            notes = ""
-                        }
+                    Button("Save") {
+                        Task { await save() }
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || workspaceID.isEmpty || backendID.isEmpty)
+                    .disabled(!canSave)
                 }
             }
         }
@@ -249,5 +366,30 @@ private struct NewCardForm: View {
                 backendID = first.id
             }
         }
+    }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (kind == .note || (!workspaceID.isEmpty && !backendID.isEmpty))
+    }
+
+    private func save() async {
+        await model.create(
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            kind: kind,
+            notes: notes,
+            backend: backendID,
+            workspaceID: kind == .note ? "" : workspaceID,
+            budgetSeconds: UInt64(budget) ?? 900
+        )
+        if model.errorMessage == nil { cancel() }
+    }
+
+    private func cancel() {
+        title = ""
+        notes = ""
+        workspaceID = ""
+        expanded = false
+        kind = .task
     }
 }

@@ -112,6 +112,7 @@ final class InsightsModel {
     var scanCooldownUntil: Date?
     var fetchCooldownUntil: Date?
     var actionMessage: String?
+    private var actionGeneration = 0
     /// Set when a load fails. The message comes from the core, which names the
     /// actual file or setting at fault, so it is shown rather than replaced.
     var errorMessage: String?
@@ -224,7 +225,7 @@ final class InsightsModel {
         defer { isScanning = false }
         do {
             let report = try await Bridge.scan()
-            actionMessage = "Scan complete: added \(report.eventsNew) new events from \(report.filesRead) files."
+            showAction("Scan complete: added \(report.eventsNew) new events from \(report.filesRead) files.")
             startCooldown(seconds: 10, clearing: \.scanCooldownUntil)
             await refresh()
         } catch {
@@ -240,7 +241,7 @@ final class InsightsModel {
         do {
             let reports = try await Bridge.fetchRemotes()
             let details = reports.compactMap(\.message).joined(separator: " · ")
-            actionMessage = details.isEmpty ? "Remote fetch complete." : details
+            showAction(details.isEmpty ? "Remote fetch complete." : details)
             startCooldown(seconds: 30 * 60, clearing: \.fetchCooldownUntil)
             await refresh()
         } catch {
@@ -255,6 +256,17 @@ final class InsightsModel {
             try? await Task.sleep(for: .seconds(seconds))
             guard let self, self[keyPath: clearing] == until else { return }
             self[keyPath: clearing] = nil
+        }
+    }
+
+    private func showAction(_ message: String) {
+        actionGeneration += 1
+        let generation = actionGeneration
+        actionMessage = message
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.actionGeneration == generation else { return }
+            self.actionMessage = nil
         }
     }
 

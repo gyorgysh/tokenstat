@@ -296,18 +296,33 @@ impl Store {
             .unwrap_or_default();
         let runs_dir = dir.join("runs");
         let runs_path = runs_dir.join("runs.json");
-        let runs = std::fs::read_to_string(&runs_path)
+        let mut runs = std::fs::read_to_string(&runs_path)
             .ok()
             .and_then(|text| serde_json::from_str::<RunsFile>(&text).ok())
             .map(|file| file.runs)
             .unwrap_or_default();
-        Store {
+        let mut recovered = false;
+        for run in &mut runs {
+            if run.status == "running" {
+                // The pty belongs to the old daemon process. It cannot still be
+                // observed after a restart, so do not resurrect a false run.
+                run.status = "interrupted".into();
+                run.ended_at_ms = Some(now_ms());
+                run.pty_id = None;
+                recovered = true;
+            }
+        }
+        let store = Store {
             path,
             runs_path,
             runs_dir,
             jobs: Mutex::new(jobs),
             runs: Mutex::new(runs),
+        };
+        if recovered {
+            let _ = store.save_runs();
         }
+        store
     }
 
     fn save(&self) -> Result<(), String> {
@@ -447,6 +462,8 @@ impl Store {
             run.status = status.to_string();
             run.ended_at_ms = Some(now_ms());
         }
+        drop(runs);
+        let _ = self.save_runs();
     }
 
     /// Bytes of a run's transcript after `offset`.
@@ -826,6 +843,33 @@ mod tests {
         let (text, _) = store.transcript(run_id, 0).unwrap();
         assert!(text.contains("hello"), "transcript holds the output");
         assert!(transcript_path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn finishing_a_run_persists_its_final_status() {
+        let dir = temp_dir("persist");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        store
+            .push_run(RunRecord {
+                id: "run-persist".into(),
+                job_id: "j".into(),
+                name: "persist".into(),
+                backend: "sh".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                exit_code: None,
+                status: "running".into(),
+                transcript_path: dir.join("run.txt").display().to_string(),
+                pty_id: None,
+            })
+            .unwrap();
+        store.finish_run("run-persist", Some(0), "ok");
+        let saved = std::fs::read_to_string(dir.join("runs").join("runs.json")).unwrap();
+        assert!(saved.contains("\"status\": \"ok\""));
+        assert!(saved.contains("\"endedAtMs\""));
         let _ = std::fs::remove_dir_all(dir);
     }
 

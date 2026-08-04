@@ -25,6 +25,7 @@ final class MachinesModel {
     /// Set after an action that worked, so the screen confirms rather than
     /// leaving somebody wondering whether the button did anything.
     var noticeMessage: String?
+    private var noticeGeneration = 0
 
     private let discovery = BonjourDiscovery()
 
@@ -93,9 +94,9 @@ final class MachinesModel {
         guard let status else { return }
         do {
             let outcome = try await Bridge.setServing(enabled, port: status.port)
-            noticeMessage = outcome.serving
+            showNotice(outcome.serving
                 ? "Other machines can reach this one at \(outcome.address ?? "the chosen port")."
-                : "This machine no longer accepts connections."
+                : "This machine no longer accepts connections.")
             errorMessage = nil
             await load()
         } catch {
@@ -112,10 +113,10 @@ final class MachinesModel {
                 label: label.trimmingCharacters(in: .whitespacesAndNewlines),
                 address: address.trimmingCharacters(in: .whitespacesAndNewlines)
             )
-            noticeMessage = """
+            showNotice("""
             Paired with \(peer.label). It will not answer until somebody \
             approves this machine over there too.
-            """
+            """)
             errorMessage = nil
             await refreshPeers()
         } catch {
@@ -125,17 +126,17 @@ final class MachinesModel {
 
     func approve(_ peer: Peer) async {
         await change(peer) { try await Bridge.approve(key: peer.key) }
-        noticeMessage = "\(peer.label) may now reach this machine."
+        showNotice("\(peer.label) may now reach this machine.")
     }
 
     func revoke(_ peer: Peer) async {
         await change(peer) { try await Bridge.revoke(key: peer.key) }
-        noticeMessage = "\(peer.label) can no longer reach this machine."
+        showNotice("\(peer.label) can no longer reach this machine.")
     }
 
     func forget(_ peer: Peer) async {
         await change(peer) { try await Bridge.forget(key: peer.key) }
-        noticeMessage = "\(peer.label) is forgotten. It will arrive as a stranger next time."
+        showNotice("\(peer.label) is forgotten. It will arrive as a stranger next time.")
     }
 
     private func change(_ peer: Peer, _ action: () async throws -> Void) async {
@@ -145,6 +146,17 @@ final class MachinesModel {
             await refreshPeers()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func showNotice(_ message: String) {
+        noticeGeneration += 1
+        let generation = noticeGeneration
+        noticeMessage = message
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self, self.noticeGeneration == generation else { return }
+            self.noticeMessage = nil
         }
     }
 }
