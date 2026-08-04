@@ -206,6 +206,29 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The account's profile picture, as something a front end can fetch.
+///
+/// The API sends `/avatar/<name>`, relative, because it never hands out a third
+/// party URL: hotlinking a provider avatar would report every view of it back to
+/// that provider. Resolving it here rather than in each client means one place
+/// knows that a leading slash is relative to the host the token authenticated
+/// to. An absolute URL is passed through untouched, so the API can start
+/// sending one without breaking anything.
+fn avatar_url(host: &str, raw: &Value) -> Option<String> {
+    let value = raw.get("avatar")?.as_str()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.starts_with("http://") || value.starts_with("https://") {
+        return Some(value.to_string());
+    }
+    Some(format!(
+        "{}/{}",
+        host.trim_end_matches('/'),
+        value.trim_start_matches('/')
+    ))
+}
+
 /// Describe a registered folder, reading git only when it is actually there.
 ///
 /// A missing folder gets `git: None` rather than an empty status, so a caller
@@ -393,6 +416,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             match tokenstat_sync::sync_status(None) {
                 Ok(s) => serde_json::to_value(AccountDto {
                     signed_in: true,
+                    avatar: avatar_url(&s.host, &s.raw),
                     host: s.host,
                     handle: s.handle,
                     display_name: s
@@ -402,12 +426,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         .filter(|v| !v.is_empty())
                         .map(str::to_string),
                     tier: s.tier,
-                    avatar: s
-                        .raw
-                        .get("avatar")
-                        .and_then(|v| v.as_str())
-                        .filter(|v| !v.is_empty())
-                        .map(str::to_string),
                     last_sync_at: s.last_sync_at,
                     machines: s.machines.iter().map(MachineDto::from_value).collect(),
                     schema_current: s.schema_current,
@@ -1058,6 +1076,33 @@ mod tests {
                 call_sessionless(method, "{}").is_none(),
                 "{method} must not bypass the session"
             );
+        }
+    }
+
+    /// The API sends a relative avatar path on purpose, so it never hands out
+    /// a third party URL. A client that treated it as a URL would render a
+    /// broken image with nothing to explain why.
+    #[test]
+    fn a_relative_avatar_resolves_against_its_host() {
+        let raw = json!({"avatar": "/avatar/abc123.webp"});
+        assert_eq!(
+            avatar_url("https://tokenstat.ai", &raw).as_deref(),
+            Some("https://tokenstat.ai/avatar/abc123.webp")
+        );
+        // A trailing slash on the host must not produce a double slash.
+        assert_eq!(
+            avatar_url("https://tokenstat.ai/", &raw).as_deref(),
+            Some("https://tokenstat.ai/avatar/abc123.webp")
+        );
+        // An absolute URL passes through, so the API can start sending one.
+        let absolute = json!({"avatar": "https://cdn.example/a.png"});
+        assert_eq!(
+            avatar_url("https://tokenstat.ai", &absolute).as_deref(),
+            Some("https://cdn.example/a.png")
+        );
+        // Absent, empty and blank are all "no picture", not an empty URL.
+        for value in [json!({}), json!({"avatar": ""}), json!({"avatar": "   "})] {
+            assert_eq!(avatar_url("https://tokenstat.ai", &value), None, "{value}");
         }
     }
 
