@@ -242,7 +242,19 @@ output.
 These are product requirements, not preferences.
 
 - Read only. Never write to, move, or delete a log file belonging to another
-  tool.
+  tool. This is about **other tools' data**, and it is absolute: a session log
+  is somebody else's file and tokenstat only ever reads it.
+- **The app may change the user's own project**, because it is a place to work
+  and not a reporter. Staging, committing and pushing are real features. The
+  rule that governs them is different: nothing happens that the user did not
+  ask for, and nothing happens on a timer.
+  - Reading and writing live in separate modules. `tokenstat-workspace::git`
+    and `::tree` are read-only and are the only ones a watcher, a refresh or a
+    status path may call. `::gitwrite` is the only module that mutates, and
+    every function in it runs because a person pressed a button.
+  - Keep new code on the correct side of that line. If something wants a
+    mutation on a schedule, the answer is no, not a new function in `gitwrite`.
+  - The CLI stays read-only. It reports.
 - Nothing leaves the machine except through an explicit sync command the user
   ran, against an account the user created.
 - Prompts, completions, file contents, and file paths from user projects are

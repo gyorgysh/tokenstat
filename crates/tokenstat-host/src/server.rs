@@ -174,12 +174,19 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         other => other.to_string(),
     };
 
-    // A poisoned lock means some earlier request panicked. The session itself
-    // is still a valid open archive, so carry on rather than refusing every
-    // request from here on.
-    let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
-    let envelope = crate::dispatch::call(&mut guard, &request.method, &params);
-    drop(guard);
+    // Answered without the lock where the method allows it. Connections share
+    // one session, so a terminal polling for output would otherwise serialize
+    // against every other client's archive and git work.
+    let envelope = match crate::dispatch::call_sessionless(&request.method, &params) {
+        Some(envelope) => envelope,
+        None => {
+            // A poisoned lock means some earlier request panicked. The session
+            // itself is still a valid open archive, so carry on rather than
+            // refusing every request from here on.
+            let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
+            crate::dispatch::call(&mut guard, &request.method, &params)
+        }
+    };
 
     // The envelope is already the right shape; the id is the only thing this
     // transport adds. Splicing it in textually rather than re-encoding keeps

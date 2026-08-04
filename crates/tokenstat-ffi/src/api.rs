@@ -21,6 +21,13 @@ fn cell() -> &'static Mutex<Option<Session>> {
 /// and never returns a non-JSON string, so the caller can decode
 /// unconditionally.
 pub fn call(method: &str, params: &str) -> String {
+    // Answered without the lock where the method allows it. A terminal polls
+    // for output continuously, and holding this mutex to do that would put
+    // every keystroke behind whatever archive or git work was already running.
+    if let Some(response) = dispatch::call_sessionless(method, params) {
+        return response;
+    }
+
     let mut guard = cell().lock().unwrap_or_else(PoisonError::into_inner);
 
     if guard.is_none() {

@@ -61,6 +61,19 @@ struct WorkspaceIdParams {
     /// Only used by `workspace.rename`.
     #[serde(default)]
     name: Option<String>,
+    /// Only used by `workspace.log`.
+    #[serde(default)]
+    limit: Option<u32>,
+    /// Directory to list, for `workspace.tree`, or the file to diff, for
+    /// `workspace.diff`. Always relative to the workspace root.
+    #[serde(default)]
+    path: Option<String>,
+    /// Paths to stage or unstage.
+    #[serde(default)]
+    paths: Option<Vec<String>>,
+    /// Commit message.
+    #[serde(default)]
+    message: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +171,22 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
         exists,
         git: exists.then(|| tokenstat_workspace::git::status(&ws.path)),
     }
+}
+
+/// Look up a registered folder, refusing one that is not on disk.
+///
+/// Every per-folder method needs the same two checks, and a missing folder has
+/// to fail with words rather than with whatever git says about a path that is
+/// not there.
+fn folder<'a>(b: &'a Session, id: &str) -> Result<&'a tokenstat_workspace::Workspace, String> {
+    let ws = b
+        .workspaces
+        .get(id)
+        .ok_or_else(|| format!("no workspace with id {id}"))?;
+    if !ws.exists() {
+        return Err(format!("the folder is missing: {}", ws.path.display()));
+    }
+    Ok(ws)
 }
 
 /// Apply a closure to the session.
@@ -406,7 +435,24 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // Git is read for each on every list: a status call is cheap, and a
         // cached one that lies about a dirty tree is worse than none.
         "workspace.list" => with_session(s, |b| {
-            let dtos: Vec<WorkspaceDto> = b.workspaces.workspaces.iter().map(describe).collect();
+            // One thread per folder. Reading git means three subprocesses, and
+            // doing that serially made the whole list cost the sum of every
+            // repository rather than the slowest one. The folders are
+            // independent, so there is nothing to coordinate.
+            let dtos: Vec<WorkspaceDto> = std::thread::scope(|scope| {
+                let handles: Vec<_> = b
+                    .workspaces
+                    .workspaces
+                    .iter()
+                    .map(|ws| scope.spawn(move || describe(ws)))
+                    .collect();
+                handles
+                    .into_iter()
+                    // A panic reading one folder must not lose the others, and
+                    // there is nothing useful to say about it here.
+                    .filter_map(|h| h.join().ok())
+                    .collect()
+            });
             serde_json::to_value(dtos).map_err(|e| e.to_string())
         }),
 
@@ -461,6 +507,96 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        // Recent commits. Separate from `workspace.status` because status runs
+        // on a file-change timer and history does not change nearly as often,
+        // so joining them would spawn a `git log` every time a file is saved.
+        "workspace.log" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            // Enough to scroll, few enough that a repository with a decade of
+            // history does not send its whole life over the bridge.
+            let limit = p.limit.unwrap_or(100).min(500);
+            with_session(s, |b| {
+                let ws = b
+                    .workspaces
+                    .get(&p.id)
+                    .ok_or_else(|| format!("no workspace with id {}", p.id))?;
+                let commits = if ws.exists() {
+                    tokenstat_workspace::git::log(&ws.path, limit)
+                } else {
+                    Vec::new()
+                };
+                serde_json::to_value(commits).map_err(|e| e.to_string())
+            })
+        }
+
+        // One directory of the file tree. Lazy per directory: a monorepo has
+        // hundreds of thousands of files and nobody looks at more than one
+        // level at a time.
+        "workspace.tree" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let relative = p.path.unwrap_or_default();
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let entries = tokenstat_workspace::tree::list(&ws.path, &relative)
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_value(entries).map_err(|e| e.to_string())
+            })
+        }
+
+        "workspace.diff" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.diff needs a path")?;
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let diff = tokenstat_workspace::git::diff(&ws.path, &path);
+                serde_json::to_value(diff).map_err(|e| e.to_string())
+            })
+        }
+
+        // Everything below changes the repository. These exist because the app
+        // is a place to work, not a reporter: they run when someone presses a
+        // button and are never reachable from a timer or a status path. See
+        // `tokenstat_workspace::gitwrite`.
+        "workspace.stage" | "workspace.unstage" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let paths = p.paths.unwrap_or_default();
+            let staging = method == "workspace.stage";
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let outcome = if staging {
+                    tokenstat_workspace::gitwrite::stage(&ws.path, &paths)
+                } else {
+                    tokenstat_workspace::gitwrite::unstage(&ws.path, &paths)
+                };
+                serde_json::to_value(outcome).map_err(|e| e.to_string())
+            })
+        }
+
+        "workspace.commit" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let message = p.message.unwrap_or_default();
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let outcome = tokenstat_workspace::gitwrite::commit(&ws.path, &message);
+                serde_json::to_value(outcome).map_err(|e| e.to_string())
+            })
+        }
+
+        "workspace.push" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let outcome = tokenstat_workspace::gitwrite::push(&ws.path);
+                serde_json::to_value(outcome).map_err(|e| e.to_string())
+            })
+        }
+
         // Terminals. The process is owned here rather than by the front end,
         // which is what lets an iPad watch a session running on a Mac and what
         // keeps an automation alive after a window closes.
@@ -489,23 +625,40 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
-        "pty.list" => {
-            serde_json::to_value(tokenstat_pty::manager().list()).map_err(|e| e.to_string())
-        }
+        other => match sessionless(other, params) {
+            Some(result) => result,
+            None => Err(format!("unknown method: {other}")),
+        },
+    }
+}
 
-        "pty.info" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+/// Methods that never touch the session.
+///
+/// The pty manager is process-wide and independent of the archive, so none of
+/// these need the session at all. That is not a detail: a transport keeps the
+/// session behind a lock, and a terminal polls for output continuously. Routing
+/// these through the lock made every keystroke queue behind whatever else was
+/// running, and a `workspace.list` shells out to git three times per folder. A
+/// terminal that stalls for the length of a git status is not a terminal.
+///
+/// `pty.spawn` is deliberately not here: it resolves a workspace id, which only
+/// the session knows. It happens once per session rather than per frame.
+fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+    Some(match method {
+        "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
+            .map_err(|e: serde_json::Error| e.to_string()),
+
+        "pty.info" => pty_id(params).and_then(|p| {
             let info = tokenstat_pty::manager()
                 .info(&p.id)
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(info).map_err(|e| e.to_string())
-        }
+        }),
 
         // Poll for output. Returns immediately, so the caller sets the pace.
         // `dropped` is non-zero when the reader fell behind the buffer, and a
         // terminal should say so rather than pretend the output never existed.
-        "pty.read" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        "pty.read" => pty_id(params).and_then(|p| {
             let chunk = tokenstat_pty::manager()
                 .read(&p.id, p.offset)
                 .map_err(|e| e.to_string())?;
@@ -514,20 +667,18 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 "nextOffset": chunk.next_offset,
                 "dropped": chunk.dropped,
             }))
-        }
+        }),
 
-        "pty.write" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        "pty.write" => pty_id(params).and_then(|p| {
             let data = p.data.ok_or("pty.write needs base64 data")?;
             let bytes = crate::base64::decode(&data)?;
             tokenstat_pty::manager()
                 .write(&p.id, &bytes)
                 .map_err(|e| e.to_string())?;
             Ok(json!({"written": bytes.len()}))
-        }
+        }),
 
-        "pty.resize" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        "pty.resize" => pty_id(params).and_then(|p| {
             let (rows, cols) = match (p.rows, p.cols) {
                 (Some(r), Some(c)) => (r, c),
                 _ => return Err("pty.resize needs rows and cols".into()),
@@ -536,26 +687,39 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 .resize(&p.id, rows, cols)
                 .map_err(|e| e.to_string())?;
             Ok(json!({"rows": rows, "cols": cols}))
-        }
+        }),
 
-        "pty.kill" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        "pty.kill" => pty_id(params).and_then(|p| {
             tokenstat_pty::manager()
                 .kill(&p.id)
                 .map_err(|e| e.to_string())?;
             Ok(json!({"killed": true}))
-        }
+        }),
 
-        "pty.close" => {
-            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        "pty.close" => pty_id(params).and_then(|p| {
             tokenstat_pty::manager()
                 .close(&p.id)
                 .map_err(|e| e.to_string())?;
             Ok(json!({"closed": true}))
-        }
+        }),
 
-        other => Err(format!("unknown method: {other}")),
-    }
+        _ => return None,
+    })
+}
+
+fn pty_id(params: &str) -> Result<PtyIdParams, String> {
+    serde_json::from_str(params.trim()).map_err(|e| e.to_string())
+}
+
+/// Answer a call that needs no session, or `None` when it needs one.
+///
+/// Transports call this **before** taking whatever lock guards their session.
+/// See [`sessionless`] for why that matters.
+pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
+    sessionless(method, params).map(|result| match result {
+        Ok(v) => ok(v),
+        Err(e) => err("call_failed", e),
+    })
 }
 
 #[cfg(test)]
@@ -605,6 +769,143 @@ mod tests {
                 assert!(v["error"]["message"].is_string(), "{method}: {out}");
             }
         }
+    }
+
+    #[test]
+    fn the_terminal_hot_path_never_needs_the_session() {
+        // Both transports keep the session behind a mutex, so anything routed
+        // through it serializes against archive reads and against `git status`
+        // for every registered folder. A terminal polls for output continuously
+        // and cannot wait behind that. If a method moves off this list, typing
+        // in a terminal starts stalling whenever anything else runs, and the
+        // symptom looks nothing like the cause.
+        for method in [
+            "pty.list",
+            "pty.info",
+            "pty.read",
+            "pty.write",
+            "pty.resize",
+            "pty.kill",
+            "pty.close",
+        ] {
+            let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
+                .unwrap_or_else(|| panic!("{method} must be answerable without a session"));
+            let v: Value = serde_json::from_str(&out)
+                .unwrap_or_else(|e| panic!("{method} returned non-JSON: {out} ({e})"));
+            assert!(v["ok"].is_boolean(), "{method} lacks ok: {out}");
+        }
+
+        // Everything else still goes through the session, `pty.spawn` included:
+        // it resolves a workspace id, which only the session knows.
+        for method in ["pty.spawn", "workspace.list", "info", "totals"] {
+            assert!(
+                call_sessionless(method, "{}").is_none(),
+                "{method} must not bypass the session"
+            );
+        }
+    }
+
+    #[test]
+    fn a_workspace_can_be_listed_diffed_and_committed() {
+        let mut s = session();
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-dispatch-git-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git must be installed to run this test");
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "t@example.invalid"]);
+        run(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("src/main.rs"), "fn main() {}\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        let added: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.add",
+            &json!({"path": dir.display().to_string()}).to_string(),
+        ))
+        .unwrap();
+        let id = added["result"]["id"].as_str().unwrap().to_string();
+
+        // The tree lists one directory at a time, root first.
+        let tree: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.tree",
+            &json!({"id": id}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(tree["ok"], true, "{tree}");
+        assert!(
+            tree["result"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["name"] == "src" && e["isDir"] == true)
+        );
+
+        // Edit, diff, stage, commit: the whole loop the Changes tab drives.
+        std::fs::write(dir.join("src/main.rs"), "fn main() {\n    work();\n}\n").unwrap();
+        let diff: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.diff",
+            &json!({"id": id, "path": "src/main.rs"}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(diff["ok"], true, "{diff}");
+        assert!(!diff["result"]["hunks"].as_array().unwrap().is_empty());
+
+        let staged: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.stage",
+            &json!({"id": id, "paths": ["src/main.rs"]}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(staged["result"]["ok"], true, "{staged}");
+
+        let committed: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.commit",
+            &json!({"id": id, "message": "feat: work"}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(committed["result"]["ok"], true, "{committed}");
+
+        let log: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.log",
+            &json!({"id": id}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(log["result"][0]["subject"], "feat: work");
+
+        // A failure comes back as a readable outcome, not as a broken envelope.
+        let empty: Value = serde_json::from_str(&call(
+            &mut s,
+            "workspace.commit",
+            &json!({"id": id, "message": "  "}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(empty["ok"], true, "the call succeeded, the commit did not");
+        assert_eq!(empty["result"]["ok"], false);
+        assert!(
+            empty["result"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("message")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
