@@ -329,22 +329,38 @@ final class WorkspacesModel {
         folders.first { $0.id == selectedID }
     }
 
+    /// Remote folders by peer key, so the list can be refreshed without
+    /// re-dialling every peer on every file change.
+    private var remoteFolders: [String: [WorkspaceFolder]] = [:]
+    /// When a failed peer may be tried again. A dead machine stays listed with
+    /// its last known folders rather than disappearing on the next refresh.
+    private var remotePeerRetryAt: [String: Date] = [:]
+
     func load() async {
         isLoading = true
         defer { isLoading = false }
         do {
             var loaded = try await Bridge.workspaces()
+            loaded.append(contentsOf: remoteFolders.values.flatMap { $0 })
             // Remote workspaces are read through the local daemon. A peer that
             // is offline does not make local folders disappear, so its failure
-            // is kept as a refresh error only when there is no local result.
+            // is remembered rather than raised. The refresh timer and the file
+            // watcher call this constantly, so a dead peer must not be dialled
+            // again until the retry window has passed.
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && $0.address?.isEmpty == false
             }
+            let liveKeys = Set(peers.map(\.key))
+            for key in remoteFolders.keys where !liveKeys.contains(key) {
+                remoteFolders.removeValue(forKey: key)
+            }
             for peer in peers {
+                if let retryAt = remotePeerRetryAt[peer.key], Date() < retryAt { continue }
                 do {
-                    loaded.append(contentsOf: try await Bridge.remoteWorkspaces(peer: peer))
-                } catch where !loaded.isEmpty {
-                    continue
+                    remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
+                    remotePeerRetryAt[peer.key] = nil
+                } catch {
+                    remotePeerRetryAt[peer.key] = Date().addingTimeInterval(30)
                 }
             }
             folders = loaded

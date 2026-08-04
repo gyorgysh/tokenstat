@@ -256,6 +256,15 @@ mod bonjour {
         Ok(record)
     }
 
+    impl Drop for Advertisement {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -272,15 +281,6 @@ mod bonjour {
         #[test]
         fn dns_service_port_is_encoded_in_network_order() {
             assert_eq!(1234u16.to_be_bytes(), [4, 210]);
-        }
-    }
-
-    impl Drop for Advertisement {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Relaxed);
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
         }
     }
 }

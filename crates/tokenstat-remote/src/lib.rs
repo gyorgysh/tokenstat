@@ -64,6 +64,15 @@ pub const DEFAULT_PORT: u16 = 7878;
 /// can perform with `nc`.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a connect may take before the peer is treated as unreachable.
+///
+/// Separate from the handshake timeout because the failure is different: an
+/// address that will not accept TCP is a machine that is offline or gone, and
+/// nobody benefits from waiting out the OS's own minutes-long timeout. A front
+/// end refreshes the peer list on a timer, so a dead peer must fail in seconds,
+/// not pile up stalled connections in the pool.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Error)]
 pub enum RemoteError {
     #[error("io: {0}")]
@@ -221,7 +230,7 @@ pub fn dial(
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| std::io::Error::other(format!("{address} resolves to nothing")))?;
-    let stream = TcpStream::connect_timeout(&target, HANDSHAKE_TIMEOUT)?;
+    let stream = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT)?;
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
     stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;

@@ -101,8 +101,6 @@ struct RootView: View {
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
         .task { await workspaces.load() }
-        .task { await machines.load() }
-        .task { await automations.load() }
         #if os(macOS)
         .task { await terminals.load() }
         #endif
