@@ -102,6 +102,56 @@ enum Bridge {
         }.value
     }
 
+    /// A call whose result may legitimately be `null`.
+    ///
+    /// Separate from `invoke` rather than a generic over `T?`, because the
+    /// envelope's `result` is already optional: `Envelope<T?>` would nest two
+    /// optionals and a successful null would be indistinguishable from a
+    /// response that carried no result at all. Here `ok` alone decides whether
+    /// the call worked, and `null` means the answer is "nothing".
+    private static func invokeOptional<T: Decodable>(
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as _: T.Type
+    ) throws -> T? {
+        let paramData = try JSONSerialization.data(withJSONObject: params)
+        let paramString = String(decoding: paramData, as: UTF8.self)
+
+        guard let raw = tokenstat_ffi_call(method, paramString) else {
+            throw BridgeError.core(code: "null", message: "The core returned nothing.")
+        }
+        defer { tokenstat_ffi_string_free(raw) }
+
+        let json = String(cString: raw)
+        let data = Data(json.utf8)
+
+        let envelope: Envelope<T>
+        do {
+            envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+        } catch {
+            throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
+        }
+
+        guard envelope.ok else {
+            throw BridgeError.core(
+                code: envelope.error?.code ?? "unknown",
+                message: envelope.error?.message
+                    ?? "The core rejected the call without saying why."
+            )
+        }
+        return envelope.result
+    }
+
+    private static func backgroundOptional<T: Decodable & Sendable>(
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as type: T.Type
+    ) async throws -> T? {
+        try await Task.detached(priority: .userInitiated) {
+            try invokeOptional(method, params, as: type)
+        }.value
+    }
+
     // MARK: - Methods
 
     static func info() async throws -> Info {
@@ -117,6 +167,16 @@ enum Bridge {
             "report",
             ["group": group.rawValue, "query": query.payload],
             as: [Bucket].self
+        )
+    }
+
+    /// The activity grid behind Home's heatmap and streaks.
+    ///
+    /// Returns nil for an archive with nothing in it yet, which is a state and
+    /// not a failure: it is the first thing a new install will ever show.
+    static func activityCalendar(weeks: Int = 53) async throws -> ActivityCalendar? {
+        try await backgroundOptional(
+            "activity.calendar", ["weeks": weeks], as: ActivityCalendar.self
         )
     }
 

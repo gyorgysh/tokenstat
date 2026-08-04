@@ -58,6 +58,18 @@ struct Counters: Codable, Sendable, Hashable {
     var total: UInt64
     var inputTotal: UInt64
     var hasUnknown: Bool
+
+    /// Fresh input plus output: what the day's work actually was.
+    ///
+    /// Cache reads are excluded on purpose. They are the largest number in the
+    /// archive by a wide margin and they measure how much context was re-sent,
+    /// not how much was done, so a heatmap coloured by `total` is a heatmap of
+    /// conversation length. The core's `activity.calendar` sums the same two
+    /// fields, and these must not diverge or the grid and the figure beside it
+    /// will disagree.
+    var workTokens: UInt64 {
+        (inputFresh ?? 0) + (output ?? 0)
+    }
 }
 
 /// One report row with its list-rate value.
@@ -125,6 +137,50 @@ struct FetchReport: Codable, Sendable, Hashable {
 struct FileText: Codable, Sendable, Hashable {
     var path: String
     var content: String
+}
+
+// MARK: - Activity
+
+/// One day of the activity grid.
+struct HeatCell: Codable, Sendable, Hashable, Identifiable {
+    /// `YYYY-MM-DD`. Kept as the archive's own string, which is also the format
+    /// a `Query` filters by, so a click on a day can become a filter with no
+    /// reformatting in between.
+    var date: String
+    var value: UInt64
+    /// `0...4`. Zero is a day inside the range with no usage, which has to read
+    /// as "nothing happened" and not as "no data".
+    var level: Int
+
+    var id: String { date }
+}
+
+struct MonthLabel: Codable, Sendable, Hashable, Identifiable {
+    var column: Int
+    var name: String
+
+    var id: Int { column }
+}
+
+/// The activity calendar, as the core computed it.
+///
+/// The rows arrive built. Do not rebuild the grid from a list of days: the
+/// archive stores only days that had events, so packing them together draws a
+/// plausible calendar with every date in the wrong column.
+struct ActivityCalendar: Codable, Sendable, Hashable {
+    /// Seven rows, Monday first. `nil` is a day outside the rendered range.
+    var rows: [[HeatCell?]]
+    var months: [MonthLabel]
+    var weeks: Int
+    var total: UInt64
+    var activeDays: Int
+    /// Consecutive active days up to the most recent one with data. A quiet day
+    /// that is not over yet does not break it.
+    var streakCurrent: Int
+    var streakBest: Int
+    var busiest: HeatCell?
+    var first: String
+    var last: String
 }
 
 // MARK: - Syntax highlighting

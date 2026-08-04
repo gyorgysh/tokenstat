@@ -67,7 +67,6 @@ final class InsightsModel {
     var byProject: [Bucket] = []
     var bySource: [Bucket] = []
     var bySession: [Bucket] = []
-    var planBySource: [Bucket] = []
     var activeBlock: Block?
 
     /// Which harnesses ran in each archive project.
@@ -99,16 +98,13 @@ final class InsightsModel {
     /// their own transcripts, so the first thing to show is everything that
     /// survived, not the last month of it.
     var period: Period = .all {
-        didSet { if period != oldValue { reload() } }
+        didSet {
+            guard period != oldValue else { return }
+            // Choosing a period is choosing to stop looking at one day.
+            focusedDay = nil
+            reload()
+        }
     }
-
-    /// What each vendor says is left of its plan.
-    ///
-    /// Loaded separately from the archive and never with it: Claude's numbers
-    /// come from a request, and the archive reloads whenever the period or the
-    /// tab changes. Nobody wants a network call behind a segmented control.
-    var planLimits: [ProviderLimits] = []
-    var isLoadingLimits = false
 
     var isLoading = false
     var isScanning = false
@@ -122,7 +118,33 @@ final class InsightsModel {
 
     private var loadTask: Task<Void, Never>?
 
+    /// A single day, pinned by clicking it on Home's heatmap.
+    ///
+    /// Overrides the period rather than being another `Period` case, because it
+    /// is not a length of time the user chose from a control and it has to be
+    /// dismissable back to whatever they had selected before.
+    private(set) var focusedDay: String?
+
+    /// Show one day. Called from the heatmap.
+    func focusOn(day: String) {
+        guard focusedDay != day else { return }
+        focusedDay = day
+        selected = nil
+        reload()
+    }
+
+    func clearFocusedDay() {
+        guard focusedDay != nil else { return }
+        focusedDay = nil
+        reload()
+    }
+
     var query: Query {
+        // The archive stores local dates as plain text, so one day is a range
+        // whose ends are the same string.
+        if let focusedDay {
+            return Query(since: focusedDay, until: focusedDay)
+        }
         guard let days = period.days else { return Query() }
         let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: Date()) ?? Date()
         return Query(since: Self.dateFormatter.string(from: start), billing: nil)
@@ -154,21 +176,6 @@ final class InsightsModel {
         loadTask = Task { await refresh() }
     }
 
-    /// Ask each vendor what is left of the plan.
-    ///
-    /// Keeps the previous answer when the call fails: a provider that reports
-    /// its own trouble already says so in its `note`, and a failure here is the
-    /// bridge, not the numbers.
-    func loadPlanLimits() async {
-        isLoadingLimits = true
-        defer { isLoadingLimits = false }
-        do {
-            planLimits = try await Bridge.usageLimits()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     private func refresh() async {
         isLoading = true
         errorMessage = nil
@@ -183,10 +190,6 @@ final class InsightsModel {
             async let byProject = Bridge.report(group: .project, query: q)
             async let bySource = Bridge.report(group: .source, query: q)
             async let bySession = Bridge.report(group: .session, query: q)
-            async let planBySource = Bridge.report(
-                group: .source,
-                query: Query(since: q.since, until: q.until, model: q.model, project: q.project, billing: "plan")
-            )
             async let blocks = Bridge.blocks(q)
             async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
 
@@ -196,7 +199,6 @@ final class InsightsModel {
             self.byProject = try await byProject
             self.bySource = try await bySource
             self.bySession = try await bySession
-            self.planBySource = try await planBySource
             self.activeBlock = try await blocks.first(where: \.active)
             self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,

@@ -7,31 +7,44 @@
 
 import SwiftUI
 
-/// The top level destinations from the desktop plan.
+/// The top level destinations.
 ///
-/// Workspaces opens first: this is a place to work, like an IDE, not a report.
-/// Insights sits last, after the work surfaces, because that is what it is:
-/// the accounting for the work, looked at when the work is done.
+/// Home opens first. It answers "what do I have left before I start", which is
+/// the question people have when they open the app, and it is not the question
+/// Insights answers. Insights sits last, because accounting for the work comes
+/// after the work.
+///
+/// There is deliberately **no Workspaces row**. The folder list below these is
+/// that navigation, and a row whose only effect is to select the first folder
+/// repeats the list beneath it. The app used to have a `WORKSPACE` heading over
+/// the destinations, a `Workspaces` destination, and a `WORKSPACES` folder
+/// section: three headings for two ideas.
 enum Destination: String, CaseIterable, Identifiable {
-    case workspaces
+    case home
     case automations
-    case fleet
+    case machines
     case insights
+    /// Reached by selecting a folder, not by a row of its own.
+    case workspaces
     case account
 
     var id: String { rawValue }
 
-    /// Account sits apart from the rest: the others are the work, it is the
-    /// settings for it.
-    static var workDestinations: [Destination] {
-        allCases.filter { $0 != .account }
+    /// The rows in the sidebar's top group.
+    ///
+    /// Account is not among them: it is reached from the footer, where people
+    /// look for their account. Workspaces is not among them either, for the
+    /// reason above.
+    static var navigable: [Destination] {
+        [.home, .automations, .machines, .insights]
     }
 
     var label: String {
         switch self {
+        case .home: return "Home"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
-        case .fleet: return "Fleet"
+        case .machines: return "Machines"
         case .insights: return "Insights"
         case .account: return "Account"
         }
@@ -39,9 +52,10 @@ enum Destination: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
+        case .home: return "house.fill"
         case .workspaces: return "square.stack.3d.up.fill"
         case .automations: return "bolt.fill"
-        case .fleet: return "desktopcomputer"
+        case .machines: return "desktopcomputer"
         case .insights: return "chart.bar.fill"
         case .account: return "person.crop.circle"
         }
@@ -49,8 +63,9 @@ enum Destination: String, CaseIterable, Identifiable {
 }
 
 struct RootView: View {
-    @State private var destination: Destination = .workspaces
+    @State private var destination: Destination = .home
     @State private var model = InsightsModel()
+    @State private var home = HomeModel()
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
     @State private var isInspectorPresented = true
@@ -113,18 +128,17 @@ struct RootView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SectionLabel(text: "Workspace")
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.s)
-                    .padding(.bottom, Theme.Space.xs)
-
-                ForEach(Destination.workDestinations) { item in
+                // No heading over these. They are the app's four screens and
+                // they are labelled with their own names, so a word above them
+                // was a word that had to be picked and then not read.
+                ForEach(Destination.navigable) { item in
                     SidebarRow(
                         label: item.label,
                         symbol: item.symbol,
                         isSelected: destination == item
                     ) { destination = item }
                 }
+                .padding(.top, Theme.Space.s)
 
                 // Folders the user chose. Nothing to do with the archive:
                 // its `project` is a lossy label recovered from a slug and
@@ -357,6 +371,13 @@ struct RootView: View {
             #else
             WorkspacesView(model: workspaces)
             #endif
+        case .home:
+            HomeView(model: home, account: account) { day in
+                // A click on a day is a question about that day, and Insights
+                // is where day-sized questions get answered.
+                model.focusOn(day: day.date)
+                destination = .insights
+            }
         case .automations:
             NotBuiltYet(
                 title: "Automations",
@@ -365,18 +386,18 @@ struct RootView: View {
                 Recurring agent jobs that keep running with the window closed, \
                 each with a budget it stops at rather than one it reports after.
                 """,
-                milestone: "Needs the host daemon, milestone 3"
+                milestone: "Milestone 9"
             )
-        case .fleet:
+        case .machines:
             NotBuiltYet(
-                title: "Fleet",
+                title: "Machines",
                 symbol: "desktopcomputer",
                 summary: """
                 Every machine signed in to your account, its workspaces, and its \
                 sessions. This is what makes an iPad a client of your Mac rather \
                 than a second place to read numbers.
                 """,
-                milestone: "Milestone 6, needs the remote transport decision"
+                milestone: "Milestone 8, needs the remote transport decision"
             )
         case .account:
             AccountView(model: account)
