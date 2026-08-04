@@ -150,6 +150,20 @@ profile exists because Rust's LLVM runs ahead of the one inside Xcode, and thin
 LTO leaves metadata in the archive that Apple's tools reject with "Unknown
 attribute kind". Do not point the script at `release` to save a rebuild.
 
+For a release-shaped build, universal and versioned like the workflow makes it:
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+scripts/build-mac-app.sh 0.1.4 dist
+scripts/package-mac-dmg.sh dist/Tokenstat.app dist/tokenstat.dmg
+```
+
+Both are unsigned. Signing, notarizing and stapling happen in the release
+workflow's `publish` job, which is the only place the Developer ID identity
+exists. `build-mac-app.sh` builds only the architectures whose Rust target is
+installed, so a release needs both added or it produces a single-architecture
+app and says so.
+
 Add iOS slices when that target starts:
 
 ```bash

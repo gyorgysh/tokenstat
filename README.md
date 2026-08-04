@@ -95,6 +95,12 @@ schedule with `--no-schedule` (Unix) or `TOKENSTAT_NO_SCHEDULE=1`.
 Release builds are published on [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases)
 for macOS (Apple silicon and Intel), Windows, and Linux.
 
+The Mac app ships beside them as a signed and notarized `.dmg`: open it and drag
+tokenstat into Applications. After that it keeps itself current. It fetches each
+release, checks the download against the release checksums and against the
+signature macOS itself would check, installs it, and then offers a relaunch. It
+never restarts on its own.
+
 ```bash
 tokenstat setup             # scan, schedule, and offer to connect an account
 tokenstat update --check
