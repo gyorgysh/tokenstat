@@ -15,6 +15,16 @@ struct TodoView: View {
         ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
     ]
     @State private var dropTarget: String?
+    /// The tallest stack of cards on the board, measured.
+    @State private var tallestColumn: CGFloat = 0
+
+    /// How much of the window an empty board takes.
+    ///
+    /// Three columns stretched to the full height of a large window is a lot of
+    /// empty panel for a board with nothing on it. Just over half reads as a
+    /// board rather than as three empty walls, and the columns grow from there
+    /// as cards arrive.
+    private let restingFraction: CGFloat = 0.55
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,13 +32,22 @@ struct TodoView: View {
                 Banner(text: error, severity: .warning)
                     .padding(Theme.Space.m)
             }
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: Theme.Space.m) {
-                    ForEach(Self.columns, id: \.0) { id, label in
-                        column(id, label)
+            GeometryReader { proxy in
+                let available = proxy.size.height - Theme.Space.m * 2
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: Theme.Space.m) {
+                        ForEach(Self.columns, id: \.0) { id, label in
+                            // Every column takes the height of the fullest one,
+                            // so the board is three columns rather than three
+                            // unrelated boxes, and drop targets stay the same
+                            // size whichever column a card is dragged from.
+                            column(id, label)
+                                .frame(height: boardHeight(available: available))
+                        }
                     }
+                    .padding(Theme.Space.m)
                 }
-                .padding(Theme.Space.m)
+                .onPreferenceChange(ColumnHeightKey.self) { tallestColumn = $0 }
             }
         }
         .background(Theme.background)
@@ -69,6 +88,16 @@ struct TodoView: View {
                             .padding(.vertical, Theme.Space.xl)
                     }
                 }
+                // Measured inside the scroll view, so this is the height the
+                // cards want rather than the height the column was given.
+                // Measuring the column itself would report what was just set
+                // and the board would never settle.
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .preference(key: ColumnHeightKey.self, value: proxy.size.height)
+                    }
+                )
             }
             .frame(maxWidth: .infinity)
 
@@ -100,6 +129,18 @@ struct TodoView: View {
                 dropTarget = nil
             }
         }
+    }
+
+    /// The height every column takes: what the fullest one needs, never less
+    /// than the resting share of the window and never more than all of it.
+    private func boardHeight(available: CGFloat) -> CGFloat {
+        guard available > 0 else { return 0 }
+        // The header, the new-card form under the backlog column, and the
+        // padding around the stack. Added so a column that has just enough
+        // cards to fill the window does not end up with its form cut off.
+        let chrome: CGFloat = 150
+        let resting = available * restingFraction
+        return min(available, max(resting, tallestColumn + chrome))
     }
 
     private func symbol(for id: String) -> String {
@@ -391,5 +432,16 @@ private struct NewCardForm: View {
         workspaceID = ""
         expanded = false
         kind = .task
+    }
+}
+
+/// The tallest stack of cards on the board.
+///
+/// Max rather than sum: the columns are alternatives, not a list, and the board
+/// takes the height of whichever one has the most in it.
+private struct ColumnHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
