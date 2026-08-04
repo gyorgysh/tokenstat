@@ -29,11 +29,13 @@
 //! - [`dto`] is the wire contract. Change it deliberately, it is public API.
 //! - [`session`] is one open archive. A plain struct, not a global.
 //! - [`dispatch`] maps a method name onto the core.
+//! - `machine` answers who this machine is and which peers it trusts.
 //! - [`server`] is the socket listener.
 
 pub mod base64;
 pub mod dispatch;
 pub mod dto;
+mod machine;
 pub mod server;
 pub mod session;
 

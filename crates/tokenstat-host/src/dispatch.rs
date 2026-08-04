@@ -891,6 +891,13 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+    // Identity and the peer list. Sessionless because the Machines screen is
+    // where somebody goes when something is wrong, and an archive that will not
+    // open must not take it away from them.
+    if let Some(answer) = crate::machine::call(method, params) {
+        return Some(answer);
+    }
+
     Some(match method {
         // Where a daemon on this machine would be listening.
         //
@@ -1099,6 +1106,9 @@ mod tests {
             // Asked before a client has a connection to ask over, so it can
             // never be behind a session.
             "host.socketPath",
+            // The Machines screen has to answer on a machine whose archive
+            // will not open, because that is when somebody goes looking at it.
+            "machine.peers",
         ] {
             let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
                 .unwrap_or_else(|| panic!("{method} must be answerable without a session"));
@@ -1115,6 +1125,97 @@ mod tests {
                 "{method} must not bypass the session"
             );
         }
+    }
+
+    /// The whole peer lifecycle over the real store, in one process.
+    ///
+    /// One test rather than six, because the states only mean anything in
+    /// sequence: the claim being pinned is that trust goes up only when
+    /// somebody says so and comes straight back down when they change their
+    /// mind. `TOKENSTAT_IDENTITY_DIR` keeps it out of the developer's own
+    /// peer list, which is a thing a test has no business writing to.
+    #[test]
+    fn a_peer_is_paired_revoked_and_forgotten() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-identity-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        // SAFETY: single-threaded within this test, and every path it reaches
+        // reads the variable rather than caching it.
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
+
+        // A machine has an identity the first time it is asked, with no setup
+        // step and no empty state to explain.
+        let me: Value =
+            serde_json::from_str(&call_sessionless("machine.identity", "{}").expect("sessionless"))
+                .expect("json");
+        assert!(me["ok"].as_bool().unwrap_or(false), "{me}");
+        let my_key = me["result"]["key"].as_str().expect("key").to_string();
+        assert_eq!(my_key.len(), 64, "a public key is 32 bytes of hex");
+        assert!(
+            me["result"]["fingerprint"]
+                .as_str()
+                .is_some_and(|f| f.contains('-'))
+        );
+
+        // Pairing with itself is the cheapest way to get a real, valid key
+        // into the store. Nothing in the peer list treats it specially.
+        let paired: Value = serde_json::from_str(
+            &call_sessionless(
+                "machine.pair",
+                &json!({"key": my_key, "label": "desk"}).to_string(),
+            )
+            .expect("sessionless"),
+        )
+        .expect("json");
+        assert!(paired["ok"].as_bool().unwrap_or(false), "{paired}");
+        assert_eq!(
+            paired["result"]["trust"], "approved",
+            "typing a key is the approval"
+        );
+        assert_eq!(paired["result"]["label"], "desk");
+
+        let listed: Value =
+            serde_json::from_str(&call_sessionless("machine.peers", "{}").expect("sessionless"))
+                .expect("json");
+        assert_eq!(listed["result"].as_array().map(Vec::len), Some(1));
+
+        // Revoking leaves the record, so the same key coming back is known as
+        // one that was turned away rather than arriving as a stranger.
+        let revoked: Value = serde_json::from_str(
+            &call_sessionless("machine.revoke", &json!({"key": my_key}).to_string())
+                .expect("sessionless"),
+        )
+        .expect("json");
+        assert_eq!(revoked["result"]["changed"], true);
+        let listed: Value =
+            serde_json::from_str(&call_sessionless("machine.peers", "{}").expect("sessionless"))
+                .expect("json");
+        assert_eq!(listed["result"][0]["trust"], "revoked");
+
+        let forgotten: Value = serde_json::from_str(
+            &call_sessionless("machine.forget", &json!({"key": my_key}).to_string())
+                .expect("sessionless"),
+        )
+        .expect("json");
+        assert_eq!(forgotten["result"]["forgotten"], true);
+        let listed: Value =
+            serde_json::from_str(&call_sessionless("machine.peers", "{}").expect("sessionless"))
+                .expect("json");
+        assert_eq!(listed["result"].as_array().map(Vec::len), Some(0));
+
+        // A fingerprint where a key belongs is the likeliest paste error, and
+        // it has to fail rather than pin nothing.
+        let bad: Value = serde_json::from_str(
+            &call_sessionless("machine.pair", &json!({"key": "1234-5678"}).to_string())
+                .expect("sessionless"),
+        )
+        .expect("json");
+        assert_eq!(bad["ok"], false, "{bad}");
+
+        unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The API sends a relative avatar path on purpose, so it never hands out
