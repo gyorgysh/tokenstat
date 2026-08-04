@@ -22,6 +22,8 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -81,6 +83,42 @@ pub struct PeerStore {
 }
 
 impl PeerStore {
+    /// The store, re-read only when the file has actually changed.
+    ///
+    /// Exists because approval has to be checked **per request** and not only
+    /// per connection. Connections are held open and pooled, so a check that
+    /// happened once at the handshake would leave a revoked machine connected
+    /// and answered for as long as it kept the socket, which is indefinitely.
+    /// Revocation has to mean the next request, not the next reconnect.
+    ///
+    /// One `stat` per request rather than one read and parse. A terminal polls
+    /// for output continuously, so the difference is the difference between a
+    /// check that is affordable and one somebody removes later.
+    pub fn cached() -> Result<Arc<Self>, IdentityError> {
+        /// The last read, and the file stamp it was read at.
+        type Cached = Mutex<Option<(SystemTime, Arc<PeerStore>)>>;
+        static CACHE: OnceLock<Cached> = OnceLock::new();
+        let cache = CACHE.get_or_init(|| Mutex::new(None));
+
+        let path = store_path()?;
+        // A store that does not exist yet has no peers, and a clock that will
+        // not answer means re-reading, which is correct and merely slower.
+        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+
+        if let Ok(guard) = cache.lock()
+            && let Some((seen, store)) = guard.as_ref()
+            && Some(*seen) == stamp
+        {
+            return Ok(Arc::clone(store));
+        }
+
+        let store = Arc::new(Self::load()?);
+        if let (Ok(mut guard), Some(stamp)) = (cache.lock(), stamp) {
+            *guard = Some((stamp, Arc::clone(&store)));
+        }
+        Ok(store)
+    }
+
     pub fn load() -> Result<Self, IdentityError> {
         let path = store_path()?;
         if !path.exists() {

@@ -19,7 +19,9 @@
 //! - [`dispatch::call`] in process, which is what the C ABI in `tokenstat-ffi`
 //!   wraps for the Mac app today.
 //! - [`server`] over a unix socket, which is the same dispatch with a different
-//!   way in, and the seam where a network transport will attach.
+//!   way in.
+//! - [`remote`] over an authenticated, encrypted connection to another machine,
+//!   which is that seam now attached. See `docs/remote-transport.md`.
 //!
 //! There is deliberately no second implementation. A method cannot exist over
 //! one transport and be missing from the other.
@@ -30,12 +32,14 @@
 //! - [`session`] is one open archive. A plain struct, not a global.
 //! - [`dispatch`] maps a method name onto the core.
 //! - `machine` answers who this machine is and which peers it trusts.
+//! - [`remote`] serves other machines and reaches them, over the same dispatch.
 //! - [`server`] is the socket listener.
 
 pub mod base64;
 pub mod dispatch;
 pub mod dto;
 mod machine;
+pub mod remote;
 pub mod server;
 pub mod session;
 

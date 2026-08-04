@@ -26,14 +26,17 @@
 
 use std::path::PathBuf;
 
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use thiserror::Error;
+use x25519_dalek::{PublicKey as X25519Public, StaticSecret};
 
 pub mod peers;
 
 pub use peers::{Peer, PeerStore, Trust};
 
-/// Bytes of an Ed25519 public key. The thing that is actually pinned.
+/// Bytes of an X25519 public key. The thing that is actually pinned, and the
+/// thing the Noise handshake authenticates. One key doing one job: a separate
+/// signing key alongside it would be two keys to compare and a way for them to
+/// disagree about who a machine is.
 pub type PublicKey = [u8; 32];
 
 #[derive(Debug, Error)]
@@ -46,7 +49,7 @@ pub enum IdentityError {
         #[source]
         source: std::io::Error,
     },
-    #[error("the identity file is {0} bytes, and an Ed25519 private key is 32")]
+    #[error("the identity file is {0} bytes, and an X25519 private key is 32")]
     Malformed(usize),
     #[error("{0}")]
     Random(String),
@@ -54,13 +57,13 @@ pub enum IdentityError {
     BadKey(String),
 }
 
-/// This machine's signing identity.
+/// This machine's identity to another machine.
 ///
 /// Created on first use and then stable. Deleting the file makes the machine a
 /// stranger to every peer that pinned it, which is the intended and only way
 /// to start over.
 pub struct MachineIdentity {
-    signing: SigningKey,
+    secret: StaticSecret,
 }
 
 impl MachineIdentity {
@@ -74,20 +77,34 @@ impl MachineIdentity {
     pub fn load_or_create() -> Result<Self, IdentityError> {
         let path = key_path()?;
         if let Some(bytes) = read_key(&path)? {
-            return Ok(Self {
-                signing: SigningKey::from_bytes(&bytes),
-            });
+            return Ok(Self::from_secret(bytes));
         }
 
         let mut seed = [0u8; 32];
         getrandom::fill(&mut seed).map_err(|e| IdentityError::Random(e.to_string()))?;
-        let signing = SigningKey::from_bytes(&seed);
         write_key(&path, &seed)?;
-        Ok(Self { signing })
+        Ok(Self::from_secret(seed))
+    }
+
+    /// Build from raw private bytes. `StaticSecret` clamps them, so any 32
+    /// bytes are a usable key and there is no "invalid seed" case to handle.
+    pub fn from_secret(bytes: [u8; 32]) -> Self {
+        Self {
+            secret: StaticSecret::from(bytes),
+        }
     }
 
     pub fn public_key(&self) -> PublicKey {
-        self.signing.verifying_key().to_bytes()
+        X25519Public::from(&self.secret).to_bytes()
+    }
+
+    /// The private key, for the one caller that needs it: the handshake.
+    ///
+    /// Deliberately awkward to reach for and named for what it is. Nothing
+    /// else in the tree has any business calling this, and a reviewer grepping
+    /// for it should find exactly one use.
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.secret.to_bytes()
     }
 
     /// The public key as lowercase hex. This is the machine's identity on the
@@ -100,23 +117,6 @@ impl MachineIdentity {
     pub fn fingerprint(&self) -> String {
         fingerprint(&self.public_key())
     }
-
-    pub fn sign(&self, message: &[u8]) -> [u8; 64] {
-        self.signing.sign(message).to_bytes()
-    }
-}
-
-/// Check a signature against a public key.
-///
-/// Every failure is one value, deliberately. A caller that could tell a
-/// malformed key from a wrong signature would be a caller tempted to treat one
-/// as recoverable, and neither is.
-pub fn verify(public: &PublicKey, message: &[u8], signature: &[u8; 64]) -> bool {
-    let Ok(key) = VerifyingKey::from_bytes(public) else {
-        return false;
-    };
-    key.verify(message, &Signature::from_bytes(signature))
-        .is_ok()
 }
 
 /// The short form of a public key, for a person to read aloud.
@@ -163,10 +163,9 @@ pub fn public_key_from_hex(text: &str) -> Result<PublicKey, IdentityError> {
         *byte = u8::from_str_radix(pair, 16)
             .map_err(|e| IdentityError::BadKey(format!("{pair}: {e}")))?;
     }
-    // A key that is not on the curve can never verify anything, so refusing it
-    // here turns a silent "nothing this peer sends is ever valid" into an
-    // error at the moment somebody typed it in.
-    VerifyingKey::from_bytes(&out).map_err(|e| IdentityError::BadKey(e.to_string()))?;
+    // Every 32-byte string is a usable X25519 public key, so there is nothing
+    // further to check. The length check above is the one that catches the
+    // realistic mistake, which is pasting a fingerprint where a key goes.
     Ok(out)
 }
 
@@ -307,30 +306,23 @@ mod tests {
         assert!(!fingerprint(&key).replace('-', "").starts_with("abab"));
     }
 
+    /// Same private bytes, same public key, every time. A machine whose
+    /// identity file survived a restart has to still be the machine its peers
+    /// pinned, and this is the property that makes that true.
     #[test]
-    fn a_signature_verifies_only_against_its_own_key_and_message() {
-        let signing = SigningKey::from_bytes(&[3u8; 32]);
-        let identity = MachineIdentity { signing };
-        let public = identity.public_key();
-        let signature = identity.sign(b"hello");
-
-        assert!(verify(&public, b"hello", &signature));
-        assert!(!verify(&public, b"hello!", &signature), "message is bound");
-
-        let other = MachineIdentity {
-            signing: SigningKey::from_bytes(&[4u8; 32]),
-        };
-        assert!(
-            !verify(&other.public_key(), b"hello", &signature),
-            "key is bound"
+    fn a_secret_always_produces_the_same_public_key() {
+        let a = MachineIdentity::from_secret([3u8; 32]);
+        let b = MachineIdentity::from_secret([3u8; 32]);
+        assert_eq!(a.public_key(), b.public_key());
+        assert_ne!(
+            a.public_key(),
+            MachineIdentity::from_secret([4u8; 32]).public_key()
         );
     }
 
     #[test]
     fn hex_round_trips_through_the_parser() {
-        let identity = MachineIdentity {
-            signing: SigningKey::from_bytes(&[9u8; 32]),
-        };
+        let identity = MachineIdentity::from_secret([9u8; 32]);
         let parsed = public_key_from_hex(&identity.public_key_hex()).expect("parse");
         assert_eq!(parsed, identity.public_key());
     }
@@ -339,22 +331,8 @@ mod tests {
     /// error there is, and it has to fail loudly rather than pin nothing.
     #[test]
     fn a_fingerprint_is_refused_where_a_key_is_expected() {
-        let identity = MachineIdentity {
-            signing: SigningKey::from_bytes(&[9u8; 32]),
-        };
+        let identity = MachineIdentity::from_secret([9u8; 32]);
         assert!(public_key_from_hex(&identity.fingerprint()).is_err());
-    }
-
-    /// 64 hex characters that are not a point on the curve verify nothing, so
-    /// accepting them would produce a peer that silently never works: every
-    /// message it ever sends fails, and nothing says why.
-    ///
-    /// `0xe1` repeated is one such encoding. Most random 32-byte strings *are*
-    /// valid points, which is exactly why this needs a chosen value rather than
-    /// an arbitrary one.
-    #[test]
-    fn hex_that_is_not_a_key_is_refused() {
-        assert!(public_key_from_hex(&"e1".repeat(32)).is_err());
     }
 
     #[test]

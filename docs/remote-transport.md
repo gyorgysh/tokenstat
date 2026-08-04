@@ -35,10 +35,15 @@ Concretely, five parts.
 
 ### 1. Identity is a per-machine keypair, not an account token
 
-The daemon generates an Ed25519 identity on first start and keeps the private
-half in the login Keychain on macOS, or in the data directory at mode 0600
-elsewhere. It never leaves the machine, is never synced, and is not derived
+The daemon generates an X25519 identity on first start and keeps the private
+half in the data directory at mode 0600, beside the account token and stored
+the same way. It never leaves the machine, is never synced, and is not derived
 from the account.
+
+The macOS Keychain was the obvious home for it and is deliberately not used, for
+the reason `tokenstat-sync::keychain` already records: reaching the Keychain
+from a command line puts the secret on argv, where the process table shows it to
+everything running.
 
 This matters because the account token already exists and reusing it would be
 easier. It is the wrong shape: a token is a bearer credential the server issues
@@ -67,15 +72,32 @@ Machines can also be paired with no directory at all, by typing the other
 machine's fingerprint. That path stays supported because it is what makes the
 claim checkable: the product works with the hosted service switched off.
 
-### 3. The wire is TLS 1.3 with both ends authenticated by those keys
+### 3. The wire is a Noise handshake with both ends authenticated by those keys
 
-Not a bespoke protocol. rustls with self-signed certificates carrying the
-pinned keys, mutual authentication, and the peer's certificate checked against
-the pinned fingerprint rather than against any certificate authority. A
-certificate authority is a third party that can issue for a name it does not
-own, which is the thing being designed out.
+`Noise_XX_25519_ChaChaPoly_BLAKE2s`, via `snow`. Both ends present their static
+key during the handshake and each checks the other against what it pinned.
 
-Above TLS the framing is the one that already exists: line-delimited JSON,
+This paragraph originally said TLS 1.3 with self-signed certificates, and the
+change is worth recording rather than quietly making. X.509 exists to bind a
+*name* to a key through a third party. There is no name here and no third party
+by design, so a certificate would carry a key we already have, signed by nobody
+we consult, wrapped in ASN.1 we would then have to parse back out to compare the
+key we started with. Every one of those steps is somewhere to get it wrong, and
+none of them adds a check. Noise authenticates raw static keys, which is exactly
+what pinning means, and the handshake is the part of TLS 1.3 the rest of that
+ceremony surrounds. Mechanism changed, guarantee unchanged.
+
+A certificate authority stays out of it for the original reason: it is a third
+party that can issue for a name it does not own, which is the thing being
+designed out.
+
+Because the static key *is* the identity, the machine key from part 1 is an
+X25519 key. One key, pinned once, doing one job. A separate signing key
+alongside it would mean two keys to compare and a way for them to disagree
+about who a machine is.
+
+Above the handshake the framing is the one that already exists: line-delimited
+JSON,
 `{"id", "method", "params"}` in, the same envelope back. `dispatch` is a
 function over a request, so the remote transport is a third caller of it
 alongside the C ABI and the unix socket. **No method is added to a transport.**
@@ -113,7 +135,7 @@ honestly it converts a structural guarantee into a policy one, and policies
 change with funding. It would also make the service a subpoena target for the
 contents of people's work, which the current design simply is not.
 
-**A relay that terminates TLS.** Same objection, plus it reads worse in a
+**A relay that terminates the encryption.** Same objection, plus it reads worse in a
 security review than no encryption at all, because it looks end to end and is
 not.
 
@@ -146,12 +168,15 @@ under deadline:
 ## Where the code goes
 
 ```
+crates/tokenstat-identity/ NEW  the machine key and the peer store. Decides
+                                who may connect, so it is ON the
+                                check-no-network guarded list: a crate that
+                                could also open a connection is a place for
+                                that decision to leak out of.
 crates/tokenstat-remote/   NEW  the client and server halves of the transport.
-                                Links rustls. Allowed a network stack, so it
-                                is deliberately NOT on the check-no-network
-                                guarded list.
-crates/tokenstat-host/          gains a third transport over dispatch, and the
-                                peer registry (known keys, approvals).
+                                Links snow. Allowed a network stack, so it is
+                                deliberately NOT guarded.
+crates/tokenstat-host/          gains a third transport over dispatch.
 ```
 
 `tokenstat-core` gains nothing, directly or transitively, and
@@ -165,9 +190,9 @@ rule stands unchanged: anything that makes a request lives above core.
    network yet, and it is independent of everything above. This is what makes
    the client transport-agnostic, and it is the step where "local or remote" 
    stops being a branch in the UI layer.
-2. Machine identity: keypair, Keychain storage, fingerprint, the public key on
+2. Machine identity: keypair, a mode-0600 file, fingerprint, the public key on
    the account's machine record.
-3. `tokenstat-remote` server and client, TLS with pinned keys, over the same
+3. `tokenstat-remote` server and client, Noise with pinned keys, over the same
    dispatch.
 4. Approval and the peer registry, plus the Machines screen showing peers,
    fingerprints, and revocation.

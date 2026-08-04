@@ -1,5 +1,5 @@
 [package]
-name = "tokenstat-identity"
+name = "tokenstat-remote"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,13 +7,11 @@ authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
-description = "This machine's signing identity, and the peers it has agreed to trust"
+description = "Authenticated, encrypted machine-to-machine transport for the host dispatch"
 
 [dependencies]
+tokenstat-identity.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-directories.workspace = true
-blake3.workspace = true
-getrandom.workspace = true
-x25519-dalek = { workspace = true }
+snow = { workspace = true }

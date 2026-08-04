@@ -898,6 +898,13 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         return Some(answer);
     }
 
+    // Serving and reaching other machines. None of these read the archive, and
+    // a call being forwarded to an idle machine must not queue behind a scan
+    // running on this one.
+    if let Some(answer) = crate::remote::call(method, params) {
+        return Some(answer);
+    }
+
     Some(match method {
         // Where a daemon on this machine would be listening.
         //
