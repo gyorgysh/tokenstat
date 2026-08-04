@@ -49,6 +49,13 @@ pub struct UpdateCheck {
     /// API asset urls, used instead of the browser ones when a token is present.
     pub asset_api_url: Option<String>,
     pub sums_api_url: Option<String>,
+    /// The macOS app's disk image, when the release carries one.
+    ///
+    /// Separate from `asset_url`, which is the command line tool for the
+    /// architecture this process runs on. The app is one universal download and
+    /// a different kind of thing: the CLI updates itself in place, and an
+    /// application replaces itself by being dragged into Applications.
+    pub app_dmg_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +203,7 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
             sums_url: None,
             asset_api_url: None,
             sums_api_url: None,
+            app_dmg_url: None,
         });
     }
     if !resp.status().is_success() {
@@ -234,6 +242,14 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
         sums_api_url: sums
             .map(|a| a.url.clone())
             .filter(|u: &String| !u.is_empty()),
+        // Matched by extension rather than by an exact file name, so the
+        // naming of the image can change without an old build losing the
+        // ability to point at a new one.
+        app_dmg_url: release
+            .assets
+            .iter()
+            .find(|a| a.name.ends_with(".dmg"))
+            .map(|a| a.browser_download_url.clone()),
     })
 }
 

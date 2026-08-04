@@ -23,6 +23,14 @@ cd "$ROOT"
 # linking a stale library from a previous run. Same trap as the CLI install.
 unset CARGO_TARGET_DIR
 
+# Match the app's deployment target from `apps/mac/project.yml`. Without this,
+# Rust builds each object for whatever macOS the build machine runs, and the
+# linker warns that a library built for 26.5 is being linked into a binary that
+# claims to run on 14.0. The warning is the honest one: those objects are free
+# to reference symbols a macOS 14 machine does not have.
+export MACOSX_DEPLOYMENT_TARGET=14.0
+export IPHONEOS_DEPLOYMENT_TARGET=17.0
+
 LIB="libtokenstat_ffi.a"
 CRATE="crates/tokenstat-ffi"
 HEADERS="$CRATE/include"

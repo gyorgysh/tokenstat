@@ -273,9 +273,19 @@ struct AppUpdate: Codable, Sendable, Hashable {
     var latest: String
     var newer: Bool
     var htmlURL: String
+    /// The signed, notarized disk image for this release, when it has one. A
+    /// release cut before the app shipped has none, so this stays optional and
+    /// the release page is the fallback.
+    var dmgURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case current, latest, newer, htmlURL = "htmlUrl"
+        case current, latest, newer, htmlURL = "htmlUrl", dmgURL = "dmgUrl"
+    }
+
+    /// Where to send somebody who wants the update: the image if the release
+    /// carries one, the release page otherwise.
+    var downloadURL: URL? {
+        URL(string: dmgURL ?? htmlURL)
     }
 
     var isAvailable: Bool { newer && latest != current }

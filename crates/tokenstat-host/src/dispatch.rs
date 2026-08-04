@@ -1087,6 +1087,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                     "latest": check.latest,
                     "newer": check.newer,
                     "htmlUrl": check.html_url,
+                    // The disk image itself, so the app can offer the download
+                    // rather than the release page it is one click inside.
+                    "dmgUrl": check.app_dmg_url,
                 })
             })
             .map_err(|e| e.to_string()),

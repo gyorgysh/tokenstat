@@ -75,6 +75,7 @@ struct RootView: View {
     @State private var automations = AutomationsModel()
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
+    @State private var showingUpdate = false
     @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -105,7 +106,18 @@ struct RootView: View {
         // Loaded up front, not on first visit, so the sidebar can show the
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
-        .task { await appUpdate.check() }
+        .task {
+            await appUpdate.check()
+            // Offered once, on the launch that found it, and never again for a
+            // version the user skipped. An update that reopens its own window
+            // every time is one people learn to dismiss without reading.
+            if appUpdate.isAvailable && !appUpdate.isSkipped {
+                showingUpdate = true
+            }
+        }
+        .sheet(isPresented: $showingUpdate) {
+            UpdateSheet(update: appUpdate)
+        }
         .task { await workspaces.load() }
         #if os(macOS)
         .task { await terminals.load() }
@@ -319,13 +331,16 @@ struct RootView: View {
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.xs)
             }
-            if appUpdate.isAvailable, let url = URL(string: appUpdate.htmlURL) {
-                Link(destination: url) {
+            if appUpdate.isAvailable {
+                Button {
+                    showingUpdate = true
+                } label: {
                     Label("Update available: v\(appUpdate.latest)", systemImage: "arrow.down.circle")
                         .font(.caption)
                         .foregroundStyle(Theme.accent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.xs)
             }

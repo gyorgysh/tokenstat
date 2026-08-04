@@ -75,7 +75,11 @@ targets:
         INFOPLIST_KEY_NSHumanReadableCopyright: "© pueev OÜ. All rights reserved."
         # No sandbox. See CODE_SIGN_IDENTITY above for why.
         ENABLE_APP_SANDBOX: NO
-        ENABLE_HARDENED_RUNTIME: NO
+        # On, because notarization requires it. It is not the sandbox: the app
+        # still spawns agent CLIs and reads the folders the user registered.
+        # What it costs us is nothing we do, and what it buys is a build Apple
+        # will notarize.
+        ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO

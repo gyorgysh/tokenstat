@@ -157,9 +157,48 @@ jobs:
             dist/${{ steps.package.outputs.asset }}.sha256
           retention-days: 7
 
+  # The Mac app, unsigned. The Developer ID identity lives on the release
+  # environment and the build matrix cannot reach it, so this produces the
+  # bundle and `publish` signs, notarizes and wraps it in a disk image.
+  app:
+    name: build the mac app
+    needs: verify
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal, so one download runs on both kinds of Mac.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-app
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Build Tokenstat.app
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: scripts/build-mac-app.sh "$VERSION" dist
+
+      # ditto rather than upload-artifact over the bundle directly: the action
+      # does not preserve the symlinks inside a .app, and a bundle that lost
+      # them cannot be signed.
+      - name: Archive the bundle
+        run: ditto -c -k --keepParent dist/Tokenstat.app dist/Tokenstat-app-unsigned.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-mac-app
+          path: dist/Tokenstat-app-unsigned.zip
+          retention-days: 7
+
   publish:
     name: publish github release
-    needs: [verify, build]
+    needs: [verify, build, app]
     runs-on: macos-latest
     environment: release
     permissions:
@@ -330,6 +369,58 @@ jobs:
 
           sign_one aarch64-apple-darwin
           sign_one x86_64-apple-darwin
+
+          # The app, then the disk image that carries it.
+          #
+          # The app is signed deep and the image is signed after it is built,
+          # because Gatekeeper checks the image the user actually downloaded.
+          # Notarizing the image alone is enough: stapling to the .dmg means the
+          # first launch works with no network, which is the point of stapling.
+          sign_app() {
+            local work="${RUNNER_TEMP}/sign-app"
+            local app="${work}/Tokenstat.app"
+            rm -rf "${work}"
+            mkdir -p "${work}"
+            ditto -x -k dist/Tokenstat-app-unsigned.zip "${work}"
+            if [ ! -d "${app}" ]; then
+              echo "no Tokenstat.app in dist/Tokenstat-app-unsigned.zip" >&2
+              exit 1
+            fi
+
+            # --deep is deprecated for signing but the bundle embeds a Swift
+            # package's frameworks, so the inner code has to be signed first and
+            # the bundle last. Signing inside out by hand is the same thing with
+            # more places to forget one.
+            codesign --force --deep --options runtime --timestamp \
+              --sign "${IDENTITY}" "${app}"
+            codesign --verify --deep --strict --verbose=2 "${app}"
+
+            local dmg="dist/tokenstat-${VERSION}-macos.dmg"
+            scripts/package-mac-dmg.sh "${app}" "${dmg}" "tokenstat ${VERSION}"
+            codesign --force --timestamp --sign "${IDENTITY}" "${dmg}"
+
+            if [ -n "${NOTARY_KEY_PATH}" ]; then
+              xcrun notarytool submit "${dmg}" \
+                --key "${NOTARY_KEY_PATH}" \
+                --key-id "${NOTARY_KEY_ID}" \
+                --issuer "${NOTARY_ISSUER_ID}" \
+                --wait
+              xcrun stapler staple "${dmg}"
+              # Proves the download opens on a machine that has never seen it.
+              # A ticket that did not staple is a release that greets everybody
+              # with "cannot be opened", so this one is not tolerated.
+              spctl --assess --type open --context context:primary-signature \
+                --verbose=2 "${dmg}"
+            fi
+            rm -f dist/Tokenstat-app-unsigned.zip
+          }
+
+          if [ -f dist/Tokenstat-app-unsigned.zip ]; then
+            sign_app
+          else
+            echo "No app bundle to sign; skipping the disk image."
+          fi
+
           if [ -n "${NOTARY_KEY_PATH}" ]; then
             rm -f "${NOTARY_KEY_PATH}"
           fi
@@ -337,8 +428,12 @@ jobs:
       - name: Collect checksums
         run: |
           cd dist
+          # An unsigned bundle survives only when the signing step was skipped
+          # for want of secrets. Publishing it would hand somebody a download
+          # Gatekeeper refuses, which is worse than shipping no app at all.
+          rm -f Tokenstat-app-unsigned.zip
           rm -f ./*.sha256 SHA256SUMS
-          for f in *.tar.gz *.zip; do
+          for f in *.tar.gz *.zip *.dmg; do
             [ -f "$f" ] || continue
             shasum -a 256 "$f" >> SHA256SUMS
           done
@@ -363,4 +458,5 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.dmg
             dist/SHA256SUMS
