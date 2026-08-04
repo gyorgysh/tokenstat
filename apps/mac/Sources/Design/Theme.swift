@@ -34,6 +34,9 @@ enum Theme {
     static let sidebar = Color.adaptive(light: hex(0xF0F0F1), dark: hex(0x0D0D0F))
     /// Cards and panels.
     static let panel = Color.adaptive(light: .white, dark: hex(0x141416))
+    /// Behind a tab strip. A step darker than the pane under it, so the strip
+    /// reads as chrome rather than as the first row of the content.
+    static let tabStrip = Color.adaptive(light: hex(0xE9E9ED), dark: hex(0x08080A))
     /// Hairlines. These carry the structure that shadows used to.
     static let border = Color.adaptive(light: hex(0xE2E2E5), dark: hex(0x232326))
     /// A row the pointer is over.
@@ -291,9 +294,6 @@ struct TabStrip<Tab: Hashable>: View {
     /// icons would push the labels into truncation.
     var tabs: [(tab: Tab, label: String, symbol: String)]
     @Binding var selection: Tab
-    /// Nil lets whatever is behind show through, for a strip sitting on the
-    /// window's material rather than on the flat content column.
-    var background: Color? = Theme.background
 
     var body: some View {
         HStack(spacing: 0) {
@@ -308,19 +308,29 @@ struct TabStrip<Tab: Hashable>: View {
                                 .font(.system(size: 11))
                         }
                         Text(item.label)
-                            .font(.system(size: 13, weight: active ? .medium : .regular))
+                            .font(.system(size: 13, weight: active ? .semibold : .regular))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.85)
                     }
-                    .foregroundStyle(active ? Color.primary : Color.secondary)
-                    .padding(.horizontal, Theme.Space.m)
+                    // The accent, not just a heavier weight. On a dark strip a
+                    // selected tab drawn as a slightly different dark panel is
+                    // the same colour as everything around it, and which tab
+                    // was selected became a guess.
+                    .foregroundStyle(active ? Theme.accent : Color.secondary)
+                    .padding(.horizontal, Theme.Space.s)
+                    // Every tab takes an equal share of the full width. Sized
+                    // to their labels with a trailing spacer, two tabs left
+                    // two thirds of the strip empty and the group floated in
+                    // the corner instead of reading as a bar.
+                    .frame(maxWidth: .infinity)
                     // An explicit height, not `maxHeight: .infinity`. The strip
                     // sits directly under the window's toolbar, and an
-                    // unbounded height let the active tab's panel fill and its
-                    // top rule expand up through the toolbar's safe area, so
-                    // the marker was drawn a toolbar's height above the tab it
+                    // unbounded height let the active tab's fill and its top
+                    // rule expand up through the toolbar's safe area, so the
+                    // marker was drawn a toolbar's height above the tab it
                     // belonged to.
                     .frame(height: TabStrip.height)
-                    .background(active ? Theme.panel : .clear)
+                    .background(active ? Theme.accentSoft : .clear)
                     .overlay(alignment: .top) {
                         // The active tab is marked along its top edge rather
                         // than underlined, so the strip reads as tabs attached
@@ -333,12 +343,14 @@ struct TabStrip<Tab: Hashable>: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer()
         }
+        .frame(maxWidth: .infinity)
         .frame(height: Self.height)
         // Nothing in a tab strip may paint outside it.
         .clipped()
-        .background(background ?? .clear)
+        // Darker than the pane below, so the strip reads as chrome the content
+        // sits under rather than as the first row of that content.
+        .background(Theme.tabStrip)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }

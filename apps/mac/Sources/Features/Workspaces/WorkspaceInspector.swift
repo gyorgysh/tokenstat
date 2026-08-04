@@ -45,8 +45,7 @@ struct WorkspaceInspector: View {
             // No icons: the inspector is 240pt at its narrowest and three
             // labels plus three glyphs truncate before they fit.
             tabs: InspectorTab.allCases.map { ($0, title(for: $0), "") },
-            selection: tab,
-            background: nil
+            selection: tab
         )
     }
 
