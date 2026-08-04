@@ -317,7 +317,7 @@ struct TabStrip<Tab: Hashable>: View {
                     // the same colour as everything around it, and which tab
                     // was selected became a guess.
                     .foregroundStyle(active ? Theme.accent : Color.secondary)
-                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.horizontal, Theme.Space.xs)
                     // Every tab takes an equal share of the full width. Sized
                     // to their labels with a trailing spacer, two tabs left
                     // two thirds of the strip empty and the group floated in
@@ -335,9 +335,16 @@ struct TabStrip<Tab: Hashable>: View {
                         // The active tab is marked along its top edge rather
                         // than underlined, so the strip reads as tabs attached
                         // to the pane below instead of as a toolbar.
-                        Rectangle()
+                        //
+                        // A capsule inset from the tab's edges, not a rule
+                        // spanning it. The strip's first tab sits under the
+                        // window's rounded corner, and a hard-cornered line
+                        // running into that curve reads as a rendering fault
+                        // rather than as a marker.
+                        Capsule()
                             .fill(active ? Theme.accent : .clear)
-                            .frame(height: 2)
+                            .frame(height: 2.5)
+                            .padding(.horizontal, Theme.Space.s)
                     }
                     .contentShape(.rect)
                 }
@@ -358,7 +365,7 @@ struct TabStrip<Tab: Hashable>: View {
 
     /// A generic type cannot hold a static stored property, so this is a
     /// computed one.
-    private static var height: CGFloat { 32 }
+    private static var height: CGFloat { 28 }
 }
 
 /// The account tier, as a small uppercase pill.
