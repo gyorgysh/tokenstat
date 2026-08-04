@@ -32,6 +32,9 @@ struct MachinesView: View {
                 }
 
                 thisMachine
+                if !model.discovered.isEmpty {
+                    discoveredMachines
+                }
                 if !model.known.isEmpty {
                     knownMachines
                 }
@@ -113,6 +116,42 @@ struct MachinesView: View {
     }
 
     // MARK: - Peers
+
+    private var discoveredMachines: some View {
+        Card(
+            title: "Found nearby",
+            subtitle: "These daemons are advertising on the local network."
+        ) {
+            VStack(spacing: Theme.Space.s) {
+                ForEach(model.discovered) { daemon in
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(daemon.label)
+                                .font(.callout.weight(.medium))
+                            Text(daemon.fingerprint)
+                                .font(Theme.mono(11))
+                                .foregroundStyle(.secondary)
+                            Text(daemon.address ?? "Resolving address...")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        Button("Pair") { Task { await model.pair(daemon) } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(daemon.address == nil)
+                    }
+                    .padding(Theme.Space.s)
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+                }
+                Text("Compare the fingerprint with the other machine before pairing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
     private var waitingForApproval: some View {
         Card(

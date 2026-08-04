@@ -100,6 +100,203 @@ fn save_settings(settings: &RemoteSettings) -> Result<(), String> {
 struct Listening {
     address: String,
     stop: Arc<AtomicBool>,
+    _advertisement: bonjour::Advertisement,
+}
+
+#[cfg(target_os = "macos")]
+mod bonjour {
+    use std::ffi::c_void;
+    use std::os::fd::RawFd;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    type DNSServiceRef = *mut c_void;
+    type DNSServiceErrorType = i32;
+    type DNSServiceFlags = u32;
+
+    const K_DNS_SERVICE_ERR_NO_ERROR: DNSServiceErrorType = 0;
+    const K_DNS_SERVICE_FLAGS_NONE: DNSServiceFlags = 0;
+    const K_DNS_SERVICE_INTERFACE_INDEX_ANY: u32 = 0;
+    const POLLIN: i16 = 0x0001;
+
+    #[repr(C)]
+    struct PollFd {
+        fd: RawFd,
+        events: i16,
+        revents: i16,
+    }
+
+    type RegisterCallback = unsafe extern "C" fn(
+        DNSServiceRef,
+        DNSServiceFlags,
+        DNSServiceErrorType,
+        *const i8,
+        *const i8,
+        *const i8,
+        *mut c_void,
+    );
+
+    unsafe extern "C" {
+        fn DNSServiceRegister(
+            service_ref: *mut DNSServiceRef,
+            flags: DNSServiceFlags,
+            interface_index: u32,
+            name: *const i8,
+            reg_type: *const i8,
+            domain: *const i8,
+            host: *const i8,
+            port: u16,
+            txt_len: u16,
+            txt_record: *const u8,
+            callback: Option<RegisterCallback>,
+            context: *mut c_void,
+        ) -> DNSServiceErrorType;
+        fn DNSServiceRefSockFD(service_ref: DNSServiceRef) -> RawFd;
+        fn DNSServiceProcessResult(service_ref: DNSServiceRef) -> DNSServiceErrorType;
+        fn DNSServiceRefDeallocate(service_ref: DNSServiceRef);
+        fn poll(fds: *mut PollFd, count: usize, timeout: i32) -> i32;
+    }
+
+    /// Owns the DNS-SD connection and removes the service when dropped.
+    pub(super) struct Advertisement {
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    // Registration errors are handled by the daemon's DNS-SD connection thread.
+    unsafe extern "C" fn registered(
+        _service: DNSServiceRef,
+        _flags: DNSServiceFlags,
+        _error: DNSServiceErrorType,
+        _name: *const i8,
+        _reg_type: *const i8,
+        _domain: *const i8,
+        _context: *mut c_void,
+    ) {
+    }
+
+    pub(super) fn advertise(
+        port: u16,
+        key: &str,
+        fingerprint: &str,
+        label: &str,
+    ) -> Result<Advertisement, String> {
+        let txt = txt_record(key, fingerprint, label)?;
+        let service_type = b"_tokenstat._tcp\0";
+        let mut service = std::ptr::null_mut();
+        let error = unsafe {
+            DNSServiceRegister(
+                &mut service,
+                K_DNS_SERVICE_FLAGS_NONE,
+                K_DNS_SERVICE_INTERFACE_INDEX_ANY,
+                std::ptr::null(),
+                service_type.as_ptr().cast(),
+                std::ptr::null(),
+                std::ptr::null(),
+                port.to_be(),
+                txt.len() as u16,
+                txt.as_ptr(),
+                Some(registered),
+                std::ptr::null_mut(),
+            )
+        };
+        if error != K_DNS_SERVICE_ERR_NO_ERROR || service.is_null() {
+            return Err(format!("DNSServiceRegister failed with error {error}"));
+        }
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        // Raw pointers do not carry a useful Rust ownership story across the
+        // thread boundary. The DNS-SD reference remains owned by that thread.
+        let service = service as usize;
+        let thread = std::thread::spawn(move || {
+            let service = service as DNSServiceRef;
+            let fd = unsafe { DNSServiceRefSockFD(service) };
+            while !thread_stop.load(Ordering::Relaxed) {
+                if fd < 0 {
+                    break;
+                }
+                let mut poll_fd = PollFd {
+                    fd,
+                    events: POLLIN,
+                    revents: 0,
+                };
+                // The timeout gives Drop a bounded path to DNSServiceRefDeallocate.
+                let ready = unsafe { poll(&mut poll_fd, 1, 100) };
+                if thread_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                if ready <= 0 || poll_fd.revents & POLLIN == 0 {
+                    continue;
+                }
+                let result = unsafe { DNSServiceProcessResult(service) };
+                if result != K_DNS_SERVICE_ERR_NO_ERROR {
+                    break;
+                }
+            }
+            unsafe { DNSServiceRefDeallocate(service) };
+        });
+
+        Ok(Advertisement {
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    fn txt_record(key: &str, fingerprint: &str, label: &str) -> Result<Vec<u8>, String> {
+        let mut record = Vec::new();
+        for (name, value) in [("key", key), ("fingerprint", fingerprint), ("label", label)] {
+            let entry = format!("{name}={value}");
+            if entry.len() > u8::MAX as usize {
+                return Err(format!("Bonjour TXT entry {name} is too long"));
+            }
+            record.push(entry.len() as u8);
+            record.extend_from_slice(entry.as_bytes());
+        }
+        Ok(record)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn txt_record_contains_the_identity_fields() {
+            let record = txt_record("key", "fingerprint", "label").unwrap();
+            assert_eq!(
+                record,
+                b"\x07key=key\x17fingerprint=fingerprint\x0blabel=label"
+            );
+        }
+
+        #[test]
+        fn dns_service_port_is_encoded_in_network_order() {
+            assert_eq!(1234u16.to_be_bytes(), [4, 210]);
+        }
+    }
+
+    impl Drop for Advertisement {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod bonjour {
+    pub(super) struct Advertisement;
+
+    pub(super) fn advertise(
+        _port: u16,
+        _key: &str,
+        _fingerprint: &str,
+        _label: &str,
+    ) -> Result<Advertisement, String> {
+        Ok(Advertisement)
+    }
 }
 
 fn listening() -> &'static Mutex<Option<Listening>> {
@@ -165,6 +362,18 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
     // on the LAN" becomes a security model.
     let server = Server::bind(&format!("0.0.0.0:{port}"), &identity).map_err(|e| e.to_string())?;
     let address = server.local_address().map_err(|e| e.to_string())?;
+    let advertised_port = address
+        .rsplit(':')
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| format!("could not determine the listener port from {address}"))?;
+    let advertisement = bonjour::advertise(
+        advertised_port,
+        &identity.public_key_hex(),
+        &identity.fingerprint(),
+        &tokenstat_identity::machine_label(),
+    )
+    .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
 
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
@@ -200,6 +409,7 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
     *guard = Some(Listening {
         address: address.clone(),
         stop,
+        _advertisement: advertisement,
     });
     Ok(address)
 }

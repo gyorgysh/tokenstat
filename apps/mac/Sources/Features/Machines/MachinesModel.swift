@@ -19,11 +19,14 @@ final class MachinesModel {
     private(set) var identity: MachineIdentity?
     private(set) var status: RemoteStatus?
     private(set) var peers: [Peer] = []
+    private(set) var discovered: [DiscoveredDaemon] = []
     private(set) var loading = false
     var errorMessage: String?
     /// Set after an action that worked, so the screen confirms rather than
     /// leaving somebody wondering whether the button did anything.
     var noticeMessage: String?
+
+    private let discovery = BonjourDiscovery()
 
     /// Peers waiting on a decision, which is the thing somebody opened this
     /// screen to do.
@@ -38,6 +41,10 @@ final class MachinesModel {
     }
 
     func load() async {
+        discovery.changed = { [weak self] daemons in
+            self?.discovered = daemons
+        }
+        discovery.start()
         loading = true
         defer { loading = false }
         do {
@@ -48,6 +55,14 @@ final class MachinesModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func pair(_ daemon: DiscoveredDaemon) async {
+        guard let address = daemon.address else {
+            errorMessage = "Still resolving \(daemon.label)'s address. Try again in a moment."
+            return
+        }
+        await pair(key: daemon.key, label: daemon.label, address: address)
     }
 
     /// Refresh the peer list alone.
