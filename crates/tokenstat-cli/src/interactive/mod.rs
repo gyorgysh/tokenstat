@@ -43,7 +43,9 @@ use tokenstat_core::{Bucket, PriceTable, Query, Reconciliation, Totals, UsageBlo
 
 use crate::ui::{self, ACCENT_RGB, SECONDARY_RGB};
 
-const MUTED: Color = Color::DarkGray;
+// macOS Terminal's DarkGray is almost black on its default dark-blue profile.
+// Normal gray keeps secondary labels readable without competing with data.
+const MUTED: Color = Color::Gray;
 const SELECTED: Color = Color::White;
 
 /// Deep violet used for panel borders: present, but never competing with data.

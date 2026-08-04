@@ -43,6 +43,8 @@ pub mod update;
 
 use std::time::Duration;
 
+use serde::Serialize;
+
 use tokenstat_core::Store;
 
 /// How long a successful vendor fetch is reused before the next network call.
@@ -63,7 +65,8 @@ impl Vendor {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FetchReport {
     pub vendor: &'static str,
     pub events: usize,

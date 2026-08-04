@@ -67,6 +67,7 @@ final class InsightsModel {
     var byProject: [Bucket] = []
     var bySource: [Bucket] = []
     var bySession: [Bucket] = []
+    var planBySource: [Bucket] = []
     var activeBlock: Block?
 
     /// Which harnesses ran in each archive project.
@@ -111,6 +112,7 @@ final class InsightsModel {
 
     var isLoading = false
     var isScanning = false
+    var isFetching = false
     /// Set when a load fails. The message comes from the core, which names the
     /// actual file or setting at fault, so it is shown rather than replaced.
     var errorMessage: String?
@@ -120,7 +122,7 @@ final class InsightsModel {
     var query: Query {
         guard let days = period.days else { return Query() }
         let start = Calendar.current.date(byAdding: .day, value: -(days - 1), to: Date()) ?? Date()
-        return Query(since: Self.dateFormatter.string(from: start))
+        return Query(since: Self.dateFormatter.string(from: start), billing: nil)
     }
 
     /// The archive stores local dates as plain `YYYY-MM-DD` text, so the filter
@@ -178,6 +180,10 @@ final class InsightsModel {
             async let byProject = Bridge.report(group: .project, query: q)
             async let bySource = Bridge.report(group: .source, query: q)
             async let bySession = Bridge.report(group: .session, query: q)
+            async let planBySource = Bridge.report(
+                group: .source,
+                query: Query(since: q.since, until: q.until, model: q.model, project: q.project, billing: "plan")
+            )
             async let blocks = Bridge.blocks(q)
             async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
 
@@ -187,6 +193,7 @@ final class InsightsModel {
             self.byProject = try await byProject
             self.bySource = try await bySource
             self.bySession = try await bySession
+            self.planBySource = try await planBySource
             self.activeBlock = try await blocks.first(where: \.active)
             self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,
@@ -211,6 +218,18 @@ final class InsightsModel {
         defer { isScanning = false }
         do {
             _ = try await Bridge.scan()
+            await refresh()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func fetchRemotes() async {
+        guard !isFetching else { return }
+        isFetching = true
+        defer { isFetching = false }
+        do {
+            _ = try await Bridge.fetchRemotes()
             await refresh()
         } catch {
             errorMessage = error.localizedDescription

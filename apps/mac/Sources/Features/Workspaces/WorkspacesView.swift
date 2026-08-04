@@ -68,13 +68,13 @@ struct WorkspacesView: View {
                 .font(.title3.weight(.medium))
             Text("""
             This is where sessions run: Claude Code, Codex, OpenCode and the \
-            rest, launched in this folder, with what they burn counted live.
+            rest, launched in this folder. Live usage meters are coming next.
             """)
             .font(.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 400)
-            Text("Milestone 5 in docs/desktop-app.md")
+            Text("Sessions are ready when you are")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 

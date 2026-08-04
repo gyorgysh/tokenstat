@@ -76,6 +76,9 @@ final class WorkspacesModel {
     /// The open file being shown, or nil when the pane is showing a terminal.
     private(set) var activeFile: [String: String] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
+    private(set) var fileContents: [String: String] = [:]
+    private(set) var dirtyFiles: Set<String> = []
+    var editorError: String?
 
     private static func treeKey(_ workspaceID: String, _ path: String) -> String {
         "\(workspaceID):\(path)"
@@ -123,7 +126,7 @@ final class WorkspacesModel {
             openFiles[workspaceID] = files
         }
         activeFile[workspaceID] = path
-        await loadDiff(path, in: workspaceID)
+        await loadText(path, in: workspaceID)
     }
 
     func closeFile(_ path: String, in workspaceID: String) {
@@ -153,6 +156,47 @@ final class WorkspacesModel {
 
     func diff(for path: String, in workspaceID: String) -> FileDiff? {
         diffs[Self.treeKey(workspaceID, path)]
+    }
+
+    func editorText(for path: String, in workspaceID: String) -> String {
+        fileContents[Self.treeKey(workspaceID, path)] ?? ""
+    }
+
+    func setEditorText(_ text: String, for path: String, in workspaceID: String) {
+        let key = Self.treeKey(workspaceID, path)
+        fileContents[key] = text
+        dirtyFiles.insert(key)
+    }
+
+    func isEditorDirty(_ path: String, in workspaceID: String) -> Bool {
+        dirtyFiles.contains(Self.treeKey(workspaceID, path))
+    }
+
+    func loadText(_ path: String, in workspaceID: String) async {
+        do {
+            let file = try await Bridge.workspaceRead(id: workspaceID, path: path)
+            let key = Self.treeKey(workspaceID, path)
+            fileContents[key] = file.content
+            dirtyFiles.remove(key)
+            editorError = nil
+        } catch {
+            editorError = error.localizedDescription
+        }
+    }
+
+    /// Save only from the editor's button. File writes never run from a watcher
+    /// or refresh path.
+    func saveText(_ path: String, in workspaceID: String) async {
+        let key = Self.treeKey(workspaceID, path)
+        guard let content = fileContents[key] else { return }
+        do {
+            _ = try await Bridge.workspaceWrite(id: workspaceID, path: path, content: content)
+            dirtyFiles.remove(key)
+            editorError = nil
+            await loadDiff(path, in: workspaceID)
+        } catch {
+            editorError = error.localizedDescription
+        }
     }
 
     func loadDiff(_ path: String, in workspaceID: String) async {

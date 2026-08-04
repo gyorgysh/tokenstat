@@ -305,6 +305,7 @@ fn query_from_args(args: &Value) -> Query {
             .get("project")
             .and_then(Value::as_str)
             .map(str::to_string),
+        billing: None,
     }
 }
 

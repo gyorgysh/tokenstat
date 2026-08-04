@@ -129,6 +129,11 @@ enum Bridge {
     static func scan() async throws -> ScanReport {
         try await background("scan", as: ScanReport.self)
     }
+
+    /// Fetch remote vendor usage after an explicit user action.
+    static func fetchRemotes() async throws -> [FetchReport] {
+        try await background("fetch", as: [FetchReport].self)
+    }
 }
 
 // MARK: - Account
@@ -239,6 +244,10 @@ extension Bridge {
         try await background("workspace.diff", ["id": id, "path": path], as: FileDiff.self)
     }
 
+    static func workspaceRead(id: String, path: String) async throws -> FileText {
+        try await background("workspace.read", ["id": id, "path": path], as: FileText.self)
+    }
+
     /// One commit in full: message, files, and their diffs.
     static func workspaceShow(id: String, commit: String) async throws -> CommitDetail {
         try await background("workspace.show", ["id": id, "path": commit], as: CommitDetail.self)
@@ -261,6 +270,14 @@ extension Bridge {
 
     static func commit(id: String, message: String) async throws -> GitOutcome {
         try await background("workspace.commit", ["id": id, "message": message], as: GitOutcome.self)
+    }
+
+    static func workspaceWrite(id: String, path: String, content: String) async throws -> GitOutcome {
+        try await background(
+            "workspace.write",
+            ["id": id, "path": path, "content": content],
+            as: GitOutcome.self
+        )
     }
 
     static func push(id: String) async throws -> GitOutcome {

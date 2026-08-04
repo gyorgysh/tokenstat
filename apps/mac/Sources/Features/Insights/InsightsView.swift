@@ -72,6 +72,8 @@ struct InsightsView: View {
                 if model.planLimits.isEmpty { await model.loadPlanLimits() }
             }
 
+            PlanUsageCard(rows: model.planBySource)
+
             Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
                 DailyChart(rows: model.daily)
             }
@@ -108,6 +110,19 @@ struct InsightsView: View {
             }
             .disabled(model.isScanning)
             .help("Read new sessions from every supported tool into the archive")
+        }
+        ToolbarItem {
+            Button {
+                Task { await model.fetchRemotes() }
+            } label: {
+                if model.isFetching {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Fetch", systemImage: "cloud.arrow.down")
+                }
+            }
+            .disabled(model.isFetching)
+            .help("Fetch usage from remote vendors such as Cursor")
         }
     }
 }

@@ -74,6 +74,9 @@ struct WorkspaceIdParams {
     /// Commit message.
     #[serde(default)]
     message: Option<String>,
+    /// Text content for `workspace.write`.
+    #[serde(default)]
+    content: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -454,6 +457,15 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             serde_json::to_value(providers).map_err(|e| e.to_string())
         }
 
+        // Remote vendor usage is fetched only after an explicit user action.
+        // Local log scanning remains separate and never needs the network.
+        "fetch" => with_session(s, |b| {
+            let tz = b.engine.timezone().clone();
+            let reports = tokenstat_sync::fetch_remotes(b.engine.store_mut(), &tz, false)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(reports).map_err(|e| e.to_string())
+        }),
+
         // Workspaces are registered folders, nothing to do with the archive.
         // Git is read for each on every list: a status call is cheap, and a
         // cached one that lies about a dirty tree is worse than none.
@@ -595,6 +607,19 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        "workspace.read" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.read needs a path")?;
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let content = tokenstat_workspace::tree::read_text(&ws.path, &path)
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_value(json!({"path": path, "content": content}))
+                    .map_err(|e| e.to_string())
+            })
+        }
+
         // Everything below changes the repository. These exist because the app
         // is a place to work, not a reporter: they run when someone presses a
         // button and are never reachable from a timer or a status path. See
@@ -622,6 +647,18 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             with_session(s, |b| {
                 let ws = folder(b, &p.id)?;
                 let outcome = tokenstat_workspace::gitwrite::commit(&ws.path, &message);
+                serde_json::to_value(outcome).map_err(|e| e.to_string())
+            })
+        }
+
+        "workspace.write" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.write needs a path")?;
+            let content = p.content.ok_or("workspace.write needs content")?;
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                let outcome = tokenstat_workspace::gitwrite::write_text(&ws.path, &path, &content);
                 serde_json::to_value(outcome).map_err(|e| e.to_string())
             })
         }

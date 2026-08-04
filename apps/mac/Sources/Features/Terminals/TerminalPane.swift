@@ -145,12 +145,8 @@ struct TerminalPane: View {
 
     @ViewBuilder
     private func fileSurface(_ path: String) -> some View {
-        if let diff = workspaces.diff(for: path, in: folder.id) {
-            DiffView(diff: diff)
-                .id(path)
-        } else {
-            reading(path)
-        }
+        EditorView(model: workspaces, folder: folder, path: path)
+            .id(path)
     }
 
     private func reading(_ what: String) -> some View {

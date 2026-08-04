@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::CoreError;
-use crate::model::{Counters, UsageEvent};
+use crate::model::{BillingMode, Counters, UsageEvent};
 use crate::sync_payload::SyncRollupBucket;
 use crate::watermark::Watermark;
 
@@ -116,6 +116,7 @@ pub struct Query {
     pub until: Option<String>,
     pub model: Option<String>,
     pub project: Option<String>,
+    pub billing: Option<BillingMode>,
 }
 
 /// Totals across everything the archive holds.
@@ -351,6 +352,9 @@ impl Store {
         }
         if let Some(v) = &q.project {
             push("project = ?", Box::new(v.clone()), &mut sql);
+        }
+        if let Some(v) = q.billing {
+            push("billing = ?", Box::new(v.as_str().to_string()), &mut sql);
         }
         (sql, args)
     }
@@ -922,6 +926,28 @@ mod tests {
         let t = s.totals(&q).unwrap();
         assert_eq!(t.events, 1);
         assert_eq!(t.counters.output, Some(7));
+    }
+
+    #[test]
+    fn billing_filter_keeps_plan_usage_separate() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut metered = ev("metered", 1_700_000_000_000, "m", 11);
+        metered.billing = BillingMode::Metered;
+        s.insert_events(&[ev("plan", 1_700_000_000_000, "m", 7), metered], &tz)
+            .unwrap();
+
+        let plan = s
+            .report(
+                GroupBy::Source,
+                &Query {
+                    billing: Some(BillingMode::Plan),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].counters.output, Some(7));
     }
 
     #[test]

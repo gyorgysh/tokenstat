@@ -98,7 +98,7 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<TreeEntry>, TreeError> {
 /// Rejects absolute paths, `..`, and anything a symlink would redirect out of
 /// the workspace: the final check is against the canonical root, so a link
 /// pointing at `/etc` cannot be listed through a workspace.
-fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError> {
+pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError> {
     let relative = relative.trim();
     if relative.is_empty() {
         return Ok(root.to_path_buf());
@@ -128,6 +128,12 @@ fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError> {
         return Err(TreeError::Outside);
     }
     Ok(real)
+}
+
+/// Read one UTF-8 text file inside a workspace for the editor.
+pub fn read_text(root: &Path, relative: &str) -> Result<String, TreeError> {
+    let path = resolve(root, relative)?;
+    std::fs::read_to_string(&path).map_err(|e| TreeError::Unreadable(e.to_string()))
 }
 
 /// Flag the entries git would ignore.

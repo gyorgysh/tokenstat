@@ -14,6 +14,7 @@ struct Query: Sendable, Equatable {
     var until: String?
     var model: String?
     var project: String?
+    var billing: String?
 
     var payload: [String: Any] {
         var out: [String: Any] = [:]
@@ -21,6 +22,7 @@ struct Query: Sendable, Equatable {
         if let until { out["until"] = until }
         if let model { out["model"] = model }
         if let project { out["project"] = project }
+        if let billing { out["billing"] = billing }
         return out
     }
 }
@@ -110,6 +112,19 @@ struct ScanReport: Codable, Sendable, Hashable {
     var daysRecovered: UInt64
     var elapsedMs: UInt64
     var warnings: [String]
+}
+
+struct FetchReport: Codable, Sendable, Hashable {
+    var vendor: String
+    var events: Int
+    var fromCache: Bool
+    var skippedNoToken: Bool
+    var message: String?
+}
+
+struct FileText: Codable, Sendable, Hashable {
+    var path: String
+    var content: String
 }
 
 struct Info: Codable, Sendable, Hashable {

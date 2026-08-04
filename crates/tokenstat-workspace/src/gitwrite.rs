@@ -119,6 +119,24 @@ pub fn push(dir: &Path) -> GitOutcome {
     }
 }
 
+/// Write one text file after an explicit Save action in the editor.
+///
+/// The path is checked against the canonical workspace root, so a symlink
+/// cannot turn an editor save into a write outside the folder the user chose.
+pub fn write_text(dir: &Path, relative: &str, content: &str) -> GitOutcome {
+    let path = match crate::tree::resolve(dir, relative) {
+        Ok(path) => path,
+        Err(error) => return GitOutcome::failed(error.to_string()),
+    };
+    match std::fs::write(path, content) {
+        Ok(()) => GitOutcome {
+            ok: true,
+            message: "Saved".into(),
+        },
+        Err(error) => GitOutcome::failed(format!("could not save file: {error}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,6 +234,18 @@ mod tests {
         let outcome = commit(&dir, "feat: nothing");
         assert!(!outcome.ok);
         assert!(!outcome.message.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writing_text_stays_inside_the_workspace() {
+        let dir = repo("write-text");
+        assert!(write_text(&dir, "seed.txt", "updated\n").ok);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("seed.txt")).unwrap(),
+            "updated\n"
+        );
+        assert!(!write_text(&dir, "../outside.txt", "nope").ok);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

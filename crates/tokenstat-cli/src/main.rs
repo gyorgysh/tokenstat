@@ -345,6 +345,7 @@ impl Window {
             until: self.until.clone(),
             model: self.model.clone(),
             project: self.project.clone(),
+            billing: None,
         }
     }
 }

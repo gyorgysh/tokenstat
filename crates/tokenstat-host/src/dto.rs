@@ -11,7 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 use tokenstat_core::{
-    Counters, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals, UsageBlock, Warning,
+    BillingMode, Counters, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals,
+    UsageBlock, Warning,
 };
 use tokenstat_sync::DeviceLogin as SyncDeviceLogin;
 
@@ -25,6 +26,7 @@ pub struct QueryDto {
     pub until: Option<String>,
     pub model: Option<String>,
     pub project: Option<String>,
+    pub billing: Option<BillingMode>,
 }
 
 impl From<QueryDto> for Query {
@@ -34,6 +36,7 @@ impl From<QueryDto> for Query {
             until: q.until,
             model: q.model,
             project: q.project,
+            billing: q.billing,
         }
     }
 }
