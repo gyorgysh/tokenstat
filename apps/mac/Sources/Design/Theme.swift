@@ -256,6 +256,11 @@ struct Stat: View {
     var note: String?
     var tint: Color = .primary
     var size: CGFloat = 22
+    /// Take an equal share of the row. Off for a group that should stay
+    /// together: three expanding stats in a full-screen window end up a third
+    /// of a metre apart, and figures that far from each other stop being
+    /// comparable, which is the only reason to put them in a row.
+    var expands: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -279,7 +284,7 @@ struct Stat: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: expands ? .infinity : nil, alignment: .leading)
     }
 }
 
@@ -489,4 +494,40 @@ struct NotBuiltYet: View {
         .padding(Theme.Space.xl)
         .background(Theme.background)
     }
+}
+
+/// Hands its own width to its content, so a layout can change shape rather
+/// than stretch.
+///
+/// macOS has no size classes, and `ViewThatFits` cannot help when every
+/// candidate layout is willing to fill any width: it takes the first, always.
+/// So the width is measured and the decision made explicitly.
+struct WidthReader<Content: View>: View {
+    @ViewBuilder var content: (CGFloat) -> Content
+
+    @State private var width: CGFloat = 0
+
+    var body: some View {
+        content(width)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: WidthKey.self, value: proxy.size.width)
+                }
+            )
+            .onPreferenceChange(WidthKey.self) { width = $0 }
+    }
+}
+
+private struct WidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Width at which a screen has room for two cards side by side.
+///
+/// One number, so the breakpoints across the app cannot drift apart.
+extension CGFloat {
+    static let twoColumnWidth: CGFloat = 1_000
 }

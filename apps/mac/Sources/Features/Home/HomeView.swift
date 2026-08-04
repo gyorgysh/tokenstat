@@ -21,26 +21,31 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                if let message = model.errorMessage {
-                    Banner(text: message, severity: .warning)
-                }
+            WidthReader { width in
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    if let message = model.errorMessage {
+                        Banner(text: message, severity: .warning)
+                    }
 
-                profile
-                activity
+                    profile
+                    activity
 
-                // What is left of each plan. This is the "can I start another
-                // session right now" question, which is why it is on the screen
-                // that opens rather than under two report tables.
-                PlanLimitsCard(
-                    providers: model.planLimits,
-                    isLoading: model.isLoadingLimits
-                ) {
-                    Task { await model.loadPlanLimits() }
-                }
-
-                if !model.planBySource.isEmpty {
-                    PlanUsageCard(rows: model.planBySource)
+                    // Side by side once there is room. Stacked, these two are a
+                    // column of half-empty rows down the middle of a wide
+                    // window; beside each other they answer the same question
+                    // from both directions, what the vendor says is left and
+                    // what the archive recorded.
+                    if width >= .twoColumnWidth, !model.planBySource.isEmpty {
+                        HStack(alignment: .top, spacing: Theme.Space.s) {
+                            planLimits
+                            PlanUsageCard(rows: model.planBySource)
+                        }
+                    } else {
+                        planLimits
+                        if !model.planBySource.isEmpty {
+                            PlanUsageCard(rows: model.planBySource)
+                        }
+                    }
                 }
             }
             // Tighter than the old inset all round. This screen is a stack of
@@ -59,6 +64,18 @@ struct HomeView: View {
             if model.isLoading && model.calendar == nil {
                 ProgressView()
             }
+        }
+    }
+
+    /// What is left of each plan. This is the "can I start another session right
+    /// now" question, which is why it is on the screen that opens rather than
+    /// under two report tables.
+    private var planLimits: some View {
+        PlanLimitsCard(
+            providers: model.planLimits,
+            isLoading: model.isLoadingLimits
+        ) {
+            Task { await model.loadPlanLimits() }
         }
     }
 
@@ -162,17 +179,33 @@ struct HomeView: View {
         ) {
             if let calendar = model.calendar {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    HStack(spacing: Theme.Space.xl) {
-                        Stat(label: "Today", value: formatTokens(model.todayTotal), size: 20)
-                        Stat(label: "Last 7 days", value: formatTokens(model.weekTotal), size: 20)
+                    // Grouped at the leading edge rather than spread across
+                    // the card. These three are meant to be read against each
+                    // other, and a full-screen window put them a third of a
+                    // metre apart.
+                    HStack(alignment: .top, spacing: Theme.Space.xl) {
+                        Stat(
+                            label: "Today",
+                            value: formatTokens(model.todayTotal),
+                            size: 20,
+                            expands: false
+                        )
+                        Stat(
+                            label: "Last 7 days",
+                            value: formatTokens(model.weekTotal),
+                            size: 20,
+                            expands: false
+                        )
                         if let busiest = calendar.busiest {
                             Stat(
                                 label: "Busiest",
                                 value: formatTokens(busiest.value),
                                 note: busiest.date,
-                                size: 20
+                                size: 20,
+                                expands: false
                             )
                         }
+                        Spacer(minLength: 0)
                     }
                     HeatmapView(calendar: calendar, onSelect: onSelectDay)
                 }

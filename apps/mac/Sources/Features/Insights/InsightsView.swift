@@ -85,12 +85,28 @@ struct InsightsView: View {
                 DailyChart(rows: model.daily)
             }
 
-            HStack(alignment: .top, spacing: Theme.Space.m) {
-                Card(title: "Top models", subtitle: "List-rate value") {
-                    MiniList(rows: model.byModel, showsValue: true, monospaced: true)
-                }
-                Card(title: "By harness", subtitle: "Which agent produced the tokens") {
-                    MiniList(rows: model.bySource, showsValue: false, monospaced: false, isHarness: true)
+            // Three across once there is room for it. Two cards on a
+            // full-screen window are two wide boxes of short rows with a page
+            // of nothing under them, and the projects breakdown was already
+            // loaded and only reachable through a tab.
+            WidthReader { width in
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    Card(title: "Top models", subtitle: "List-rate value") {
+                        MiniList(rows: model.byModel, showsValue: true, monospaced: true)
+                    }
+                    Card(title: "By harness", subtitle: "Which agent produced the tokens") {
+                        MiniList(
+                            rows: model.bySource,
+                            showsValue: false,
+                            monospaced: false,
+                            isHarness: true
+                        )
+                    }
+                    if width >= .twoColumnWidth, !model.byProject.isEmpty {
+                        Card(title: "By project", subtitle: "Where the work happened") {
+                            MiniList(rows: model.byProject, showsValue: false, monospaced: true)
+                        }
+                    }
                 }
             }
         }
