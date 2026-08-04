@@ -27,6 +27,10 @@ credentials.json
 # TRADEMARK.md, which say the terms. The reasoning, the rejected options and
 # the history behind them are ours.
 /docs/licensing.md
+# The tunnel's implementation plan. `docs/remote-transport.md` is the public
+# design and stays tracked; this is the internal build order, and it names
+# infrastructure, hosts and costs that are nobody else's business.
+/docs/tunnel-plan.md
 
 # Coverage and profiling
 /coverage/
