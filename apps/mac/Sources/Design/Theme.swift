@@ -34,9 +34,14 @@ enum Theme {
     static let sidebar = Color.adaptive(light: hex(0xF0F0F1), dark: hex(0x0D0D0F))
     /// Cards and panels.
     static let panel = Color.adaptive(light: .white, dark: hex(0x141416))
-    /// Behind a tab strip. A step darker than the pane under it, so the strip
-    /// reads as chrome rather than as the first row of the content.
-    static let tabStrip = Color.adaptive(light: hex(0xE9E9ED), dark: hex(0x08080A))
+    /// Behind a tab strip.
+    ///
+    /// A step darker than the pane under it, so the strip reads as chrome
+    /// rather than as the first row of the content. Only a step: in light mode
+    /// this was a solid grey, which put a third tone between the toolbar above
+    /// and the content below and made the strip look like a band stuck across
+    /// the window. Dark mode can take the contrast, light mode cannot.
+    static let tabStrip = Color.adaptive(light: hex(0xF1F1F3), dark: hex(0x08080A))
     /// Hairlines. These carry the structure that shadows used to.
     static let border = Color.adaptive(light: hex(0xE2E2E5), dark: hex(0x232326))
     /// A row the pointer is over.

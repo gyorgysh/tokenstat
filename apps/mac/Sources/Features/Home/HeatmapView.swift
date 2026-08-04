@@ -21,8 +21,10 @@ struct HeatmapView: View {
 
     @State private var hovered: HeatCell?
 
-    private let gap: CGFloat = 3
     private let gutter: CGFloat = 30
+    /// Gap as a fraction of a cell, so the grid keeps its texture at any size.
+    /// A fixed 3 point gap between 28 point squares reads as a solid block.
+    private let gapRatio: CGFloat = 0.2
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -33,8 +35,9 @@ struct HeatmapView: View {
             // card empty.
             GeometryReader { proxy in
                 let cell = cellSize(for: proxy.size.width)
+                let gap = cell * gapRatio
                 VStack(alignment: .leading, spacing: gap) {
-                    months(cell: cell)
+                    months(cell: cell, gap: gap)
                     ForEach(0 ..< calendar.rows.count, id: \.self) { row in
                         HStack(spacing: gap) {
                             Text(Self.rowLabel(row))
@@ -47,6 +50,7 @@ struct HeatmapView: View {
                         }
                     }
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
             }
             .frame(height: gridHeight)
 
@@ -54,27 +58,36 @@ struct HeatmapView: View {
         }
     }
 
-    /// Square size that makes seven rows of `weeks` columns fill the width.
+    /// Square size that makes `weeks` columns span the width exactly.
     ///
-    /// Clamped at both ends: below about seven points the levels stop being
-    /// distinguishable, and above about eighteen a year of days reads as a
-    /// wall of tiles rather than a calendar.
+    /// Solved rather than guessed. The gap is a fraction of the cell, so the
+    /// width is `gutter + gap + weeks × (cell + gap)`, and with `gap = k·cell`
+    /// that rearranges to the expression below. Picking a size and hoping is
+    /// what left a year of squares ending two thirds across a full-screen
+    /// window.
+    ///
+    /// The lower bound is real: under about seven points the five heat levels
+    /// stop being distinguishable. There is no upper bound, because on a wide
+    /// display the alternative to large squares is empty space.
     private func cellSize(for width: CGFloat) -> CGFloat {
         guard calendar.weeks > 0, width > 0 else { return 11 }
-        let available = width - gutter - gap
-        let fitted = (available / CGFloat(calendar.weeks)) - gap
-        return min(max(fitted, 7), 18)
+        let columns = CGFloat(calendar.weeks)
+        let fitted = (width - gutter) / (gapRatio + columns * (1 + gapRatio))
+        return max(fitted, 7)
     }
 
-    /// Reserved height: the month strip, then seven rows.
+    /// Reserved height: the month strip, then seven rows at the largest cell
+    /// the card is likely to give.
     ///
-    /// Fixed rather than measured, because the grid is inside a `GeometryReader`
-    /// and a reader that sizes itself from its own content has nothing to read.
+    /// Fixed rather than measured, because the grid is inside a
+    /// `GeometryReader` and a reader that sizes itself from its own content has
+    /// nothing to read.
     private var gridHeight: CGFloat {
-        11 + gap + 7 * (18 + gap)
+        let cell: CGFloat = 22
+        return 11 + cell * gapRatio + 7 * (cell * (1 + gapRatio))
     }
 
-    private func months(cell: CGFloat) -> some View {
+    private func months(cell: CGFloat, gap: CGFloat) -> some View {
         // Absolute placement rather than a stack of spacers: a month label is
         // wider than the column it belongs to, so laying them out in sequence
         // pushes every later one out of alignment with its week.
