@@ -431,6 +431,29 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        // What each vendor says is left of its plan. Not derived from the
+        // archive: these are the vendor's own numbers about a quota, and a
+        // percentage we worked out ourselves would be a guess wearing a
+        // number's clothes.
+        //
+        // Codex reads off the disk and is instant. Claude is a request, so this
+        // is slow enough that a caller should treat it as a refresh rather than
+        // something to poll.
+        "usage.limits" => {
+            let providers = std::thread::scope(|scope| {
+                let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
+                let codex = tokenstat_core::limits::codex_limits();
+                let claude = claude.join().unwrap_or_else(|_| {
+                    tokenstat_core::limits::ProviderLimits::unavailable(
+                        "claude_code",
+                        "Reading the Claude Code limits failed unexpectedly.",
+                    )
+                });
+                vec![claude, codex]
+            });
+            serde_json::to_value(providers).map_err(|e| e.to_string())
+        }
+
         // Workspaces are registered folders, nothing to do with the archive.
         // Git is read for each on every list: a status call is cheap, and a
         // cached one that lies about a dirty tree is worse than none.

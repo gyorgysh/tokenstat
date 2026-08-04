@@ -44,6 +44,11 @@ enum Theme {
     /// highlight and a selection highlight both in grey, the two were the same
     /// thing at a glance and you could not tell which workspace you were in.
     static let rowSelected = accent.opacity(0.18)
+    /// A selected row nested inside a selected one, such as the session showing
+    /// inside the open workspace. Same hue, lighter, so the pair reads as
+    /// "this folder, and this terminal within it" rather than as two equal
+    /// selections competing.
+    static let rowSelectedNested = accent.opacity(0.09)
 
     private static func hex(_ value: UInt32) -> Color {
         Color(

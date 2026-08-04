@@ -101,6 +101,14 @@ final class InsightsModel {
         didSet { if period != oldValue { reload() } }
     }
 
+    /// What each vendor says is left of its plan.
+    ///
+    /// Loaded separately from the archive and never with it: Claude's numbers
+    /// come from a request, and the archive reloads whenever the period or the
+    /// tab changes. Nobody wants a network call behind a segmented control.
+    var planLimits: [ProviderLimits] = []
+    var isLoadingLimits = false
+
     var isLoading = false
     var isScanning = false
     /// Set when a load fails. The message comes from the core, which names the
@@ -139,6 +147,21 @@ final class InsightsModel {
     func reload() {
         loadTask?.cancel()
         loadTask = Task { await refresh() }
+    }
+
+    /// Ask each vendor what is left of the plan.
+    ///
+    /// Keeps the previous answer when the call fails: a provider that reports
+    /// its own trouble already says so in its `note`, and a failure here is the
+    /// bridge, not the numbers.
+    func loadPlanLimits() async {
+        isLoadingLimits = true
+        defer { isLoadingLimits = false }
+        do {
+            planLimits = try await Bridge.usageLimits()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func refresh() async {

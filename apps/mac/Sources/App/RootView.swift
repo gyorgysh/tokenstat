@@ -467,18 +467,20 @@ private struct ActiveSessionRow: View {
         .help(session.cwd)
     }
 
-    /// The same treatment as a selected workspace, indented to match the row.
-    /// A session is a place you are working in just as much as a folder is, and
-    /// which terminal is on screen should not be something you have to infer.
+    /// The same treatment as a selected workspace, but lighter.
+    ///
+    /// A session sits inside a workspace and the two are selected together, so
+    /// they must not compete: the folder is the strong tint and the terminal
+    /// within it is the same hue at half strength, with a thinner bar.
     private var background: some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
+                .fill(isSelected ? Theme.rowSelectedNested : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
             if isSelected {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Theme.accent)
-                    .frame(width: 3)
-                    .padding(.vertical, 3)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Theme.accent.opacity(0.6))
+                    .frame(width: 2)
+                    .padding(.vertical, 4)
             }
         }
         .padding(.leading, Theme.Space.l)

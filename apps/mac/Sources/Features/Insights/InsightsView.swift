@@ -58,6 +58,20 @@ struct InsightsView: View {
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
+            // First, because it is the only thing here that answers "can I
+            // start another session right now". Everything below it is history.
+            PlanLimitsCard(
+                providers: model.planLimits,
+                isLoading: model.isLoadingLimits
+            ) {
+                Task { await model.loadPlanLimits() }
+            }
+            .task {
+                // Once on arrival, not on every period or tab change: one of
+                // these providers is a network call.
+                if model.planLimits.isEmpty { await model.loadPlanLimits() }
+            }
+
             Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
                 DailyChart(rows: model.daily)
             }

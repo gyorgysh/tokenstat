@@ -28,6 +28,7 @@ pub mod budget;
 pub mod catalog;
 pub mod engine;
 pub mod error;
+pub mod limits;
 pub mod model;
 pub mod pricing;
 pub mod scan;

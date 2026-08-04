@@ -28,6 +28,7 @@
 pub mod antigravity;
 pub mod antigravity_ide;
 pub mod catalog;
+pub mod claude_limits;
 pub mod config;
 pub mod creds;
 pub mod cursor;

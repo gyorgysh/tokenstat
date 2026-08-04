@@ -166,14 +166,18 @@ mod tests {
       ]
     }"#;
 
+    /// A clock alone is not unique enough. `SystemTime::now()` does not
+    /// advance every nanosecond, so two tests entering together built the same
+    /// path, shared one SQLite file, and saw each other's events. That failed
+    /// as a wrong row count in whichever test lost the race, which reads as a
+    /// query bug and is not one.
+    static ENGINE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     fn engine() -> Engine {
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-engine-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            ENGINE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
         Engine::open(Some(&dir.join("tokenstat.db")), Some("UTC")).unwrap()

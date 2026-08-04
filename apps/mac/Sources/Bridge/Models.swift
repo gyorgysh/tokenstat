@@ -544,6 +544,57 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 }
 
+/// How close to a limit a window is.
+enum LimitSeverity: String, Codable, Sendable {
+    case normal, warning, critical
+
+    var tint: Color {
+        switch self {
+        case .normal: return Theme.accent
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+}
+
+/// One quota window a vendor reports.
+struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
+    /// `5-hour`, `weekly`, `monthly`.
+    var label: String
+    /// Percent of the allowance used, 0 to 100.
+    var percent: Double
+    var resetsAtMs: Int64?
+    var severity: LimitSeverity
+
+    var id: String { label }
+
+    var resetsAt: Date? {
+        resetsAtMs.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+    }
+
+    /// Clamped for drawing. A vendor reporting 104% is telling you it is over,
+    /// not asking for a bar that runs off the edge.
+    var fraction: Double { min(1, max(0, percent / 100)) }
+}
+
+/// What one provider says about its own limits.
+struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
+    /// Archive source id, so the brand mark is the same one used elsewhere.
+    var source: String
+    var plan: String?
+    var windows: [UsageWindow]
+    var observedAtMs: Int64
+    /// Why there is nothing to show. Present exactly when `windows` is empty:
+    /// "no limits" and "we could not look" must never render the same.
+    var note: String?
+
+    var id: String { source }
+
+    var observedAt: Date? {
+        observedAtMs > 0 ? Date(timeIntervalSince1970: TimeInterval(observedAtMs) / 1000) : nil
+    }
+}
+
 /// One commit in full: what it says, and what it changed.
 struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var id: String

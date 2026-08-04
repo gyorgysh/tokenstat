@@ -188,6 +188,18 @@ extension Bridge {
     }
 }
 
+// MARK: - Plan limits
+
+extension Bridge {
+    /// What each vendor says is left of its plan.
+    ///
+    /// Slow: Codex reads off the disk but Claude is a request. Treat it as a
+    /// refresh the user asked for, not something to poll.
+    static func usageLimits() async throws -> [ProviderLimits] {
+        try await background("usage.limits", as: [ProviderLimits].self)
+    }
+}
+
 // MARK: - Workspaces
 
 extension Bridge {
