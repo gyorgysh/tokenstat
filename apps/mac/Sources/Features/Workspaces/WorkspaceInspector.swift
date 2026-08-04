@@ -29,37 +29,29 @@ struct WorkspaceInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            tabs
+            TabStrip(
+                // No icons: the inspector is 280pt at its narrowest and three
+                // labels plus three glyphs truncate before they fit.
+                tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
+                selection: tab
+            )
             content
         }
         .background(Theme.sidebarMaterial)
     }
 
-    /// The same strip the centre pane uses.
-    ///
-    /// This was a segmented `Picker`, which is a capsule and centres itself, so
-    /// the two tabbed surfaces in the same window read as different mechanisms.
-    /// One kind of tab, one selection language.
-    private var tabs: some View {
-        TabStrip(
-            // No icons: the inspector is 240pt at its narrowest and three
-            // labels plus three glyphs truncate before they fit.
-            tabs: InspectorTab.allCases.map { ($0, title(for: $0), "") },
-            selection: tab
-        )
-    }
-
-    private func title(for tab: InspectorTab) -> String {
-        switch tab {
-        case .changes:
-            let count = folder?.changeCount ?? 0
-            return count > 0 ? "Changes (\(count))" : "Changes"
-        case .files:
-            return "Files"
-        case .history:
-            return "History"
-        }
-    }
+    // The empty band above this panel is the window's toolbar, not padding this
+    // view controls, and two attempts to use it both came out worse:
+    //
+    // - `.ignoresSafeArea(.container, edges: .top)` does not move a view *into*
+    //   the toolbar, it slides it *behind* it, and the tabs vanish entirely.
+    // - A `ToolbarItem` does land in the band, but toolbar items fill from the
+    //   leading edge, so the tabs sat beside the sidebar toggle instead of over
+    //   the column they switch. `ToolbarSpacer` fixes that and is macOS 26,
+    //   above this app's deployment target.
+    //
+    // Leave the band alone. It is one empty strip, and the tabs belong to the
+    // panel they switch.
 
     @ViewBuilder
     private var content: some View {

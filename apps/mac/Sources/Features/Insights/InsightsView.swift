@@ -327,10 +327,15 @@ private struct DailyChart: View {
             Chart(rows) { row in
                 BarMark(
                     x: .value("Day", row.key),
-                    y: .value("Tokens", Double(row.counters.total))
+                    y: .value("Tokens", Double(row.counters.total)),
+                    // Capped, not proportional. A categorical axis gives every
+                    // bar an equal share of the plot, so filtering to one day
+                    // drew a single bar the width of the card: a block, with no
+                    // shape to read and nothing to compare it against.
+                    width: rows.count > 12 ? .automatic : .fixed(36)
                 )
                 .foregroundStyle(Theme.accent.gradient)
-                .cornerRadius(1)
+                .cornerRadius(2)
             }
             .chartXAxis {
                 // Chart's automatic count still crowds: with 30 categorical

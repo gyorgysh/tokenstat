@@ -21,15 +21,20 @@ struct HeatmapView: View {
 
     @State private var hovered: HeatCell?
 
-    private let cell: CGFloat = 11
     private let gap: CGFloat = 3
     private let gutter: CGFloat = 30
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            // The cell size comes from the width available, so the grid always
+            // spans the card. It used to be a fixed 11 points inside a
+            // horizontal scroll view anchored trailing, which on a wide window
+            // drew a year of squares against the right edge and left half the
+            // card empty.
+            GeometryReader { proxy in
+                let cell = cellSize(for: proxy.size.width)
                 VStack(alignment: .leading, spacing: gap) {
-                    months
+                    months(cell: cell)
                     ForEach(0 ..< calendar.rows.count, id: \.self) { row in
                         HStack(spacing: gap) {
                             Text(Self.rowLabel(row))
@@ -37,23 +42,39 @@ struct HeatmapView: View {
                                 .foregroundStyle(.tertiary)
                                 .frame(width: gutter, alignment: .leading)
                             ForEach(0 ..< calendar.rows[row].count, id: \.self) { column in
-                                square(calendar.rows[row][column])
+                                square(calendar.rows[row][column], cell: cell)
                             }
                         }
                     }
                 }
-                // The grid is drawn oldest first and the interesting end is the
-                // newest, so a window too narrow for a year opens on today.
-                .flipsForRightToLeftLayoutDirection(false)
-                .padding(.trailing, Theme.Space.xs)
             }
-            .defaultScrollAnchor(.trailing)
+            .frame(height: gridHeight)
 
             footer
         }
     }
 
-    private var months: some View {
+    /// Square size that makes seven rows of `weeks` columns fill the width.
+    ///
+    /// Clamped at both ends: below about seven points the levels stop being
+    /// distinguishable, and above about eighteen a year of days reads as a
+    /// wall of tiles rather than a calendar.
+    private func cellSize(for width: CGFloat) -> CGFloat {
+        guard calendar.weeks > 0, width > 0 else { return 11 }
+        let available = width - gutter - gap
+        let fitted = (available / CGFloat(calendar.weeks)) - gap
+        return min(max(fitted, 7), 18)
+    }
+
+    /// Reserved height: the month strip, then seven rows.
+    ///
+    /// Fixed rather than measured, because the grid is inside a `GeometryReader`
+    /// and a reader that sizes itself from its own content has nothing to read.
+    private var gridHeight: CGFloat {
+        11 + gap + 7 * (18 + gap)
+    }
+
+    private func months(cell: CGFloat) -> some View {
         // Absolute placement rather than a stack of spacers: a month label is
         // wider than the column it belongs to, so laying them out in sequence
         // pushes every later one out of alignment with its week.
@@ -66,14 +87,11 @@ struct HeatmapView: View {
                     .offset(x: gutter + gap + CGFloat(month.column) * (cell + gap))
             }
         }
-        .frame(
-            width: gutter + gap + CGFloat(calendar.weeks) * (cell + gap),
-            alignment: .leading
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
-    private func square(_ day: HeatCell?) -> some View {
+    private func square(_ day: HeatCell?, cell: CGFloat) -> some View {
         if let day {
             RoundedRectangle(cornerRadius: 2.5)
                 .fill(Theme.heat[min(day.level, Theme.heat.count - 1)])

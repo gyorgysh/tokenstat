@@ -41,6 +41,25 @@ final class WorkspacesModel {
     /// the picker looked like it did nothing at all.
     var inspectorTab: InspectorTab = .changes
 
+    /// Label for an inspector tab, with the count that is the reason to look at
+    /// it.
+    ///
+    /// On the model rather than in the view because the tabs are drawn in the
+    /// window toolbar, above the inspector column, while the panel they switch
+    /// lives here. Two places needing the same label is what puts a count on one
+    /// of them and not the other.
+    func inspectorTabTitle(_ tab: InspectorTab) -> String {
+        switch tab {
+        case .changes:
+            let count = selected?.changeCount ?? 0
+            return count > 0 ? "Changes (\(count))" : "Changes"
+        case .files:
+            return "Files"
+        case .history:
+            return "History"
+        }
+    }
+
     /// Recent commits per workspace, keyed by workspace id.
     ///
     /// Loaded when the History tab first asks for one, not with the folder
