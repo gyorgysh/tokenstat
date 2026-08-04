@@ -1120,6 +1120,9 @@ struct MachineIdentity: Codable, Sendable {
     /// the comparison a person performs rather than skims.
     let words: String?
     let label: String
+    /// Whether somebody named this machine, as opposed to it carrying the name
+    /// the operating system gave it. Decides whether there is anything to undo.
+    var labelIsChosen: Bool?
 }
 
 /// A machine this one knows about.

@@ -63,7 +63,11 @@ struct MachinesView: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
-                    LabeledContent("Name") { Text(identity.label) }
+                    LabeledContent("Name") {
+                        MachineNameField(identity: identity) { name in
+                            await model.rename(to: name)
+                        }
+                    }
                     if let words = model.words {
                         LabeledContent("Known as") {
                             // The comparison a person actually performs. The
@@ -297,6 +301,55 @@ struct MachinesView: View {
         .font(.caption)
         .foregroundStyle(.tertiary)
         .padding(.top, Theme.Space.xs)
+    }
+}
+
+// MARK: - Naming this machine
+
+/// The machine's name, editable in place.
+///
+/// A text field rather than a sheet, because renaming a computer is not a
+/// decision with consequences: the key is the identity, so this changes only how
+/// the machine reads on somebody else's screen. Committed on return or on losing
+/// focus, and emptying it puts the computer's own name back.
+private struct MachineNameField: View {
+    var identity: MachineIdentity
+    var rename: (String) async -> Void
+
+    @State private var draft = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            TextField("Name", text: $draft, prompt: Text(identity.label))
+                .textFieldStyle(.plain)
+                .focused($editing)
+                .onSubmit { commit() }
+                .frame(maxWidth: 220)
+            if identity.labelIsChosen == true {
+                Button("Use the computer's name") {
+                    draft = ""
+                    commit()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+        }
+        .onAppear { draft = identity.label }
+        .onChange(of: identity.label) { _, new in
+            // Only while nobody is typing, so a refresh underneath somebody
+            // mid-edit does not take the characters back out of the field.
+            if !editing { draft = new }
+        }
+        .onChange(of: editing) { _, focused in
+            if !focused { commit() }
+        }
+    }
+
+    private func commit() {
+        let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard name != identity.label else { return }
+        Task { await rename(name) }
     }
 }
 

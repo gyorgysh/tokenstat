@@ -1385,6 +1385,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A machine can be called something, and the name survives the rename
+    /// round trip without touching the key.
+    ///
+    /// The key is what a peer pinned, so the property worth asserting is not
+    /// that the name changed but that renaming did not make this a different
+    /// machine to anybody who already trusts it.
+    #[test]
+    fn naming_a_machine_leaves_its_identity_alone() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-name-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        // SAFETY: single-threaded within this test, as above.
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
+
+        let before: Value =
+            serde_json::from_str(&call_sessionless("machine.identity", "{}").expect("sessionless"))
+                .expect("json");
+        let key = before["result"]["key"].as_str().expect("key").to_string();
+        assert_eq!(before["result"]["labelIsChosen"], false);
+
+        let named: Value = serde_json::from_str(
+            &call_sessionless(
+                "machine.rename",
+                &json!({"name": " the desk one "}).to_string(),
+            )
+            .expect("sessionless"),
+        )
+        .expect("json");
+        assert!(named["ok"].as_bool().unwrap_or(false), "{named}");
+        assert_eq!(named["result"]["label"], "the desk one", "trimmed");
+        assert_eq!(named["result"]["labelIsChosen"], true);
+        assert_eq!(named["result"]["key"], key, "renaming is not a new machine");
+
+        // Blank is the undo, and it puts the computer's own name back rather
+        // than leaving a machine called "".
+        let cleared: Value = serde_json::from_str(
+            &call_sessionless("machine.rename", &json!({"name": "  "}).to_string())
+                .expect("sessionless"),
+        )
+        .expect("json");
+        assert_eq!(cleared["result"]["labelIsChosen"], false, "{cleared}");
+        assert!(
+            !cleared["result"]["label"]
+                .as_str()
+                .unwrap_or_default()
+                .is_empty()
+        );
+        assert_eq!(cleared["result"]["key"], key);
+
+        unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The API sends a relative avatar path on purpose, so it never hands out
     /// a third party URL. A client that treated it as a URL would render a
     /// broken image with nothing to explain why.

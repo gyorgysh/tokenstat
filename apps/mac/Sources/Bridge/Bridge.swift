@@ -688,6 +688,12 @@ extension Bridge {
         try await background("machine.identity", as: MachineIdentity.self)
     }
 
+    /// Name this machine. An empty name puts the system's own name back, which
+    /// is why this takes a string rather than an optional: the field is the undo.
+    static func renameMachine(_ name: String) async throws -> MachineIdentity {
+        try await background("machine.rename", ["name": name], as: MachineIdentity.self)
+    }
+
     static func peers() async throws -> [Peer] {
         try await background("machine.peers", as: [Peer].self)
     }

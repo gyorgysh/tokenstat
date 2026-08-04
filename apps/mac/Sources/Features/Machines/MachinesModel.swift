@@ -76,6 +76,26 @@ final class MachinesModel {
         }
     }
 
+    /// Call this machine something, or clear the name to get the computer's own
+    /// name back.
+    ///
+    /// The name reaches a paired machine and nowhere else. It is not synced and
+    /// it is not part of the identity: the key is what is pinned, so renaming a
+    /// machine never changes who it is to a peer that already trusts it.
+    func rename(to name: String) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != identity?.label else { return }
+        do {
+            identity = try await Bridge.renameMachine(trimmed)
+            errorMessage = nil
+            showNotice(trimmed.isEmpty
+                ? "Back to the name this computer already had."
+                : "Other machines will see this one as \(identity?.label ?? trimmed).")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func pair(_ daemon: DiscoveredDaemon) async {
         guard let address = daemon.address else {
             errorMessage = "Still resolving \(daemon.label)'s address. Try again in a moment."

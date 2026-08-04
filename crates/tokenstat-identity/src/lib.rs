@@ -228,6 +228,16 @@ pub fn public_key_from_hex(text: &str) -> Result<PublicKey, IdentityError> {
 /// states that project paths, sessions, prompts and hostnames do not enter that
 /// path. This travels only to a machine the user explicitly paired with.
 pub fn machine_label() -> String {
+    // What the user called it, if they called it anything. A person naming
+    // their laptop "laptop" is doing the one thing that makes a peer list
+    // readable, and their answer outranks whatever the operating system thinks
+    // the computer is called.
+    if let Ok(chosen) = read_chosen_label()
+        && let Some(name) = chosen
+    {
+        return name;
+    }
+
     #[cfg(target_os = "macos")]
     {
         // The name in Sharing preferences, which is what the user recognises.
@@ -249,6 +259,60 @@ pub fn machine_label() -> String {
         .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| "this machine".into())
+}
+
+/// Name this machine, or clear the name and go back to the system one.
+///
+/// A plain file beside the key rather than a field in the config, because the
+/// Machines screen is sessionless on purpose: it has to answer "who am I" on a
+/// machine whose archive will not open, and a name kept anywhere the archive
+/// owns would disappear exactly then.
+///
+/// Blank clears it. That is the whole of the undo, and it means a person who
+/// empties the field gets their computer's real name back rather than a machine
+/// called "".
+pub fn set_machine_label(name: &str) -> Result<(), IdentityError> {
+    let path = label_path()?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(IdentityError::Io {
+                path: path.display().to_string(),
+                source: e,
+            }),
+        };
+    }
+    std::fs::write(&path, trimmed).map_err(|e| IdentityError::Io {
+        path: path.display().to_string(),
+        source: e,
+    })
+}
+
+/// Whether the name on screen is one somebody chose, which is what lets the
+/// field offer to clear itself only when there is something to clear.
+pub fn machine_label_is_chosen() -> bool {
+    matches!(read_chosen_label(), Ok(Some(_)))
+}
+
+fn read_chosen_label() -> Result<Option<String>, IdentityError> {
+    let path = label_path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => {
+            let name = text.trim().to_string();
+            Ok((!name.is_empty()).then_some(name))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(IdentityError::Io {
+            path: path.display().to_string(),
+            source: e,
+        }),
+    }
+}
+
+fn label_path() -> Result<PathBuf, IdentityError> {
+    Ok(identity_dir()?.join("machine.name"))
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -392,6 +456,30 @@ mod tests {
             a.public_key(),
             MachineIdentity::from_secret([4u8; 32]).public_key()
         );
+    }
+
+    /// A chosen name outranks the system one, and clearing it gives the system
+    /// name back rather than leaving a machine called "".
+    #[test]
+    fn a_chosen_name_wins_and_an_empty_one_undoes_it() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-name-{}", std::process::id()));
+        // Safety: single-threaded test, and the variable is read only through
+        // `identity_dir`, which is called below on this thread.
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
+
+        assert!(!machine_label_is_chosen());
+        let system = machine_label();
+
+        set_machine_label("  the desk one  ").expect("write the name");
+        assert_eq!(machine_label(), "the desk one", "trimmed and preferred");
+        assert!(machine_label_is_chosen());
+
+        set_machine_label("   ").expect("clear the name");
+        assert!(!machine_label_is_chosen(), "blank is a reset, not a name");
+        assert_eq!(machine_label(), system);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
     }
 
     #[test]

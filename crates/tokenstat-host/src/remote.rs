@@ -100,7 +100,7 @@ fn save_settings(settings: &RemoteSettings) -> Result<(), String> {
 struct Listening {
     address: String,
     stop: Arc<AtomicBool>,
-    _advertisement: bonjour::Advertisement,
+    advertisement: bonjour::Advertisement,
 }
 
 #[cfg(target_os = "macos")]
@@ -452,9 +452,44 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
     *guard = Some(Listening {
         address: address.clone(),
         stop,
-        _advertisement: advertisement,
+        advertisement,
     });
     Ok(address)
+}
+
+/// Advertise this machine again, under whatever it is now called.
+///
+/// The name goes into the Bonjour record at the moment serving starts, so a
+/// machine renamed while it is serving would keep introducing itself as the old
+/// one on every nearby screen. Only the advertisement is replaced: the listener,
+/// the port and the key are untouched, so nothing that is connected notices.
+///
+/// A no-op when not serving, because there is then nothing advertising a stale
+/// name.
+pub(crate) fn readvertise() -> Result<(), String> {
+    let mut guard = listening().lock().map_err(|e| e.to_string())?;
+    let Some(current) = guard.as_mut() else {
+        return Ok(());
+    };
+    let Some(port) = current
+        .address
+        .rsplit(':')
+        .next()
+        .and_then(|value| value.parse::<u16>().ok())
+    else {
+        return Ok(());
+    };
+    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    let fresh = bonjour::advertise(
+        port,
+        &identity.public_key_hex(),
+        &identity.fingerprint(),
+        &tokenstat_identity::key_words(&identity.public_key()),
+        &tokenstat_identity::machine_label(),
+    )
+    .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
+    current.advertisement = fresh;
+    Ok(())
 }
 
 /// Stop serving. The accept loop is blocked in `accept`, so it is woken by a
