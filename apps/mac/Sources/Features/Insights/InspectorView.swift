@@ -112,6 +112,29 @@ struct InspectorView: View {
                 Stat(label: "Events", value: formatTokens(row.events), size: 15)
             }
 
+            // Which agents produced this project's usage. Only meaningful on
+            // the Projects tab: on any other tab the key is not a project.
+            if model.tab == .projects {
+                let harnesses = model.harnesses(inProject: row.key)
+                if !harnesses.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text("Harnesses here")
+                            .font(.caption.weight(.medium))
+                        ForEach(harnesses) { h in
+                            HStack(spacing: Theme.Space.s) {
+                                HarnessMark(id: h.split, size: 14)
+                                Text(harnessName(h.split))
+                                    .font(.caption)
+                                Spacer()
+                                Text(formatTokens(h.counters.total))
+                                    .font(Theme.numeric(10))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+
             if !row.unpricedModels.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text("Unpriced models")

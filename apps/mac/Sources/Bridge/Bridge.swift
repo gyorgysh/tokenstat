@@ -187,3 +187,29 @@ extension Bridge {
         )
     }
 }
+
+// MARK: - Workspaces
+
+extension Bridge {
+    /// Registered folders with their current git state. Reads git per folder,
+    /// so treat it as a refresh rather than something to call on every keypress.
+    static func workspaces() async throws -> [WorkspaceFolder] {
+        try await background("workspace.list", as: [WorkspaceFolder].self)
+    }
+
+    static func addWorkspace(path: String) async throws -> WorkspaceFolder {
+        try await background("workspace.add", ["path": path], as: WorkspaceFolder.self)
+    }
+
+    /// Forgets the entry. Never deletes the folder.
+    static func removeWorkspace(id: String) async throws {
+        _ = try await background("workspace.remove", ["id": id], as: Removed.self)
+    }
+
+    static func renameWorkspace(id: String, name: String) async throws {
+        _ = try await background("workspace.rename", ["id": id, "name": name], as: Renamed.self)
+    }
+}
+
+private struct Removed: Codable, Sendable { let removed: Bool }
+private struct Renamed: Codable, Sendable { let renamed: Bool }

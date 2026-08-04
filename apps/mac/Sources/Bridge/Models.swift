@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
+import SwiftUI
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
@@ -333,8 +334,12 @@ struct SplitBucket: Codable, Sendable, Hashable, Identifiable {
     var id: String { "\(key)\u{1}\(split)" }
 }
 
-/// A project folder with the harnesses that ran in it.
-struct Workspace: Identifiable, Hashable {
+/// An archive project with the harnesses that ran in it.
+///
+/// Not a workspace. A workspace is a folder the user registered; this is a
+/// label the archive recovered from a slug, and the two are deliberately
+/// separate concepts with separate types so they cannot be confused.
+struct ProjectHarnesses: Identifiable, Hashable {
     var path: String
     var harnesses: [SplitBucket]
     var tokens: UInt64
@@ -388,4 +393,91 @@ func harnessBrandAsset(_ id: String) -> String? {
         "antigravity_ide", "cursor", "gemini",
     ]
     return known.contains(id) ? "brand_\(id)" : nil
+}
+
+// MARK: - Workspaces
+
+/// What happened to one file, as git reports it.
+enum ChangeKind: String, Codable, Sendable {
+    case added, modified, deleted, renamed, untracked, conflicted
+
+    var symbol: String {
+        switch self {
+        case .added: return "plus.square"
+        case .modified: return "square.righthalf.filled"
+        case .deleted: return "minus.square"
+        case .renamed: return "arrow.right.square"
+        case .untracked: return "questionmark.square"
+        case .conflicted: return "exclamationmark.triangle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .added: return .green
+        case .deleted: return .red
+        case .conflicted: return .orange
+        case .untracked: return .secondary
+        case .modified, .renamed: return Theme.secondary
+        }
+    }
+}
+
+/// One changed file.
+struct FileChange: Codable, Sendable, Hashable, Identifiable {
+    var path: String
+    var kind: ChangeKind
+    /// Nil when unknown rather than zero: an untracked file has nothing to diff
+    /// against, and a changed binary is not an unchanged one.
+    var added: UInt64?
+    var removed: UInt64?
+
+    var id: String { path }
+
+    /// Directory the file sits in, for grouping. Empty at the repo root.
+    var directory: String {
+        let parts = path.split(separator: "/")
+        return parts.count > 1 ? parts.dropLast().joined(separator: "/") : ""
+    }
+
+    var fileName: String {
+        String(path.split(separator: "/").last ?? "")
+    }
+}
+
+/// Git state of a workspace folder.
+struct GitStatus: Codable, Sendable, Hashable {
+    var isRepo: Bool
+    var branch: String?
+    var upstream: String?
+    var ahead: UInt32
+    var behind: UInt32
+    var files: [FileChange]
+    var added: UInt64
+    var removed: UInt64
+    /// True when some file's counts were unknown, so the totals are a floor.
+    var partial: Bool
+}
+
+/// A folder the user registered.
+struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var path: String
+    var name: String
+    var addedAtMs: Int64
+    /// False when the folder is gone. Kept and marked rather than dropped.
+    var exists: Bool
+    /// Absent when the folder is missing, so "we did not look" cannot be
+    /// mistaken for "no changes".
+    var git: GitStatus?
+
+    var changeCount: Int { git?.files.count ?? 0 }
+
+    /// `+120 −8`, or nil when there is nothing to say.
+    var diffStat: String? {
+        guard let git, git.isRepo, !git.files.isEmpty else { return nil }
+        let plus = "+\(git.added)"
+        let minus = git.removed > 0 ? " −\(git.removed)" : ""
+        return git.partial ? "\(plus)\(minus)+" : "\(plus)\(minus)"
+    }
 }

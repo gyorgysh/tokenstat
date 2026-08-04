@@ -52,38 +52,37 @@ struct RootView: View {
     @State private var destination: Destination = .insights
     @State private var model = InsightsModel()
     @State private var account = AccountModel()
+    @State private var workspaces = WorkspacesModel()
     @State private var showInspector = true
-    /// Projects the user has collapsed. Stored as the exception rather than
-    /// the rule, so a newly discovered project arrives expanded.
-    @State private var collapsed: Set<String> = []
-
-    /// The archive holds every project ever touched, which on a working
-    /// machine is dozens. The sidebar shows the busiest and says how many it
-    /// left out rather than silently truncating.
-    private let workspaceLimit = 12
-
     var body: some View {
         NavigationSplitView {
             sidebar
         } detail: {
             detail
                 .inspector(isPresented: inspectorBinding) {
-                    InspectorView(model: model)
-                        .inspectorColumnWidth(min: 240, ideal: 280, max: 380)
+                    Group {
+                        switch destination {
+                        case .workspaces:
+                            WorkspaceChangesView(folder: workspaces.selected)
+                        default:
+                            InspectorView(model: model)
+                        }
+                    }
+                    .inspectorColumnWidth(min: 240, ideal: 300, max: 420)
                 }
         }
         .task { await model.load() }
         // Loaded up front, not on first visit, so the sidebar can show the
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
+        .task { await workspaces.load() }
     }
 
-    /// The inspector describes a report, so it only exists on Insights. Bound
-    /// through a computed binding rather than hidden, so toggling it on one
-    /// screen does not silently change another.
+    /// Insights and Workspaces each have something to put in the right pane.
+    /// The rest do not, so it collapses rather than showing an empty column.
     private var inspectorBinding: Binding<Bool> {
         Binding(
-            get: { showInspector && destination == .insights },
+            get: { showInspector && (destination == .insights || destination == .workspaces) },
             set: { showInspector = $0 }
         )
     }
@@ -106,39 +105,58 @@ struct RootView: View {
                     ) { destination = item }
                 }
 
-                // Real folders from the archive, each with the harnesses that
-                // ran in it. Today the counts come from session history, which
-                // is what the archive holds. When the terminal lands these same
-                // rows gain live sessions, and clicking one opens it rather
-                // than filtering a report.
-                SectionLabel(text: "Workspaces", count: model.workspaces.count)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.l)
-                    .padding(.bottom, Theme.Space.xs)
+                // Folders the user chose. Nothing to do with the archive:
+                // its `project` is a lossy label recovered from a slug and
+                // cannot name a directory, and a folder an agent touched once
+                // is not somewhere anyone wants a terminal.
+                HStack {
+                    SectionLabel(text: "Workspaces", count: workspaces.folders.count)
+                    Spacer()
+                    #if os(macOS)
+                    Button {
+                        Task { await workspaces.addFolder() }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Add a project folder")
+                    #endif
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.top, Theme.Space.l)
+                .padding(.bottom, Theme.Space.xs)
 
-                if model.workspaces.isEmpty {
-                    Text("Run a scan to see your projects.")
+                if workspaces.folders.isEmpty {
+                    Text("No folders yet. Use + to add one.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, Theme.Space.m)
                         .padding(.vertical, Theme.Space.xs)
                 } else {
-                    ForEach(model.workspaces.prefix(workspaceLimit)) { workspace in
-                        WorkspaceRow(
-                            workspace: workspace,
-                            isExpanded: expanded.contains(workspace.id),
-                            selectedHarness: selectedHarness(in: workspace),
-                            onToggle: { toggle(workspace) },
-                            onSelectProject: { select(project: workspace) },
-                            onSelectHarness: { select(harness: $0) }
-                        )
-                    }
-                    if model.workspaces.count > workspaceLimit {
-                        Text("and \(model.workspaces.count - workspaceLimit) more")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, Theme.Space.m)
-                            .padding(.vertical, Theme.Space.xs)
+                    ForEach(workspaces.folders) { folder in
+                        SidebarRow(
+                            label: folder.name,
+                            symbol: folder.exists ? "folder" : "questionmark.folder",
+                            trailing: folder.diffStat,
+                            isSelected: destination == .workspaces
+                                && workspaces.selectedID == folder.id
+                        ) {
+                            destination = .workspaces
+                            workspaces.selectedID = folder.id
+                        }
+                        .help(folder.path)
+                        .contextMenu {
+                            #if os(macOS)
+                            Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
+                            #endif
+                            Divider()
+                            // "Remove" and not "Delete": the folder stays.
+                            Button("Remove from tokenstat") {
+                                Task { await workspaces.remove(folder) }
+                            }
+                        }
                     }
                 }
             }
@@ -147,37 +165,6 @@ struct RootView: View {
         .background(Theme.sidebar)
         .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 300)
         .safeAreaInset(edge: .bottom) { accountFooter }
-    }
-
-    /// Expanded by default, so the harnesses in a project are visible without
-    /// hunting. Collapsing is remembered per project instead.
-    private var expanded: Set<String> {
-        Set(model.workspaces.map(\.id)).subtracting(collapsed)
-    }
-
-    private func toggle(_ workspace: Workspace) {
-        if collapsed.contains(workspace.id) {
-            collapsed.remove(workspace.id)
-        } else {
-            collapsed.insert(workspace.id)
-        }
-    }
-
-    private func selectedHarness(in workspace: Workspace) -> String? {
-        guard destination == .insights, model.tab == .harnesses else { return nil }
-        return model.selected?.key
-    }
-
-    private func select(project workspace: Workspace) {
-        destination = .insights
-        model.tab = .projects
-        model.selected = model.byProject.first { $0.key == workspace.path }
-    }
-
-    private func select(harness row: SplitBucket) {
-        destination = .insights
-        model.tab = .harnesses
-        model.selected = model.bySource.first { $0.key == row.split }
     }
 
     /// Who is signed in, pinned to the bottom of the sidebar with a menu.
@@ -281,16 +268,7 @@ struct RootView: View {
                     }
                 }
         case .workspaces:
-            NotBuiltYet(
-                title: "Workspaces",
-                symbol: "square.stack.3d.up",
-                summary: """
-                A terminal per project. Past sessions and running ones, with \
-                Claude Code, Codex, OpenCode and the rest launched in place, and \
-                the file and git changes for that folder in this pane.
-                """,
-                milestone: "Milestones 4 and 5 in docs/desktop-app.md"
-            )
+            WorkspacesView(model: workspaces)
         case .automations:
             NotBuiltYet(
                 title: "Automations",
@@ -314,87 +292,6 @@ struct RootView: View {
             )
         case .account:
             AccountView(model: account)
-        }
-    }
-}
-
-/// A project folder and the harnesses that ran in it.
-private struct WorkspaceRow: View {
-    var workspace: Workspace
-    var isExpanded: Bool
-    var selectedHarness: String?
-    var onToggle: () -> Void
-    var onSelectProject: () -> Void
-    var onSelectHarness: (SplitBucket) -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: Theme.Space.xs) {
-                Button(action: onToggle) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 12)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                // Disabled rather than hidden, so rows stay aligned whether or
-                // not a project has harness attribution.
-                .disabled(workspace.harnesses.isEmpty)
-                .opacity(workspace.harnesses.isEmpty ? 0.25 : 1)
-
-                Button(action: onSelectProject) {
-                    HStack(spacing: Theme.Space.s) {
-                        Image(systemName: "folder")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                        Text(workspace.name)
-                            .font(.system(size: 12))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: Theme.Space.xs)
-                        Text(formatTokens(workspace.tokens))
-                            .font(Theme.numeric(10))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                // The leaf name is what people call a project, but two
-                // checkouts of one repository share it, so the full path is a
-                // hover away.
-                .help(workspace.path)
-            }
-            .padding(.leading, Theme.Space.s)
-            .padding(.trailing, Theme.Space.m)
-            .padding(.vertical, 4)
-
-            if isExpanded {
-                ForEach(workspace.harnesses) { harness in
-                    Button {
-                        onSelectHarness(harness)
-                    } label: {
-                        HStack(spacing: Theme.Space.s) {
-                            HarnessMark(id: harness.split, size: 14)
-                            Text(harnessName(harness.split))
-                                .font(.system(size: 11))
-                                .foregroundStyle(
-                                    selectedHarness == harness.split ? Color.primary : .secondary
-                                )
-                                .lineLimit(1)
-                            Spacer(minLength: Theme.Space.xs)
-                            Text(formatTokens(harness.counters.total))
-                                .font(Theme.numeric(10))
-                                .foregroundStyle(.quaternary)
-                        }
-                        .padding(.leading, 30)
-                        .padding(.trailing, Theme.Space.m)
-                        .padding(.vertical, 3)
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
         }
     }
 }

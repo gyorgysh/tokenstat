@@ -69,15 +69,11 @@ final class InsightsModel {
     var bySession: [Bucket] = []
     var activeBlock: Block?
 
-    /// Project folders with the harnesses that ran in each.
+    /// Which harnesses ran in each archive project.
     ///
-    /// This is what the sidebar tree is. The folders are real and so is the
-    /// agent attribution, which is why it earns its place before Workspaces
-    /// exists: these are session histories, and the same rows gain live
-    /// sessions once the terminal lands.
-    ///
-    /// Built from one two-level query rather than a query per project.
-    var workspaces: [Workspace] = []
+    /// Feeds the inspector when a project row is selected. Built from one
+    /// two-level query rather than a query per project.
+    var projectHarnesses: [ProjectHarnesses] = []
 
     var tab: Tab = .overview {
         didSet { if tab != oldValue { selected = nil } }
@@ -169,7 +165,7 @@ final class InsightsModel {
             self.bySource = try await bySource
             self.bySession = try await bySession
             self.activeBlock = try await blocks.first(where: \.active)
-            self.workspaces = Self.buildWorkspaces(
+            self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,
                 split: try await split
             )
@@ -198,19 +194,24 @@ final class InsightsModel {
         }
     }
 
+    /// Harnesses that ran in the given project, largest first.
+    func harnesses(inProject key: String) -> [SplitBucket] {
+        projectHarnesses.first { $0.path == key }?.harnesses ?? []
+    }
+
     /// Attach each project's harnesses to it.
     ///
     /// Order comes from `projects`, which the archive already returns busiest
     /// first, rather than from re-sorting the split. A project with no split
     /// rows still appears: it has usage, so hiding it would be a lie about the
     /// archive, even if the harness attribution is missing.
-    private static func buildWorkspaces(
+    private static func buildProjectHarnesses(
         projects: [Bucket],
         split: [SplitBucket]
-    ) -> [Workspace] {
+    ) -> [ProjectHarnesses] {
         let byPath = Dictionary(grouping: split, by: \.key)
         return projects.map { project in
-            Workspace(
+            ProjectHarnesses(
                 path: project.key,
                 harnesses: byPath[project.key] ?? [],
                 tokens: project.counters.total
