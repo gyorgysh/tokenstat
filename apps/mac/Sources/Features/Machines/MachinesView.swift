@@ -52,7 +52,7 @@ struct MachinesView: View {
     private var thisMachine: some View {
         Card(
             title: "This machine",
-            subtitle: "Its fingerprint is what the other end checks it against."
+            subtitle: "How other machines reach it, and what they check against."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
@@ -62,17 +62,37 @@ struct MachinesView: View {
                             .font(Theme.mono(12))
                             .textSelection(.enabled)
                     }
-                    LabeledContent("Key") {
-                        Text(identity.key)
-                            .font(Theme.mono(10))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
+                    if let link = model.connectLink {
+                        LabeledContent("Connect link") {
+                            HStack(spacing: Theme.Space.xs) {
+                                Text(link)
+                                    .font(Theme.mono(10))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(link, forType: .string)
+                                } label: {
+                                    Image(systemName: "doc.on.doc")
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .help("Copy the link to paste on another machine")
+                            }
+                        }
                     }
                 }
                 Divider()
                 serving
+                Text("""
+                Machines on the same network appear under Found nearby, so there \
+                is nothing to type. Anywhere else, copy this link and paste it \
+                into the other machine's Connect box.
+                """)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
             }
         }
     }
@@ -138,14 +158,14 @@ struct MachinesView: View {
                                 .foregroundStyle(.tertiary)
                         }
                         Spacer()
-                        Button("Pair") { Task { await model.pair(daemon) } }
+                        Button("Connect") { Task { await model.pair(daemon) } }
                             .buttonStyle(.borderedProminent)
                             .disabled(daemon.address == nil)
                     }
                     .padding(Theme.Space.s)
                     .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
                 }
-                Text("Compare the fingerprint with the other machine before pairing.")
+                Text("The fingerprint is compared with the one shown on that machine before it can reach this one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -295,64 +315,72 @@ private struct TrustBadge: View {
 
 // MARK: - Pairing by hand
 
-/// Pair with a machine by pasting its key.
+/// Connect to a machine by pasting its link.
 ///
-/// This path works with no account and no network service at all, which is why
-/// it is on the screen rather than behind an "advanced" disclosure: it is the
+/// One field accepts the whole thing, `key@host:port` or just the key. This
+/// path works with no account and no network service at all, which is why it
+/// is on the screen rather than behind an "advanced" disclosure: it is the
 /// thing that makes the privacy claim checkable instead of promised.
 private struct PairingForm: View {
     var pair: (String, String, String) async -> Void
 
-    @State private var key = ""
+    @State private var link = ""
     @State private var label = ""
-    @State private var address = ""
     @State private var working = false
 
     var body: some View {
         Card(
             title: "Add a machine",
-            subtitle: "Paste the key from that machine's own Machines screen."
+            subtitle: "Paste a connect link, or the key alone, from its Machines screen."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Key", text: $key, prompt: Text("64 characters of hex"))
-                    .font(Theme.mono(11))
-                TextField("Name", text: $label, prompt: Text("What you call that machine"))
                 TextField(
-                    "Address",
-                    text: $address,
-                    prompt: Text("host or address, and port, as in 192.168.1.20:7878")
+                    "Connect link or key",
+                    text: $link,
+                    prompt: Text("key@host:port, or just the key")
                 )
+                .font(Theme.mono(11))
+                TextField("Name", text: $label, prompt: Text("What you call that machine"))
 
                 HStack {
                     Spacer()
                     Button {
                         working = true
                         Task {
+                            let (key, address) = splitLink(link)
                             await pair(key, label, address)
                             working = false
-                            key = ""
+                            link = ""
                             label = ""
-                            address = ""
                         }
                     } label: {
-                        Label("Pair", systemImage: "link")
+                        Label("Connect", systemImage: "link")
                     }
                     .buttonStyle(.borderedProminent)
-                    // A key is not optional; a name and an address are, because
-                    // a machine that only ever connects *to* this one needs
-                    // neither.
-                    .disabled(working || key.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
 
                 Text("""
-                Pairing here approves that machine to reach this one. The other \
-                machine has to approve this one too, and its own screen will \
-                show this machine waiting.
+                Connecting here approves that machine to reach this one. The \
+                other machine has to approve this one too, and its own screen \
+                will show this machine waiting. A key is a 64 character hex \
+                string; the address after the @ is where to dial it.
                 """)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
             .textFieldStyle(.roundedBorder)
         }
+    }
+
+    /// `key@host:port` splits at the last @; a bare key has no address, which
+    /// is right for a machine that only ever connects *to* this one.
+    private func splitLink(_ raw: String) -> (String, String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let at = trimmed.lastIndex(of: "@") else { return (trimmed, "") }
+        return (
+            String(trimmed[..<at]),
+            String(trimmed[trimmed.index(after: at)...])
+        )
     }
 }

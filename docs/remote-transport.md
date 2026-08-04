@@ -165,6 +165,36 @@ under deadline:
 - The privacy wording gains a sentence about metadata on the day it ships, and
   not later.
 
+## Making it not require typing addresses
+
+Pairing by `host:port` is the one part of this milestone that a person who is
+not us will not do. The default path is therefore two things that need nothing
+typed, with the link as the fallback and the relay as the premium last resort.
+
+1. **Bonjour on the LAN is the no-brainer default.** A machine that advertises
+   shows up in the other's Machines screen under Found nearby, with its key and
+   fingerprint already in hand from the TXT record. Connect is one click. This
+   covers the case the milestone exists for: a Mac and an iPad on the same
+   Wi-Fi, and two Macs in one house.
+2. **A connect link is the fallback for machines not on the same LAN.** Each
+   machine shows a single string, `key@host:port` (the key alone when it does
+   not serve), with a Copy button. Pasting it into the other machine's Connect
+   box is the whole exchange: the key pins the identity and the address is a
+   hint for dialling, nothing more. No account and no network service is
+   involved, which is what makes the privacy claim checkable.
+3. **The account is a key directory, and one day a relay.** The account's
+   machine record should carry the machine's public key and last-known address.
+   A machine signed in to an account can then offer "connect to my other
+   machines" with no paste at all: same-account machines trust each other after
+   one fingerprint check, and the directory supplies the address. For machines
+   behind different networks, the relay (constrained above) is the premium
+   path, offered only to accounts that have it and only when a direct connect
+   actually fails. The account never holds private keys and never terminates
+   the stream.
+
+The order in the UI reflects this: discovered machines first, then this
+machine's link, with the raw key entry collapsed behind "paste a link instead".
+
 ## Where the code goes
 
 ```

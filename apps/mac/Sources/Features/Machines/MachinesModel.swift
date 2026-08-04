@@ -40,6 +40,17 @@ final class MachinesModel {
         peers.filter { $0.trust == .approved && $0.address?.isEmpty == false }
     }
 
+    /// The string to paste on another machine to connect. Carries the key
+    /// always and the address when this machine is listening, so the other
+    /// side can dial without typing a host and port by hand.
+    var connectLink: String? {
+        guard let identity else { return nil }
+        if let address = status?.address, status?.listening == true {
+            return "\(identity.key)@\(address)"
+        }
+        return identity.key
+    }
+
     func load() async {
         discovery.changed = { [weak self] daemons in
             self?.discovered = daemons
