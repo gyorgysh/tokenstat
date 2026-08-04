@@ -49,6 +49,8 @@ pub struct UpdateCheck {
     /// API asset urls, used instead of the browser ones when a token is present.
     pub asset_api_url: Option<String>,
     pub sums_api_url: Option<String>,
+    /// The disk image's file name, which is also its key in `SHA256SUMS`.
+    pub app_dmg_name: Option<String>,
     /// The macOS app's disk image, when the release carries one.
     ///
     /// Separate from `asset_url`, which is the command line tool for the
@@ -203,6 +205,7 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
             sums_url: None,
             asset_api_url: None,
             sums_api_url: None,
+            app_dmg_name: None,
             app_dmg_url: None,
         });
     }
@@ -228,6 +231,9 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
         .assets
         .iter()
         .find(|a| a.name == "SHA256SUMS" || a.name.ends_with("SHA256SUMS"));
+    // Matched by extension rather than an exact name, so the image can be
+    // renamed without an installed build losing the ability to find a new one.
+    let image = release.assets.iter().find(|a| a.name.ends_with(".dmg"));
     Ok(UpdateCheck {
         current,
         latest,
@@ -245,12 +251,57 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
         // Matched by extension rather than by an exact file name, so the
         // naming of the image can change without an old build losing the
         // ability to point at a new one.
-        app_dmg_url: release
-            .assets
-            .iter()
-            .find(|a| a.name.ends_with(".dmg"))
-            .map(|a| a.browser_download_url.clone()),
+        app_dmg_name: image.map(|a| a.name.clone()),
+        app_dmg_url: image.map(|a| a.browser_download_url.clone()),
     })
+}
+
+/// Download the release's disk image and prove it is the published one.
+///
+/// Returns the path it was written to. Deliberately stops there: this crate
+/// downloads and verifies, and the app mounts, checks the signature and
+/// installs. Splitting it that way keeps the one step that needs Apple's own
+/// tools in the process that has them, and keeps this function testable as what
+/// it is, a fetch with a checksum on it.
+///
+/// The checksum proves the bytes are the ones the release published. It does
+/// not prove the release is ours, which is what the app's `codesign` and
+/// `spctl` checks are for. Neither check replaces the other.
+pub fn download_app_image() -> Result<PathBuf, UpdateError> {
+    let check = check_latest()?;
+    if !check.newer {
+        return Err(UpdateError::Message(format!(
+            "already up to date ({})",
+            check.current
+        )));
+    }
+    let url = check.app_dmg_url.as_deref().ok_or_else(|| {
+        UpdateError::Message(format!(
+            "release v{} has no macOS app download",
+            check.latest
+        ))
+    })?;
+    let name = check.app_dmg_name.as_deref().unwrap_or("tokenstat.dmg");
+    let sums_url = check
+        .sums_url
+        .as_deref()
+        .ok_or_else(|| UpdateError::Message("release is missing SHA256SUMS".into()))?;
+
+    let client = client()?;
+    let bytes = download_asset(&client, url, None)?;
+    let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
+    let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
+        .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
+    let actual = hex_sha256(&bytes);
+    if actual != expected {
+        return Err(UpdateError::Message(format!(
+            "checksum mismatch for {name}: expected {expected}, got {actual}"
+        )));
+    }
+
+    let path = tempfile_dir()?.join(name);
+    fs::write(&path, &bytes)?;
+    Ok(path)
 }
 
 /// A GitHub token from the environment, if one is set and non-empty.

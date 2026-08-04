@@ -806,18 +806,25 @@ mod tests {
     #[test]
     fn the_preferred_port_is_still_preferred_when_it_is_free() {
         let identity = MachineIdentity::from_secret([9u8; 32]);
-        // Take a port, learn its number, release it: a number known to be free.
-        let free = {
-            let probe = std::net::TcpListener::bind("0.0.0.0:0").expect("a probe");
-            probe.local_addr().expect("its address").port()
-        };
-        let server = bind_any(free, &identity).expect("bound");
-        assert!(
-            server
-                .local_address()
-                .expect("address")
-                .ends_with(&format!(":{free}"))
-        );
+        // A port is only known to be free for as long as nobody else takes it,
+        // and the other tests in this binary are asking the operating system
+        // for free ports at the same time. Losing that race says nothing about
+        // `bind_any`, so it is retried rather than reported as a failure.
+        for attempt in 1..=8 {
+            let free = {
+                let probe = std::net::TcpListener::bind("0.0.0.0:0").expect("a probe");
+                probe.local_addr().expect("its address").port()
+            };
+            let server = bind_any(free, &identity).expect("bound");
+            let address = server.local_address().expect("address");
+            if address.ends_with(&format!(":{free}")) {
+                return;
+            }
+            assert!(
+                attempt < 8,
+                "never got the preferred port, last was {address}"
+            );
+        }
     }
 
     #[test]

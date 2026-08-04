@@ -291,6 +291,11 @@ struct AppUpdate: Codable, Sendable, Hashable {
     var isAvailable: Bool { newer && latest != current }
 }
 
+/// Something the daemon fetched and checked, waiting on disk.
+struct DownloadedFile: Codable, Sendable {
+    var path: String
+}
+
 /// A list-rate value, carrying the two qualifiers it must never be shown
 /// without.
 struct Money: Sendable, Hashable {

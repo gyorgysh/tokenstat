@@ -233,6 +233,13 @@ enum Bridge {
 // MARK: - Account
 
 extension Bridge {
+    /// Fetch the release's disk image and verify it against the release's own
+    /// checksums. The daemon stops at a file on disk; `AppInstaller` decides
+    /// whether to trust it.
+    static func appUpdateDownload() async throws -> DownloadedFile {
+        try await background("app.updateDownload", as: DownloadedFile.self)
+    }
+
     static func appUpdateCheck() async throws -> AppUpdate {
         try await background("app.updateCheck", as: AppUpdate.self)
     }

@@ -1094,6 +1094,16 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             })
             .map_err(|e| e.to_string()),
 
+        // Fetch the disk image and prove it is the one the release published.
+        //
+        // Stops at a verified file on disk. Mounting it, checking who signed it
+        // and replacing the application are the app's, because those need
+        // Apple's own tools and knowledge of where the running bundle lives,
+        // neither of which a daemon should be guessing at.
+        "app.updateDownload" => tokenstat_sync::download_app_image()
+            .map(|path| json!({"path": path.display().to_string()}))
+            .map_err(|e| e.to_string()),
+
         "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
             .map_err(|e: serde_json::Error| e.to_string()),
 

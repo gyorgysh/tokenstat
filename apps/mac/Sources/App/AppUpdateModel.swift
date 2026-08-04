@@ -5,23 +5,93 @@
 import Foundation
 import Observation
 
-/// Read-only release availability for the app chrome.
+/// Finding a new version, fetching it, and putting it in place.
+///
+/// The whole thing happens without being asked, and then stops. Downloading and
+/// verifying is work nobody wants to watch, so it runs quietly. Restarting is
+/// not: an application that relaunches itself under somebody who is halfway
+/// through a sentence has taken a decision that was not its to take. So the
+/// last step is a button, and the sidebar carries it until it is pressed.
 @MainActor
 @Observable
 final class AppUpdateModel {
+    /// Where an update has got to. The interface shows something only in the
+    /// last two, because the ones before it are not the user's business.
+    enum Stage: Equatable {
+        case idle
+        case checking
+        /// Found, and being fetched and checked.
+        case installing
+        /// In place. Restarting is all that is left.
+        case readyToRelaunch
+        /// It could not be installed, so the download page is the fallback.
+        case failed(String)
+    }
+
     private(set) var release: AppUpdate?
-    private(set) var isChecking = false
-    private(set) var lastError: String?
+    private(set) var stage: Stage = .idle
 
     var isAvailable: Bool { release?.isAvailable == true }
     var latest: String { release?.latest ?? "" }
     var current: String { release?.current ?? "" }
     var htmlURL: String { release?.htmlURL ?? "" }
-    /// The disk image if this release has one, the release page otherwise.
     var downloadURL: URL? { release?.downloadURL }
-    /// Whether the download is the app itself, which decides whether the sheet
-    /// can say "drag it into Applications" or has to send somebody to a page.
-    var hasDiskImage: Bool { release?.dmgURL?.isEmpty == false }
+
+    /// The sidebar's card. Present only when there is something for a person to
+    /// do, which is either restart or go and fetch it by hand.
+    var isReady: Bool { stage == .readyToRelaunch }
+
+    var failure: String? {
+        if case .failed(let why) = stage { return why }
+        return nil
+    }
+
+    /// Check, and install what is found.
+    ///
+    /// Failure is quiet in the sense that it never interrupts, but it is not
+    /// swallowed: the card offers the manual download instead, so an update
+    /// that cannot be automated still reaches the user.
+    func checkAndInstall() async {
+        guard stage == .idle || failure != nil else { return }
+        stage = .checking
+        do {
+            let found = try await Bridge.appUpdateCheck()
+            release = found
+            guard found.isAvailable else {
+                stage = .idle
+                return
+            }
+        } catch {
+            // An update check is not worth a banner. No network is the common
+            // reason and the user already knows.
+            stage = .idle
+            return
+        }
+
+        #if os(macOS)
+        stage = .installing
+        do {
+            let downloaded = try await Bridge.appUpdateDownload()
+            // Off the main actor: mounting an image and copying a bundle would
+            // otherwise freeze the window for the whole of it.
+            try await Task.detached(priority: .utility) {
+                try AppInstaller.install(imagePath: downloaded.path)
+            }.value
+            stage = .readyToRelaunch
+        } catch {
+            stage = .failed(error.localizedDescription)
+        }
+        #else
+        // Nothing to install into on iOS. The card offers the release page.
+        stage = .failed("Updates on this platform come from the App Store.")
+        #endif
+    }
+
+    func relaunch() {
+        #if os(macOS)
+        AppInstaller.relaunch()
+        #endif
+    }
 
     /// A release the user said they did not want to hear about again.
     ///
@@ -38,19 +108,6 @@ final class AppUpdateModel {
     func skipThisVersion() {
         guard let latest = release?.latest, !latest.isEmpty else { return }
         UserDefaults.standard.set(latest, forKey: Self.skippedKey)
-    }
-
-    func check() async {
-        guard !isChecking else { return }
-        isChecking = true
-        defer { isChecking = false }
-        do {
-            release = try await Bridge.appUpdateCheck()
-            lastError = nil
-        } catch {
-            // Update checks are optional. Do not put network noise into the
-            // account or workspace error surfaces.
-            lastError = error.localizedDescription
-        }
+        stage = .idle
     }
 }
