@@ -86,6 +86,24 @@ depend on it so the app can offer account and sync.
 Add a crate to the `GUARDED` list when it should never make a request. Do not
 remove one to make a build pass.
 
+## Two licences
+
+`crates/`, `xtask/` and `scripts/` are GPL-3.0. **`apps/` is source-available
+for review only** (`apps/LICENSE`), because pueev OU ships the only builds.
+Swift files carry a different SPDX header from Rust files for that reason: do
+not "fix" one to match the other.
+
+This works because pueev owns every `tokenstat-*` crate, so it is not a
+licensee of its own code. It would stop working if a third party copyleft
+dependency entered what the app links, so
+`scripts/check-app-licences.sh` guards it in CI as the `app licences` job.
+MPL-2.0 is allowed on purpose (per-file copyleft, section 3.3 permits a larger
+work); GPL/AGPL/LGPL and friends are not.
+
+**The repository does not accept pull requests.** A contributor keeps copyright,
+and one merged patch would end pueev's ability to ship the apps, permanently and
+irreversibly. Issues are welcome. See `CONTRIBUTING.md` and `docs/licensing.md`.
+
 ## Commands
 
 ```bash

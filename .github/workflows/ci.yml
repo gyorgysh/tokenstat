@@ -68,6 +68,21 @@ jobs:
       - name: Core and MCP must not reach the network
         run: bash scripts/check-no-network.sh
 
+  # The apps are shipped only by pueev OU, which works because pueev owns every
+  # tokenstat crate. A third party copyleft dependency would quietly end that.
+  app-licences:
+    name: app licences
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: No dependency may block shipping the app
+        run: bash scripts/check-app-licences.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -8,9 +8,11 @@ It restricts nothing about the code beyond what that licence already says.
 
 ## What you may do
 
-The code is source-available: you may read it, study it, fork it, modify your
-own copy, and build and run it on your own machines. See `LICENSE` for the full
-terms. None of that requires any use of the marks.
+The code under `crates/`, `xtask/` and `scripts/` is licensed GPL-3.0. You may
+use it, study it, modify it, run it for any purpose, redistribute it, and charge
+for it. Those freedoms are the point of the licence and nothing here limits
+them. The code under `apps/` is source-available for review only and carries its
+own, narrower terms: see `apps/LICENSE`.
 
 ## What the marks do not permit
 

@@ -266,28 +266,27 @@ format, and release steps.
 
 ## License
 
-**Source-available, not open source.** One licence covers the whole
-repository: see [LICENSE](LICENSE).
+Two licences, deliberately.
 
-Every line is published so it can be read. tokenstat's claim is about what
-happens to your data, and a claim nobody can check is marketing. So: read it,
-study it, fork it on GitHub, build it, run your build on your own machines,
-and say publicly what you find. Trust, and verify.
+**`crates/`, `xtask/`, `scripts/` are GPL-3.0.** See [LICENSE](LICENSE). That
+is the CLI, the parsers, the pricing, the archive, the MCP server and the host
+daemon: everything that reads your data. Fork it, change it, run it, ship it,
+sell it, within the terms of that licence.
 
-What is reserved is publication. You may not redistribute the source or a
-build of it, put it in another product, or offer it as a service. pueev OÜ
-ships the only builds of tokenstat, on every platform. The name is not part of
-the grant either: **"tokenstat" and the tokenstat logo are trademarks of
-pueev OÜ**. See [TRADEMARK.md](TRADEMARK.md).
+**`apps/` is source-available for review only.** See [apps/LICENSE](apps/LICENSE).
+The desktop and mobile apps are published so anyone can check what they do with
+your data, which is the only way a privacy claim means anything. They are not
+licensed for redistribution, and pueev OÜ ships the only builds.
 
-Releases up to v0.1.3 went out under GPL-3.0. That grant stands for those
-versions and cannot be withdrawn. The licence above governs everything from
-here.
+The name is not part of either grant. **"tokenstat" and the tokenstat logo are
+trademarks of pueev OÜ**, reserved under section 7(e) of the GPL. Fork the code
+freely, but give your version its own name so users can tell whose build they
+are running. See [TRADEMARK.md](TRADEMARK.md).
 
 ### Contributions
 
-This repository does not accept pull requests, so that pueev OÜ remains the sole
-copyright holder and can keep shipping the applications. **Issues are very
+This repository does not accept pull requests, so that pueev OÜ remains the
+sole copyright holder and can keep shipping the apps. **Issues are very
 welcome** and are the more useful thing anyway: a harness that is not read yet,
-counts that disagree with the tool itself, or anything in the privacy claim that
-does not match the code. See [CONTRIBUTING.md](CONTRIBUTING.md).
+counts that disagree with the tool itself, or anything in the privacy claim
+that does not match the code. See [CONTRIBUTING.md](CONTRIBUTING.md).
