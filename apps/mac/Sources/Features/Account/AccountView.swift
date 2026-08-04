@@ -12,7 +12,7 @@ struct AccountView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
@@ -34,7 +34,7 @@ struct AccountView: View {
 
                 privacyNote
             }
-            .padding(Theme.Space.l)
+            .padding(Theme.Space.m)
         }
         .navigationTitle("Account")
         .task { if model.account == nil { await model.load() } }
@@ -66,7 +66,7 @@ struct AccountView: View {
     }
 
     private func signedIn(_ account: Account) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
             syncCard(account)
             machinesCard(account)
@@ -115,7 +115,7 @@ struct AccountView: View {
                 .foregroundStyle(Theme.accent)
             }
         }
-        .padding(Theme.Space.l)
+        .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(

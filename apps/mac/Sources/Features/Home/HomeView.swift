@@ -21,7 +21,7 @@ struct HomeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
@@ -43,7 +43,10 @@ struct HomeView: View {
                     PlanUsageCard(rows: model.planBySource)
                 }
             }
-            .padding(Theme.Space.m)
+            // Tighter than the old inset all round. This screen is a stack of
+            // cards, and a card already carries its own padding, so the gutter
+            // outside it only has to separate the stack from the window edge.
+            .padding(Theme.Space.s)
         }
         .background(Theme.background)
         .task {
@@ -117,7 +120,7 @@ struct HomeView: View {
                 }
             }
         }
-        .padding(Theme.Space.l)
+        .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(

@@ -134,7 +134,20 @@ enum Theme {
         static let xl: CGFloat = 32
     }
 
-    static let cardRadius: CGFloat = 8
+    /// Corner radius for cards and panels.
+    ///
+    /// Matched to the window's own corner rather than picked. A card sitting a
+    /// few points inside a rounded window with a tighter radius reads as two
+    /// unrelated shapes, and the eye catches the mismatch even where the two
+    /// corners are nowhere near each other.
+    static let cardRadius: CGFloat = 14
+
+    /// Padding inside a card.
+    ///
+    /// One step below the old `Space.l`. On a screen that is mostly cards, 20
+    /// points of inset on every one of them spends more of the window on
+    /// margins than on content.
+    static let cardPadding: CGFloat = 16
 
     /// Numbers that sit in columns must not jitter as they update, so anything
     /// numeric uses tabular figures with a monospaced digit face.
@@ -220,7 +233,7 @@ struct Card<Content: View>: View {
             }
             content
         }
-        .padding(Theme.Space.l)
+        .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
