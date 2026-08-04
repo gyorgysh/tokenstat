@@ -467,6 +467,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     .workspaces
                     .workspaces
                     .iter()
+                    .filter(|ws| !is_test_workspace(ws))
                     .map(|ws| scope.spawn(move || describe(ws)))
                     .collect();
                 handles
@@ -668,6 +669,18 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             None => Err(format!("unknown method: {other}")),
         },
     }
+}
+
+/// Test repositories live in the system temp directory and must never appear
+/// in the user's workspace list if a test process was interrupted mid-cleanup.
+fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
+    let in_temp = ws.path.starts_with(std::env::temp_dir());
+    let name = ws.path.file_name().and_then(|name| name.to_str());
+    in_temp
+        && name.is_some_and(|name| {
+            name.starts_with("tokenstat-dispatch-git-")
+                || name.starts_with("tokenstat-ws-dispatch-")
+        })
 }
 
 /// Methods that never touch the session.
