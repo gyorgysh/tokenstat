@@ -101,13 +101,7 @@ pub fn calendar(
     );
     let start = shift_days(end, -((weeks * 7 - 1) as i64));
 
-    let max = parsed
-        .iter()
-        .filter(|(d, _)| *d >= start)
-        .map(|(_, v)| *v)
-        .max()
-        .unwrap_or(1)
-        .max(1);
+    let scale = Scale::from_days(parsed.iter().filter(|(d, _)| *d >= start).map(|(_, v)| *v));
 
     let span = (days_between(start, end) as usize) + 1;
     let cols = span.div_ceil(7);
@@ -143,7 +137,7 @@ pub fn calendar(
         let cell = HeatCell {
             date,
             value,
-            level: heat_level(value, max),
+            level: scale.level(value),
         };
         if value > 0 {
             total += value;
@@ -218,14 +212,51 @@ fn days_between(a: jiff::civil::Date, b: jiff::civil::Date) -> i64 {
     b.since(a).map(|s| s.get_days() as i64).unwrap_or(0)
 }
 
-fn heat_level(v: u64, max: u64) -> u8 {
-    if v == 0 {
-        0
-    } else {
-        // Fourth root spreads the low end out, so a quiet day is still
-        // distinguishable from an empty one.
-        let ratio = (v as f64 / max as f64).powf(0.25);
-        ((ratio * 4.0).ceil() as u8).clamp(1, 4)
+/// Where the four shades change, taken from the days themselves.
+///
+/// Scaling against the maximum does not work here. One expensive day sets the
+/// ceiling and, with a fourth root to lift the low end, everything from a tenth
+/// of that day upwards landed on the top two shades: a $44 day and a $144 day
+/// drew the same square while the grid as a whole read as uniformly hot.
+///
+/// So the shades are quartiles of the active days instead. A quarter of the
+/// days you worked sit in each shade whatever the amounts are, which is what
+/// makes a busy month look different from a quiet one rather than every month
+/// looking like its own busiest day.
+#[derive(Debug, Clone, Copy)]
+struct Scale {
+    /// Upper bound of levels 1, 2 and 3. A day above the last one is level 4.
+    breaks: [u64; 3],
+}
+
+impl Scale {
+    fn from_days(values: impl Iterator<Item = u64>) -> Self {
+        let mut active: Vec<u64> = values.filter(|v| *v > 0).collect();
+        active.sort_unstable();
+        if active.is_empty() {
+            return Self { breaks: [0; 3] };
+        }
+        // Nearest-rank quartiles. With very few active days the ranks collide,
+        // which is correct: three days of work cannot fill four shades, and
+        // spreading them out would invent a difference that is not there.
+        let at = |q: f64| -> u64 {
+            let last = active.len() - 1;
+            let rank = ((active.len() as f64) * q).ceil() as usize;
+            active[rank.saturating_sub(1).min(last)]
+        };
+        Self {
+            breaks: [at(0.25), at(0.5), at(0.75)],
+        }
+    }
+
+    fn level(&self, value: u64) -> u8 {
+        if value == 0 {
+            return 0;
+        }
+        match self.breaks.iter().position(|b| value <= *b) {
+            Some(i) => (i as u8) + 1,
+            None => 4,
+        }
     }
 }
 
@@ -326,5 +357,43 @@ mod tests {
     #[test]
     fn calendar_handles_empty_input() {
         assert!(calendar(&[], 5, anchor()).is_none());
+    }
+
+    #[test]
+    fn the_shades_split_the_active_days_evenly() {
+        // Twelve active days, so three per shade. Scaling against the maximum
+        // put nine of these twelve on the top two shades.
+        let values: Vec<u64> = (1..=12).map(|n| n * 10).collect();
+        let scale = Scale::from_days(values.iter().copied());
+        let levels: Vec<u8> = values.iter().map(|v| scale.level(*v)).collect();
+        assert_eq!(levels, vec![1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4]);
+        assert_eq!(scale.level(0), 0, "an idle day is not a quiet day");
+    }
+
+    #[test]
+    fn one_expensive_day_does_not_flatten_the_rest() {
+        // The case that started this: a run of ordinary days and one that cost
+        // ten times as much. The ordinary days must still differ from each
+        // other rather than all collapsing into the bottom shade, and $44 and
+        // $144 must not draw the same square.
+        let values = [10u64, 20, 44, 144, 300];
+        let scale = Scale::from_days(values.iter().copied());
+        let levels: Vec<u8> = values.iter().map(|v| scale.level(*v)).collect();
+        assert!(
+            levels.windows(2).all(|w| w[0] <= w[1]),
+            "shades rise with the amount: {levels:?}"
+        );
+        assert_ne!(scale.level(44), scale.level(144));
+        assert_eq!(scale.level(300), 4);
+    }
+
+    #[test]
+    fn too_few_days_to_fill_the_shades_is_not_an_invented_difference() {
+        // Two active days cannot honestly occupy four shades, so some of them
+        // stay empty rather than the two days being pushed apart.
+        let scale = Scale::from_days([5u64, 9].into_iter());
+        assert!(scale.level(5) < scale.level(9));
+        assert!(scale.level(9) <= 4);
+        assert_eq!(scale.level(0), 0);
     }
 }

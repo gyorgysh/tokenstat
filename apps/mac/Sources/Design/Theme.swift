@@ -15,9 +15,8 @@ import UIKit
 
 /// Shared visual constants.
 ///
-/// The brand colours are the same two the CLI uses (`ui.rs` `ACCENT_RGB` and
-/// `SECONDARY_RGB`). One product, one palette: a user running both should not
-/// see two different purples. Change them in both places or in neither.
+/// The brand colours follow tokenstat.ai's `sites/tokenstat` design tokens. The
+/// Mac app and the public profile should read as one product in either theme.
 ///
 /// The chrome is translucent and the content is not. A sidebar or an inspector
 /// can sit on material and gain some depth from it, but a table of digits and a
@@ -25,15 +24,15 @@ import UIKit
 /// window into the text, and columns of numbers are hard enough to read
 /// already. So `sidebarMaterial` for the edges, flat colours for the middle.
 enum Theme {
-    static let accent = Color(red: 0xB2 / 255, green: 0x64 / 255, blue: 0xEB / 255)
-    static let secondary = Color(red: 0x67 / 255, green: 0xE8 / 255, blue: 0xF9 / 255)
+    static let accent = Color.adaptive(light: hex(0x6A3DFF), dark: hex(0x8B5CF6))
+    static let secondary = Color.adaptive(light: hex(0xC026D3), dark: hex(0xE879F9))
 
     /// Behind everything.
-    static let background = Color.adaptive(light: hex(0xF7F7F8), dark: hex(0x0A0A0B))
+    static let background = Color.adaptive(light: hex(0xFBFBFD), dark: hex(0x08070D))
     /// Sidebar, one step darker than the content beside it.
-    static let sidebar = Color.adaptive(light: hex(0xF0F0F1), dark: hex(0x0D0D0F))
+    static let sidebar = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x12101D))
     /// Cards and panels.
-    static let panel = Color.adaptive(light: .white, dark: hex(0x141416))
+    static let panel = Color.adaptive(light: .white, dark: hex(0x100E1A))
     /// Behind a tab strip.
     ///
     /// A step darker than the pane under it, so the strip reads as chrome
@@ -41,11 +40,11 @@ enum Theme {
     /// this was a solid grey, which put a third tone between the toolbar above
     /// and the content below and made the strip look like a band stuck across
     /// the window. Dark mode can take the contrast, light mode cannot.
-    static let tabStrip = Color.adaptive(light: hex(0xF1F1F3), dark: hex(0x08080A))
+    static let tabStrip = Color.adaptive(light: hex(0xF3F2F8), dark: hex(0x08070D))
     /// Hairlines. These carry the structure that shadows used to.
-    static let border = Color.adaptive(light: hex(0xE2E2E5), dark: hex(0x232326))
+    static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
     /// A row the pointer is over.
-    static let rowHighlight = Color.adaptive(light: hex(0xE4E4E8), dark: hex(0x1C1C1F))
+    static let rowHighlight = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
     /// The row that is actually selected.
     ///
     /// Tinted with the accent rather than being a lighter grey. With a hover
@@ -60,32 +59,29 @@ enum Theme {
     /// competing selections rather than as "this folder, and this terminal
     /// within it". The folder carries the colour, this one just lifts off the
     /// background.
-    static let rowSelectedNested = Color.adaptive(light: hex(0xDEDEE3), dark: hex(0x26262B))
+    static let rowSelectedNested = Color.adaptive(light: hex(0xE8E7F0), dark: hex(0x26213D))
 
     /// The accent at card strength, for a fill that has to read as tinted
     /// rather than as coloured.
-    static let accentSoft = accent.opacity(0.12)
+    static let accentSoft = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
 
     // Semantic colours. Before these existed, a live session was `.green` and
     // an unsaved file was `.orange`, written at the call site, so the app had
     // no single answer to what "good" looks like.
-    static let success = Color(red: 0x3F / 255, green: 0xC1 / 255, blue: 0x7E / 255)
-    static let warning = Color(red: 0xE8 / 255, green: 0xA1 / 255, blue: 0x3A / 255)
-    static let danger = Color(red: 0xE8 / 255, green: 0x5D / 255, blue: 0x5D / 255)
+    static let success = Color.adaptive(light: hex(0x2F7D4B), dark: hex(0x79D69C))
+    static let warning = Color(red: 0xE0 / 255, green: 0xA9 / 255, blue: 0x3B / 255)
+    static let danger = Color(red: 0xD6 / 255, green: 0x45 / 255, blue: 0x3F / 255)
 
     /// Five steps of activity, idle first.
     ///
-    /// Built from the accent rather than from the usual green, because the
-    /// heatmap is the largest coloured object in the app and a green grid in a
-    /// purple product looks like a screenshot from something else. Step 0 is a
-    /// day inside the range with no usage, which has to read as "nothing here"
-    /// and not as "no data".
+    /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as
+    /// "nothing here", while the upper levels run violet into fuchsia.
     static let heat: [Color] = [
-        Color.adaptive(light: hex(0xE9E9EC), dark: hex(0x1A1A1D)),
-        accent.opacity(0.28),
-        accent.opacity(0.48),
-        accent.opacity(0.72),
-        accent,
+        Color.adaptive(light: hex(0xECEAF2), dark: hex(0x191627)),
+        Color.adaptive(light: hex(0xD6C9FF), dark: hex(0x3B2A6B)),
+        Color.adaptive(light: hex(0xA98CFF), dark: hex(0x5F3FB8)),
+        Color.adaptive(light: hex(0x7C4DFF), dark: hex(0x8B5CF6)),
+        Color.adaptive(light: hex(0xC026D3), dark: hex(0xE879F9)),
     ]
 
     /// Colour for a syntax kind.
@@ -551,4 +547,12 @@ private struct WidthKey: PreferenceKey {
 /// One number, so the breakpoints across the app cannot drift apart.
 extension CGFloat {
     static let twoColumnWidth: CGFloat = 1_000
+
+    /// How wide a self-contained panel wants to be in a flowing grid.
+    ///
+    /// A quota panel is a title and a few bars, so it needs about this much to
+    /// avoid wrapping its header and no more. The grid fits as many of these as
+    /// the window allows, which is why the count of columns follows the window
+    /// rather than a hard breakpoint.
+    static let panelWidth: CGFloat = 330
 }

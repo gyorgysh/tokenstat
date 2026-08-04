@@ -59,14 +59,9 @@ struct Counters: Codable, Sendable, Hashable {
     var inputTotal: UInt64
     var hasUnknown: Bool
 
-    /// Fresh input plus output: what the day's work actually was.
-    ///
-    /// Cache reads are excluded on purpose. They are the largest number in the
-    /// archive by a wide margin and they measure how much context was re-sent,
-    /// not how much was done, so a heatmap coloured by `total` is a heatmap of
-    /// conversation length. The core's `activity.calendar` sums the same two
-    /// fields, and these must not diverge or the grid and the figure beside it
-    /// will disagree.
+    /// Fresh input plus output: what the work actually was, cache reads left
+    /// out. They are the largest number in the archive by a wide margin and
+    /// they measure how much context was re-sent, not how much was done.
     var workTokens: UInt64 {
         (inputFresh ?? 0) + (output ?? 0)
     }
@@ -147,6 +142,9 @@ struct HeatCell: Codable, Sendable, Hashable, Identifiable {
     /// a `Query` filters by, so a click on a day can become a filter with no
     /// reformatting in between.
     var date: String
+    /// What the day was worth at list rates, in microdollars. Spend rather than
+    /// tokens, so the grid ranks a day by what it cost and not by how many
+    /// cheap tokens went through it.
     var value: UInt64
     /// `0...4`. Zero is a day inside the range with no usage, which has to read
     /// as "nothing happened" and not as "no data".
@@ -172,6 +170,8 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     var rows: [[HeatCell?]]
     var months: [MonthLabel]
     var weeks: Int
+    /// Value of the whole grid at list rates, in microdollars, matching the
+    /// unit every `HeatCell` carries.
     var total: UInt64
     var activeDays: Int
     /// Consecutive active days up to the most recent one with data. A quiet day
@@ -268,6 +268,19 @@ struct Info: Codable, Sendable, Hashable {
     var hasPrices: Bool
 }
 
+struct AppUpdate: Codable, Sendable, Hashable {
+    var current: String
+    var latest: String
+    var newer: Bool
+    var htmlURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case current, latest, newer, htmlURL = "htmlUrl"
+    }
+
+    var isAvailable: Bool { newer && latest != current }
+}
+
 /// A list-rate value, carrying the two qualifiers it must never be shown
 /// without.
 struct Money: Sendable, Hashable {
@@ -329,6 +342,16 @@ extension Sequence where Element == Bucket {
             )
         }
     }
+}
+
+/// A heat value as money.
+///
+/// The activity calendar carries microdollars, not tokens: a day's colour is
+/// what the day's work was worth at list rates, so a cheap high-volume day does
+/// not outshine an expensive one. The qualifiers are dropped here because the
+/// grid sends one number per day and the card above it already carries them.
+func formatSpend(_ micros: UInt64) -> String {
+    Money(micros: Int64(clamping: micros), estimated: false, complete: true).formatted
 }
 
 /// Compact token counts. 1.2B rather than 1,214,203,912, because these numbers
@@ -779,14 +802,28 @@ struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     var plan: String?
     var windows: [UsageWindow]
     var observedAtMs: Int64
-    /// Why there is nothing to show. Present exactly when `windows` is empty:
-    /// "no limits" and "we could not look" must never render the same.
+    /// Why the vendor could not be read. With windows present it explains why
+    /// they are old rather than why they are missing.
     var note: String?
+    /// These windows were remembered from an earlier read, because this one
+    /// failed. Real numbers, just not current ones.
+    var stale: Bool?
 
     var id: String { source }
 
     var observedAt: Date? {
         observedAtMs > 0 ? Date(timeIntervalSince1970: TimeInterval(observedAtMs) / 1000) : nil
+    }
+
+    var isStale: Bool { stale == true }
+
+    /// Something to draw, as opposed to only a reason there is nothing.
+    var hasWindows: Bool { !windows.isEmpty }
+
+    /// When the soonest window rolls over, which is the next moment these
+    /// numbers can change on their own.
+    var nextReset: Date? {
+        windows.compactMap(\.resetsAt).min()
     }
 }
 

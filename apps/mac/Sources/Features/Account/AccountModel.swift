@@ -29,6 +29,7 @@ final class AccountModel {
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
     var syncNotice: String?
+    var syncNoticeIsError = false
     var syncCooldownUntil: Date?
 
     private var pollTask: Task<Void, Never>?
@@ -120,22 +121,27 @@ final class AccountModel {
         do {
             let result = try await Bridge.sync()
             lastSyncSummary = "Sent \(result.rows) rows for \(result.from) to \(result.to)."
-            showSyncNotice(lastSyncSummary!)
+            showSyncNotice(lastSyncSummary!, isError: false)
             startSyncCooldown()
             await load()
         } catch {
-            errorMessage = error.localizedDescription
+            // Sync failures are action feedback, not account state. Keep them
+            // in the transient notice so a plan cooldown cannot pin the footer.
+            errorMessage = nil
+            showSyncNotice(error.localizedDescription, isError: true)
         }
     }
 
-    private func showSyncNotice(_ message: String) {
+    private func showSyncNotice(_ message: String, isError: Bool) {
         noticeGeneration += 1
         let generation = noticeGeneration
         syncNotice = message
+        syncNoticeIsError = isError
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
             guard let self, self.noticeGeneration == generation else { return }
             self.syncNotice = nil
+            self.syncNoticeIsError = false
         }
     }
 

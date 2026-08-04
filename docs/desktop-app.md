@@ -180,10 +180,19 @@ workspaces, no daemon. It proved the bridge, the Xcode and Cargo build
 integration, and the visual language, for very little money, and its figures
 were checked row by row against `tokenstat models` on the same archive.
 
-Still open before it could ship to anyone: an app icon, a Sparkle-style update
-path or an installer, a Developer ID signed build in the release workflow, and
-a decision on whether the window should open on Insights or on Workspaces once
-the latter exists.
+The app icon and a first release check now exist. The check is deliberately
+read-only and opens the signed release page when a newer version is available.
+The shell `scripts/install.sh` remains the CLI installer: it downloads the
+matching tarball into `~/.local/bin`, where the CLI self-updater can replace its
+own binary safely. It does not install the Mac app into `/Applications`.
+
+The Mac app needs a separate signed application update path before it can apply
+updates itself. The intended release shape is a notarized zip or DMG installed
+under `/Applications`, with a Sparkle-style signed appcast and replacement on
+the next relaunch. The app must not overwrite its own bundle from the running
+process, and the CLI updater must never try to replace the GUI bundle. Until
+that updater ships, the in-app action opens the release page so installation is
+explicit and uses the same signed artifact as a fresh install.
 
 **M2. Account. Built.** Sign in, profile, machines, sync status and sync now.
 

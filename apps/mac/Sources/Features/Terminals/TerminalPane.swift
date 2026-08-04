@@ -35,13 +35,26 @@ struct TerminalPane: View {
         workspaces.openCommit[folder.id]
     }
 
+    private var browserShown: Bool {
+        workspaces.activeBrowserID[folder.id] != nil
+    }
+
+    private var activeBrowser: WorkspaceBrowserTab? {
+        guard let id = workspaces.activeBrowserID[folder.id] else { return nil }
+        return workspaces.browserTabs(in: folder.id).first { $0.id == id }
+    }
+
+    private var filesShown: Bool {
+        workspaces.filesShown.contains(folder.id)
+    }
+
     private var loadingCommit: String? {
         workspaces.loadingCommit[folder.id]
     }
 
     /// True when the pane is showing a terminal rather than a file or a commit.
     private var showsTerminal: Bool {
-        activeFile == nil && openCommit == nil && loadingCommit == nil
+        activeFile == nil && !browserShown && !filesShown && openCommit == nil && loadingCommit == nil
     }
 
     /// Size of the terminal area, measured rather than assumed.
@@ -69,7 +82,7 @@ struct TerminalPane: View {
                 strip
                 Divider()
                 surface
-                if activeFile == nil, let active {
+                if activeFile == nil, !browserShown, !filesShown, let active {
                     TerminalHost(session: active)
                 }
             } else {
@@ -135,9 +148,18 @@ struct TerminalPane: View {
                         .frame(width: size.width, height: size.height)
                 } else if let path = activeFile {
                     fileSurface(path)
+                    .frame(width: size.width, height: size.height)
+                } else if filesShown {
+                    WorkspaceFilesView(model: workspaces, folder: folder, surface: .content)
                         .frame(width: size.width, height: size.height)
+                } else if let browser = activeBrowser {
+                    BrowserView(
+                        url: browser.url,
+                        onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
+                    )
+                    .frame(width: size.width, height: size.height)
                 } else if sessions.isEmpty {
-                    LaunchSurface(folder: folder, terminals: terminals, grid: spawnGrid)
+                    LaunchSurface(folder: folder, terminals: terminals, workspaces: workspaces, grid: spawnGrid)
                         .frame(width: size.width, height: size.height)
                 }
             }
@@ -215,6 +237,33 @@ struct TerminalPane: View {
                 }
             }
 
+            ForEach(workspaces.browserTabs(in: folder.id)) { browser in
+                FileChip(
+                    path: browser.url.isEmpty ? browser.title : browser.url,
+                    symbol: "globe",
+                    label: browser.title,
+                    isSelected: browser.id == workspaces.activeBrowserID[folder.id]
+                ) {
+                    _ = workspaces.showBrowser(in: folder.id, id: browser.id)
+                } onClose: {
+                    workspaces.closeBrowser(browser, in: folder.id)
+                }
+            }
+
+            if filesShown || !openFiles.isEmpty {
+                FileChip(
+                    path: folder.path,
+                    symbol: "folder",
+                    label: "Files",
+                    isSelected: filesShown && activeFile == nil,
+                    isDirty: false
+                ) {
+                    workspaces.showFiles(in: folder.id)
+                } onClose: {
+                    workspaces.closeFiles(in: folder.id)
+                }
+            }
+
             // A commit gets a tab too, so it is as closeable as anything else
             // and it is obvious the pane is showing history rather than work.
             if let commit = openCommit {
@@ -229,6 +278,17 @@ struct TerminalPane: View {
             }
 
             Menu {
+                Button {
+                    _ = workspaces.showBrowser(in: folder.id)
+                } label: {
+                    Label("Browser", systemImage: "globe")
+                }
+                Button {
+                    workspaces.showFiles(in: folder.id)
+                } label: {
+                    Label("Files", systemImage: "folder")
+                }
+                Divider()
                 ForEach(LaunchProfile.available) { profile in
                     Button {
                         start(profile)
@@ -477,6 +537,7 @@ struct TerminalHost: View {
 private struct LaunchSurface: View {
     let folder: WorkspaceFolder
     let terminals: TerminalsModel
+    let workspaces: WorkspacesModel
     /// The grid to spawn at, measured by the pane. Passed in rather than
     /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
@@ -499,6 +560,12 @@ private struct LaunchSurface: View {
                 columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                 spacing: Theme.Space.m
             ) {
+                utilityButton("Browser", subtitle: "Enter a URL", symbol: "globe") {
+                    _ = workspaces.showBrowser(in: folder.id)
+                }
+                utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
+                    workspaces.showFiles(in: folder.id)
+                }
                 ForEach(LaunchProfile.available) { profile in
                     launchButton(profile)
                 }
@@ -541,6 +608,36 @@ private struct LaunchSurface: View {
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 Text(profile.command)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Space.m)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func utilityButton(
+        _ label: String,
+        subtitle: String,
+        symbol: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: Theme.Space.s) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18))
+                    .foregroundStyle(Theme.accent)
+                Text(label)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Text(subtitle)
                     .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
             }
@@ -604,11 +701,11 @@ private struct LaunchProfile: Identifiable {
         LaunchProfile(id: "cursor", name: "Cursor CLI", command: "cursor", args: [], harnessID: "cursor", symbol: nil),
     ]
 
-    private static var shellCommand: String {
+    static var shellCommand: String {
         ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
     }
 
-    private static var shellArguments: [String] {
+    static var shellArguments: [String] {
         URL(fileURLWithPath: shellCommand).lastPathComponent == "zsh" ? ["-f"] : []
     }
 }

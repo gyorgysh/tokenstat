@@ -33,14 +33,14 @@ final class HomeModel {
     var isLoading = false
     var errorMessage: String?
 
-    /// Tokens in the last seven calendar days, cache excluded, matching the
-    /// heatmap's own measure so the two cannot disagree.
-    var weekTotal: UInt64 {
-        week.reduce(0) { $0 + $1.counters.workTokens }
+    /// Value at list rates over the last seven calendar days, the same measure
+    /// the heatmap colours by, so the two cannot disagree.
+    var weekValue: Money {
+        week.totalValue
     }
 
-    var todayTotal: UInt64 {
-        today?.counters.workTokens ?? 0
+    var todayValue: Money {
+        today.map { [$0].totalValue } ?? Money(micros: 0, estimated: false, complete: true)
     }
 
     func load() async {

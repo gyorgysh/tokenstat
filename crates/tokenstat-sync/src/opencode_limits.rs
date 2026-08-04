@@ -96,6 +96,7 @@ pub fn fetch() -> ProviderLimits {
         windows,
         observed_at_ms,
         note: None,
+        stale: false,
     }
 }
 
@@ -216,6 +217,7 @@ fn local_limits() -> ProviderLimits {
         windows,
         observed_at_ms: now,
         note: None,
+        stale: false,
     }
 }
 

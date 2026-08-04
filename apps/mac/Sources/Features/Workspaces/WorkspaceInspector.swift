@@ -7,6 +7,35 @@
 
 import SwiftUI
 
+// MARK: - Shared empty-state chrome
+
+/// Centred icon + title + subtitle used by all three inspector tabs.
+struct InspectorEmptyState: View {
+    let systemImage: String
+    let title: String
+    let subtitle: String
+    var tint: Color = .secondary
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(tint.opacity(0.7))
+                .symbolRenderingMode(.hierarchical)
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.75))
+            Text(subtitle)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 /// The right pane for a workspace: what changed, and what has already landed.
 ///
 /// Two tabs rather than one long scroll, because they answer different
@@ -38,6 +67,23 @@ struct WorkspaceInspector: View {
             content
         }
         .background(Theme.sidebarMaterial)
+        // When a folder is not a git repository, Changes and History have nothing
+        // to show; redirect to Files which always works.
+        .onChange(of: folder?.git?.isRepo) { _, isRepo in
+            if isRepo == false || isRepo == nil,
+               model.inspectorTab == .changes || model.inspectorTab == .history {
+                model.inspectorTab = .files
+            }
+        }
+        .onAppear {
+            if let git = folder?.git, !git.isRepo,
+               model.inspectorTab == .changes || model.inspectorTab == .history {
+                model.inspectorTab = .files
+            } else if folder?.git == nil,
+                      model.inspectorTab == .changes || model.inspectorTab == .history {
+                model.inspectorTab = .files
+            }
+        }
     }
 
     // The empty band above this panel is the window's toolbar, not padding this
@@ -72,58 +118,73 @@ struct WorkspaceHistoryView: View {
     var folder: WorkspaceFolder?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                content
+        historyBody
+            .background(Theme.sidebarMaterial)
+            // Keyed on the folder, so switching workspaces reads the right history
+            // instead of leaving the previous one on screen.
+            .task(id: folder?.id) {
+                guard let id = folder?.id else { return }
+                await model.loadHistory(for: id)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Space.m)
-        }
-        .background(Theme.sidebarMaterial)
-        // Keyed on the folder, so switching workspaces reads the right history
-        // instead of leaving the previous one on screen.
-        .task(id: folder?.id) {
-            guard let id = folder?.id else { return }
-            await model.loadHistory(for: id)
-        }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var historyBody: some View {
         if let folder {
             if !folder.exists {
-                note("The folder is missing, so there is nothing to read.", tint: .orange)
+                InspectorEmptyState(
+                    systemImage: "exclamationmark.triangle",
+                    title: "Folder missing",
+                    subtitle: "The folder no longer exists on disk.",
+                    tint: .orange
+                )
+            } else if folder.git?.isRepo != true {
+                InspectorEmptyState(
+                    systemImage: "clock.arrow.trianglehead.counterclockwise.rotate.90",
+                    title: "No git history",
+                    subtitle: "This folder is not a git repository, so there are no commits to browse."
+                )
             } else if let commits = model.history[folder.id] {
                 if commits.isEmpty {
-                    note(
-                        folder.git?.isRepo == true
-                            ? "No commits yet."
-                            : "Not a git repository, so there is no history to show."
+                    InspectorEmptyState(
+                        systemImage: "clock",
+                        title: "No commits yet",
+                        subtitle: "Make your first commit and it will appear here."
                     )
                 } else {
-                    ForEach(commits) { commit in
-                        CommitRow(
-                            commit: commit,
-                            isOpen: model.openCommit[folder.id]?.id == commit.id
-                        ) {
-                            Task { await model.showCommit(commit.id, in: folder.id) }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(commits) { commit in
+                                CommitRow(
+                                    commit: commit,
+                                    isOpen: model.openCommit[folder.id]?.id == commit.id
+                                ) {
+                                    Task { await model.showCommit(commit.id, in: folder.id) }
+                                }
+                            }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Space.m)
                     }
                 }
             } else if let error = model.historyError {
-                note(error, tint: .red)
+                InspectorEmptyState(
+                    systemImage: "exclamationmark.circle",
+                    title: "Could not load history",
+                    subtitle: error,
+                    tint: .red
+                )
             } else {
-                note("Reading history…")
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
-            note("Select a workspace.")
+            InspectorEmptyState(
+                systemImage: "sidebar.right",
+                title: "No workspace selected",
+                subtitle: "Pick a workspace from the list on the left."
+            )
         }
-    }
-
-    private func note(_ text: String, tint: Color = .secondary) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(tint)
     }
 }
 

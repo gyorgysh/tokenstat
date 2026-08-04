@@ -30,21 +30,13 @@ struct HomeView: View {
                     profile
                     activity
 
-                    // Side by side once there is room. Stacked, these two are a
-                    // column of half-empty rows down the middle of a wide
-                    // window; beside each other they answer the same question
-                    // from both directions, what the vendor says is left and
-                    // what the archive recorded.
-                    if width >= .twoColumnWidth, !model.planBySource.isEmpty {
-                        HStack(alignment: .top, spacing: Theme.Space.s) {
-                            planLimits
-                            PlanUsageCard(rows: model.planBySource)
-                        }
-                    } else {
-                        planLimits
-                        if !model.planBySource.isEmpty {
-                            PlanUsageCard(rows: model.planBySource)
-                        }
+                    panels(width: width)
+
+                    if limitsPending {
+                        Text("Reading what each vendor says is left…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Theme.Space.s)
                     }
                 }
             }
@@ -67,16 +59,85 @@ struct HomeView: View {
         }
     }
 
-    /// What is left of each plan. This is the "can I start another session right
-    /// now" question, which is why it is on the screen that opens rather than
-    /// under two report tables.
-    private var planLimits: some View {
-        PlanLimitsCard(
-            providers: model.planLimits,
-            isLoading: model.isLoadingLimits
-        ) {
-            Task { await model.loadPlanLimits() }
+    // MARK: - Panels
+
+    /// One panel per thing this machine can report, packed into columns.
+    ///
+    /// Columns rather than a grid. A grid gives every panel in a row the height
+    /// of the tallest one in it, so a vendor with a single quota window sat in a
+    /// box sized for the one beside it with three, and the screen was mostly
+    /// empty card. Packed into columns each panel is exactly as tall as what it
+    /// has to say, and the next panel starts where the last one ended.
+    ///
+    /// How many panels appear at all depends on what is installed. A vendor
+    /// with nothing to report has no panel.
+    @ViewBuilder
+    private func panels(width: CGFloat) -> some View {
+        let columns = packed(panels, into: columnCount(for: width))
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    ForEach(column) { panel in
+                        view(for: panel)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func view(for panel: HomePanel) -> some View {
+        switch panel.kind {
+        case let .limits(provider):
+            PlanLimitPanel(
+                provider: provider,
+                isLoading: model.isLoadingLimits
+            ) {
+                Task { await model.loadPlanLimits() }
+            }
+        case let .planUsage(rows):
+            PlanUsageCard(rows: rows)
+        }
+    }
+
+    private var panels: [HomePanel] {
+        var out = PlanLimits.visible(model.planLimits).map { HomePanel(kind: .limits($0)) }
+        if !model.planBySource.isEmpty {
+            out.append(HomePanel(kind: .planUsage(model.planBySource)))
+        }
+        return out
+    }
+
+    private func columnCount(for width: CGFloat) -> Int {
+        let fits = Int((width + Theme.Space.s) / (.panelWidth + Theme.Space.s))
+        return max(1, min(panels.count, fits))
+    }
+
+    /// Deal the panels out to the column that has the least in it so far.
+    ///
+    /// Rough by design: the weight is how many rows a panel draws, not its
+    /// measured height, because measuring would mean laying the panels out
+    /// twice. Filling left to right instead leaves one very long column beside
+    /// three short ones whenever the biggest panel comes last.
+    private func packed(_ panels: [HomePanel], into count: Int) -> [[HomePanel]] {
+        var columns = Array(repeating: [HomePanel](), count: max(1, count))
+        var filled = Array(repeating: 0, count: columns.count)
+        for panel in panels {
+            let target = filled.indices.min { filled[$0] < filled[$1] } ?? 0
+            columns[target].append(panel)
+            filled[target] += panel.weight
+        }
+        return columns.filter { !$0.isEmpty }
+    }
+
+    /// Whether to say the vendors are still being asked.
+    ///
+    /// Only while nothing has arrived. A panel that is already on screen says
+    /// more than a sentence about a refresh in progress, and every panel
+    /// carries its own spinner.
+    private var limitsPending: Bool {
+        model.isLoadingLimits && model.planLimits.isEmpty
     }
 
     // MARK: - Profile
@@ -174,8 +235,8 @@ struct HomeView: View {
         Card(
             title: "Activity",
             subtitle: model.calendar.map {
-                "\(formatTokens($0.total)) over \($0.activeDays) active days"
-            } ?? "Input and output per day, cache excluded"
+                "\(formatSpend($0.total)) at list rates over \($0.activeDays) active days"
+            } ?? "What each day was worth at list rates"
         ) {
             if let calendar = model.calendar {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -186,20 +247,20 @@ struct HomeView: View {
                     HStack(alignment: .top, spacing: Theme.Space.xl) {
                         Stat(
                             label: "Today",
-                            value: formatTokens(model.todayTotal),
+                            value: model.todayValue.formatted,
                             size: 20,
                             expands: false
                         )
                         Stat(
                             label: "Last 7 days",
-                            value: formatTokens(model.weekTotal),
+                            value: model.weekValue.formatted,
                             size: 20,
                             expands: false
                         )
                         if let busiest = calendar.busiest {
                             Stat(
                                 label: "Busiest",
-                                value: formatTokens(busiest.value),
+                                value: formatSpend(busiest.value),
                                 note: busiest.date,
                                 size: 20,
                                 expands: false
@@ -221,6 +282,36 @@ struct HomeView: View {
                 // grid that looks like a year of doing nothing.
                 EmptyHint(text: "Nothing scanned yet. Run a scan from Insights to fill this in.")
             }
+        }
+    }
+}
+
+/// One panel in the Home grid, and roughly how much room it wants.
+///
+/// The weight is a row count, not a height. It only has to be good enough to
+/// decide which column the next panel should go in, and a row count is
+/// something the data already knows without laying anything out.
+private struct HomePanel: Identifiable {
+    enum Kind {
+        case limits(ProviderLimits)
+        case planUsage([Bucket])
+    }
+
+    let kind: Kind
+
+    var id: String {
+        switch kind {
+        case let .limits(provider): return "limits.\(provider.source)"
+        case .planUsage: return "planUsage"
+        }
+    }
+
+    var weight: Int {
+        switch kind {
+        // A header, then a bar per window, or a sentence where the bars would
+        // have been.
+        case let .limits(provider): return 1 + max(1, provider.windows.count)
+        case let .planUsage(rows): return 1 + rows.count
         }
     }
 }

@@ -10,7 +10,10 @@ import SwiftUI
 /// The activity grid: a year of days, a column per week.
 ///
 /// The grid arrives built from `tokenstat_core::activity`, which is the same
-/// code the CLI draws from. This view places squares and nothing else. It must
+/// code the CLI draws from. A square's shade is its day's value at list rates,
+/// so the grid reads as where the money went rather than where the tokens went,
+/// and matches the profile page on the website. This view places squares and
+/// nothing else, taking the level as given. It must
 /// not compute which day belongs in which column: the archive stores only days
 /// that had events, so anything that packs them together draws a plausible
 /// calendar with every date in the wrong place.
@@ -142,7 +145,7 @@ struct HeatmapView: View {
                 )
                 .onHover { hovered = $0 ? day : (hovered == day ? nil : hovered) }
                 .onTapGesture { onSelect?(day) }
-                .help("\(day.date): \(formatTokens(day.value)) tokens")
+                .help("\(day.date): \(formatSpend(day.value)) at list rates")
         } else {
             // A day after today. Left blank rather than drawn as idle: it has
             // not happened, which is not the same as nothing happening.
@@ -156,7 +159,7 @@ struct HeatmapView: View {
                 Text("\(day.date)")
                     .font(Theme.numeric(11))
                     .foregroundStyle(.secondary)
-                Text(formatTokens(day.value))
+                Text(formatSpend(day.value))
                     .font(Theme.numeric(11, weight: .medium))
             } else {
                 Text("\(calendar.first) to \(calendar.last)")

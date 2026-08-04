@@ -74,6 +74,7 @@ struct RootView: View {
     @State private var machines = MachinesModel()
     @State private var automations = AutomationsModel()
     @State private var todo = TodoModel()
+    @State private var appUpdate = AppUpdateModel()
     @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -104,6 +105,7 @@ struct RootView: View {
         // Loaded up front, not on first visit, so the sidebar can show the
         // handle without the user opening the screen to populate it.
         .task { await account.load() }
+        .task { await appUpdate.check() }
         .task { await workspaces.load() }
         #if os(macOS)
         .task { await terminals.load() }
@@ -304,16 +306,26 @@ struct RootView: View {
     /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
-            if let status = account.syncNotice ?? account.errorMessage {
+            if let status = account.syncNotice {
                 HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: account.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    Image(systemName: account.syncNoticeIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                     Text(status)
                         .lineLimit(2)
                         .truncationMode(.tail)
                 }
                 .font(.caption)
-                .foregroundStyle(account.errorMessage == nil ? Theme.secondary : .orange)
+                .foregroundStyle(account.syncNoticeIsError ? Theme.warning : Theme.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.xs)
+            }
+            if appUpdate.isAvailable, let url = URL(string: appUpdate.htmlURL) {
+                Link(destination: url) {
+                    Label("Update available: v\(appUpdate.latest)", systemImage: "arrow.down.circle")
+                        .font(.caption)
+                        .foregroundStyle(Theme.accent)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.xs)
             }

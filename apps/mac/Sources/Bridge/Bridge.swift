@@ -233,6 +233,14 @@ enum Bridge {
 // MARK: - Account
 
 extension Bridge {
+    static func appUpdateCheck() async throws -> AppUpdate {
+        try await background("app.updateCheck", as: AppUpdate.self)
+    }
+}
+
+// MARK: - Automations
+
+extension Bridge {
     /// Who is signed in. Signed out is a normal result, not an error: the
     /// bridge reports `signedIn: false` so the UI can offer sign-in rather
     /// than show a failure.

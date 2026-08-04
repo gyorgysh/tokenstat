@@ -158,6 +158,7 @@ pub fn fetch() -> ProviderLimits {
         windows,
         observed_at_ms: now_ms(),
         note: None,
+        stale: false,
     }
 }
 

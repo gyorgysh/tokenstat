@@ -185,18 +185,7 @@ struct WorkspaceChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let folder {
-                        content(folder)
-                    } else {
-                        Text("Select a workspace.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(Theme.Space.m)
-            }
+            changesBody
             #if os(macOS)
             if let folder, folder.exists, folder.git?.isRepo == true {
                 CommitBox(model: model, folder: folder)
@@ -207,16 +196,53 @@ struct WorkspaceChangesView: View {
     }
 
     @ViewBuilder
+    private var changesBody: some View {
+        if let folder {
+            if !folder.exists {
+                InspectorEmptyState(
+                    systemImage: "exclamationmark.triangle",
+                    title: "Folder missing",
+                    subtitle: "The folder no longer exists on disk.",
+                    tint: .orange
+                )
+            } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
+                // Only show the scroll list when there is real content.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        content(folder)
+                    }
+                    .padding(Theme.Space.m)
+                }
+            } else {
+                // All other states (clean tree, not a git repo) are centred.
+                content(folder)
+            }
+        } else {
+            InspectorEmptyState(
+                systemImage: "square.stack.3d.up",
+                title: "No workspace selected",
+                subtitle: "Pick a workspace from the list on the left."
+            )
+        }
+    }
+
+    @ViewBuilder
     private func content(_ folder: WorkspaceFolder) -> some View {
         if !folder.exists {
-            Text("The folder is missing, so there is nothing to read.")
-                .font(.caption)
-                .foregroundStyle(.orange)
+            InspectorEmptyState(
+                systemImage: "exclamationmark.triangle",
+                title: "Folder missing",
+                subtitle: "The folder no longer exists on disk.",
+                tint: .orange
+            )
         } else if let git = folder.git, git.isRepo {
             if git.files.isEmpty {
-                Text("Working tree clean.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                InspectorEmptyState(
+                    systemImage: "checkmark.seal",
+                    title: "Working tree clean",
+                    subtitle: "No uncommitted changes. Everything is up to date.",
+                    tint: .green
+                )
             } else {
                 summary(git)
                 #if os(macOS)
@@ -243,9 +269,11 @@ struct WorkspaceChangesView: View {
                 }
             }
         } else {
-            Text("Not a git repository. It is still a workspace, it just has no branch.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            InspectorEmptyState(
+                systemImage: "arrow.triangle.branch",
+                title: "Not a git repository",
+                subtitle: "This folder has no branch. Files are still accessible in the Files tab."
+            )
         }
     }
 

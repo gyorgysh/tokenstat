@@ -32,9 +32,11 @@ struct AccountView: View {
             }
             .padding(Theme.Space.m)
         }
+        .background(Theme.background)
         .navigationTitle("Account")
         .overlay(alignment: .bottomTrailing) {
-            TransientToast(message: $model.syncNotice, severity: .success)
+            TransientToast(message: $model.syncNotice,
+                           severity: model.syncNoticeIsError ? .danger : .success)
                 .padding(Theme.Space.l)
         }
         .task { if model.account == nil { await model.load() } }

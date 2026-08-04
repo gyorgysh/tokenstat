@@ -162,6 +162,7 @@ pub fn limits() -> ProviderLimits {
         windows,
         observed_at_ms: now_ms(),
         note: None,
+        stale: false,
     }
 }
 

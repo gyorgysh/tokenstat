@@ -390,16 +390,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     .engine
                     .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
                     .map_err(|e| e.to_string())?;
-                // Fresh input plus output: what the day's work actually was.
-                // Cache reads are counted elsewhere and would swamp the scale.
+                // Cost in microdollars: what the day's work actually spent.
+                // Token counts would favour high-volume cheap models over
+                // expensive ones; cost reflects real spend instead.
                 let days: Vec<(String, u64)> = rows
                     .iter()
-                    .map(|r| {
-                        (
-                            r.key.clone(),
-                            r.counters.input_fresh.unwrap_or(0) + r.counters.output.unwrap_or(0),
-                        )
-                    })
+                    .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
                     .collect();
                 // Anchored on today rather than on the newest day with data, so
                 // a quiet week reads as a quiet week instead of vanishing.
@@ -633,6 +629,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 });
                 vec![claude, codex, cursor, opencode, antigravity]
             });
+            // A vendor that could not be read this time is not a vendor whose
+            // quota is unknown. Remember every real reading and hand back the
+            // last one, marked stale and dated, when a refresh comes back with
+            // only a reason.
+            tokenstat_core::limits::cache::store(&providers);
+            let providers = tokenstat_core::limits::cache::backfill(providers);
             serde_json::to_value(providers).map_err(|e| e.to_string())
         }
 
@@ -1074,6 +1076,20 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 }))
                 .map_err(|e| e.to_string())
             }),
+
+        // The app only asks whether a release exists. Applying an update to an
+        // installed application needs its signed installer and is deliberately
+        // left to the release updater, not the daemon process.
+        "app.updateCheck" => tokenstat_sync::check_latest()
+            .map(|check| {
+                json!({
+                    "current": check.current,
+                    "latest": check.latest,
+                    "newer": check.newer,
+                    "htmlUrl": check.html_url,
+                })
+            })
+            .map_err(|e| e.to_string()),
 
         "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
             .map_err(|e: serde_json::Error| e.to_string()),

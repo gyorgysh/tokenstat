@@ -14,11 +14,19 @@ import AppKit
 
 /// The tabs of the workspace inspector.
 enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
-    case changes = "Changes"
     case files = "Files"
+    case changes = "Changes"
     case history = "History"
 
     var id: String { rawValue }
+}
+
+/// A browser tab kept with its workspace, not with the window.
+struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
+    let id: String
+    var url: String
+    var number: Int
+    var title: String { "Browser \(number)" }
 }
 
 /// The folders the user chose to work in.
@@ -39,7 +47,7 @@ final class WorkspacesModel {
     /// file watcher refreshes the folder list, which during a build is several
     /// times a second. As view state the tab was reset on the next build and
     /// the picker looked like it did nothing at all.
-    var inspectorTab: InspectorTab = .changes
+    var inspectorTab: InspectorTab = .files
 
     /// Label for an inspector tab, with the count that is the reason to look at
     /// it.
@@ -94,6 +102,9 @@ final class WorkspacesModel {
     private(set) var openFiles: [String: [String]] = [:]
     /// The open file being shown, or nil when the pane is showing a terminal.
     private(set) var activeFile: [String: String] = [:]
+    private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
+    private(set) var activeBrowserID: [String: String] = [:]
+    private(set) var filesShown: Set<String> = []
     private(set) var diffs: [String: FileDiff] = [:]
     /// One document per open file, keyed the same way as the diffs.
     ///
@@ -209,12 +220,63 @@ final class WorkspacesModel {
     /// Put the terminal back in front without closing any open file.
     func showTerminal(in workspaceID: String) {
         activeFile[workspaceID] = nil
+        activeBrowserID[workspaceID] = nil
+        filesShown.remove(workspaceID)
         closeCommit(in: workspaceID)
+    }
+
+    func browserTabs(in workspaceID: String) -> [WorkspaceBrowserTab] {
+        browserTabs[workspaceID] ?? []
+    }
+
+    /// Open a new browser tab, or select an existing one when an id is given.
+    @discardableResult
+    func showBrowser(in workspaceID: String, id: String? = nil) -> WorkspaceBrowserTab {
+        activeFile[workspaceID] = nil
+        filesShown.remove(workspaceID)
+        closeCommit(in: workspaceID)
+        if let id, let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) {
+            activeBrowserID[workspaceID] = id
+            return tab
+        }
+        let tabs = browserTabs[workspaceID] ?? []
+        let tab = WorkspaceBrowserTab(
+            id: UUID().uuidString,
+            url: "",
+            number: tabs.count + 1
+        )
+        browserTabs[workspaceID] = tabs + [tab]
+        activeBrowserID[workspaceID] = tab.id
+        return tab
+    }
+
+    func closeBrowser(_ tab: WorkspaceBrowserTab, in workspaceID: String) {
+        browserTabs[workspaceID]?.removeAll { $0.id == tab.id }
+        guard activeBrowserID[workspaceID] == tab.id else { return }
+        activeBrowserID[workspaceID] = browserTabs[workspaceID]?.last?.id
+    }
+
+    func setBrowserURL(_ url: String, in workspaceID: String, tabID: String) {
+        guard let index = browserTabs[workspaceID]?.firstIndex(where: { $0.id == tabID }) else { return }
+        browserTabs[workspaceID]?[index].url = url
+    }
+
+    func showFiles(in workspaceID: String) {
+        activeFile[workspaceID] = nil
+        activeBrowserID[workspaceID] = nil
+        filesShown.insert(workspaceID)
+        closeCommit(in: workspaceID)
+    }
+
+    func closeFiles(in workspaceID: String) {
+        filesShown.remove(workspaceID)
     }
 
     /// True when the pane is showing a terminal rather than a file or a commit.
     func isShowingTerminal(in workspaceID: String) -> Bool {
         activeFile[workspaceID] == nil
+            && activeBrowserID[workspaceID] == nil
+            && !filesShown.contains(workspaceID)
             && openCommit[workspaceID] == nil
             && loadingCommit[workspaceID] == nil
     }

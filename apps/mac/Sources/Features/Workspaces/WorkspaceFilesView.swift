@@ -14,57 +14,92 @@ import SwiftUI
 /// monorepo has hundreds of thousands of files and reading them to draw a
 /// dozen rows would stall the window for no benefit.
 struct WorkspaceFilesView: View {
+    /// Where the list is drawn, which decides what is behind it.
+    ///
+    /// The tree appears twice: in the inspector column, which sits on the same
+    /// translucent material as the rest of the chrome, and in the middle pane
+    /// as a session, which is content. Material in the middle made the file
+    /// list read a shade lighter than the editor, the diff and the browser it
+    /// shares that slot with, so the same folder changed colour depending on
+    /// which pane you opened it in.
+    enum Surface {
+        case chrome
+        case content
+    }
+
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
+    var surface: Surface = .chrome
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                content
+        filesBody
+            .background(backdrop)
+            .task(id: folder?.id) {
+                guard let folder, folder.exists else { return }
+                if model.children(of: "", in: folder.id) == nil {
+                    await model.loadTree("", in: folder.id)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Theme.Space.s)
-        }
-        .background(Theme.sidebarMaterial)
-        .task(id: folder?.id) {
-            guard let folder, folder.exists else { return }
-            if model.children(of: "", in: folder.id) == nil {
-                await model.loadTree("", in: folder.id)
-            }
+    }
+
+    private var backdrop: AnyShapeStyle {
+        switch surface {
+        case .chrome: return AnyShapeStyle(Theme.sidebarMaterial)
+        case .content: return AnyShapeStyle(Theme.background)
         }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var filesBody: some View {
         if let folder {
             if !folder.exists {
-                note("The folder is missing, so there is nothing to read.", tint: .orange)
+                InspectorEmptyState(
+                    systemImage: "exclamationmark.triangle",
+                    title: "Folder missing",
+                    subtitle: "The folder no longer exists on disk.",
+                    tint: .orange
+                )
             } else if let roots = model.children(of: "", in: folder.id) {
                 if roots.isEmpty {
-                    note("This folder is empty.")
+                    InspectorEmptyState(
+                        systemImage: "tray",
+                        title: "Empty folder",
+                        subtitle: "There are no files or directories here yet."
+                    )
                 } else {
-                    ForEach(rows(roots, in: folder)) { row in
-                        TreeRow(
-                            entry: row.entry,
-                            depth: row.depth,
-                            isExpanded: model.isExpanded(row.entry.path, in: folder.id),
-                            isOpen: model.activeFile[folder.id] == row.entry.path
-                        ) {
-                            Task {
-                                if row.entry.isDir {
-                                    await model.toggleDirectory(row.entry.path, in: folder.id)
-                                } else {
-                                    await model.openFile(row.entry.path, in: folder.id)
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(rows(roots, in: folder)) { row in
+                                TreeRow(
+                                    entry: row.entry,
+                                    depth: row.depth,
+                                    isExpanded: model.isExpanded(row.entry.path, in: folder.id),
+                                    isOpen: model.activeFile[folder.id] == row.entry.path
+                                ) {
+                                    Task {
+                                        if row.entry.isDir {
+                                            await model.toggleDirectory(row.entry.path, in: folder.id)
+                                        } else {
+                                            await model.openFile(row.entry.path, in: folder.id)
+                                        }
+                                    }
                                 }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Theme.Space.s)
                     }
                 }
             } else {
-                note("Reading…")
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
-            note("Select a workspace.")
+            InspectorEmptyState(
+                systemImage: "sidebar.right",
+                title: "No workspace selected",
+                subtitle: "Pick a workspace from the list on the left."
+            )
         }
     }
 
@@ -95,13 +130,6 @@ struct WorkspaceFilesView: View {
         }
         walk(roots, depth: 0)
         return out
-    }
-
-    private func note(_ text: String, tint: Color = .secondary) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(tint)
-            .padding(.horizontal, Theme.Space.m)
     }
 }
 
