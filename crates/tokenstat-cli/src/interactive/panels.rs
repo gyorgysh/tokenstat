@@ -5,7 +5,7 @@ use tokenstat_core::{
 };
 
 use super::*;
-use crate::ui;
+use crate::ui::{self, HeatRender};
 
 pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
     let c = &app.totals.counters;
@@ -105,7 +105,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             )));
             for (r, row) in cal.rows.iter().enumerate() {
                 let mut spans = vec![Span::styled(
-                    ui::pad_right(ui::HeatCalendar::row_label(r), ui::HEAT_GUTTER),
+                    ui::pad_right(ui::heat_row_label(r), ui::HEAT_GUTTER),
                     Style::default().fg(MUTED),
                 )];
                 for cell in row {
@@ -772,7 +772,7 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
     )));
     for (r, row) in cal.rows.iter().enumerate() {
         let mut spans = vec![Span::styled(
-            ui::pad_right(ui::HeatCalendar::row_label(r), ui::HEAT_GUTTER),
+            ui::pad_right(ui::heat_row_label(r), ui::HEAT_GUTTER),
             Style::default().fg(MUTED),
         )];
         for cell in row {
@@ -912,7 +912,7 @@ pub(super) fn wrapped_detail_lines(
             )));
             for (r, row) in cal.rows.iter().enumerate() {
                 let mut spans = vec![Span::styled(
-                    ui::pad_right(ui::HeatCalendar::row_label(r), ui::HEAT_GUTTER),
+                    ui::pad_right(ui::heat_row_label(r), ui::HEAT_GUTTER),
                     Style::default().fg(MUTED),
                 )];
                 for cell in row {

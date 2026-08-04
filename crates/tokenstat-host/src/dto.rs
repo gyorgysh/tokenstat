@@ -385,3 +385,88 @@ pub struct WorkspaceDto {
     /// not look" for "no changes".
     pub git: Option<tokenstat_workspace::GitStatus>,
 }
+
+/// The activity calendar, flattened for a front end that draws its own grid.
+///
+/// The rows are sent as they are computed, seven of them, Monday first, with
+/// `null` for a day outside the range. A client must not rebuild the grid from
+/// the day list: the calendar's whole point is that a column is a real week and
+/// a row a real weekday, and packing active days back to back silently shifts
+/// every later column.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarDto {
+    pub rows: Vec<Vec<Option<HeatCellDto>>>,
+    /// `(column, short month name)` for a header strip.
+    pub months: Vec<MonthLabelDto>,
+    pub weeks: usize,
+    pub total: u64,
+    pub active_days: usize,
+    /// Consecutive active days ending on the most recent day with data. A quiet
+    /// day that has not finished yet does not break it.
+    pub streak_current: usize,
+    pub streak_best: usize,
+    pub busiest: Option<HeatCellDto>,
+    pub first: String,
+    pub last: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatCellDto {
+    /// `YYYY-MM-DD`, so a client formats it in its own locale.
+    pub date: String,
+    pub value: u64,
+    /// `0..=4`. Zero is a day inside the range with no usage, which reads as
+    /// "nothing happened" and not as "no data".
+    pub level: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonthLabelDto {
+    pub column: usize,
+    pub name: String,
+}
+
+impl From<&tokenstat_core::activity::HeatCell> for HeatCellDto {
+    fn from(c: &tokenstat_core::activity::HeatCell) -> HeatCellDto {
+        HeatCellDto {
+            date: c.date.to_string(),
+            value: c.value,
+            level: c.level,
+        }
+    }
+}
+
+impl From<tokenstat_core::activity::HeatCalendar> for CalendarDto {
+    fn from(c: tokenstat_core::activity::HeatCalendar) -> CalendarDto {
+        CalendarDto {
+            rows: c
+                .rows
+                .iter()
+                .map(|row| {
+                    row.iter()
+                        .map(|c| c.as_ref().map(HeatCellDto::from))
+                        .collect()
+                })
+                .collect(),
+            months: c
+                .months
+                .iter()
+                .map(|(column, name)| MonthLabelDto {
+                    column: *column,
+                    name: (*name).to_string(),
+                })
+                .collect(),
+            weeks: c.weeks,
+            total: c.total,
+            active_days: c.active_days,
+            streak_current: c.streak_current,
+            streak_best: c.streak_best,
+            busiest: c.busiest.as_ref().map(HeatCellDto::from),
+            first: c.first.to_string(),
+            last: c.last.to_string(),
+        }
+    }
+}

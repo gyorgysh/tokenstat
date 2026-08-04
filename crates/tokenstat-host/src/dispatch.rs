@@ -18,8 +18,9 @@ use tokenstat_core::{GroupBy, Query};
 
 use crate::PROTOCOL_VERSION;
 use crate::dto::{
-    AccountDto, BlockDto, BucketDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto,
-    MachineDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto, WorkspaceDto,
+    AccountDto, BlockDto, BucketDto, CalendarDto, DeviceLoginDto, DevicePollDto, GroupByDto,
+    InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
+    WorkspaceDto,
 };
 use crate::session::{OpenParams, Session};
 
@@ -46,6 +47,30 @@ struct SplitParams {
     split_by: GroupByDto,
     #[serde(default)]
     query: QueryDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CalendarParams {
+    /// Columns in the grid, clamped to 1..=53 by the core. 53 is the rolling
+    /// year the CLI draws.
+    #[serde(default = "default_weeks")]
+    weeks: usize,
+    #[serde(default)]
+    query: QueryDto,
+}
+
+impl Default for CalendarParams {
+    fn default() -> Self {
+        CalendarParams {
+            weeks: default_weeks(),
+            query: QueryDto::default(),
+        }
+    }
+}
+
+fn default_weeks() -> usize {
+    53
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -281,6 +306,44 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     .map_err(|e| e.to_string())?;
                 let dtos: Vec<BucketDto> = rows.into_iter().map(BucketDto::from).collect();
                 serde_json::to_value(dtos).map_err(|e| e.to_string())
+            })
+        }
+
+        // The activity calendar behind the Home screen's heatmap and streaks.
+        //
+        // Built here rather than in the client from a day report, because the
+        // grid has to align a real week to a column and the archive only stores
+        // days that had events. A client that packed those together would draw
+        // a plausible grid with every date in the wrong place.
+        "activity.calendar" => {
+            let p: CalendarParams = parse(params)?;
+            with_session(s, |b| {
+                let rows = b
+                    .engine
+                    .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
+                    .map_err(|e| e.to_string())?;
+                // Fresh input plus output: what the day's work actually was.
+                // Cache reads are counted elsewhere and would swamp the scale.
+                let days: Vec<(String, u64)> = rows
+                    .iter()
+                    .map(|r| {
+                        (
+                            r.key.clone(),
+                            r.counters.input_fresh.unwrap_or(0) + r.counters.output.unwrap_or(0),
+                        )
+                    })
+                    .collect();
+                // Anchored on today rather than on the newest day with data, so
+                // a quiet week reads as a quiet week instead of vanishing.
+                let today = tokenstat_core::activity::today(b.engine.timezone());
+                match tokenstat_core::activity::calendar(&days, p.weeks, today) {
+                    Some(calendar) => {
+                        serde_json::to_value(CalendarDto::from(calendar)).map_err(|e| e.to_string())
+                    }
+                    // An empty archive is not an error. The client draws an
+                    // empty grid and says the archive has nothing in it yet.
+                    None => Ok(Value::Null),
+                }
             })
         }
 
@@ -989,6 +1052,21 @@ mod tests {
                 "{method} must not bypass the session"
             );
         }
+    }
+
+    /// An empty archive is a valid answer, not a failure.
+    ///
+    /// Home draws this grid the moment the window opens, before anything has
+    /// been scanned, and the first run of the app is exactly the case where
+    /// there is nothing yet. An error here would put a banner across a brand
+    /// new install.
+    #[test]
+    fn the_calendar_answers_for_an_empty_archive() {
+        let mut s = session();
+        let out = call(&mut s, "activity.calendar", "{}");
+        let v: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(v["ok"], true, "{out}");
+        assert!(v["result"].is_null(), "{out}");
     }
 
     /// The editor's contract, pinned at the transport rather than only in the

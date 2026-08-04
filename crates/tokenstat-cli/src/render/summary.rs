@@ -3,7 +3,7 @@ use anyhow::Result;
 use tokenstat_core::{EquivalentValue, EstimateSource, GroupBy, PriceTable, Query, Store};
 
 use super::*;
-use crate::ui::{self, BOLD, DIM, accent};
+use crate::ui::{self, BOLD, DIM, HeatRender, accent};
 
 pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -> Result<()> {
     let totals = store.totals(q)?;
@@ -193,11 +193,10 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     Ok(())
 }
 
-/// Today in the user's timezone. The heatmap anchors on it rather than on the
-/// newest day with data, so a quiet week still shows as a quiet week.
-pub(super) fn today(tz: &jiff::tz::TimeZone) -> jiff::civil::Date {
-    jiff::Timestamp::now().to_zoned(tz.clone()).date()
-}
+/// Today in the user's timezone. Re-exported from the core, which owns the
+/// calendar this anchors, so the CLI and the app cannot disagree about which
+/// day it is.
+pub(super) use tokenstat_core::activity::today;
 
 /// Weeks that fit the current terminal, so a wide window is not required to
 /// read the grid and a narrow one does not wrap into noise.
@@ -229,7 +228,7 @@ fn heat_block(cal: &ui::HeatCalendar, legend: bool) {
         }
         println!(
             "  {DIM}{}{DIM:#}{}",
-            ui::pad_right(ui::HeatCalendar::row_label(r), ui::HEAT_GUTTER),
+            ui::pad_right(ui::heat_row_label(r), ui::HEAT_GUTTER),
             line.trim_end()
         );
     }

@@ -417,53 +417,29 @@ pub const HEAT_GUTTER: usize = 4;
 /// Terminal columns one week occupies: the cell plus its gap.
 pub const HEAT_COL: usize = 2;
 
-/// One day in the activity calendar.
-#[derive(Debug, Clone, Copy)]
-pub struct HeatCell {
-    pub date: jiff::civil::Date,
-    pub value: u64,
-    /// Heat level `0..=4`. Level 0 means the day is inside the range but idle.
-    pub level: u8,
-}
+// The calendar itself lives in `tokenstat_core::activity`, because the desktop
+// app draws the same grid and a second implementation would be a second answer
+// to "how long is my streak". What stayed here is the part that is genuinely
+// about a terminal: the column arithmetic and the two label strings.
+pub use tokenstat_core::activity::{HeatCalendar, calendar as heat_calendar};
 
-/// A calendar-aligned activity grid, newest week last.
+/// Drawing a calendar into a fixed-width grid.
 ///
-/// The point of the calendar, rather than a packed run of active days, is that
-/// a column really is a week and a row really is a weekday. Days with no usage
-/// have to be filled in, because the archive only stores days that had events
-/// and rendering those back to back silently shifts every later column.
-#[derive(Debug, Clone)]
-pub struct HeatCalendar {
-    /// Seven rows, Monday first. `None` is outside the rendered range.
-    pub rows: Vec<Vec<Option<HeatCell>>>,
-    /// `(column, short month name)` for the header strip.
-    pub months: Vec<(usize, &'static str)>,
-    pub weeks: usize,
-    pub total: u64,
-    pub active_days: usize,
-    /// Consecutive active days ending on the most recent day with data.
-    pub streak_current: usize,
-    /// Longest run of consecutive active days in the rendered range.
-    pub streak_best: usize,
-    pub busiest: Option<HeatCell>,
-    pub first: jiff::civil::Date,
-    pub last: jiff::civil::Date,
+/// A trait rather than methods on the type, because the type is in another
+/// crate now and these are of no use to anything that is not a terminal.
+pub trait HeatRender {
+    /// Width of the rendered block in terminal columns.
+    fn width(&self) -> usize;
+    /// The month header strip, already padded to line up with the columns.
+    fn header(&self) -> String;
 }
 
-impl HeatCalendar {
-    /// Width of the rendered block in terminal columns.
-    pub fn width(&self) -> usize {
+impl HeatRender for HeatCalendar {
+    fn width(&self) -> usize {
         HEAT_GUTTER + self.weeks * HEAT_COL
     }
 
-    /// Every rendered day, oldest first. The grid is stored row-major for
-    /// drawing, so consumers that want a date series come through here.
-    pub fn days(&self) -> impl Iterator<Item = &HeatCell> {
-        (0..self.weeks).flat_map(move |c| (0..7).filter_map(move |r| self.rows[r][c].as_ref()))
-    }
-
-    /// The month header strip, already padded to line up with the columns.
-    pub fn header(&self) -> String {
+    fn header(&self) -> String {
         let mut s = " ".repeat(HEAT_GUTTER);
         for (col, name) in &self.months {
             let want = HEAT_GUTTER + col * HEAT_COL;
@@ -476,176 +452,16 @@ impl HeatCalendar {
         }
         s
     }
-
-    /// Label for a grid row. Only alternate days are labelled so the gutter
-    /// stays quiet.
-    pub fn row_label(row: usize) -> &'static str {
-        match row {
-            0 => "Mon",
-            2 => "Wed",
-            4 => "Fri",
-            _ => "",
-        }
-    }
 }
 
-/// Build the calendar from `(YYYY-MM-DD, value)` pairs in any order.
-///
-/// The grid is a fixed window of `weeks` columns ending on `anchor`, so the
-/// usual call is a rolling twelve months: the archive can hold years, the grid
-/// shows the last 53 weeks and pads the quiet ones with idle cells rather than
-/// shrinking. Days after `anchor` are left blank instead of reading as idle.
-pub fn heat_calendar(
-    days: &[(String, u64)],
-    weeks: usize,
-    anchor: jiff::civil::Date,
-) -> Option<HeatCalendar> {
-    use jiff::civil::Date;
-
-    let mut parsed: Vec<(Date, u64)> = days
-        .iter()
-        .filter_map(|(d, v)| d.parse::<Date>().ok().map(|d| (d, *v)))
-        .collect();
-    if parsed.is_empty() {
-        return None;
-    }
-    parsed.sort_by_key(|(d, _)| *d);
-
-    let last = anchor;
-    let weeks = weeks.clamp(1, 53);
-
-    // Grid edges: end on the Sunday of the anchor's week, start on a Monday.
-    let end = shift_days(
-        anchor,
-        6 - i64::from(anchor.weekday().to_monday_zero_offset()),
-    );
-    let start = shift_days(end, -((weeks * 7 - 1) as i64));
-
-    let max = parsed
-        .iter()
-        .filter(|(d, _)| *d >= start)
-        .map(|(_, v)| *v)
-        .max()
-        .unwrap_or(1)
-        .max(1);
-
-    let span = (days_between(start, end) as usize) + 1;
-    let cols = span.div_ceil(7);
-    let mut total = 0u64;
-    let mut active_days = 0usize;
-    let mut busiest: Option<HeatCell> = None;
-    let mut run = 0usize;
-    let mut streak_best = 0usize;
-    let mut streak_current = 0usize;
-
-    // One ascending walk over the calendar. `parsed` is ascending too, so the
-    // lookup advances alongside it instead of searching per day.
-    let mut lookup = parsed.iter().peekable();
-    let mut cells: Vec<Option<HeatCell>> = Vec::with_capacity(span);
-    let mut date = start;
-    for _ in 0..span {
-        if date > anchor {
-            cells.push(None);
-            date = shift_days(date, 1);
-            continue;
-        }
-        let mut value = 0u64;
-        while let Some((d, v)) = lookup.peek() {
-            if *d < date {
-                lookup.next();
-            } else if *d == date {
-                value += *v;
-                lookup.next();
-            } else {
-                break;
-            }
-        }
-        let cell = HeatCell {
-            date,
-            value,
-            level: heat_level(value, max),
-        };
-        if value > 0 {
-            total += value;
-            active_days += 1;
-            run += 1;
-            streak_best = streak_best.max(run);
-            if busiest.is_none_or(|b| value > b.value) {
-                busiest = Some(cell);
-            }
-        } else if date < last {
-            // A quiet anchor day does not break the streak. The day is not
-            // over yet, and reporting "0 day streak" every morning is wrong.
-            run = 0;
-        }
-        streak_current = run;
-        cells.push(Some(cell));
-        date = shift_days(date, 1);
-    }
-
-    let rows: Vec<Vec<Option<HeatCell>>> = (0..7)
-        .map(|r| {
-            (0..cols)
-                .map(|c| cells.get(c * 7 + r).copied().flatten())
-                .collect()
-        })
-        .collect();
-    let months: Vec<(usize, &'static str)> = (0..cols).fold(Vec::new(), |mut acc, col| {
-        let monday = shift_days(start, (col * 7) as i64);
-        if let Some(name) = month_label(monday, col, acc.last()) {
-            acc.push((col, name));
-        }
-        acc
-    });
-
-    Some(HeatCalendar {
-        rows,
-        months,
-        weeks: cols,
-        total,
-        active_days,
-        streak_current,
-        streak_best,
-        busiest,
-        first: start,
-        last,
-    })
-}
-
-/// Month name for a column, or `None` when the label would repeat or crowd the
-/// previous one. Three-character names need two columns of clearance.
-fn month_label(
-    monday: jiff::civil::Date,
-    col: usize,
-    prev: Option<&(usize, &'static str)>,
-) -> Option<&'static str> {
-    const NAMES: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
-    let name = NAMES[(monday.month() as usize) - 1];
-    match prev {
-        Some((_, p)) if *p == name => None,
-        Some((c, _)) if col.saturating_sub(*c) < 2 => None,
-        _ => Some(name),
-    }
-}
-
-fn shift_days(d: jiff::civil::Date, n: i64) -> jiff::civil::Date {
-    d.checked_add(jiff::Span::new().days(n)).unwrap_or(d)
-}
-
-fn days_between(a: jiff::civil::Date, b: jiff::civil::Date) -> i64 {
-    b.since(a).map(|s| s.get_days() as i64).unwrap_or(0)
-}
-
-fn heat_level(v: u64, max: u64) -> u8 {
-    if v == 0 {
-        0
-    } else {
-        // Fourth root spreads the low end out, so a quiet day is still
-        // distinguishable from an empty one.
-        let ratio = (v as f64 / max as f64).powf(0.25);
-        ((ratio * 4.0).ceil() as u8).clamp(1, 4)
+/// Label for a grid row. Only alternate days are labelled so the gutter stays
+/// quiet.
+pub fn heat_row_label(row: usize) -> &'static str {
+    match row {
+        0 => "Mon",
+        2 => "Wed",
+        4 => "Fri",
+        _ => "",
     }
 }
 
