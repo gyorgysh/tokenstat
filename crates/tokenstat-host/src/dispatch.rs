@@ -63,6 +63,45 @@ struct WorkspaceIdParams {
     name: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PtySpawnParams {
+    /// Workspace to run in. The command inherits its folder as the cwd.
+    workspace_id: String,
+    command: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default = "default_rows")]
+    rows: u16,
+    #[serde(default = "default_cols")]
+    cols: u16,
+}
+
+fn default_rows() -> u16 {
+    24
+}
+
+fn default_cols() -> u16 {
+    80
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PtyIdParams {
+    id: String,
+    /// `pty.read` only: where the caller got to last time.
+    #[serde(default)]
+    offset: u64,
+    /// `pty.write` only: base64, because a keystroke is bytes.
+    #[serde(default)]
+    data: Option<String>,
+    /// `pty.resize` only.
+    #[serde(default)]
+    rows: Option<u16>,
+    #[serde(default)]
+    cols: Option<u16>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct SyncParams {
@@ -420,6 +459,99 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     .ok_or_else(|| format!("no workspace with id {}", p.id))?;
                 serde_json::to_value(describe(ws)).map_err(|e| e.to_string())
             })
+        }
+
+        // Terminals. The process is owned here rather than by the front end,
+        // which is what lets an iPad watch a session running on a Mac and what
+        // keeps an automation alive after a window closes.
+        "pty.spawn" => {
+            let p: PtySpawnParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            with_session(s, |b| {
+                let ws = b
+                    .workspaces
+                    .get(&p.workspace_id)
+                    .ok_or_else(|| format!("no workspace with id {}", p.workspace_id))?;
+                if !ws.exists() {
+                    return Err(format!("the folder is missing: {}", ws.path.display()));
+                }
+                let info = tokenstat_pty::manager()
+                    .spawn(&tokenstat_pty::Spawn {
+                        command: p.command.clone(),
+                        args: p.args.clone(),
+                        cwd: ws.path.clone(),
+                        workspace_id: Some(ws.id.clone()),
+                        rows: p.rows,
+                        cols: p.cols,
+                    })
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_value(info).map_err(|e| e.to_string())
+            })
+        }
+
+        "pty.list" => {
+            serde_json::to_value(tokenstat_pty::manager().list()).map_err(|e| e.to_string())
+        }
+
+        "pty.info" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let info = tokenstat_pty::manager()
+                .info(&p.id)
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(info).map_err(|e| e.to_string())
+        }
+
+        // Poll for output. Returns immediately, so the caller sets the pace.
+        // `dropped` is non-zero when the reader fell behind the buffer, and a
+        // terminal should say so rather than pretend the output never existed.
+        "pty.read" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let chunk = tokenstat_pty::manager()
+                .read(&p.id, p.offset)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({
+                "data": crate::base64::encode(&chunk.bytes),
+                "nextOffset": chunk.next_offset,
+                "dropped": chunk.dropped,
+            }))
+        }
+
+        "pty.write" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let data = p.data.ok_or("pty.write needs base64 data")?;
+            let bytes = crate::base64::decode(&data)?;
+            tokenstat_pty::manager()
+                .write(&p.id, &bytes)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"written": bytes.len()}))
+        }
+
+        "pty.resize" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let (rows, cols) = match (p.rows, p.cols) {
+                (Some(r), Some(c)) => (r, c),
+                _ => return Err("pty.resize needs rows and cols".into()),
+            };
+            tokenstat_pty::manager()
+                .resize(&p.id, rows, cols)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"rows": rows, "cols": cols}))
+        }
+
+        "pty.kill" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            tokenstat_pty::manager()
+                .kill(&p.id)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"killed": true}))
+        }
+
+        "pty.close" => {
+            let p: PtyIdParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            tokenstat_pty::manager()
+                .close(&p.id)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"closed": true}))
         }
 
         other => Err(format!("unknown method: {other}")),

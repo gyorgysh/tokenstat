@@ -31,6 +31,7 @@
 //! - [`dispatch`] maps a method name onto the core.
 //! - [`server`] is the socket listener.
 
+pub mod base64;
 pub mod dispatch;
 pub mod dto;
 pub mod server;

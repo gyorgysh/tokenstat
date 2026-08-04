@@ -6,6 +6,7 @@ members = [
     "crates/tokenstat-sync",
     "crates/tokenstat-mcp",
     "crates/tokenstat-workspace",
+    "crates/tokenstat-pty",
     "crates/tokenstat-host",
     "crates/tokenstat-ffi",
     "xtask",
@@ -34,6 +35,7 @@ tokenstat-sync = { path = "crates/tokenstat-sync", version = "0.1.3" }
 tokenstat-mcp = { path = "crates/tokenstat-mcp", version = "0.1.3" }
 tokenstat-host = { path = "crates/tokenstat-host", version = "0.1.3" }
 tokenstat-workspace = { path = "crates/tokenstat-workspace", version = "0.1.3" }
+tokenstat-pty = { path = "crates/tokenstat-pty", version = "0.1.3" }
 
 # Core. Deliberately no network stack here: the privacy guarantee is that the
 # crate reading your logs cannot send them anywhere.

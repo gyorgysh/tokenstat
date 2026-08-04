@@ -1,0 +1,19 @@
+[package]
+name = "tokenstat-pty"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Pseudoterminal sessions for the agent CLIs a workspace runs"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+# Creating a pty needs forkpty, which means libc and a pile of platform
+# specifics. portable-pty is wezterm's, MIT, and already solves the macOS,
+# Linux and Windows differences. Writing this by hand would be unsafe code
+# whose only feature is being ours.
+portable-pty = "0.9"
