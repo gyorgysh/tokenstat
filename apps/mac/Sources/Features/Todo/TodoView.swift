@@ -34,6 +34,7 @@ struct TodoView: View {
                 .padding(Theme.Space.m)
             }
         }
+        .background(Theme.background)
         .navigationTitle("Todo")
         .task { await model.load() }
     }
@@ -41,13 +42,8 @@ struct TodoView: View {
     private func column(_ id: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
-                Text(label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                SectionLabel(text: label, count: model.cards(in: id).count)
                 Spacer()
-                Text("\(model.cards(in: id).count)")
-                    .font(Theme.numeric(11))
-                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.xs)
@@ -74,9 +70,9 @@ struct TodoView: View {
         }
         .frame(width: 300)
         .padding(Theme.Space.s)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
     }
@@ -130,9 +126,9 @@ private struct CardView: View {
             }
         }
         .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(card.delegate == nil ? Theme.border : tint.opacity(0.4), lineWidth: 1)
         )
     }

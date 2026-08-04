@@ -340,8 +340,19 @@ final class WorkspacesModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            var loaded = try await Bridge.workspaces()
-            loaded.append(contentsOf: remoteFolders.values.flatMap { $0 })
+            let loaded = try await Bridge.workspaces()
+            // Publish local folders before dialing peers. The sidebar and the
+            // selected workspace should not wait for a machine that is asleep.
+            folders = loaded + remoteFolders.values.flatMap { $0 }
+            errorMessage = nil
+            if let id = selectedID, !folders.contains(where: { $0.id == id }) {
+                selectedID = folders.first?.id
+            }
+            if selectedID == nil { selectedID = folders.first?.id }
+            #if os(macOS)
+            syncWatcher()
+            #endif
+
             // Remote workspaces are read through the local daemon. A peer that
             // is offline does not make local folders disappear, so its failure
             // is remembered rather than raised. The refresh timer and the file
@@ -363,8 +374,7 @@ final class WorkspacesModel {
                     remotePeerRetryAt[peer.key] = Date().addingTimeInterval(30)
                 }
             }
-            folders = loaded
-            errorMessage = nil
+            folders = loaded + remoteFolders.values.flatMap { $0 }
             // A folder removed elsewhere should not leave the detail pane
             // describing something that is no longer in the list.
             if let id = selectedID, !folders.contains(where: { $0.id == id }) {

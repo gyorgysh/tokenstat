@@ -165,7 +165,7 @@ struct RootView: View {
                         label: item.label,
                         symbol: item.symbol,
                         isSelected: destination == item
-                    ) { destination = item }
+                    ) { selectDestination(item) }
                 }
 
                 // Folders the user chose. Nothing to do with the archive:
@@ -229,10 +229,7 @@ struct RootView: View {
                                 trailing: folder.diffStat,
                                 isSelected: destination == .workspaces
                                     && workspaces.selectedID == folder.id
-                            ) {
-                                destination = .workspaces
-                                workspaces.selectedID = folder.id
-                            }
+                            ) { selectWorkspace(folder.id) }
                         }
                         .contextMenu {
                             if !folder.isRemote {
@@ -251,10 +248,7 @@ struct RootView: View {
                             trailing: folder.diffStat,
                             isSelected: destination == .workspaces
                                 && workspaces.selectedID == folder.id
-                        ) {
-                            destination = .workspaces
-                            workspaces.selectedID = folder.id
-                        }
+                        ) { selectWorkspace(folder.id) }
                         .help(folder.path)
                         .contextMenu {
                             Divider()
@@ -279,10 +273,15 @@ struct RootView: View {
                                         && workspaces.isShowingTerminal(in: folder.id)
                                         && terminals.active(in: folder.id)?.id == session.id
                                 ) {
-                                    destination = .workspaces
-                                    workspaces.selectedID = folder.id
-                                    workspaces.showTerminal(in: folder.id)
-                                    terminals.select(session)
+                                    var transaction = Transaction()
+                                    transaction.animation = nil
+                                    withTransaction(transaction) {
+                                        destination = .workspaces
+                                        workspaces.selectedID = folder.id
+                                        workspaces.showTerminal(in: folder.id)
+                                        terminals.select(session)
+                                        isInspectorPresented = true
+                                    }
                                 }
                             }
                         }
@@ -417,6 +416,25 @@ struct RootView: View {
             AccountView(model: account)
         case .insights:
             InsightsView(model: model)
+        }
+    }
+
+    /// Select the folder and destination in one immediate transaction. The
+    /// inspector is part of the workspace destination, so allowing SwiftUI to
+    /// animate the two state changes separately makes it visibly trail the row.
+    private func selectWorkspace(_ id: String) {
+        selectDestination(.workspaces) {
+            workspaces.selectedID = id
+            isInspectorPresented = true
+        }
+    }
+
+    private func selectDestination(_ next: Destination, update: (() -> Void)? = nil) {
+        var transaction = Transaction()
+        transaction.animation = nil
+        withTransaction(transaction) {
+            destination = next
+            update?()
         }
     }
 }

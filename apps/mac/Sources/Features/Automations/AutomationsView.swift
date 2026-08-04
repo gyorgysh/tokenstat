@@ -35,6 +35,7 @@ struct AutomationsView: View {
             .padding(Theme.Space.m)
         }
         .navigationTitle("Automations")
+        .background(Theme.background)
         .task {
             await model.load()
             model.syncWatching()
@@ -107,7 +108,11 @@ struct AutomationsView: View {
             }
             .frame(maxHeight: 220)
             .padding(Theme.Space.s)
-            .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
         }
     }
 
@@ -178,7 +183,11 @@ struct AutomationsView: View {
             }
         }
         .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 
     // MARK: - New automation
@@ -234,9 +243,9 @@ private struct NewAutomationForm: View {
                     .frame(minHeight: 90)
                     .scrollContentBackground(.hidden)
                     .padding(6)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: Theme.cardRadius)
                             .strokeBorder(Theme.border, lineWidth: 1)
                     )
                     .overlay(alignment: .topLeading) {

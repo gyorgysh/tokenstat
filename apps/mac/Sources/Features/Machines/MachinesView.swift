@@ -44,6 +44,7 @@ struct MachinesView: View {
             .padding(Theme.Space.m)
         }
         .navigationTitle("Machines")
+        .background(Theme.background)
         .task { if model.identity == nil { await model.load() } }
     }
 
@@ -163,7 +164,11 @@ struct MachinesView: View {
                             .disabled(daemon.address == nil)
                     }
                     .padding(Theme.Space.s)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.cardRadius)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    )
                 }
                 Text("The fingerprint is compared with the one shown on that machine before it can reach this one.")
                     .font(.caption)
@@ -272,7 +277,11 @@ private struct PeerRow<Actions: View>: View {
             actions
         }
         .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 
     private var tint: Color {
