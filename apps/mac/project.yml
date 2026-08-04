@@ -39,6 +39,9 @@ targets:
     supportedDestinations: [macOS, iOS]
     sources:
       - path: Sources
+      # Vendor marks for the harnesses. See TRADEMARK.md: these belong to
+      # their owners and are not covered by this project's licence.
+      - path: Resources
     dependencies:
       # Linked, not embedded: it is a static library, so it ends up inside the
       # binary and there is nothing to copy into the bundle.

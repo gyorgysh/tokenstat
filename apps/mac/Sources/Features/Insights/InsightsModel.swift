@@ -72,8 +72,11 @@ final class InsightsModel {
 
     /// Project folders with the harnesses that ran in each.
     ///
-    /// This is what the sidebar tree is, and it is a preview of Workspaces:
-    /// the folders are real, and so is the list of agents that touched them.
+    /// This is what the sidebar tree is. The folders are real and so is the
+    /// agent attribution, which is why it earns its place before Workspaces
+    /// exists: these are session histories, and the same rows gain live
+    /// sessions once the terminal lands.
+    ///
     /// Built from one two-level query rather than a query per project.
     var workspaces: [Workspace] = []
 
@@ -96,7 +99,10 @@ final class InsightsModel {
         }
     }
 
-    var period: Period = .month {
+    /// Defaults to the whole archive. tokenstat exists because agents delete
+    /// their own transcripts, so the first thing to show is everything that
+    /// survived, not the last month of it.
+    var period: Period = .all {
         didSet { if period != oldValue { reload() } }
     }
 

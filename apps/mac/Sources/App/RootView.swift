@@ -108,8 +108,10 @@ struct RootView: View {
                 }
 
                 // Real folders from the archive, each with the harnesses that
-                // actually ran in it. Not a preview of Workspaces, the same
-                // data Workspaces will be built on.
+                // ran in it. Today the counts come from session history, which
+                // is what the archive holds. When the terminal lands these same
+                // rows gain live sessions, and clicking one opens it rather
+                // than filtering a report.
                 SectionLabel(text: "Workspaces", count: model.workspaces.count)
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.top, Theme.Space.l)
@@ -222,20 +224,11 @@ struct RootView: View {
     /// of the name.
     private var accountLabel: some View {
         HStack(spacing: Theme.Space.s) {
-            ZStack {
-                Circle()
-                    .fill(account.signedIn ? Theme.accent.opacity(0.18) : Color.secondary.opacity(0.15))
-                if let initial = account.account?.handle?.first {
-                    Text(String(initial).uppercased())
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-                } else {
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 22, height: 22)
+            Avatar(
+                url: account.account?.avatar,
+                handle: account.account?.handle,
+                size: 22
+            )
 
             if account.isSyncing {
                 Text("Syncing…")
@@ -293,11 +286,11 @@ struct RootView: View {
                 title: "Workspaces",
                 symbol: "square.stack.3d.up",
                 summary: """
-                A folder per piece of work, with its branch, its diff, its file tree, \
-                and the agent sessions running against it. Each row carries what it \
-                has burned.
+                A terminal per project. Past sessions and running ones, with \
+                Claude Code, Codex, OpenCode and the rest launched in place, and \
+                the file and git changes for that folder in this pane.
                 """,
-                milestone: "Milestone 4 in docs/desktop-app.md"
+                milestone: "Milestones 4 and 5 in docs/desktop-app.md"
             )
         case .automations:
             NotBuiltYet(
@@ -383,9 +376,7 @@ private struct WorkspaceRow: View {
                         onSelectHarness(harness)
                     } label: {
                         HStack(spacing: Theme.Space.s) {
-                            Circle()
-                                .fill(Theme.secondary.opacity(0.7))
-                                .frame(width: 5, height: 5)
+                            HarnessMark(id: harness.split, size: 14)
                             Text(harnessName(harness.split))
                                 .font(.system(size: 11))
                                 .foregroundStyle(
@@ -397,7 +388,7 @@ private struct WorkspaceRow: View {
                                 .font(Theme.numeric(10))
                                 .foregroundStyle(.quaternary)
                         }
-                        .padding(.leading, 34)
+                        .padding(.leading, 30)
                         .padding(.trailing, Theme.Space.m)
                         .padding(.vertical, 3)
                         .contentShape(.rect)

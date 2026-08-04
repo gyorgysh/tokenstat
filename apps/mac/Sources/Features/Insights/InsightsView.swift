@@ -42,8 +42,9 @@ struct InsightsView: View {
                         selected: $model.selected,
                         showsValue: model.tab == .models,
                         // A session id or a project path is read character by
-                        // character. A tool name is a word.
-                        monospaced: model.tab != .harnesses
+                        // character. A harness has a name, not an id.
+                        monospaced: model.tab != .harnesses,
+                        isHarness: model.tab == .harnesses
                     )
                 }
             }
@@ -66,7 +67,7 @@ struct InsightsView: View {
                     MiniList(rows: model.byModel, showsValue: true, monospaced: true)
                 }
                 Card(title: "By harness", subtitle: "Which agent produced the tokens") {
-                    MiniList(rows: model.bySource, showsValue: false, monospaced: false)
+                    MiniList(rows: model.bySource, showsValue: false, monospaced: false, isHarness: true)
                 }
             }
         }
@@ -107,6 +108,7 @@ private struct BreakdownTable: View {
     @Binding var selected: Bucket?
     var showsValue: Bool
     var monospaced: Bool
+    var isHarness: Bool = false
 
     var body: some View {
         if rows.isEmpty {
@@ -120,7 +122,8 @@ private struct BreakdownTable: View {
                         share: share(row),
                         showsValue: showsValue,
                         monospaced: monospaced,
-                        isSelected: selected?.key == row.key
+                        isSelected: selected?.key == row.key,
+                        isHarness: isHarness
                     )
                     .contentShape(.rect)
                     .onTapGesture { selected = selected?.key == row.key ? nil : row }
@@ -165,10 +168,16 @@ private struct BreakdownRow: View {
     var showsValue: Bool
     var monospaced: Bool
     var isSelected: Bool
+    /// Harness rows carry the tool's mark and its proper name. Every other
+    /// dimension is a raw id and stays one.
+    var isHarness: Bool = false
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
-            Text(row.key.isEmpty ? "unknown" : row.key)
+            if isHarness {
+                HarnessMark(id: row.key, size: 16)
+            }
+            Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
                 .font(monospaced ? Theme.mono(11) : .system(size: 12))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -214,6 +223,7 @@ private struct MiniList: View {
     var rows: [Bucket]
     var showsValue: Bool
     var monospaced: Bool
+    var isHarness: Bool = false
     var limit: Int = 6
 
     var body: some View {
@@ -223,7 +233,10 @@ private struct MiniList: View {
             VStack(spacing: Theme.Space.s) {
                 ForEach(rows.prefix(limit)) { row in
                     HStack(spacing: Theme.Space.m) {
-                        Text(row.key.isEmpty ? "unknown" : row.key)
+                        if isHarness {
+                            HarnessMark(id: row.key, size: 15)
+                        }
+                        Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
                             .font(monospaced ? Theme.mono(11) : .system(size: 12))
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -255,6 +268,20 @@ private struct MiniList: View {
 private struct DailyChart: View {
     var rows: [Bucket]
 
+    /// Every nth day, so labels never collide however long the period is.
+    private var labelledDays: [String] {
+        guard !rows.isEmpty else { return [] }
+        let stride = max(1, Int((Double(rows.count) / 8).rounded(.up)))
+        return rows.enumerated()
+            .filter { $0.offset % stride == 0 }
+            .map(\.element.key)
+    }
+
+    /// `2026-07-29` becomes `07-29`. The year is the same on every bar.
+    private func shortDay(_ raw: String) -> String {
+        raw.count > 5 ? String(raw.suffix(5)) : raw
+    }
+
     var body: some View {
         if rows.isEmpty {
             EmptyHint(text: "No usage in this period.")
@@ -268,12 +295,17 @@ private struct DailyChart: View {
                 .cornerRadius(1)
             }
             .chartXAxis {
-                // One label per bar is unreadable at 90 days, and the exact
-                // date is available on hover anyway.
-                AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                // Chart's automatic count still crowds: with 30 categorical
+                // bars it wants a label per bar and they overlap into an
+                // unreadable smear. Pick the marks explicitly from the data,
+                // roughly eight across whatever the period is, and drop the
+                // year since every bar shares it.
+                AxisMarks(values: labelledDays) { value in
                     AxisValueLabel {
                         if let day = value.as(String.self) {
-                            Text(day.suffix(5)).font(.caption2)
+                            Text(shortDay(day))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }

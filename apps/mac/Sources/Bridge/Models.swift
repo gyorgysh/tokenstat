@@ -246,6 +246,8 @@ struct Account: Codable, Sendable, Hashable {
     var host: String
     var handle: String?
     var tier: String?
+    /// Profile picture URL, when the account has one.
+    var avatar: String?
     var lastSyncAt: String?
     /// Server-side machine records. The shape belongs to the API, so this
     /// decodes the few fields the UI shows and ignores the rest.
@@ -352,23 +354,39 @@ struct Workspace: Identifiable, Hashable {
 
 /// Display name for a harness, the agent CLI that produced the events.
 ///
-/// The archive stores source ids like `claude_code`. These are shown to people,
-/// so they get the spelling the tool itself uses.
+/// The archive stores source ids like `claude_code`. These are shown to
+/// people, so they get the same spelling tokenstat.ai uses. Keep the two in
+/// step: a user reading their profile on the web and their app should not see
+/// two names for one tool.
 func harnessName(_ id: String) -> String {
     switch id {
     case "claude_code": return "Claude Code"
-    case "claude_code_rollup": return "Claude Code (rollup)"
-    case "opencode": return "OpenCode"
+    case "claude_code_rollup": return "Claude Code rollup"
     case "codex": return "Codex"
-    case "cursor": return "Cursor"
-    case "copilot": return "Copilot"
-    case "antigravity": return "Antigravity"
-    case "antigravity_ide": return "Antigravity IDE"
-    case "grok": return "Grok"
+    case "grok": return "Grok Build"
+    case "opencode": return "OpenCode"
     case "cline": return "Cline"
-    case "zed": return "Zed"
     case "openclaw": return "OpenClaw"
+    case "zed": return "Zed"
+    case "copilot": return "Copilot CLI"
+    case "antigravity": return "Antigravity CLI"
+    case "antigravity_ide": return "Antigravity IDE"
+    case "cursor": return "Cursor"
+    case "gemini": return "Gemini"
     case "": return "unknown"
     default: return id
     }
+}
+
+/// Asset name for a harness's brand mark, or nil when none is bundled.
+///
+/// Vendor marks, not ours. See TRADEMARK.md. A missing one falls back to a
+/// letter tile rather than borrowing another tool's logo.
+func harnessBrandAsset(_ id: String) -> String? {
+    let known: Set<String> = [
+        "claude_code", "claude_code_rollup", "codex", "grok", "opencode",
+        "cline", "openclaw", "zed", "copilot", "antigravity",
+        "antigravity_ide", "cursor", "gemini",
+    ]
+    return known.contains(id) ? "brand_\(id)" : nil
 }

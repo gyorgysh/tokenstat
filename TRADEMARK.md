@@ -41,6 +41,22 @@ what may leave the machine. A user can only rely on that guarantee if they can
 tell an official build from a modified one. A name that anyone may apply to any
 build makes the promise unverifiable.
 
+## Other people's marks
+
+The desktop app ships the logos of the tools it reads, under
+`apps/mac/Resources/Brands.xcassets`, so a harness is recognisable at a glance.
+
+Those marks belong to their respective owners. They are **not** licensed under
+this project's GPL grant, and forking this repository grants no right to use
+them. They are included as nominative identification of the tool each one
+names, which is what trademark law permits without a licence, and each is the
+owner's own official mark rather than a redrawing.
+
+Do not invent a mark for a tool that has none, do not restyle one, and do not
+use any of them to suggest that the tool's owner is involved with tokenstat.
+The source files come from `sites/tokenstat/assets/brands` in the website
+repository, which records where each one came from.
+
 ## Contact
 
 Permission requests: the address listed at https://tokenstat.ai.
