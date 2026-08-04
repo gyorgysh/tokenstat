@@ -6,7 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Syntax spans for the workspace editor, computed once and shared by every front end"
 
 [dependencies]

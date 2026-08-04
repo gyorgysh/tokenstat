@@ -6,7 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "C ABI bridge exposing the tokenstat core to native front ends"
 
 [lib]

@@ -31,7 +31,7 @@ machine by default. Sync to a public profile is opt in.
 - **Local first** — counters stay on your machine; conversation text never reaches the archive
 - **Many sources** — Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, plus Cursor fetch
 - **One schema** — daily, weekly, monthly, and per-model views across every tool
-- **Activity heatmap** — rolling calendar with streaks, busiest day, and a purple-to-cyan ramp
+- **Activity heatmap** — rolling calendar ramped on daily list-rate value, with streaks, busiest day, and a purple-to-cyan ramp
 - **Model catalog** — context window, capabilities, and public benchmark scores per model
 - **Optional sync** — sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
 - **Self-update** — verified GitHub Releases with rollback if the new binary cannot run
@@ -266,22 +266,23 @@ format, and release steps.
 
 ## License
 
-Two licences, deliberately.
+**Source-available, not open source.** One licence covers the whole
+repository: see [LICENSE](LICENSE).
 
-**`crates/`, `xtask/`, `scripts/` are GPL-3.0.** See [LICENSE](LICENSE). That
-is the CLI, the parsers, the pricing, the archive, the MCP server and the host
-daemon: everything that reads your data. Fork it, change it, run it, ship it,
-sell it, within the terms of that licence.
+Every line is published so it can be read. tokenstat's claim is about what
+happens to your data, and a claim nobody can check is marketing. So: read it,
+study it, fork it on GitHub, build it, run your build on your own machines,
+and say publicly what you find. Trust, and verify.
 
-**`apps/` is source-available for review only.** See [apps/LICENSE](apps/LICENSE).
-The desktop and mobile apps are published so anyone can check what they do with
-your data, which is the only way a privacy claim means anything. They are not
-licensed for redistribution, and pueev OÜ ships the only builds.
+What is reserved is publication. You may not redistribute the source or a
+build of it, put it in another product, or offer it as a service. pueev OÜ
+ships the only builds of tokenstat. The name is not part of the grant either:
+**"tokenstat" and the tokenstat logo are trademarks of pueev OÜ**. See
+[TRADEMARK.md](TRADEMARK.md).
 
-The name is not part of either grant. **"tokenstat" and the tokenstat logo are
-trademarks of pueev OÜ**, reserved under section 7(e) of the GPL. Fork the code
-freely, but give your version its own name so users can tell whose build they
-are running. See [TRADEMARK.md](TRADEMARK.md).
+Releases up to v0.1.3 went out under GPL-3.0. That grant stands for those
+versions and cannot be withdrawn. The licence above governs everything from
+here.
 
 ### Contributions
 

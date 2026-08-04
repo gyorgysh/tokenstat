@@ -6,7 +6,8 @@ rust-version.workspace = true
 authors.workspace = true
 repository.workspace = true
 homepage.workspace = true
-license.workspace = true
+license-file.workspace = true
+publish.workspace = true
 description = "Workspace folders, git state, and the changes in them"
 
 # No git library. `git` itself is on any machine that has a checkout to look at,

@@ -26,6 +26,8 @@ Two gitignored files hold the working context. Read both before making changes.
   next one able to continue.
 - `roadmap.md`: research findings, the verified inventory of every log format on
   disk, and the design rationale.
+- `docs/licensing.md`: why the licence is what it is, and what was tried and
+  rejected. Also gitignored, and internal on purpose.
 
 ## Stack
 
@@ -86,23 +88,34 @@ depend on it so the app can offer account and sync.
 Add a crate to the `GUARDED` list when it should never make a request. Do not
 remove one to make a build pass.
 
-## Two licences
+## One licence, source-available
 
-`crates/`, `xtask/` and `scripts/` are GPL-3.0. **`apps/` is source-available
-for review only** (`apps/LICENSE`), because pueev OU ships the only builds.
-Swift files carry a different SPDX header from Rust files for that reason: do
-not "fix" one to match the other.
+The whole repository is under `LICENSE`, the tokenstat Source-Available
+Licence: read, study, fork, modify privately, build and run your own build.
+Redistribution, publishing a build, reuse inside other software and providing
+a service are reserved, because pueev OU ships the only builds. It is not open
+source and no file may describe it as such. Every source file carries
+`SPDX-License-Identifier: LicenseRef-tokenstat-source-available`. Do not add an
+SPDX identifier for a licence this project does not use.
 
-This works because pueev owns every `tokenstat-*` crate, so it is not a
-licensee of its own code. It would stop working if a third party copyleft
-dependency entered what the app links, so
-`scripts/check-app-licences.sh` guards it in CI as the `app licences` job.
-MPL-2.0 is allowed on purpose (per-file copyleft, section 3.3 permits a larger
-work); GPL/AGPL/LGPL and friends are not.
+This works because pueev owns all of it, so it is not a licensee of its own
+code. It would stop working if a third party copyleft dependency entered a
+shipped binary, so `scripts/check-dep-licences.sh` guards the whole workspace
+in CI as the `dependency licences` job. MPL-2.0 is allowed on purpose (per-file
+copyleft, section 3.3 permits a larger work); GPL/AGPL/LGPL and friends are
+not. A dual licensed crate passes on its cleanest alternative.
+
+Releases up to v0.1.3 shipped under GPL-3.0 and stay available under it. That
+grant cannot be withdrawn, so do not write that tokenstat "was never GPL".
+
+Third party credit is given, not avoided. `cargo xtask notices` writes
+`THIRD-PARTY-NOTICES.md` for the shipped binary and the release workflow puts
+it in every artifact. It is generated into `target/`, never committed.
 
 **The repository does not accept pull requests.** A contributor keeps copyright,
-and one merged patch would end pueev's ability to ship the apps, permanently and
-irreversibly. Issues are welcome. See `CONTRIBUTING.md` and `docs/licensing.md`.
+and one merged patch would end pueev's ability to ship, permanently and
+irreversibly. Issues are welcome. See `CONTRIBUTING.md`, and `docs/licensing.md`
+for the reasoning, which is gitignored and stays internal like `WORKLOG.md`.
 
 **No generated file may be tracked.** `scripts/check-no-artifacts.sh` enforces
 it, CI job `no build artifacts`. `.gitignore` alone is not enough and this is

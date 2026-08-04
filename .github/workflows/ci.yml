@@ -68,10 +68,10 @@ jobs:
       - name: Core and MCP must not reach the network
         run: bash scripts/check-no-network.sh
 
-  # The apps are shipped only by pueev OU, which works because pueev owns every
-  # tokenstat crate. A third party copyleft dependency would quietly end that.
-  app-licences:
-    name: app licences
+  # Everything here is shipped only by pueev OU, which works because pueev owns
+  # all of it. A third party copyleft dependency would quietly end that.
+  dep-licences:
+    name: dependency licences
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -80,8 +80,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: No dependency may block shipping the app
-        run: bash scripts/check-app-licences.sh
+      - name: No dependency may block shipping tokenstat
+        run: bash scripts/check-dep-licences.sh
 
   # .gitignore is not enough on its own: a commit built at an older revision
   # uses that revision's rules, which is how a 30 MB static library once got in.

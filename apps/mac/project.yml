@@ -72,7 +72,7 @@ targets:
         # Info.plist to keep in sync by hand.
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: tokenstat
-        INFOPLIST_KEY_NSHumanReadableCopyright: "GPL-3.0"
+        INFOPLIST_KEY_NSHumanReadableCopyright: "© pueev OÜ. All rights reserved."
         # No sandbox. See CODE_SIGN_IDENTITY above for why.
         ENABLE_APP_SANDBOX: NO
         ENABLE_HARDENED_RUNTIME: NO

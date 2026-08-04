@@ -8,11 +8,9 @@ It restricts nothing about the code beyond what that licence already says.
 
 ## What you may do
 
-The code under `crates/`, `xtask/` and `scripts/` is licensed GPL-3.0. You may
-use it, study it, modify it, run it for any purpose, redistribute it, and charge
-for it. Those freedoms are the point of the licence and nothing here limits
-them. The code under `apps/` is source-available for review only and carries its
-own, narrower terms: see `apps/LICENSE`.
+The code is source-available: you may read it, study it, fork it, modify your
+own copy, and build and run it on your own machines. See `LICENSE` for the full
+terms. None of that requires any use of the marks.
 
 ## What the marks do not permit
 
@@ -48,9 +46,8 @@ build makes the promise unverifiable.
 The desktop app ships the logos of the tools it reads, under
 `apps/mac/Resources/Brands.xcassets`, so a harness is recognisable at a glance.
 
-Those marks belong to their respective owners. They are **not** licensed under
-this project's GPL grant, and forking this repository grants no right to use
-them. They are included as nominative identification of the tool each one
+Those marks belong to their respective owners. They are **not** licensed by
+`LICENSE`, and forking this repository grants no right to use them. They are included as nominative identification of the tool each one
 names, which is what trademark law permits without a licence, and each is the
 owner's own official mark rather than a redrawing.
 
