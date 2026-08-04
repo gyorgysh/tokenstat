@@ -57,7 +57,7 @@ struct WorkspaceFilesView: View {
                     systemImage: "exclamationmark.triangle",
                     title: "Folder missing",
                     subtitle: "The folder no longer exists on disk.",
-                    tint: .orange
+                    tint: Theme.warning
                 )
             } else if let roots = model.children(of: "", in: folder.id) {
                 if roots.isEmpty {

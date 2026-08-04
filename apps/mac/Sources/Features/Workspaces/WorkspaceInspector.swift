@@ -136,7 +136,7 @@ struct WorkspaceHistoryView: View {
                     systemImage: "exclamationmark.triangle",
                     title: "Folder missing",
                     subtitle: "The folder no longer exists on disk.",
-                    tint: .orange
+                    tint: Theme.warning
                 )
             } else if folder.git?.isRepo != true {
                 InspectorEmptyState(
@@ -172,7 +172,7 @@ struct WorkspaceHistoryView: View {
                     systemImage: "exclamationmark.circle",
                     title: "Could not load history",
                     subtitle: error,
-                    tint: .red
+                    tint: Theme.danger
                 )
             } else {
                 ProgressView()

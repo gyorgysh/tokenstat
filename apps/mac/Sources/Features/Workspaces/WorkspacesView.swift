@@ -112,7 +112,7 @@ struct WorkspacesView: View {
                 Label("This folder is missing. It is kept in case it comes back.",
                       systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
                     .padding(.top, Theme.Space.s)
             }
             Spacer()
@@ -166,7 +166,7 @@ struct BranchChip: View {
                 Text("↑\(git.ahead)").font(Theme.numeric(11)).foregroundStyle(Theme.secondary)
             }
             if git.behind > 0 {
-                Text("↓\(git.behind)").font(Theme.numeric(11)).foregroundStyle(.orange)
+                Text("↓\(git.behind)").font(Theme.numeric(11)).foregroundStyle(Theme.warning)
             }
         }
         .foregroundStyle(.secondary)
@@ -203,7 +203,7 @@ struct WorkspaceChangesView: View {
                     systemImage: "exclamationmark.triangle",
                     title: "Folder missing",
                     subtitle: "The folder no longer exists on disk.",
-                    tint: .orange
+                    tint: Theme.warning
                 )
             } else if let git = folder.git, git.isRepo, !git.files.isEmpty {
                 // Only show the scroll list when there is real content.
@@ -233,7 +233,7 @@ struct WorkspaceChangesView: View {
                 systemImage: "exclamationmark.triangle",
                 title: "Folder missing",
                 subtitle: "The folder no longer exists on disk.",
-                tint: .orange
+                tint: Theme.warning
             )
         } else if let git = folder.git, git.isRepo {
             if git.files.isEmpty {
@@ -241,7 +241,7 @@ struct WorkspaceChangesView: View {
                     systemImage: "checkmark.seal",
                     title: "Working tree clean",
                     subtitle: "No uncommitted changes. Everything is up to date.",
-                    tint: .green
+                    tint: Theme.accent
                 )
             } else {
                 summary(git)
@@ -297,10 +297,10 @@ struct WorkspaceChangesView: View {
             HStack(spacing: Theme.Space.s) {
                 Text("+\(git.added)")
                     .font(Theme.numeric(13, weight: .medium))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.success)
                 Text("−\(git.removed)")
                     .font(Theme.numeric(13, weight: .medium))
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.danger)
                 Text("· \(git.files.count) file\(git.files.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -427,10 +427,10 @@ private struct ChangeRow: View {
             .help("Open the diff")
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
-                Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(.green)
+                Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(Theme.success)
             }
             if let removed = file.removed, removed > 0 {
-                Text("−\(removed)").font(Theme.numeric(11)).foregroundStyle(.red)
+                Text("−\(removed)").font(Theme.numeric(11)).foregroundStyle(Theme.danger)
             }
             if file.added == nil {
                 // A dash, not a zero. The difference matters here as much as it

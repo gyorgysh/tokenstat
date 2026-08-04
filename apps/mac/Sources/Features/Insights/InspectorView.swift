@@ -164,7 +164,7 @@ struct InspectorView: View {
                 } else {
                     Text("No price book yet, so every value reads as zero. Run `tokenstat pricing --refresh`.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Theme.warning)
                 }
             }
             Text("Read from this machine. Nothing left it.")

@@ -342,7 +342,7 @@ struct TerminalPane: View {
             Label("This folder is missing. It is kept in case it comes back.",
                   systemImage: "exclamationmark.triangle")
                 .font(.callout)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.warning)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -519,7 +519,7 @@ struct TerminalHost: View {
             if session.droppedOutput {
                 Text("Some output was lost: the reader fell behind.")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
             }
             Spacer()
         }
@@ -575,7 +575,7 @@ private struct LaunchSurface: View {
             if let error = terminals.errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Theme.danger)
             }
             Spacer()
         }
