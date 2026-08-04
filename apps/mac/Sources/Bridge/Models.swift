@@ -823,6 +823,10 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     /// Absent when the folder is missing, so "we did not look" cannot be
     /// mistaken for "no changes".
     var git: GitStatus?
+    /// Public key of the machine that owns this workspace. Local folders have
+    /// no machine id. The id is optional for compatibility with older daemons.
+    var machineID: String?
+    var machineLabel: String?
 
     var changeCount: Int { git?.files.count ?? 0 }
 
@@ -833,6 +837,8 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
         let minus = git.removed > 0 ? " −\(git.removed)" : ""
         return git.partial ? "\(plus)\(minus)+" : "\(plus)\(minus)"
     }
+
+    var isRemote: Bool { machineID != nil }
 }
 
 // MARK: - Terminals

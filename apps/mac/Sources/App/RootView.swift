@@ -216,8 +216,12 @@ struct RootView: View {
                             .help(collapsedWorkspaces.contains(folder.id) ? "Expand workspace" : "Collapse workspace")
 
                             SidebarRow(
-                                label: folder.name,
-                                symbol: folder.exists ? "folder" : "questionmark.folder",
+                                label: folder.isRemote
+                                    ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                                    : folder.name,
+                                symbol: folder.isRemote
+                                    ? "network"
+                                    : (folder.exists ? "folder" : "questionmark.folder"),
                                 trailing: folder.diffStat,
                                 isSelected: destination == .workspaces
                                     && workspaces.selectedID == folder.id
@@ -227,7 +231,9 @@ struct RootView: View {
                             }
                         }
                         .contextMenu {
-                            Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
+                            if !folder.isRemote {
+                                Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
+                            }
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
                             Button("Remove from tokenstat") {

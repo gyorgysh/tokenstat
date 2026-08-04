@@ -333,7 +333,21 @@ final class WorkspacesModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            folders = try await Bridge.workspaces()
+            var loaded = try await Bridge.workspaces()
+            // Remote workspaces are read through the local daemon. A peer that
+            // is offline does not make local folders disappear, so its failure
+            // is kept as a refresh error only when there is no local result.
+            let peers = try await Bridge.peers().filter {
+                $0.trust == .approved && $0.address?.isEmpty == false
+            }
+            for peer in peers {
+                do {
+                    loaded.append(contentsOf: try await Bridge.remoteWorkspaces(peer: peer))
+                } catch where !loaded.isEmpty {
+                    continue
+                }
+            }
+            folders = loaded
             errorMessage = nil
             // A folder removed elsewhere should not leave the detail pane
             // describing something that is no longer in the list.
@@ -357,11 +371,11 @@ final class WorkspacesModel {
     /// registered, or all of them missing.
     private func syncWatcher() {
         if let watcher {
-            watcher.watch(folders.map(\.path))
+            watcher.watch(folders.filter { !$0.isRemote }.map(\.path))
         } else {
             let watcher = WorkspaceFileWatcher(model: self)
             self.watcher = watcher
-            watcher.watch(folders.map(\.path))
+            watcher.watch(folders.filter { !$0.isRemote }.map(\.path))
         }
     }
 

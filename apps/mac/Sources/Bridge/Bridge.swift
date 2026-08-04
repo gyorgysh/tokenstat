@@ -308,6 +308,17 @@ extension Bridge {
         try await background("workspace.list", as: [WorkspaceFolder].self)
     }
 
+    static func remoteWorkspaces(peer: Peer) async throws -> [WorkspaceFolder] {
+        let folders = try await onPeer(peer.key, "workspace.list", as: [WorkspaceFolder].self)
+        return folders.map { folder in
+            var folder = folder
+            folder.id = "remote:\(peer.key):\(folder.id)"
+            folder.machineID = peer.key
+            folder.machineLabel = peer.label
+            return folder
+        }
+    }
+
     static func addWorkspace(path: String) async throws -> WorkspaceFolder {
         try await background("workspace.add", ["path": path], as: WorkspaceFolder.self)
     }
@@ -324,22 +335,54 @@ extension Bridge {
     /// Recent commits, newest first. Empty for a folder that is not a
     /// repository, and for one whose first commit has not happened yet.
     static func workspaceLog(id: String, limit: Int = 100) async throws -> [Commit] {
-        try await background("workspace.log", ["id": id, "limit": limit], as: [Commit].self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.log",
+                ["id": target.workspace, "limit": limit],
+                as: [Commit].self
+            )
+        }
+        return try await background("workspace.log", ["id": id, "limit": limit], as: [Commit].self)
     }
 
     /// One directory of the file tree. Lazy: pass the relative path of the
     /// folder being opened, or "" for the workspace root.
     static func workspaceTree(id: String, path: String = "") async throws -> [TreeEntry] {
-        try await background("workspace.tree", ["id": id, "path": path], as: [TreeEntry].self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.tree",
+                ["id": target.workspace, "path": path],
+                as: [TreeEntry].self
+            )
+        }
+        return try await background("workspace.tree", ["id": id, "path": path], as: [TreeEntry].self)
     }
 
     /// One file's diff against HEAD, staged and unstaged together.
     static func workspaceDiff(id: String, path: String) async throws -> FileDiff {
-        try await background("workspace.diff", ["id": id, "path": path], as: FileDiff.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.diff",
+                ["id": target.workspace, "path": path],
+                as: FileDiff.self
+            )
+        }
+        return try await background("workspace.diff", ["id": id, "path": path], as: FileDiff.self)
     }
 
     static func workspaceRead(id: String, path: String) async throws -> FileText {
-        try await background("workspace.read", ["id": id, "path": path], as: FileText.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.read",
+                ["id": target.workspace, "path": path],
+                as: FileText.self
+            )
+        }
+        return try await background("workspace.read", ["id": id, "path": path], as: FileText.self)
     }
 
     /// Colour a buffer.
@@ -354,7 +397,15 @@ extension Bridge {
 
     /// One commit in full: message, files, and their diffs.
     static func workspaceShow(id: String, commit: String) async throws -> CommitDetail {
-        try await background("workspace.show", ["id": id, "path": commit], as: CommitDetail.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.show",
+                ["id": target.workspace, "path": commit],
+                as: CommitDetail.self
+            )
+        }
+        return try await background("workspace.show", ["id": id, "path": commit], as: CommitDetail.self)
     }
 }
 
@@ -365,19 +416,51 @@ extension Bridge {
 /// `tokenstat_workspace::gitwrite` for why that split is kept in the Rust too.
 extension Bridge {
     static func stage(id: String, paths: [String]) async throws -> GitOutcome {
-        try await background("workspace.stage", ["id": id, "paths": paths], as: GitOutcome.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.stage",
+                ["id": target.workspace, "paths": paths],
+                as: GitOutcome.self
+            )
+        }
+        return try await background("workspace.stage", ["id": id, "paths": paths], as: GitOutcome.self)
     }
 
     static func unstage(id: String, paths: [String]) async throws -> GitOutcome {
-        try await background("workspace.unstage", ["id": id, "paths": paths], as: GitOutcome.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.unstage",
+                ["id": target.workspace, "paths": paths],
+                as: GitOutcome.self
+            )
+        }
+        return try await background("workspace.unstage", ["id": id, "paths": paths], as: GitOutcome.self)
     }
 
     static func commit(id: String, message: String) async throws -> GitOutcome {
-        try await background("workspace.commit", ["id": id, "message": message], as: GitOutcome.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.commit",
+                ["id": target.workspace, "message": message],
+                as: GitOutcome.self
+            )
+        }
+        return try await background("workspace.commit", ["id": id, "message": message], as: GitOutcome.self)
     }
 
     static func workspaceWrite(id: String, path: String, content: String) async throws -> GitOutcome {
-        try await background(
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.write",
+                ["id": target.workspace, "path": path, "content": content],
+                as: GitOutcome.self
+            )
+        }
+        return try await background(
             "workspace.write",
             ["id": id, "path": path, "content": content],
             as: GitOutcome.self
@@ -385,12 +468,27 @@ extension Bridge {
     }
 
     static func push(id: String) async throws -> GitOutcome {
-        try await background("workspace.push", ["id": id], as: GitOutcome.self)
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(target.peer, "workspace.push", ["id": target.workspace], as: GitOutcome.self)
+        }
+        return try await background("workspace.push", ["id": id], as: GitOutcome.self)
     }
 }
 
 private struct Removed: Codable, Sendable { let removed: Bool }
 private struct Renamed: Codable, Sendable { let renamed: Bool }
+
+private struct RemoteWorkspaceTarget {
+    let peer: String
+    let workspace: String
+}
+
+private func remoteWorkspace(_ id: String) -> RemoteWorkspaceTarget? {
+    guard id.hasPrefix("remote:") else { return nil }
+    let parts = id.split(separator: ":", maxSplits: 2).map(String.init)
+    guard parts.count == 3 else { return nil }
+    return RemoteWorkspaceTarget(peer: parts[1], workspace: parts[2])
+}
 
 // MARK: - Terminals
 

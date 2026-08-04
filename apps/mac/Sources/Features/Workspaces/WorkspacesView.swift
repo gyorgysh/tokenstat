@@ -24,11 +24,15 @@ struct WorkspacesView: View {
             if let folder = model.selected {
                 header(folder)
                 Divider()
-                #if os(macOS)
-                TerminalPane(folder: folder, terminals: terminals, workspaces: model)
-                #else
-                terminalPlaceholder(folder)
-                #endif
+                if folder.isRemote {
+                    remotePlaceholder(folder)
+                } else {
+                    #if os(macOS)
+                    TerminalPane(folder: folder, terminals: terminals, workspaces: model)
+                    #else
+                    terminalPlaceholder(folder)
+                    #endif
+                }
             } else {
                 empty
             }
@@ -43,7 +47,9 @@ struct WorkspacesView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(folder.name)
                     .font(.system(size: 13, weight: .semibold))
-                Text(folder.path)
+                Text(folder.isRemote
+                     ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)"
+                     : folder.path)
                     .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -56,6 +62,25 @@ struct WorkspacesView: View {
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
+    }
+
+    private func remotePlaceholder(_ folder: WorkspaceFolder) -> some View {
+        VStack(spacing: Theme.Space.m) {
+            Spacer()
+            Image(systemName: "network")
+                .font(.system(size: 34, weight: .light))
+                .foregroundStyle(Theme.accent.opacity(0.65))
+            Text("Remote workspace")
+                .font(.title3.weight(.medium))
+            Text("Files and git state are read from \(folder.machineLabel ?? "the other machine"). Terminal sessions will run there when remote sessions are enabled.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 430)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(Theme.Space.xl)
     }
 
     private func terminalPlaceholder(_ folder: WorkspaceFolder) -> some View {
