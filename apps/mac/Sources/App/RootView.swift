@@ -84,7 +84,7 @@ struct RootView: View {
         .task { await terminals.load() }
         #endif
         .toolbar {
-            if destination == .insights || (destination == .workspaces && !workspaces.folders.isEmpty) {
+            if destination == .insights || destination == .workspaces {
                 ToolbarItem {
                     Button {
                         isInspectorPresented.toggle()
@@ -102,8 +102,7 @@ struct RootView: View {
         Binding(
             get: {
                 isInspectorPresented
-                    && (destination == .insights
-                        || (destination == .workspaces && !workspaces.folders.isEmpty))
+                    && (destination == .insights || destination == .workspaces)
             },
             set: { isInspectorPresented = $0 }
         )
