@@ -195,6 +195,98 @@ typed, with the link as the fallback and the relay as the premium last resort.
 The order in the UI reflects this: discovered machines first, then this
 machine's link, with the raw key entry collapsed behind "paste a link instead".
 
+## The tunnel: what the relay actually is
+
+The constraints above were written before there was anything to build. This
+section turns them into a specification, because "we will add a relay later"
+has a way of becoming "the relay does whatever was easiest that week".
+
+**What it is.** One long-lived process beside tokenstat.ai, reachable at
+`tunnel.tokenstat.ai` over TLS and WebSocket. It has one job: to hold two
+sockets open and copy bytes between them.
+
+**What it moves.** Frames of an already-established Noise session, exactly the
+bytes the two machines would have sent each other directly. The handshake is
+between the machines. The tunnel is a socket, not a party: it has no static key
+in the session, cannot complete a handshake with either end, and a machine that
+finds itself talking to the tunnel rather than to its peer fails the same way it
+fails against any other wrong key, loudly.
+
+**How two machines find each other through it.** Each machine signed in to an
+account keeps a WebSocket open to the tunnel and is known there by its public
+key, which is also its address. A dial is `CONNECT <peer key>`; the tunnel looks
+up whether that key has a live socket and, if it does, pairs the two into a
+session and copies frames until one side goes away. There is no room id to
+exchange and nothing for a person to type, because the key that pins the
+identity is the same key that routes.
+
+**What it can see.** That two keys talked, when, and how many bytes. It cannot
+see what they said. That is the whole of the trade and it goes in the interface
+in those words, not in a privacy policy nobody opens.
+
+**What it keeps.** Nothing. No disk, no log of who dialled whom beyond what an
+operator needs to keep it running, and a session buffer that dies with the
+session. Counters for capacity are aggregate and carry no keys.
+
+**When it is used.** Last. A dial tries the local network, then the last known
+direct address, then the tunnel. A machine that can be reached directly is never
+tunnelled, which also means the common case costs pueev nothing.
+
+### The plan gate, and what it must not touch
+
+Remote reach through the tunnel is a **Supporter and Patron feature**. It is
+the one part of this product that costs money to run per user, per byte, every
+month, so it is the honest thing to charge for.
+
+What must stay free, permanently, and is worth writing down so it does not get
+revisited:
+
+- Everything on the local network. Discovery, pairing, connecting, and using
+  another machine over Bonjour needs no account at all and no server of ours.
+- The direct connect link between two machines anywhere, when they can reach
+  each other.
+- Every local feature. A plan check that can fail must never sit between a
+  person and their own machine's data.
+
+The check happens at the tunnel, not in the app. The app asks and the tunnel
+answers, because a gate enforced only in a client is not a gate, and because a
+free-tier client that thinks it is entitled should get a clear "not on this
+plan" from the service rather than a broken connection. The app reads the same
+answer to decide whether to offer the feature at all, so nobody is invited to
+try something they cannot have.
+
+### Where the tunnel's code lives
+
+Not in this repository. It is a service, and this repository is a CLI, a core
+library and an app. It goes beside the account service in the pueev web
+repository, deployed the way that repository already deploys things. What lands
+here is the client half in `tokenstat-remote`, which dials it, and nothing in
+`tokenstat-core`, which stays exactly as unable to make a request as it is now.
+
+## Saying none of this out loud
+
+A person setting up a second machine should never read the words port, IP
+address, socket, fingerprint, hex, or key. They have a laptop and a desktop and
+they want one to see the other. The screen therefore says:
+
+- **This machine** with a name they can change, and a **pairing code**: a short,
+  readable string that encodes the same public key the design pins. Not the raw
+  64 characters, and not called a key.
+- **Machines nearby**, found automatically, each with a Connect button. No
+  address under the name, because there is nothing useful to do with one.
+- **Your other machines**, from the account, connectable in one click.
+- Instead of a fingerprint to compare, **a pair of words** derived from the key.
+  Comparing "amber-otter" between two screens is a check people will actually
+  perform, and it is the same bytes either way.
+- **Waiting for you** stays. A machine that can spawn processes and write files
+  on this one is approved by a person, in words, or the guarantee is decoration.
+  Automatic discovery is not automatic trust, and this line does not move.
+
+Addresses, ports and the raw key remain, one disclosure away, under something
+like "connection details", because a person debugging their own network needs
+them and because hiding them entirely would mean the honest version of the
+screen is the one we do not show.
+
 ## Where the code goes
 
 ```
