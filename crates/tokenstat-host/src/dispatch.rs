@@ -206,6 +206,25 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// When this account last synced, from anywhere.
+///
+/// Derived rather than read. `/api/v1/me` carries a `last_sync_at` per machine
+/// and none for the account, so reading the top level gave `None` and every
+/// front end said "never" for an account that had synced minutes earlier.
+/// Deriving it is also the more honest definition: an account's last sync is
+/// the most recent one across its machines, not this machine's.
+///
+/// Timestamps are RFC 3339 from the server, which sorts correctly as text, so
+/// this compares strings rather than parsing dates it would only re-serialize.
+fn latest_sync(raw_machines: &[Value]) -> Option<String> {
+    raw_machines
+        .iter()
+        .filter_map(|m| m.get("last_sync_at")?.as_str())
+        .filter(|s| !s.is_empty())
+        .max()
+        .map(str::to_string)
+}
+
 /// The account's profile picture, as something a front end can fetch.
 ///
 /// The API sends `/avatar/<name>`, relative, because it never hands out a third
@@ -426,7 +445,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         .filter(|v| !v.is_empty())
                         .map(str::to_string),
                     tier: s.tier,
-                    last_sync_at: s.last_sync_at,
+                    last_sync_at: s.last_sync_at.clone().or_else(|| latest_sync(&s.machines)),
+                    // Which of the machines below is the one you are sitting
+                    // at. Without it the list is a set of opaque ids and the
+                    // only machine anyone can act on is unidentifiable.
+                    this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
                     machines: s.machines.iter().map(MachineDto::from_value).collect(),
                     schema_current: s.schema_current,
                 })
@@ -439,6 +462,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     tier: None,
                     avatar: None,
                     last_sync_at: None,
+                    this_machine_id: None,
                     machines: Vec::new(),
                     schema_current: None,
                 })

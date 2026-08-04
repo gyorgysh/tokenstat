@@ -305,6 +305,9 @@ pub struct AccountDto {
     /// account and the website is a separate project.
     pub avatar: Option<String>,
     pub last_sync_at: Option<String>,
+    /// The id of the machine this process is running on, so a client can mark
+    /// which row in `machines` is the one in front of the user.
+    pub this_machine_id: Option<String>,
     pub machines: Vec<MachineDto>,
     pub schema_current: Option<u32>,
 }

@@ -401,7 +401,16 @@ struct Account: Codable, Sendable, Hashable {
     /// Always nil today: `/api/v1/me` does not carry an avatar field yet, so
     /// every surface draws the monogram. Not a bug in the app.
     var avatar: String?
+    /// When this account last synced, from any machine.
+    ///
+    /// Derived in the host from the machine list, because `/api/v1/me` carries
+    /// a timestamp per machine and none for the account. Reading the top level
+    /// gave nil, so the Account screen said "never" for an account that had
+    /// synced minutes earlier.
     var lastSyncAt: String?
+    /// The machine this app is running on, so the list below can say which row
+    /// is the one you are sitting at.
+    var thisMachineID: String?
     /// Server-side machine records. The shape belongs to the API, so this
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
@@ -469,6 +478,31 @@ struct SyncOutcome: Codable, Sendable, Hashable {
 ///
 /// Returns nil rather than a placeholder when it cannot be parsed, so the
 /// caller decides what absence looks like.
+/// "3 minutes ago", for a timestamp whose exact minute nobody reads.
+///
+/// The absolute date stays available as a tooltip. "Last synced 4 Aug 2026 at
+/// 18:41" makes you work out whether that was recent; "12 minutes ago" is the
+/// answer to the question actually being asked.
+func formatRelativeDate(_ raw: String?) -> String? {
+    guard let date = parseServerDate(raw) else { return nil }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .full
+    return formatter.localizedString(for: date, relativeTo: Date())
+}
+
+func parseServerDate(_ raw: String?) -> Date? {
+    guard let raw else { return nil }
+    let parsers = [ISO8601DateFormatter(), {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()]
+    for p in parsers {
+        if let date = p.date(from: raw) { return date }
+    }
+    return nil
+}
+
 func formatServerDate(_ raw: String?) -> String? {
     guard let raw else { return nil }
     let parsers = [ISO8601DateFormatter(), {

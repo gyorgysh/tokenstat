@@ -138,6 +138,15 @@ struct RootView: View {
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                // The brand sits where the heading used to. A sidebar's top
+                // left is where an app says what it is, and this one had a
+                // section label there saying "WORKSPACE", which is what it is
+                // not.
+                Wordmark()
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.top, Theme.Space.s)
+                    .padding(.bottom, Theme.Space.m)
+
                 // No heading over these. They are the app's four screens and
                 // they are labelled with their own names, so a word above them
                 // was a word that had to be picked and then not read.
@@ -148,7 +157,6 @@ struct RootView: View {
                         isSelected: destination == item
                     ) { destination = item }
                 }
-                .padding(.top, Theme.Space.s)
 
                 // Folders the user chose. Nothing to do with the archive:
                 // its `project` is a lossy label recovered from a slug and

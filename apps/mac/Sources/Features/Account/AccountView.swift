@@ -67,75 +67,175 @@ struct AccountView: View {
 
     private func signedIn(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
-            Card(title: "Signed in", subtitle: account.host) {
-                HStack(alignment: .top, spacing: Theme.Space.l) {
-                    Stat(label: "Handle", value: account.handle.map { "@\($0)" } ?? "unknown")
-                    Stat(label: "Plan", value: account.tier?.capitalized ?? "free")
-                    Stat(
-                        label: "Last sync",
-                        value: formatServerDate(account.lastSyncAt) ?? "never"
-                    )
-                }
+            identity(account)
+            syncCard(account)
+            machinesCard(account)
+        }
+    }
 
+    /// Who you are, at the size a profile deserves.
+    ///
+    /// This screen used to open with three `Stat` columns reading "Handle",
+    /// "Plan", "Last sync", which is a report about an account rather than an
+    /// account. The picture, the name and the tier belong together and belong
+    /// first.
+    private func identity(_ account: Account) -> some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            Avatar(url: account.avatar, handle: account.handle, size: 64)
+
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
-                    Button {
-                        Task { await model.sync() }
-                    } label: {
-                        if model.isSyncing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Sync now", systemImage: "arrow.up.circle")
-                        }
+                    Text(account.title ?? "Signed in")
+                        .font(.system(size: 22, weight: .semibold))
+                    if let tier = account.tier, !tier.isEmpty {
+                        TierMark(tier: tier, size: 17)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                    .disabled(model.isSyncing || model.syncCooldownUntil != nil)
-
-                    Button("Sign out") {
-                        Task { await model.signOut() }
-                    }
-                    .disabled(model.isSyncing)
                 }
-                .padding(.top, Theme.Space.xs)
-            }
-
-            Card(
-                title: "Machines",
-                subtitle: "Every machine that has synced to this account"
-            ) {
-                if account.machines.isEmpty {
-                    Text("Nothing has synced yet.")
+                if let handle = account.handle {
+                    Text("@\(handle)")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                } else {
-                    VStack(spacing: Theme.Space.s) {
-                        ForEach(account.machines) { machine in
-                            HStack(spacing: Theme.Space.m) {
-                                Image(systemName: "desktopcomputer")
-                                    .foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(machine.displayName)
-                                        .font(.callout)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                    if let subtitle = machine.subtitle {
-                                        Text(subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.tertiary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                }
-                                Spacer()
-                                Text(formatServerDate(machine.lastSyncAt) ?? "never synced")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                        .textSelection(.enabled)
+                }
+                Text(account.host)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if let handle = account.handle, let url = URL(string: "\(account.host)/\(handle)") {
+                // The profile is a public page and this is the only place in
+                // the app that knows its address.
+                Link(destination: url) {
+                    Label("View profile", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.plain)
+                .font(.callout)
+                .foregroundStyle(Theme.accent)
+            }
+        }
+        .padding(Theme.Space.l)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private func syncCard(_ account: Account) -> some View {
+        Card(title: "Sync", subtitle: "Only aggregate counters are eligible") {
+            HStack(alignment: .center, spacing: Theme.Space.l) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("LAST SYNC")
+                        .font(Theme.sectionHeader)
+                        .foregroundStyle(.tertiary)
+                    // Relative, with the exact time on hover. "12 minutes ago"
+                    // is the answer to the question; a date and a clock time
+                    // makes you work it out.
+                    Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
+                        .font(.system(size: 17, weight: .medium))
+                        .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
+                }
+
+                Spacer()
+
+                Button {
+                    Task { await model.sync() }
+                } label: {
+                    if model.isSyncing {
+                        HStack(spacing: Theme.Space.xs) {
+                            ProgressView().controlSize(.small)
+                            Text("Syncing…")
                         }
+                    } else {
+                        Label("Sync now", systemImage: "arrow.up.circle")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .disabled(model.isSyncing || model.syncCooldownUntil != nil)
+
+                Button("Sign out") {
+                    Task { await model.signOut() }
+                }
+                .disabled(model.isSyncing)
+            }
+
+            if model.syncCooldownUntil != nil {
+                Text("Syncing again is available shortly.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private func machinesCard(_ account: Account) -> some View {
+        Card(
+            title: "Machines",
+            subtitle: account.machines.isEmpty
+                ? "Every machine that has synced to this account"
+                : "\(account.machines.count) linked"
+        ) {
+            if account.machines.isEmpty {
+                EmptyHint(text: "Nothing has synced yet. Sync now to link this machine.")
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(account.machines.enumerated()), id: \.element.id) { index, machine in
+                        if index > 0 {
+                            Divider().padding(.vertical, Theme.Space.xs)
+                        }
+                        machineRow(machine, isThisMachine: machine.machineID == account.thisMachineID)
                     }
                 }
             }
         }
+    }
+
+    /// One machine. The one you are sitting at is marked.
+    ///
+    /// Without the mark the list is a set of opaque ids, and the only machine
+    /// anyone can actually act on is the one they cannot pick out.
+    private func machineRow(_ machine: Machine, isThisMachine: Bool) -> some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: isThisMachine ? "laptopcomputer" : "desktopcomputer")
+                .foregroundStyle(isThisMachine ? Theme.accent : .secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: Theme.Space.xs) {
+                    Text(machine.displayName)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if isThisMachine {
+                        Text("THIS MAC")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.5)
+                            .foregroundStyle(Theme.accent)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Theme.accentSoft, in: Capsule())
+                    }
+                }
+                if let subtitle = machine.subtitle {
+                    Text(subtitle)
+                        .font(Theme.mono(10))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer()
+
+            Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(formatServerDate(machine.lastSyncAt) ?? "never synced")
+        }
+        .padding(.vertical, Theme.Space.xs)
     }
 
     /// The claim, stated where someone is deciding whether to connect an

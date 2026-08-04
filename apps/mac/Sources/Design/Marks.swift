@@ -98,3 +98,91 @@ struct Avatar: View {
         }
     }
 }
+
+/// The tokenstat mark: three ascending bars on a shared baseline.
+///
+/// Drawn rather than shipped as an image. It is three rounded rectangles, so an
+/// asset catalogue would be a resource to keep in step with the website's SVG
+/// for no benefit, and a drawn mark is sharp at any size on any display.
+///
+/// The geometry is the website's, from `brand-assets/tokenstat/logo`: bars 12
+/// wide on a 15 pitch, sharing a baseline, in a 64 unit square. **They share a
+/// baseline on purpose**, which is what makes them read as a chart instead of
+/// three floating shapes. The colours are the dark-context ramp the favicon
+/// badge uses, since this sits on the app's own dark chrome. Change these with
+/// the website, not on their own.
+struct LogoMark: View {
+    var size: CGFloat = 18
+
+    private static let bars: [(y: CGFloat, height: CGFloat, color: Color)] = [
+        (34, 18, Color(red: 0xC3 / 255, green: 0xB0 / 255, blue: 0xFF / 255)),
+        (22, 30, Color(red: 0x8B / 255, green: 0x5C / 255, blue: 0xF6 / 255)),
+        (10, 42, Color(red: 0xE8 / 255, green: 0x79 / 255, blue: 0xF9 / 255)),
+    ]
+
+    var body: some View {
+        // One scale factor from the 64 unit artboard, so every number below is
+        // the website's own and none of them are re-derived by hand.
+        let unit = size / 64
+
+        ZStack(alignment: .topLeading) {
+            ForEach(Array(Self.bars.enumerated()), id: \.offset) { index, bar in
+                RoundedRectangle(cornerRadius: 3.5 * unit)
+                    .fill(bar.color)
+                    .frame(width: 12 * unit, height: bar.height * unit)
+                    .offset(x: (11 + CGFloat(index) * 15) * unit, y: bar.y * unit)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("tokenstat")
+    }
+}
+
+/// The mark and the name, for the top of the sidebar.
+struct Wordmark: View {
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            LogoMark(size: 20)
+            Text("tokenstat")
+                .font(.system(size: 15, weight: .semibold))
+                // Lowercase, always. It is the command you type.
+                .textCase(.lowercase)
+            Spacer()
+        }
+    }
+}
+
+/// The tier, as the glyph the website puts beside a name.
+///
+/// A crown for Patron, a star for Supporter, matching `TIER_BADGES` on the
+/// site. Free has no mark at all: a badge that everyone has is decoration, and
+/// the profile page shows nothing there either.
+///
+/// Used where the name is large enough to carry a glyph beside it. The sidebar
+/// footer keeps the written pill, because a crown alone in the corner of a
+/// window is a puzzle rather than a badge.
+struct TierMark: View {
+    var tier: String
+    var size: CGFloat = 15
+
+    private var symbol: String? {
+        switch tier.lowercased() {
+        case "patron": return "crown.fill"
+        case "supporter": return "star.fill"
+        case "free", "": return nil
+        // An unknown tier still gets a mark rather than disappearing: a new
+        // tier on the server should not make an account look downgraded.
+        default: return "seal.fill"
+        }
+    }
+
+    var body: some View {
+        if let symbol {
+            Image(systemName: symbol)
+                .font(.system(size: size))
+                .foregroundStyle(Theme.accent)
+                .help("\(tier.capitalized) tier")
+                .accessibilityLabel("\(tier.capitalized) tier")
+        }
+    }
+}

@@ -313,7 +313,13 @@ struct TabStrip<Tab: Hashable>: View {
                     }
                     .foregroundStyle(active ? Color.primary : Color.secondary)
                     .padding(.horizontal, Theme.Space.m)
-                    .frame(maxHeight: .infinity)
+                    // An explicit height, not `maxHeight: .infinity`. The strip
+                    // sits directly under the window's toolbar, and an
+                    // unbounded height let the active tab's panel fill and its
+                    // top rule expand up through the toolbar's safe area, so
+                    // the marker was drawn a toolbar's height above the tab it
+                    // belonged to.
+                    .frame(height: TabStrip.height)
                     .background(active ? Theme.panel : .clear)
                     .overlay(alignment: .top) {
                         // The active tab is marked along its top edge rather
@@ -329,12 +335,18 @@ struct TabStrip<Tab: Hashable>: View {
             }
             Spacer()
         }
-        .frame(height: 32)
+        .frame(height: Self.height)
+        // Nothing in a tab strip may paint outside it.
+        .clipped()
         .background(background ?? .clear)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
     }
+
+    /// A generic type cannot hold a static stored property, so this is a
+    /// computed one.
+    private static var height: CGFloat { 32 }
 }
 
 /// The account tier, as a small uppercase pill.

@@ -74,7 +74,11 @@ struct HomeView: View {
                     Text(account.account?.title ?? "Not signed in")
                         .font(.system(size: 20, weight: .semibold))
                     if let tier = account.account?.tier, !tier.isEmpty {
-                        TierBadge(tier: tier)
+                        // The glyph the profile page uses, not the written
+                        // pill. Beside a 20pt name a crown reads as a mark on
+                        // the person; a word in a capsule reads as a label
+                        // stuck to them.
+                        TierMark(tier: tier, size: 16)
                     }
                 }
                 // The handle, and nothing else. The privacy sentence that was
