@@ -173,10 +173,12 @@ struct MachinesView: View {
                 // that showed only the setting would be lying. Which port is
                 // under Connection details, where somebody debugging will look.
                 if status.serving && !status.listening {
+                    // Rare now that a taken port falls back to a free one, so
+                    // this means the machine would not let us listen at all.
                     Banner(
                         text: """
-                        Turned on, but not reachable. Something else on this \
-                        machine is using the same port.
+                        Turned on, but not reachable. This machine refused to \
+                        accept connections at all, which is usually a firewall.
                         """,
                         severity: .warning
                     )

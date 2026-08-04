@@ -195,6 +195,37 @@ typed, with the link as the fallback and the relay as the premium last resort.
 The order in the UI reflects this: discovered machines first, then this
 machine's link, with the raw key entry collapsed behind "paste a link instead".
 
+## Nobody opens a port, and nobody picks one
+
+Two related facts, both of which the first version got wrong.
+
+**The port is the software's business, not the user's.** Serving binds the
+preferred port and, if that is taken, any free one. Nothing needs a fixed
+number: on the network the port arrives in the advertisement, and from anywhere
+else it arrives inside the pairing code. Refusing to serve because 7878 was busy
+made somebody debug a port conflict to use their own two computers, which is the
+kind of failure that ends a setup.
+
+**No inbound port is ever required.** Most people cannot forward a port and
+should never be asked to. That is not a limitation to work around later, it is
+the shape of the design:
+
+- **On one network**, the two machines reach each other directly. A home router
+  does not stand between them and nothing has to be opened.
+- **Anywhere else**, both machines dial *out* to the tunnel over TLS on 443 and
+  are paired there. Outbound is what NAT allows by definition, so this works
+  from behind a router, a phone hotspot, or a corporate network that permits
+  only web traffic.
+- **A direct connection between two networks** is a bonus path, tried before the
+  tunnel and expected to fail for most people. It is what a user with a static
+  address or an existing VPN gets for free, never something the interface asks
+  anyone to arrange.
+
+Hole punching is deliberately still not in this design. It fails often enough to
+need the tunnel as a fallback anyway, and a fallback that always works is worth
+more than a shortcut that sometimes does. If it is added later it is an
+optimisation under the same interface, not a new user-visible mode.
+
 ## The tunnel: what the relay actually is
 
 The constraints above were written before there was anything to build. This

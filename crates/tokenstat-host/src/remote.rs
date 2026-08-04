@@ -363,6 +363,33 @@ pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     }
 }
 
+/// Bind the preferred port, or any free one.
+///
+/// A port in use is not a reason to stop serving. Nothing about this protocol
+/// needs a fixed number: machines on the network learn the port from the
+/// advertisement, and a machine reached from elsewhere learns it from the
+/// pairing code, so the port is a detail the software carries rather than a
+/// setting a person maintains. Refusing to start because 7878 was taken made
+/// somebody debug a port conflict to use their own two computers.
+///
+/// The preference is still tried first, so a person who did open a port in
+/// their router keeps getting the one they opened.
+fn bind_any(preferred: u16, identity: &MachineIdentity) -> Result<Server, String> {
+    match Server::bind(&format!("0.0.0.0:{preferred}"), identity) {
+        Ok(server) => Ok(server),
+        Err(first) => {
+            // Port 0 asks the operating system for whatever is free, which is
+            // what every peer-to-peer application does and the reason they do
+            // not have port settings.
+            Server::bind("0.0.0.0:0", identity).map_err(|any| {
+                format!(
+                    "could not listen on port {preferred} ({first}), nor on any free port: {any}"
+                )
+            })
+        }
+    }
+}
+
 /// Bind and accept in a background thread.
 pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> {
     let mut guard = listening().lock().map_err(|e| e.to_string())?;
@@ -375,7 +402,7 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
     // then be served is the peer store's question, not the bind address's: an
     // address is not an authorization and treating it as one is how "it is only
     // on the LAN" becomes a security model.
-    let server = Server::bind(&format!("0.0.0.0:{port}"), &identity).map_err(|e| e.to_string())?;
+    let server = bind_any(port, &identity)?;
     let address = server.local_address().map_err(|e| e.to_string())?;
     let advertised_port = address
         .rsplit(':')
@@ -641,8 +668,16 @@ fn status() -> Result<Value, String> {
         // "serving" about a daemon that is not.
         "serving": settings.serving,
         "listening": address.is_some(),
+        // The port actually bound, which is not always the one asked for: a
+        // taken port falls back to any free one rather than refusing to serve.
+        // Reporting the preference here would have the details panel name a
+        // port nothing is listening on.
+        "port": address
+            .as_ref()
+            .and_then(|a| a.rsplit(':').next())
+            .and_then(|p| p.parse::<u16>().ok())
+            .unwrap_or(settings.port),
         "address": address,
-        "port": settings.port,
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
         // The check a person will actually perform. See
@@ -712,6 +747,43 @@ fn forward(params: &str) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A port conflict is somebody else's software, not a reason to stop
+    /// somebody using their own two computers.
+    #[test]
+    fn a_taken_port_falls_back_to_a_free_one() {
+        let identity = MachineIdentity::from_secret([9u8; 32]);
+        let squatter = std::net::TcpListener::bind("0.0.0.0:0").expect("a port to squat on");
+        let taken = squatter.local_addr().expect("its address").port();
+
+        let server = bind_any(taken, &identity).expect("bound somewhere");
+        let bound: u16 = server
+            .local_address()
+            .expect("an address")
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.parse().ok())
+            .expect("a port");
+        assert_ne!(bound, taken, "the taken port cannot be the one bound");
+        assert_ne!(bound, 0, "a real port, not the ask-for-any placeholder");
+    }
+
+    #[test]
+    fn the_preferred_port_is_still_preferred_when_it_is_free() {
+        let identity = MachineIdentity::from_secret([9u8; 32]);
+        // Take a port, learn its number, release it: a number known to be free.
+        let free = {
+            let probe = std::net::TcpListener::bind("0.0.0.0:0").expect("a probe");
+            probe.local_addr().expect("its address").port()
+        };
+        let server = bind_any(free, &identity).expect("bound");
+        assert!(
+            server
+                .local_address()
+                .expect("address")
+                .ends_with(&format!(":{free}"))
+        );
+    }
 
     #[test]
     fn serving_is_off_unless_a_file_says_otherwise() {
