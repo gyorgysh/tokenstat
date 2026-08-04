@@ -9,6 +9,16 @@ import SwiftUI
 
 @main
 struct TokenstatApp: App {
+    /// Pick the transport before any view can call across it.
+    ///
+    /// In the initializer rather than in a `.task`, because a view that renders
+    /// first would make its opening calls in-process and its later ones over
+    /// the daemon, so the terminals a session starts with would belong to a
+    /// different owner than the ones it ends with.
+    init() {
+        Bridge.connect()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

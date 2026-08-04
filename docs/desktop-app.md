@@ -269,9 +269,9 @@ pass over the visual language. See "The polish pass" below for what that means
 concretely, because "make it nicer" is not a milestone anyone can finish.
 
 **M8. Machines.** A second machine's workspaces in the same sidebar. Once this
-works, the iPad client is mostly a layout exercise. It needs the remote
-transport decision written down first, and that decision is listed under open
-risks below rather than improvised here.
+works, the iPad client is mostly a layout exercise. The transport decision it
+was blocked on is written down in [`remote-transport.md`](remote-transport.md),
+along with the order the pieces land in.
 
 **M9. Automations.** Recurring agent jobs owned by the daemon, each with a
 budget it stops at rather than one it reports after. The daemon already runs
@@ -321,11 +321,11 @@ place where two surfaces disagree and one of them has to change.
   built by scanning logs after the fact. The next meter slice needs either a
   tail-follow mode on the active log or a scan triggered on file change. It must
   preserve the parser boundary and never store conversation text.
-- **The remote transport.** M8 needs authenticated machine-to-machine
-  connections. Whether that is direct, relayed through tokenstat.ai, or both,
-  is a product and privacy decision that touches the sync privacy claim. It
-  needs its own document, written before the milestone starts rather than
-  during it.
+- **The remote transport. Decided**, in
+  [`remote-transport.md`](remote-transport.md): direct machine to machine, end
+  to end encrypted with per-machine keypairs, the account acting only as a key
+  directory, and no relay. That document also fixes what a later relay is
+  allowed to be, so the constraint is not renegotiated under deadline.
 - **Tree-sitter's weight on the app's licence check.** The editor's grammars are
   a new set of third-party crates inside what `apps/mac` links, which is exactly
   the boundary `check-app-licences.sh` guards. The common grammars are MIT or

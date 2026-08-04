@@ -892,6 +892,17 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
 /// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(match method {
+        // Where a daemon on this machine would be listening.
+        //
+        // A client needs this before it has a connection, so it is answered by
+        // the in-process transport and is sessionless by necessity. It exists
+        // so no front end reimplements the data directory rules: a client that
+        // computed the path itself would silently look in the wrong place on
+        // the day those rules change, and report "no daemon" rather than a
+        // mismatch.
+        "host.socketPath" => crate::server::default_socket_path()
+            .map(|path| json!({"path": path.display().to_string()})),
+
         "highlight" => highlight(params),
 
         "highlight.syntax" => serde_json::from_str::<HighlightParams>(params.trim())
@@ -1085,6 +1096,9 @@ mod tests {
             // text the caller sent, so it has nothing to ask the session about.
             "highlight",
             "highlight.syntax",
+            // Asked before a client has a connection to ask over, so it can
+            // never be behind a session.
+            "host.socketPath",
         ] {
             let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
                 .unwrap_or_else(|| panic!("{method} must be answerable without a session"));

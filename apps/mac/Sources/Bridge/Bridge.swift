@@ -6,7 +6,6 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
-import TokenstatFFI
 
 /// Errors surfaced by the bridge.
 ///
@@ -41,10 +40,55 @@ private struct Envelope<T: Decodable>: Decodable {
 /// Swift face of the Rust core.
 ///
 /// Deliberately thin. It owns no state and caches nothing, because the Rust
-/// side already holds the open archive and the loaded price book. When the host
-/// daemon lands, only the body of `invoke` changes: a socket write instead of a
-/// function call, with the same method names and the same envelope.
+/// side already holds the open archive and the loaded price book. Which
+/// `Transport` carries a call is chosen once, at launch, by `Bridge.connect()`.
+/// Every method below is written as though there were only one.
 enum Bridge {
+    /// How calls leave this process.
+    ///
+    /// Set once by `connect()` before the first call and never afterwards.
+    /// Switching transports while running would strand whatever the previous
+    /// one owned, most visibly the terminals, so it is deliberately not a
+    /// thing that can happen.
+    nonisolated(unsafe) private static var transport: Transport = InProcessTransport()
+
+    /// Which transport is in use, for the interface and for a bug report.
+    static var transportDescription: String { transport.describedAs }
+
+    /// True when a daemon owns this session's work, so terminals outlive the
+    /// window. The Machines screen will need to say this out loud.
+    nonisolated(unsafe) private(set) static var isHosted = false
+
+    /// Choose a transport. Call once, before anything else.
+    ///
+    /// Prefers a running daemon. The daemon runs under launchd, so its
+    /// terminals survive the app quitting and can be picked up again, which is
+    /// the entire point of `tokenstat-hostd` and the step `remote-transport.md`
+    /// puts first. In-process is the fallback for a machine where nobody
+    /// installed the agent, not a faster path worth preferring: the socket's
+    /// keystroke round trip measures in hundredths of a millisecond.
+    static func connect() {
+        // The path comes from the Rust side rather than being rebuilt here. A
+        // client that computed the data directory itself would look in the
+        // wrong place the day those rules change and report "no daemon"
+        // instead of a mismatch.
+        guard let socket = try? InProcessTransport().call(method: "host.socketPath", params: "{}"),
+              let path = Self.socketPath(fromEnvelope: socket),
+              let hosted = SocketTransport.connecting(to: path)
+        else {
+            isHosted = false
+            return
+        }
+        transport = hosted
+        isHosted = true
+    }
+
+    private static func socketPath(fromEnvelope json: String) -> String? {
+        struct Reply: Decodable { let path: String }
+        let envelope = try? JSONDecoder().decode(Envelope<Reply>.self, from: Data(json.utf8))
+        return envelope?.result?.path
+    }
+
     /// Call across the boundary and decode the result.
     ///
     /// Synchronous and potentially slow. Everything public here is `async` and
@@ -57,14 +101,9 @@ enum Bridge {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
 
-        // `tokenstat_ffi_call` never returns null and always returns JSON, so
-        // the only failure modes below are decoding ones.
-        guard let raw = tokenstat_ffi_call(method, paramString) else {
-            throw BridgeError.core(code: "null", message: "The core returned nothing.")
-        }
-        defer { tokenstat_ffi_string_free(raw) }
-
-        let json = String(cString: raw)
+        // Every transport answers with an envelope or throws, so the only
+        // failure modes left below are decoding ones.
+        let json = try transport.call(method: method, params: paramString)
         let data = Data(json.utf8)
 
         let decoder = JSONDecoder()
@@ -117,12 +156,7 @@ enum Bridge {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
 
-        guard let raw = tokenstat_ffi_call(method, paramString) else {
-            throw BridgeError.core(code: "null", message: "The core returned nothing.")
-        }
-        defer { tokenstat_ffi_string_free(raw) }
-
-        let json = String(cString: raw)
+        let json = try transport.call(method: method, params: paramString)
         let data = Data(json.utf8)
 
         let envelope: Envelope<T>

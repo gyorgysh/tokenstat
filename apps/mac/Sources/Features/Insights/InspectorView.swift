@@ -155,6 +155,10 @@ struct InspectorView: View {
             if let info = model.info {
                 KeyValue(key: "Timezone", value: info.timezone)
                 KeyValue(key: "Core", value: info.coreVersion)
+                // Worth stating, because it decides whether a terminal survives
+                // quitting the app. In-process means this window owns every
+                // process it starts, and they go when it does.
+                KeyValue(key: "Host", value: Bridge.isHosted ? "daemon" : "in-process")
                 if info.hasPrices {
                     KeyValue(key: "Rates from", value: info.priceBookEffectiveFrom)
                 } else {
