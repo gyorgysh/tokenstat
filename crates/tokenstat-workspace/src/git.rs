@@ -64,6 +64,250 @@ pub struct GitStatus {
     pub partial: bool,
 }
 
+/// One commit, as the history panel shows it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    /// Full hash. The abbreviation is the reader's job, not the parser's.
+    pub id: String,
+    pub subject: String,
+    pub author: String,
+    /// Author time in unix seconds. Author rather than commit time, because
+    /// that is when the work was done, and a rebase should not restate it.
+    pub timestamp: i64,
+    /// True while this commit is not on the upstream branch yet. False when
+    /// there is no upstream, because then nothing is known to be behind rather
+    /// than everything being unpushed.
+    pub unpushed: bool,
+}
+
+/// What one line of a diff is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffLineKind {
+    Context,
+    Added,
+    Removed,
+}
+
+/// One line of a diff, carrying the numbers both sides would show in a gutter.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    /// Line number on the left, absent for an added line.
+    pub old_line: Option<u32>,
+    /// Line number on the right, absent for a removed line.
+    pub new_line: Option<u32>,
+    /// The line without its leading `+`, `-` or space.
+    pub text: String,
+}
+
+/// One `@@` hunk.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffHunk {
+    /// The `@@ ... @@` line, including any trailing section heading git found.
+    pub header: String,
+    pub lines: Vec<DiffLine>,
+}
+
+/// The diff of one file against HEAD.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    pub hunks: Vec<DiffHunk>,
+    /// True when git refused to diff it as text. There is nothing to show, and
+    /// showing nothing without saying why looks like an empty file.
+    pub binary: bool,
+    /// True when the file is not tracked, so every line reads as added.
+    pub untracked: bool,
+}
+
+/// Diff one file against HEAD, staged and unstaged together.
+///
+/// An untracked file has nothing to diff against, so it is compared with an
+/// empty file and every line comes back added, which is what someone looking at
+/// a new file expects to see.
+pub fn diff(dir: &Path, path: &str) -> FileDiff {
+    let mut out = FileDiff {
+        path: path.to_string(),
+        ..FileDiff::default()
+    };
+    if !inside_work_tree(dir) {
+        return out;
+    }
+
+    let tracked = git(dir, &["ls-files", "--error-unmatch", "--", path]).is_some();
+    out.untracked = !tracked;
+
+    let raw = if tracked {
+        git(dir, &["diff", "HEAD", "--", path])
+    } else {
+        // `--no-index` exits 1 when the files differ, which is the normal
+        // answer here rather than a failure.
+        git_allowing(
+            dir,
+            &["diff", "--no-index", "--", "/dev/null", path],
+            &[0, 1],
+        )
+    };
+
+    let Some(raw) = raw else { return out };
+    if raw.lines().any(|l| l.starts_with("Binary files ")) {
+        out.binary = true;
+        return out;
+    }
+    out.hunks = parse_diff(&raw);
+    out
+}
+
+/// Parse unified diff output into hunks with both gutters filled in.
+fn parse_diff(raw: &str) -> Vec<DiffHunk> {
+    let mut hunks: Vec<DiffHunk> = Vec::new();
+    let (mut old_no, mut new_no) = (0u32, 0u32);
+
+    for line in raw.lines() {
+        if line.starts_with("@@") {
+            let (old_start, new_start) = hunk_starts(line);
+            old_no = old_start;
+            new_no = new_start;
+            hunks.push(DiffHunk {
+                header: line.to_string(),
+                lines: Vec::new(),
+            });
+            continue;
+        }
+        let Some(hunk) = hunks.last_mut() else {
+            // Everything before the first `@@` is the file header.
+            continue;
+        };
+        // "\ No newline at end of file" is a note about the previous line, not
+        // a line of the file, and numbering it would shift every line after it.
+        if line.starts_with('\\') {
+            continue;
+        }
+
+        let mut chars = line.chars();
+        let (kind, text) = match chars.next() {
+            Some('+') => (DiffLineKind::Added, chars.as_str()),
+            Some('-') => (DiffLineKind::Removed, chars.as_str()),
+            Some(' ') => (DiffLineKind::Context, chars.as_str()),
+            // An empty line in the body is an empty context line: git writes
+            // the leading space, but some tools strip trailing whitespace.
+            None => (DiffLineKind::Context, ""),
+            // Anything else belongs to a header we are not in a hunk for.
+            _ => continue,
+        };
+
+        let (old_line, new_line) = match kind {
+            DiffLineKind::Added => {
+                new_no += 1;
+                (None, Some(new_no))
+            }
+            DiffLineKind::Removed => {
+                old_no += 1;
+                (Some(old_no), None)
+            }
+            DiffLineKind::Context => {
+                old_no += 1;
+                new_no += 1;
+                (Some(old_no), Some(new_no))
+            }
+        };
+        hunk.lines.push(DiffLine {
+            kind,
+            old_line,
+            new_line,
+            text: text.to_string(),
+        });
+    }
+    hunks
+}
+
+/// Pull the two starting line numbers out of `@@ -a,b +c,d @@`.
+///
+/// The counts are omitted when they are 1, so `-a +c` is legal and has to
+/// parse the same way.
+fn hunk_starts(header: &str) -> (u32, u32) {
+    let mut old = 0;
+    let mut new = 0;
+    for field in header.split_whitespace() {
+        let number = |s: &str| -> u32 {
+            s.split(',')
+                .next()
+                .and_then(|n| n.parse::<u32>().ok())
+                .unwrap_or(1)
+                // The header names the first line; the parser counts up from
+                // the one before it.
+                .saturating_sub(1)
+        };
+        if let Some(rest) = field.strip_prefix('-') {
+            old = number(rest);
+        } else if let Some(rest) = field.strip_prefix('+') {
+            new = number(rest);
+        }
+    }
+    (old, new)
+}
+
+/// Read the most recent commits, newest first.
+///
+/// Empty for a folder that is not a repository, and for a repository with no
+/// commits yet. Neither is an error: one is a plain folder and the other is a
+/// repository someone just made.
+pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
+    if !inside_work_tree(dir) {
+        return Vec::new();
+    }
+
+    // Unit separator between fields and record separator between commits, so a
+    // subject containing a newline or a tab cannot shift the parse. `%x1f` and
+    // `%x1e` are exactly what those two ASCII controls are for.
+    let format = format!("--format=%H{US}%s{US}%an{US}%at{RS}");
+    let raw = match git(
+        dir,
+        &["log", &format!("--max-count={limit}"), &format, "HEAD"],
+    ) {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    // Which commits are not upstream yet. A separate command because deriving
+    // it from the ahead count assumes a linear history, and a merge breaks that
+    // assumption silently.
+    let unpushed: std::collections::HashSet<String> = git(dir, &["rev-list", "@{upstream}..HEAD"])
+        .map(|s| s.lines().map(|l| l.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    parse_log(&raw, &unpushed)
+}
+
+const US: char = '\u{1f}';
+const RS: char = '\u{1e}';
+
+fn parse_log(raw: &str, unpushed: &std::collections::HashSet<String>) -> Vec<Commit> {
+    raw.split(RS)
+        .map(str::trim_start)
+        .filter(|record| !record.is_empty())
+        .filter_map(|record| {
+            let mut fields = record.splitn(4, US);
+            let id = fields.next()?.to_string();
+            let subject = fields.next()?.to_string();
+            let author = fields.next()?.to_string();
+            let timestamp = fields.next()?.trim().parse().ok()?;
+            Some(Commit {
+                unpushed: unpushed.contains(&id),
+                id,
+                subject,
+                author,
+                timestamp,
+            })
+        })
+        .collect()
+}
+
 /// Read git state, or `is_repo: false` for anything that is not a work tree.
 ///
 /// Never fails for "this is not a repository": a plain folder is a legitimate
@@ -121,6 +365,13 @@ fn inside_work_tree(dir: &Path) -> bool {
 
 /// Run a read-only git command, or `None` if it fails.
 fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    git_allowing(dir, args, &[0])
+}
+
+/// As [`git`], but for commands whose non-zero exit is an answer rather than a
+/// failure. `diff --no-index` exits 1 to say "these differ", which is exactly
+/// what it was asked.
+fn git_allowing(dir: &Path, args: &[&str], codes: &[i32]) -> Option<String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -133,8 +384,8 @@ fn git(dir: &Path, args: &[&str]) -> Option<String> {
         .args(args)
         .output()
         .ok()?;
-    out.status
-        .success()
+    codes
+        .contains(&out.status.code().unwrap_or(-1))
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
@@ -361,6 +612,125 @@ mod tests {
         assert!(s.partial, "an untracked file makes the totals a floor");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_subject_with_control_characters_does_not_shift_the_parse() {
+        // The whole reason for the unit and record separators: a subject can
+        // contain a newline or a tab, and splitting on either would turn one
+        // commit into two and misattribute every field after it.
+        let raw = format!(
+            "aaa{US}fix: a subject\nwith a newline{US}Ada{US}1700000000{RS}\
+             bbb{US}feat: plain{US}Grace{US}1700000100{RS}"
+        );
+        let unpushed = ["bbb".to_string()].into_iter().collect();
+        let commits = parse_log(&raw, &unpushed);
+
+        assert_eq!(commits.len(), 2);
+        assert_eq!(commits[0].subject, "fix: a subject\nwith a newline");
+        assert_eq!(commits[0].author, "Ada");
+        assert_eq!(commits[0].timestamp, 1_700_000_000);
+        assert!(!commits[0].unpushed);
+        assert!(commits[1].unpushed);
+    }
+
+    #[test]
+    fn a_diff_numbers_both_gutters() {
+        let hunks = parse_diff(
+            "diff --git a/a.rs b/a.rs\n\
+             --- a/a.rs\n\
+             +++ b/a.rs\n\
+             @@ -10,4 +10,5 @@ fn main() {\n\
+             \x20context one\n\
+             -gone\n\
+             +new one\n\
+             +new two\n\
+             \x20context two\n",
+        );
+        assert_eq!(hunks.len(), 1);
+        assert!(hunks[0].header.ends_with("fn main() {"));
+
+        let rows: Vec<_> = hunks[0]
+            .lines
+            .iter()
+            .map(|l| (l.kind, l.old_line, l.new_line, l.text.as_str()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (DiffLineKind::Context, Some(10), Some(10), "context one"),
+                (DiffLineKind::Removed, Some(11), None, "gone"),
+                (DiffLineKind::Added, None, Some(11), "new one"),
+                (DiffLineKind::Added, None, Some(12), "new two"),
+                // The removed line advanced only the left gutter and the added
+                // lines only the right, so the trailing context has to land on
+                // 12 and 13. Getting this wrong is invisible until someone
+                // reads a line number.
+                (DiffLineKind::Context, Some(12), Some(13), "context two"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hunk_header_without_counts_parses() {
+        // git omits the count when it is 1, so `@@ -3 +3 @@` is legal.
+        let hunks = parse_diff("@@ -3 +7 @@\n-old\n+new\n");
+        assert_eq!(hunks[0].lines[0].old_line, Some(3));
+        assert_eq!(hunks[0].lines[1].new_line, Some(7));
+    }
+
+    #[test]
+    fn a_no_newline_marker_does_not_shift_the_numbering() {
+        let hunks = parse_diff("@@ -1,2 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n");
+        assert_eq!(hunks[0].lines.len(), 2);
+        assert_eq!(hunks[0].lines[1].new_line, Some(1));
+    }
+
+    #[test]
+    fn an_untracked_file_reads_as_entirely_added() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-diff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git must be installed to run this test")
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "t@example.invalid"]);
+        run(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("seed.txt"), "seed\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        std::fs::write(dir.join("new.txt"), "alpha\nbeta\n").unwrap();
+        let d = diff(&dir, "new.txt");
+        assert!(d.untracked);
+        assert!(!d.binary);
+        let kinds: Vec<_> = d.hunks[0].lines.iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, vec![DiffLineKind::Added, DiffLineKind::Added]);
+
+        // And a tracked edit still diffs against HEAD.
+        std::fs::write(dir.join("seed.txt"), "seed\nmore\n").unwrap();
+        let d = diff(&dir, "seed.txt");
+        assert!(!d.untracked);
+        assert!(
+            d.hunks[0]
+                .lines
+                .iter()
+                .any(|l| l.kind == DiffLineKind::Added && l.text == "more")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_plain_folder_has_no_history() {
+        let commits = log(&std::env::temp_dir(), 20);
+        assert!(commits.is_empty());
     }
 
     #[test]

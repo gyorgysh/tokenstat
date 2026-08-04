@@ -15,11 +15,18 @@
 //! folder on disk; and a folder an agent touched once is not somewhere you want
 //! a terminal open.
 //!
-//! Nothing here writes to a user's repository. See [`git`] for why that is a
-//! rule rather than a coincidence.
+//! Reading and writing are separate modules on purpose. [`git`] and [`tree`]
+//! are read-only and are safe to call from a timer, a watcher, or a status
+//! path, which is where they are called from. [`gitwrite`] is the only module
+//! that changes a repository, and everything in it runs because a person
+//! pressed a button. Keep new code on the correct side of that line.
 
 pub mod git;
+pub mod gitwrite;
 pub mod registry;
+pub mod tree;
 
-pub use git::{ChangeKind, FileChange, GitStatus};
+pub use git::{ChangeKind, Commit, FileChange, FileDiff, GitStatus};
+pub use gitwrite::GitOutcome;
 pub use registry::{Registry, RegistryError, Workspace};
+pub use tree::{TreeEntry, TreeError};
