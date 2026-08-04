@@ -208,10 +208,19 @@ struct RootView: View {
                             ForEach(activeSessions) { session in
                                 ActiveSessionRow(
                                     session: session,
-                                    workspaceName: folder.name
+                                    workspaceName: folder.name,
+                                    // Selected only when this session is the one
+                                    // actually on screen: the right workspace,
+                                    // its active session, and a terminal rather
+                                    // than a file or a commit in front of it.
+                                    isSelected: destination == .workspaces
+                                        && workspaces.selectedID == folder.id
+                                        && workspaces.isShowingTerminal(in: folder.id)
+                                        && terminals.active(in: folder.id)?.id == session.id
                                 ) {
                                     destination = .workspaces
                                     workspaces.selectedID = folder.id
+                                    workspaces.showTerminal(in: folder.id)
                                     terminals.select(session)
                                 }
                             }
@@ -222,7 +231,7 @@ struct RootView: View {
             }
             .padding(.bottom, Theme.Space.m)
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
         .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 300)
         .safeAreaInset(edge: .bottom) { accountFooter }
     }
@@ -260,7 +269,7 @@ struct RootView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
     }
 
     /// Avatar, handle, plan, chevron.
@@ -278,21 +287,21 @@ struct RootView: View {
 
             if account.isSyncing {
                 Text("Syncing…")
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
                 HStack(spacing: Theme.Space.xs) {
                     Text(account.account?.handle ?? "Not signed in")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let tier = account.account?.tier, !tier.isEmpty {
                         Text("·")
-                            .font(.system(size: 12))
+                            .font(.system(size: 13))
                             .foregroundStyle(.tertiary)
                         Text(tier.capitalized)
-                            .font(.system(size: 11))
+                            .font(.system(size: 12))
                             .foregroundStyle(Theme.accent)
                             .lineLimit(1)
                     }
@@ -373,13 +382,13 @@ private struct SidebarRow: View {
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(label)
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)
                 if let trailing {
                     Text(trailing)
-                        .font(Theme.numeric(10))
+                        .font(Theme.numeric(11))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -392,10 +401,21 @@ private struct SidebarRow: View {
         .onHover { isHovering = $0 }
     }
 
+    /// Selection is tinted and carries a bar down its leading edge. Hover is a
+    /// plain grey wash. They have to look like different things: with both as
+    /// shades of grey, which workspace you were actually in was a guess.
     private var background: some View {
-        RoundedRectangle(cornerRadius: 5)
-            .fill(isSelected ? Theme.rowHighlight : (isHovering ? Theme.rowHighlight.opacity(0.5) : .clear))
-            .padding(.horizontal, Theme.Space.xs)
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 3)
+            }
+        }
+        .padding(.horizontal, Theme.Space.xs)
     }
 }
 
@@ -404,7 +424,10 @@ private struct SidebarRow: View {
 private struct ActiveSessionRow: View {
     let session: TerminalSession
     let workspaceName: String
+    let isSelected: Bool
     let action: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
@@ -413,17 +436,17 @@ private struct ActiveSessionRow: View {
                     HarnessMark(id: harnessID, size: 18)
                 } else {
                     Image(systemName: "terminal")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.accent)
                         .frame(width: 18, height: 18)
                 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(session.title?.isEmpty == false ? session.title! : session.command)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(workspaceName)
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -436,10 +459,30 @@ private struct ActiveSessionRow: View {
             .padding(.leading, Theme.Space.l)
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, 5)
+            .background(background)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .help(session.cwd)
+    }
+
+    /// The same treatment as a selected workspace, indented to match the row.
+    /// A session is a place you are working in just as much as a folder is, and
+    /// which terminal is on screen should not be something you have to infer.
+    private var background: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isSelected ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 3)
+            }
+        }
+        .padding(.leading, Theme.Space.l)
+        .padding(.trailing, Theme.Space.xs)
     }
 }
 #endif

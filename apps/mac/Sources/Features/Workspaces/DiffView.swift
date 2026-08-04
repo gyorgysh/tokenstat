@@ -34,14 +34,7 @@ struct DiffView: View {
                      : "No changes against HEAD.")
             } else {
                 ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(diff.hunks) { hunk in
-                            hunkHeader(hunk)
-                            ForEach(hunk.lines) { line in
-                                DiffRow(line: line, minWidth: paneWidth)
-                            }
-                        }
-                    }
+                    DiffBody(diff: diff, minWidth: paneWidth)
                 }
             }
         }
@@ -56,17 +49,6 @@ struct DiffView: View {
         )
     }
 
-    private func hunkHeader(_ hunk: DiffHunk) -> some View {
-        Text(hunk.header)
-            .font(Theme.mono(10))
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 4)
-            .frame(minWidth: paneWidth, alignment: .leading)
-            .background(Theme.panel)
-    }
-
     private func note(_ text: String) -> some View {
         VStack {
             Spacer()
@@ -78,6 +60,36 @@ struct DiffView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// The hunks and lines of one diff, without any scrolling of its own.
+///
+/// Shared by the file viewer, which scrolls it, and by the commit view, which
+/// stacks several of them inside one scroll view. A commit's files scrolling
+/// independently of each other would be a strange way to read a change.
+struct DiffBody: View {
+    let diff: FileDiff
+    /// At least this wide, so a tint spans the pane rather than stopping at the
+    /// last character. Zero is fine: rows then size to their content.
+    var minWidth: CGFloat = 0
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(diff.hunks) { hunk in
+                Text(hunk.header)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, 4)
+                    .frame(minWidth: minWidth, alignment: .leading)
+                    .background(Theme.panel)
+                ForEach(hunk.lines) { line in
+                    DiffRow(line: line, minWidth: minWidth)
+                }
+            }
+        }
     }
 }
 

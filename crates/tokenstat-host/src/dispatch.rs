@@ -545,6 +545,21 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        // One commit in full. Separate from `workspace.log`, which is a list:
+        // reading every commit's diff to draw a list would be absurd.
+        "workspace.show" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let rev = p.path.ok_or("workspace.show needs a commit id")?;
+            with_session(s, |b| {
+                let ws = folder(b, &p.id)?;
+                match tokenstat_workspace::git::show(&ws.path, &rev) {
+                    Some(detail) => serde_json::to_value(detail).map_err(|e| e.to_string()),
+                    None => Err(format!("no commit {rev} in this workspace")),
+                }
+            })
+        }
+
         "workspace.diff" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;

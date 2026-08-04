@@ -12,6 +12,15 @@ import Observation
 import AppKit
 #endif
 
+/// The tabs of the workspace inspector.
+enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
+    case changes = "Changes"
+    case files = "Files"
+    case history = "History"
+
+    var id: String { rawValue }
+}
+
 /// The folders the user chose to work in.
 ///
 /// Nothing here reads the usage archive. Workspaces are a separate idea: a
@@ -23,6 +32,14 @@ final class WorkspacesModel {
     var selectedID: String?
     var isLoading = false
     var errorMessage: String?
+
+    /// Which inspector tab is open.
+    ///
+    /// Here rather than in the view, because the view is rebuilt every time the
+    /// file watcher refreshes the folder list, which during a build is several
+    /// times a second. As view state the tab was reset on the next build and
+    /// the picker looked like it did nothing at all.
+    var inspectorTab: InspectorTab = .changes
 
     /// Recent commits per workspace, keyed by workspace id.
     ///
@@ -66,8 +83,40 @@ final class WorkspacesModel {
 
     // MARK: - The centre pane
 
+    /// The commit open in the centre pane, per workspace.
+    ///
+    /// A commit takes the pane the same way a file does, but is not in
+    /// `openFiles`: there is only ever one, and it is opened by clicking a row
+    /// in History rather than accumulated as tabs.
+    private(set) var openCommit: [String: CommitDetail] = [:]
+    private(set) var loadingCommit: [String: String] = [:]
+
+    /// Read a commit and show it. Replaces whatever the pane was showing.
+    func showCommit(_ id: String, in workspaceID: String) async {
+        loadingCommit[workspaceID] = id
+        activeFile[workspaceID] = nil
+        do {
+            let detail = try await Bridge.workspaceShow(id: workspaceID, commit: id)
+            // The user may have clicked another commit while this was in flight.
+            guard loadingCommit[workspaceID] == id else { return }
+            openCommit[workspaceID] = detail
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        if loadingCommit[workspaceID] == id { loadingCommit[workspaceID] = nil }
+    }
+
+    func closeCommit(in workspaceID: String) {
+        openCommit[workspaceID] = nil
+        loadingCommit[workspaceID] = nil
+    }
+
     /// Show a file in the centre pane, opening it if it is not already there.
     func openFile(_ path: String, in workspaceID: String) async {
+        // A file and a commit are both "what the pane is showing", so opening
+        // one puts the other away.
+        closeCommit(in: workspaceID)
         var files = openFiles[workspaceID] ?? []
         if !files.contains(path) {
             files.append(path)
@@ -92,6 +141,14 @@ final class WorkspacesModel {
     /// Put the terminal back in front without closing any open file.
     func showTerminal(in workspaceID: String) {
         activeFile[workspaceID] = nil
+        closeCommit(in: workspaceID)
+    }
+
+    /// True when the pane is showing a terminal rather than a file or a commit.
+    func isShowingTerminal(in workspaceID: String) -> Bool {
+        activeFile[workspaceID] == nil
+            && openCommit[workspaceID] == nil
+            && loadingCommit[workspaceID] == nil
     }
 
     func diff(for path: String, in workspaceID: String) -> FileDiff? {

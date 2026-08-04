@@ -28,7 +28,7 @@ struct InspectorView: View {
             }
             .padding(Theme.Space.m)
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
     }
 
     private var period: some View {

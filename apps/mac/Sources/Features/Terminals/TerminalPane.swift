@@ -30,6 +30,20 @@ struct TerminalPane: View {
         workspaces.activeFile[folder.id]
     }
 
+    /// The commit on screen, if History opened one.
+    private var openCommit: CommitDetail? {
+        workspaces.openCommit[folder.id]
+    }
+
+    private var loadingCommit: String? {
+        workspaces.loadingCommit[folder.id]
+    }
+
+    /// True when the pane is showing a terminal rather than a file or a commit.
+    private var showsTerminal: Bool {
+        activeFile == nil && openCommit == nil && loadingCommit == nil
+    }
+
     /// Size of the terminal area, measured rather than assumed.
     @State private var paneSize: CGSize = .zero
 
@@ -90,13 +104,21 @@ struct TerminalPane: View {
             ZStack {
                 TerminalStack(
                     sessions: sessions,
-                    // Nothing is shown while a file is open, so the terminals
-                    // stay mounted underneath rather than being torn down.
-                    activeID: activeFile == nil ? active?.id : nil
+                    // Nothing is shown while a file or a commit is open, so the
+                    // terminals stay mounted underneath rather than being torn
+                    // down.
+                    activeID: showsTerminal ? active?.id : nil
                 )
                 .frame(width: size.width, height: size.height)
 
-                if let path = activeFile {
+                if let commit = openCommit {
+                    CommitView(detail: commit)
+                        .frame(width: size.width, height: size.height)
+                        .id(commit.id)
+                } else if loadingCommit != nil {
+                    reading("commit")
+                        .frame(width: size.width, height: size.height)
+                } else if let path = activeFile {
                     fileSurface(path)
                         .frame(width: size.width, height: size.height)
                 } else if sessions.isEmpty {
@@ -127,16 +149,20 @@ struct TerminalPane: View {
             DiffView(diff: diff)
                 .id(path)
         } else {
-            VStack {
-                Spacer()
-                Text("Reading \(path)…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Theme.background)
+            reading(path)
         }
+    }
+
+    private func reading(_ what: String) -> some View {
+        VStack {
+            Spacer()
+            Text("Reading \(what)…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
     }
 
     private var strip: some View {
@@ -144,7 +170,7 @@ struct TerminalPane: View {
             ForEach(sessions) { session in
                 SessionChip(
                     session: session,
-                    isSelected: activeFile == nil && session.id == active?.id
+                    isSelected: showsTerminal && session.id == active?.id
                 ) {
                     // Selecting a terminal puts it back in front without
                     // closing whatever files are open.
@@ -158,11 +184,26 @@ struct TerminalPane: View {
             ForEach(openFiles, id: \.self) { path in
                 FileChip(
                     path: path,
-                    isSelected: activeFile == path
+                    symbol: "doc.text",
+                    label: String(path.split(separator: "/").last ?? ""),
+                    isSelected: openCommit == nil && activeFile == path
                 ) {
                     Task { await workspaces.openFile(path, in: folder.id) }
                 } onClose: {
                     workspaces.closeFile(path, in: folder.id)
+                }
+            }
+
+            // A commit gets a tab too, so it is as closeable as anything else
+            // and it is obvious the pane is showing history rather than work.
+            if let commit = openCommit {
+                FileChip(
+                    path: commit.subject,
+                    symbol: "arrow.triangle.branch",
+                    label: commit.shortID,
+                    isSelected: true
+                ) {} onClose: {
+                    workspaces.closeCommit(in: folder.id)
                 }
             }
 
@@ -183,7 +224,7 @@ struct TerminalPane: View {
                 }
             } label: {
                 Label("New session", systemImage: "plus")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -227,12 +268,43 @@ struct TerminalPane: View {
     }
 }
 
+/// The close control on a tab.
+///
+/// Shown whenever the tab is selected or the pointer is over it, not only when
+/// selected: closing a background tab should not mean selecting it first. Sized
+/// as a real target with its own hover background, because an 8pt glyph with no
+/// affordance is something people miss and then click the tab instead.
+private struct TabCloseButton: View {
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(isHovering ? Color.primary : .secondary)
+                .frame(width: 18, height: 18)
+                .background(
+                    Circle().fill(isHovering ? Theme.rowHighlight : .clear)
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(help)
+    }
+}
+
 /// One session's tab: status dot, label, and a close button on the active one.
 private struct SessionChip: View {
     let session: TerminalSession
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 2) {
@@ -242,12 +314,12 @@ private struct SessionChip: View {
                         HarnessMark(id: harnessID, size: 16)
                     } else {
                         Image(systemName: "terminal")
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                             .foregroundStyle(Theme.accent)
                             .frame(width: 16, height: 16)
                     }
                     Text(label)
-                        .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -264,18 +336,11 @@ private struct SessionChip: View {
             .buttonStyle(.plain)
             .help(session.cwd)
 
-            if isSelected {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help("Close this session")
+            if isSelected || isHovering {
+                TabCloseButton(help: "Close this session", action: onClose)
             }
         }
+        .onHover { isHovering = $0 }
     }
 
     private var label: String {
@@ -290,21 +355,26 @@ private struct SessionChip: View {
 /// A different icon from a session on purpose: these live in the same strip,
 /// and a terminal and a file are not the same kind of thing to close.
 private struct FileChip: View {
+    /// The full thing, for the tooltip: a path, or a commit's subject.
     let path: String
+    let symbol: String
+    let label: String
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 2) {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: "doc.text")
-                        .font(.system(size: 10))
+                    Image(systemName: symbol)
+                        .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
-                    Text(String(path.split(separator: "/").last ?? ""))
-                        .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                    Text(label)
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -321,18 +391,11 @@ private struct FileChip: View {
             .buttonStyle(.plain)
             .help(path)
 
-            if isSelected {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 14, height: 14)
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help("Close this file")
+            if isSelected || isHovering {
+                TabCloseButton(help: "Close this file", action: onClose)
             }
         }
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -357,7 +420,7 @@ struct TerminalHost: View {
         HStack(spacing: Theme.Space.s) {
             if let code = session.exitCode {
                 Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(code == 0 ? .green : .red)
                 Text(code == 0 ? "Process exited" : "Process exited with code \(code)")
                     .font(.caption)
@@ -445,10 +508,10 @@ private struct LaunchSurface: View {
                         .foregroundStyle(Theme.accent)
                 }
                 Text(profile.name)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 Text(profile.command)
-                    .font(Theme.mono(10))
+                    .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity)

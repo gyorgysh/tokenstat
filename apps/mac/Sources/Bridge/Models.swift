@@ -544,6 +544,28 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
 }
 
+/// One commit in full: what it says, and what it changed.
+struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var subject: String
+    /// Everything after the subject. Empty when there is none.
+    var body: String
+    var author: String
+    var email: String
+    var timestamp: Int64
+    /// Two or more parents means a merge, which is why its diff can be empty
+    /// for a commit that plainly changed things.
+    var parents: [String]
+    var files: [FileChange]
+    var added: UInt64
+    var removed: UInt64
+    var diffs: [FileDiff]
+
+    var shortID: String { String(id.prefix(7)) }
+    var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+    var isMerge: Bool { parents.count > 1 }
+}
+
 /// A folder the user registered.
 struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var id: String

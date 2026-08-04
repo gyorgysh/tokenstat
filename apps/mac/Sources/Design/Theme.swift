@@ -19,10 +19,11 @@ import UIKit
 /// `SECONDARY_RGB`). One product, one palette: a user running both should not
 /// see two different purples. Change them in both places or in neither.
 ///
-/// Surfaces are flat and explicit rather than translucent material. A window
-/// full of dense numbers wants a steady background: vibrancy pulls whatever is
-/// behind the window into the table, and columns of digits are hard enough to
-/// read without the desktop showing through them.
+/// The chrome is translucent and the content is not. A sidebar or an inspector
+/// can sit on material and gain some depth from it, but a table of digits and a
+/// terminal need a steady background: vibrancy pulls whatever is behind the
+/// window into the text, and columns of numbers are hard enough to read
+/// already. So `sidebarMaterial` for the edges, flat colours for the middle.
 enum Theme {
     static let accent = Color(red: 0xB2 / 255, green: 0x64 / 255, blue: 0xEB / 255)
     static let secondary = Color(red: 0x67 / 255, green: 0xE8 / 255, blue: 0xF9 / 255)
@@ -35,8 +36,14 @@ enum Theme {
     static let panel = Color.adaptive(light: .white, dark: hex(0x141416))
     /// Hairlines. These carry the structure that shadows used to.
     static let border = Color.adaptive(light: hex(0xE2E2E5), dark: hex(0x232326))
-    /// A selected row.
+    /// A row the pointer is over.
     static let rowHighlight = Color.adaptive(light: hex(0xE4E4E8), dark: hex(0x1C1C1F))
+    /// The row that is actually selected.
+    ///
+    /// Tinted with the accent rather than being a lighter grey. With a hover
+    /// highlight and a selection highlight both in grey, the two were the same
+    /// thing at a glance and you could not tell which workspace you were in.
+    static let rowSelected = accent.opacity(0.18)
 
     private static func hex(_ value: UInt32) -> Color {
         Color(
@@ -71,7 +78,14 @@ enum Theme {
     }
 
     /// Small uppercase label above a group.
-    static let sectionHeader = Font.system(size: 10, weight: .semibold)
+    static let sectionHeader = Font.system(size: 12, weight: .semibold)
+
+    /// Material for the window's edges: the sidebar and the inspector.
+    ///
+    /// Not for the content column, and never behind the terminal. A terminal
+    /// showing the desktop through it is unreadable, and it is the one surface
+    /// in the app where every pixel is someone's output.
+    static let sidebarMaterial: Material = .bar
 }
 
 extension Color {
@@ -193,7 +207,7 @@ struct SectionLabel: View {
             Spacer()
             if let count {
                 Text("\(count)")
-                    .font(Theme.numeric(10))
+                    .font(Theme.numeric(11))
                     .foregroundStyle(.quaternary)
             }
         }
@@ -217,9 +231,9 @@ struct TabStrip<Tab: Hashable>: View {
                 } label: {
                     HStack(spacing: Theme.Space.xs) {
                         Image(systemName: item.symbol)
-                            .font(.system(size: 10))
+                            .font(.system(size: 11))
                         Text(item.label)
-                            .font(.system(size: 12, weight: active ? .medium : .regular))
+                            .font(.system(size: 13, weight: active ? .medium : .regular))
                     }
                     .foregroundStyle(active ? Color.primary : Color.secondary)
                     .padding(.horizontal, Theme.Space.m)

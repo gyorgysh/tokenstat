@@ -252,6 +252,107 @@ fn hunk_starts(header: &str) -> (u32, u32) {
     (old, new)
 }
 
+/// One commit in full: what it says, and what it changed.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    pub id: String,
+    pub subject: String,
+    /// Everything after the subject, trimmed. Empty when there is none.
+    pub body: String,
+    pub author: String,
+    pub email: String,
+    pub timestamp: i64,
+    /// Parent hashes. Two or more means a merge, which is why the diff below
+    /// can be empty for a commit that plainly changed things.
+    pub parents: Vec<String>,
+    pub files: Vec<FileChange>,
+    pub added: u64,
+    pub removed: u64,
+    /// Per-file diffs, in the order the files are listed.
+    pub diffs: Vec<FileDiff>,
+}
+
+/// Read one commit: its message, its files, and their diffs.
+///
+/// `id` is passed to git as a revision, so it accepts a hash, a tag, `HEAD~2`,
+/// or anything else git resolves. An unknown revision comes back as `None`
+/// rather than an error, because the caller asked about something that is not
+/// there rather than doing something wrong.
+pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
+    if !inside_work_tree(dir) {
+        return None;
+    }
+
+    let format = format!("--format=%H{US}%s{US}%b{US}%an{US}%ae{US}%at{US}%P");
+    let raw = git(dir, &["show", "--no-patch", &format, id])?;
+    let mut fields = raw.trim_end_matches('\n').splitn(7, US);
+
+    let mut detail = CommitDetail {
+        id: fields.next()?.to_string(),
+        subject: fields.next()?.to_string(),
+        body: fields.next()?.trim().to_string(),
+        author: fields.next()?.to_string(),
+        email: fields.next()?.to_string(),
+        timestamp: fields.next()?.trim().parse().ok()?,
+        parents: fields
+            .next()?
+            .split_whitespace()
+            .map(str::to_string)
+            .collect(),
+        ..CommitDetail::default()
+    };
+
+    // Names and statuses, then counts, the same two-command split `status` uses
+    // and for the same reason: neither command reports both.
+    let range = format!("{id}^!");
+    if let Some(names) = git(dir, &["diff", "--name-status", "-M", &range]) {
+        for line in names.lines() {
+            let mut parts = line.split('\t');
+            let (Some(status), Some(first)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            // A rename prints `R100<tab>old<tab>new`. The new name is the one a
+            // reader is looking for, and the one the diff is keyed by.
+            let path = parts.next().unwrap_or(first).to_string();
+            detail.files.push(FileChange {
+                path,
+                kind: kind_from_xy(status),
+                added: None,
+                removed: None,
+            });
+        }
+    }
+    if let Some(numstat) = git(dir, &["diff", "--numstat", "-M", &range]) {
+        let mut status = GitStatus {
+            files: std::mem::take(&mut detail.files),
+            ..GitStatus::default()
+        };
+        apply_numstat(&numstat, &mut status);
+        detail.files = status.files;
+    }
+    for f in &detail.files {
+        detail.added += f.added.unwrap_or(0);
+        detail.removed += f.removed.unwrap_or(0);
+    }
+
+    detail.diffs = detail
+        .files
+        .iter()
+        .map(|f| {
+            let raw = git(dir, &["diff", "-M", &range, "--", &f.path]).unwrap_or_default();
+            FileDiff {
+                path: f.path.clone(),
+                binary: raw.lines().any(|l| l.starts_with("Binary files ")),
+                untracked: false,
+                hunks: parse_diff(&raw),
+            }
+        })
+        .collect();
+
+    Some(detail)
+}
+
 /// Read the most recent commits, newest first.
 ///
 /// Empty for a folder that is not a repository, and for a repository with no
@@ -723,6 +824,67 @@ mod tests {
                 .iter()
                 .any(|l| l.kind == DiffLineKind::Added && l.text == "more")
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_commit_reads_back_with_its_message_and_diff() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-show-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(args)
+                .output()
+                .expect("git must be installed to run this test");
+        };
+        run(&["init", "-q", "."]);
+        run(&["config", "user.email", "t@example.invalid"]);
+        run(&["config", "user.name", "Ada"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        run(&["add", "-A"]);
+        run(&["commit", "-qm", "init"]);
+
+        std::fs::write(dir.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "new\n").unwrap();
+        run(&["add", "-A"]);
+        run(&[
+            "commit",
+            "-qm",
+            "feat: two things\n\nA body that\nspans lines.",
+        ]);
+
+        let detail = show(&dir, "HEAD").expect("HEAD resolves");
+        assert_eq!(detail.subject, "feat: two things");
+        assert_eq!(detail.body, "A body that\nspans lines.");
+        assert_eq!(detail.author, "Ada");
+        assert_eq!(detail.parents.len(), 1);
+
+        let paths: Vec<_> = detail.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            paths.contains(&"a.txt") && paths.contains(&"b.txt"),
+            "{paths:?}"
+        );
+        assert_eq!(detail.added, 2, "one line in each file");
+
+        // The diffs are the point: a commit list nobody can open is a list.
+        let a = detail.diffs.iter().find(|d| d.path == "a.txt").unwrap();
+        assert!(
+            a.hunks[0]
+                .lines
+                .iter()
+                .any(|l| l.kind == DiffLineKind::Added && l.text == "two")
+        );
+
+        // The first commit has no parent, and `id^!` still has to work there.
+        let first = show(&dir, "HEAD~1").expect("the root commit resolves");
+        assert!(first.parents.is_empty());
+        assert_eq!(first.subject, "init");
+
+        assert!(show(&dir, "nope-not-a-rev").is_none());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -226,6 +226,11 @@ extension Bridge {
     static func workspaceDiff(id: String, path: String) async throws -> FileDiff {
         try await background("workspace.diff", ["id": id, "path": path], as: FileDiff.self)
     }
+
+    /// One commit in full: message, files, and their diffs.
+    static func workspaceShow(id: String, commit: String) async throws -> CommitDetail {
+        try await background("workspace.show", ["id": id, "path": commit], as: CommitDetail.self)
+    }
 }
 
 // MARK: - Git, the parts that write

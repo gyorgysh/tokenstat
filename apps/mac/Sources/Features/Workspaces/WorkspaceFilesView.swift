@@ -25,7 +25,7 @@ struct WorkspaceFilesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, Theme.Space.s)
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
         .task(id: folder?.id) {
             guard let folder, folder.exists else { return }
             if model.children(of: "", in: folder.id) == nil {
@@ -118,11 +118,11 @@ private struct TreeRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: symbol)
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(entry.isDir ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(entry.name)
-                    .font(.system(size: 12, weight: isOpen ? .medium : .regular))
+                    .font(.system(size: 13, weight: isOpen ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)

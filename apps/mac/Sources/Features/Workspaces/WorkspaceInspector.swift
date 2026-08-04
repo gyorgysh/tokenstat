@@ -15,15 +15,15 @@ import SwiftUI
 struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case changes = "Changes"
-        case files = "Files"
-        case history = "History"
-
-        var id: String { rawValue }
+    /// The chosen tab lives in the model, not in `@State` here.
+    ///
+    /// This view is rebuilt whenever the folder list refreshes, which the file
+    /// watcher does every time anything in a workspace changes. With the
+    /// selection in view state it was reset on the next build, so the tabs
+    /// simply did not switch while a build was running in one of the folders.
+    private var tab: Binding<InspectorTab> {
+        Binding(get: { model.inspectorTab }, set: { model.inspectorTab = $0 })
     }
-
-    @State private var tab: Tab = .changes
 
     private var folder: WorkspaceFolder? { model.selected }
 
@@ -33,12 +33,12 @@ struct WorkspaceInspector: View {
             Divider()
             content
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
     }
 
     private var picker: some View {
-        Picker("", selection: $tab) {
-            ForEach(Tab.allCases) { tab in
+        Picker("", selection: tab) {
+            ForEach(InspectorTab.allCases) { tab in
                 // The count belongs on the tab: it is the reason to look at it.
                 Text(title(for: tab)).tag(tab)
             }
@@ -49,7 +49,7 @@ struct WorkspaceInspector: View {
         .padding(.vertical, Theme.Space.s)
     }
 
-    private func title(for tab: Tab) -> String {
+    private func title(for tab: InspectorTab) -> String {
         switch tab {
         case .changes:
             let count = folder?.changeCount ?? 0
@@ -63,7 +63,7 @@ struct WorkspaceInspector: View {
 
     @ViewBuilder
     private var content: some View {
-        switch tab {
+        switch tab.wrappedValue {
         case .changes:
             WorkspaceChangesView(model: model, folder: folder)
         case .files:
@@ -87,7 +87,7 @@ struct WorkspaceHistoryView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Theme.Space.m)
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
         // Keyed on the folder, so switching workspaces reads the right history
         // instead of leaving the previous one on screen.
         .task(id: folder?.id) {
@@ -110,7 +110,12 @@ struct WorkspaceHistoryView: View {
                     )
                 } else {
                     ForEach(commits) { commit in
-                        CommitRow(commit: commit)
+                        CommitRow(
+                            commit: commit,
+                            isOpen: model.openCommit[folder.id]?.id == commit.id
+                        ) {
+                            Task { await model.showCommit(commit.id, in: folder.id) }
+                        }
                     }
                 }
             } else if let error = model.historyError {
@@ -134,43 +139,61 @@ struct WorkspaceHistoryView: View {
 /// not left this machine yet.
 private struct CommitRow: View {
     let commit: Commit
+    let isOpen: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
+        Button(action: action) {
+            content
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isOpen ? Theme.rowSelected : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
+        )
+    }
+
+    private var content: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(commit.subject)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .lineLimit(2)
                     .truncationMode(.tail)
                 HStack(spacing: Theme.Space.xs) {
                     Text(commit.author)
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                     Text("·")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Text(commit.date, format: .relative(presentation: .named))
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Text("·")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Text(commit.shortID)
-                        .font(Theme.mono(10))
+                        .font(Theme.mono(11))
                         .foregroundStyle(.tertiary)
                 }
             }
             Spacer(minLength: Theme.Space.xs)
             if commit.unpushed {
                 Image(systemName: "arrow.up.circle")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(Theme.accent)
                     .help("Not pushed yet")
             }
         }
+        .padding(.horizontal, Theme.Space.xs)
         .padding(.vertical, Theme.Space.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help(commit.id)
+        .contentShape(.rect)
+        .help("Open this commit")
     }
 }

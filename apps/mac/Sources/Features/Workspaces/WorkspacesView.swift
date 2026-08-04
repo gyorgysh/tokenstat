@@ -44,7 +44,7 @@ struct WorkspacesView: View {
                 Text(folder.name)
                     .font(.system(size: 13, weight: .semibold))
                 Text(folder.path)
-                    .font(Theme.mono(10))
+                    .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.head)
@@ -136,12 +136,12 @@ struct BranchChip: View {
             Image(systemName: "arrow.triangle.branch")
                 .font(.system(size: 9))
             Text(git.branch ?? "detached")
-                .font(Theme.mono(11))
+                .font(Theme.mono(12))
             if git.ahead > 0 {
-                Text("↑\(git.ahead)").font(Theme.numeric(10)).foregroundStyle(Theme.secondary)
+                Text("↑\(git.ahead)").font(Theme.numeric(11)).foregroundStyle(Theme.secondary)
             }
             if git.behind > 0 {
-                Text("↓\(git.behind)").font(Theme.numeric(10)).foregroundStyle(.orange)
+                Text("↓\(git.behind)").font(Theme.numeric(11)).foregroundStyle(.orange)
             }
         }
         .foregroundStyle(.secondary)
@@ -178,7 +178,7 @@ struct WorkspaceChangesView: View {
             }
             #endif
         }
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
     }
 
     @ViewBuilder
@@ -243,10 +243,10 @@ struct WorkspaceChangesView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Theme.Space.s) {
                 Text("+\(git.added)")
-                    .font(Theme.numeric(12, weight: .medium))
+                    .font(Theme.numeric(13, weight: .medium))
                     .foregroundStyle(.green)
                 Text("−\(git.removed)")
-                    .font(Theme.numeric(12, weight: .medium))
+                    .font(Theme.numeric(13, weight: .medium))
                     .foregroundStyle(.red)
                 Text("· \(git.files.count) file\(git.files.count == 1 ? "" : "s")")
                     .font(.caption)
@@ -300,7 +300,7 @@ private struct CommitBox: View {
 
             TextField("Commit message", text: message, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.system(size: 13))
                 .lineLimit(2 ... 5)
                 .padding(Theme.Space.s)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
@@ -325,7 +325,7 @@ private struct CommitBox: View {
                     Task { await model.commit(folder) }
                 } label: {
                     Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
@@ -334,7 +334,7 @@ private struct CommitBox: View {
             .padding(.horizontal, Theme.Space.m)
         }
         .padding(.bottom, Theme.Space.m)
-        .background(Theme.sidebar)
+        .background(Theme.sidebarMaterial)
     }
 }
 #endif
@@ -352,7 +352,7 @@ private struct ChangeRow: View {
             #if os(macOS)
             Button(action: onToggle) {
                 Image(systemName: isStaged ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(isStaged ? Theme.accent : Color.secondary)
                     .contentShape(.rect)
             }
@@ -361,11 +361,11 @@ private struct ChangeRow: View {
             #endif
 
             Image(systemName: file.kind.symbol)
-                .font(.system(size: 10))
+                .font(.system(size: 11))
                 .foregroundStyle(file.kind.tint)
             Button(action: onOpen) {
                 Text(file.fileName)
-                    .font(.system(size: 12, weight: isOpen ? .medium : .regular))
+                    .font(.system(size: 13, weight: isOpen ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .contentShape(.rect)
@@ -374,15 +374,15 @@ private struct ChangeRow: View {
             .help("Open the diff")
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
-                Text("+\(added)").font(Theme.numeric(10)).foregroundStyle(.green)
+                Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(.green)
             }
             if let removed = file.removed, removed > 0 {
-                Text("−\(removed)").font(Theme.numeric(10)).foregroundStyle(.red)
+                Text("−\(removed)").font(Theme.numeric(11)).foregroundStyle(.red)
             }
             if file.added == nil {
                 // A dash, not a zero. The difference matters here as much as it
                 // does for token counters.
-                Text("—").font(Theme.numeric(10)).foregroundStyle(.tertiary)
+                Text("—").font(Theme.numeric(11)).foregroundStyle(.tertiary)
             }
         }
         .help(file.path)
