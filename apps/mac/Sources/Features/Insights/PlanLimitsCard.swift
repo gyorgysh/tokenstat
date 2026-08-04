@@ -19,19 +19,26 @@ struct PlanLimitsCard: View {
     let isLoading: Bool
     let refresh: () -> Void
 
+    private var visibleProviders: [ProviderLimits] {
+        providers.filter { provider in
+            guard let note = provider.note?.lowercased() else { return true }
+            return !Self.isUnavailable(note)
+        }
+    }
+
     var body: some View {
         Card(
             title: "Plan limits",
             subtitle: "What each vendor says is left, not what we counted.",
             accessory: AnyView(refreshButton)
         ) {
-            if providers.isEmpty {
+            if visibleProviders.isEmpty {
                 Text(isLoading ? "Reading…" : "No providers reported a limit.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
-                    ForEach(providers) { provider in
+                    ForEach(visibleProviders) { provider in
                         ProviderRow(provider: provider)
                     }
                 }
@@ -52,6 +59,23 @@ struct PlanLimitsCard: View {
         .buttonStyle(.plain)
         .disabled(isLoading)
         .help("Ask each vendor again")
+    }
+
+    /// Do not turn an absent tool into an error card. Once a tool is present,
+    /// authentication, network, and rate-limit failures remain visible.
+    private static func isUnavailable(_ note: String) -> Bool {
+        [
+            "not found",
+            "not running",
+            "no sessions",
+            "no cursor session",
+            "no opencode",
+            "no antigravity",
+            "no codex",
+            "not signed in",
+            "no claude code",
+            "no home directory",
+        ].contains { note.contains($0) }
     }
 }
 

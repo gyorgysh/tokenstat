@@ -28,6 +28,7 @@ final class AccountModel {
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
+    var syncCooldownUntil: Date?
 
     private var pollTask: Task<Void, Never>?
 
@@ -110,16 +111,27 @@ final class AccountModel {
     }
 
     func sync() async {
-        guard !isSyncing else { return }
+        guard !isSyncing, syncCooldownUntil == nil else { return }
         isSyncing = true
         errorMessage = nil
         defer { isSyncing = false }
         do {
             let result = try await Bridge.sync()
             lastSyncSummary = "Sent \(result.rows) rows for \(result.from) to \(result.to)."
+            startSyncCooldown()
             await load()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func startSyncCooldown() {
+        let until = Date().addingTimeInterval(5 * 60)
+        syncCooldownUntil = until
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5 * 60))
+            guard let self, self.syncCooldownUntil == until else { return }
+            self.syncCooldownUntil = nil
         }
     }
 }

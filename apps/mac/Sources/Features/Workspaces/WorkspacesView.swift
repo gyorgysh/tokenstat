@@ -104,8 +104,8 @@ struct WorkspacesView: View {
             Text("No workspaces yet")
                 .font(.title3.weight(.medium))
             Text("""
-            Add a project folder. tokenstat reads its git state and, once the \
-            terminal lands, runs your agents in it.
+            Add a project folder. tokenstat reads its git state and gives you a \
+            place to run your agents.
             """)
             .font(.callout)
             .foregroundStyle(.secondary)

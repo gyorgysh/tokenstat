@@ -525,9 +525,9 @@ private struct LaunchSurface: View {
 
 /// What can be launched in a workspace.
 ///
-/// These are the same agent CLIs the archive counts, keyed by their source id
-/// so the launch mark and the archive's mark are the same mark. Only commands
-/// actually on the PATH are offered.
+/// These are the supported harness commands, keyed by the source id so the
+/// launch mark and the archive's mark are the same mark. Only commands actually
+/// on the PATH are offered.
 private struct LaunchProfile: Identifiable {
     let id: String
     let name: String
@@ -562,6 +562,12 @@ private struct LaunchProfile: Identifiable {
         LaunchProfile(id: "opencode", name: "OpenCode", command: "opencode", args: [], harnessID: "opencode", symbol: nil),
         LaunchProfile(id: "grok", name: "Grok Build", command: "grok", args: [], harnessID: "grok", symbol: nil),
         LaunchProfile(id: "copilot", name: "Copilot CLI", command: "copilot", args: [], harnessID: "copilot", symbol: nil),
+        LaunchProfile(id: "cline", name: "Cline", command: "cline", args: [], harnessID: "cline", symbol: nil),
+        LaunchProfile(id: "openclaw", name: "OpenClaw", command: "openclaw", args: [], harnessID: "openclaw", symbol: nil),
+        LaunchProfile(id: "zed", name: "Zed", command: "zed", args: [], harnessID: "zed", symbol: nil),
+        LaunchProfile(id: "antigravity", name: "Antigravity", command: "agy", args: [], harnessID: "antigravity", symbol: nil),
+        LaunchProfile(id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [], harnessID: "cursor", symbol: nil),
+        LaunchProfile(id: "cursor", name: "Cursor CLI", command: "cursor", args: [], harnessID: "cursor", symbol: nil),
     ]
 
     private static var shellCommand: String {

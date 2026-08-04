@@ -53,6 +53,7 @@ struct RootView: View {
     @State private var model = InsightsModel()
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
+    @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var collapsedWorkspaces: Set<String> = []
@@ -82,15 +83,29 @@ struct RootView: View {
         #if os(macOS)
         .task { await terminals.load() }
         #endif
+        .toolbar {
+            if destination == .insights || (destination == .workspaces && !workspaces.folders.isEmpty) {
+                ToolbarItem {
+                    Button {
+                        isInspectorPresented.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help(isInspectorPresented ? "Hide inspector" : "Show inspector")
+                }
+            }
+        }
     }
 
-    /// Which destinations have something for the right pane. The pane is part
-    /// of the layout and is not user-closeable; it simply does not exist for
-    /// screens that have nothing to put in it.
+    /// Which destinations have an optional right pane.
     private var showsInspector: Binding<Bool> {
         Binding(
-            get: { destination == .insights || destination == .workspaces },
-            set: { _ in }
+            get: {
+                isInspectorPresented
+                    && (destination == .insights
+                        || (destination == .workspaces && !workspaces.folders.isEmpty))
+            },
+            set: { isInspectorPresented = $0 }
         )
     }
 
@@ -244,12 +259,25 @@ struct RootView: View {
     /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
+            if let status = account.lastSyncSummary ?? account.errorMessage {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: account.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    Text(status)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                }
+                .font(.caption)
+                .foregroundStyle(account.errorMessage == nil ? Theme.secondary : .orange)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.xs)
+            }
             Rectangle().fill(Theme.border).frame(height: 1)
             Menu {
                 if account.signedIn {
                     Button("Account settings") { destination = .account }
                     Button("Sync now") { Task { await account.sync() } }
-                        .disabled(account.isSyncing)
+                        .disabled(account.isSyncing || account.syncCooldownUntil != nil)
                     Divider()
                     Button("Sign out") { Task { await account.signOut() } }
                 } else {

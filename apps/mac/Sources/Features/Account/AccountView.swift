@@ -89,7 +89,7 @@ struct AccountView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.accent)
-                    .disabled(model.isSyncing)
+                    .disabled(model.isSyncing || model.syncCooldownUntil != nil)
 
                     Button("Sign out") {
                         Task { await model.signOut() }

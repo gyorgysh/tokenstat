@@ -31,6 +31,9 @@ struct InsightsView: View {
                 if let message = model.errorMessage {
                     Banner(text: message)
                 }
+                if let message = model.actionMessage {
+                    Banner(text: message, tint: Theme.secondary, symbol: "checkmark.circle.fill")
+                }
 
                 switch model.tab {
                 case .overview:
@@ -106,11 +109,12 @@ struct InsightsView: View {
                 if model.isScanning {
                     ProgressView().controlSize(.small)
                 } else {
-                    Label("Scan", systemImage: "arrow.clockwise")
+                    Label("Scan", systemImage: "arrow.triangle.2.circlepath")
                 }
             }
-            .disabled(model.isScanning)
-            .help("Read new sessions from every supported tool into the archive")
+            .labelStyle(.iconOnly)
+            .disabled(model.isScanning || model.scanCooldownUntil != nil)
+            .help("Read new sessions from supported local tools into the archive")
         }
         ToolbarItem {
             Button {
@@ -119,10 +123,11 @@ struct InsightsView: View {
                 if model.isFetching {
                     ProgressView().controlSize(.small)
                 } else {
-                    Label("Fetch", systemImage: "cloud.arrow.down")
+                    Label("Fetch", systemImage: "arrow.down.circle")
                 }
             }
-            .disabled(model.isFetching)
+            .labelStyle(.iconOnly)
+            .disabled(model.isFetching || model.fetchCooldownUntil != nil)
             .help("Fetch usage from remote vendors such as Cursor")
         }
     }

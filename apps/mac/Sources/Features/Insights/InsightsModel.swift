@@ -113,6 +113,9 @@ final class InsightsModel {
     var isLoading = false
     var isScanning = false
     var isFetching = false
+    var scanCooldownUntil: Date?
+    var fetchCooldownUntil: Date?
+    var actionMessage: String?
     /// Set when a load fails. The message comes from the core, which names the
     /// actual file or setting at fault, so it is shown rather than replaced.
     var errorMessage: String?
@@ -213,11 +216,14 @@ final class InsightsModel {
 
     /// Read every discoverable log source into the archive, then redraw.
     func scan() async {
-        guard !isScanning else { return }
+        guard !isScanning, scanCooldownUntil == nil else { return }
         isScanning = true
+        actionMessage = nil
         defer { isScanning = false }
         do {
-            _ = try await Bridge.scan()
+            let report = try await Bridge.scan()
+            actionMessage = "Scan complete: added \(report.eventsNew) new events from \(report.filesRead) files."
+            startCooldown(seconds: 10, clearing: \.scanCooldownUntil)
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
@@ -225,14 +231,28 @@ final class InsightsModel {
     }
 
     func fetchRemotes() async {
-        guard !isFetching else { return }
+        guard !isFetching, fetchCooldownUntil == nil else { return }
         isFetching = true
+        actionMessage = nil
         defer { isFetching = false }
         do {
-            _ = try await Bridge.fetchRemotes()
+            let reports = try await Bridge.fetchRemotes()
+            let details = reports.compactMap(\.message).joined(separator: " · ")
+            actionMessage = details.isEmpty ? "Remote fetch complete." : details
+            startCooldown(seconds: 30 * 60, clearing: \.fetchCooldownUntil)
             await refresh()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func startCooldown(seconds: TimeInterval, clearing: ReferenceWritableKeyPath<InsightsModel, Date?>) {
+        let until = Date().addingTimeInterval(seconds)
+        self[keyPath: clearing] = until
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard let self, self[keyPath: clearing] == until else { return }
+            self[keyPath: clearing] = nil
         }
     }
 
