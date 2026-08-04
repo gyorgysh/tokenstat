@@ -50,7 +50,11 @@ struct HeatmapView: View {
                         }
                     }
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                // Centred, not leading. Once the cell and the gap are both at
+                // their ceilings a very wide card has width left over, and all
+                // of it collecting on one side reads as the grid having failed
+                // to reach the edge. `.top` is horizontally centred.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(height: gridHeight)
 

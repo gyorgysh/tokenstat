@@ -287,3 +287,37 @@ struct BadgeShape: Shape {
         return path
     }
 }
+
+/// An opaque identifier, readable at the start and blurred after it.
+///
+/// A machine id is 18 characters of hex that nobody reads and everybody has to
+/// look past. Truncating it would move the layout on hover; blurring the tail
+/// keeps the row exactly as wide as it was and still says "there is more here".
+///
+/// The full value stays selectable, so copying it does not depend on hovering
+/// first.
+struct MaskedID: View {
+    let value: String
+    /// Characters left legible. Enough to tell two ids apart at a glance.
+    var visible: Int = 8
+    var size: CGFloat = 11
+
+    @State private var isRevealed = false
+
+    private var head: String { String(value.prefix(visible)) }
+    private var tail: String { String(value.dropFirst(visible)) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(head)
+            Text(tail)
+                .blur(radius: isRevealed ? 0 : 3)
+                .opacity(isRevealed ? 1 : 0.6)
+        }
+        .font(Theme.mono(size))
+        .textSelection(.enabled)
+        .animation(.easeOut(duration: 0.12), value: isRevealed)
+        .onHover { isRevealed = $0 }
+        .help(value)
+    }
+}
