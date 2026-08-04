@@ -392,14 +392,28 @@ struct Account: Codable, Sendable, Hashable {
     var signedIn: Bool
     var host: String
     var handle: String?
+    /// The name the user chose to be shown as. The handle is the identifier,
+    /// this is the label.
+    var displayName: String?
     var tier: String?
     /// Profile picture URL, when the account has one.
+    ///
+    /// Always nil today: `/api/v1/me` does not carry an avatar field yet, so
+    /// every surface draws the monogram. Not a bug in the app.
     var avatar: String?
     var lastSyncAt: String?
     /// Server-side machine records. The shape belongs to the API, so this
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
     var schemaCurrent: UInt32?
+
+    /// What to call this person on screen: their chosen name, or the handle
+    /// when they have not set one.
+    var title: String? {
+        let name = displayName?.trimmingCharacters(in: .whitespaces)
+        if let name, !name.isEmpty { return name }
+        return handle
+    }
 }
 
 /// A machine on the account.

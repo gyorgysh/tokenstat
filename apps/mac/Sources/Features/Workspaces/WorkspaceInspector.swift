@@ -29,24 +29,25 @@ struct WorkspaceInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            picker
-            Divider()
+            tabs
             content
         }
         .background(Theme.sidebarMaterial)
     }
 
-    private var picker: some View {
-        Picker("", selection: tab) {
-            ForEach(InspectorTab.allCases) { tab in
-                // The count belongs on the tab: it is the reason to look at it.
-                Text(title(for: tab)).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, Theme.Space.s)
+    /// The same strip the centre pane uses.
+    ///
+    /// This was a segmented `Picker`, which is a capsule and centres itself, so
+    /// the two tabbed surfaces in the same window read as different mechanisms.
+    /// One kind of tab, one selection language.
+    private var tabs: some View {
+        TabStrip(
+            // No icons: the inspector is 240pt at its narrowest and three
+            // labels plus three glyphs truncate before they fit.
+            tabs: InspectorTab.allCases.map { ($0, title(for: $0), "") },
+            selection: tab,
+            background: nil
+        )
     }
 
     private func title(for tab: InspectorTab) -> String {

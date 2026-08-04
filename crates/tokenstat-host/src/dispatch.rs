@@ -395,6 +395,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     signed_in: true,
                     host: s.host,
                     handle: s.handle,
+                    display_name: s
+                        .raw
+                        .get("display_name")
+                        .and_then(|v| v.as_str())
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_string),
                     tier: s.tier,
                     avatar: s
                         .raw
@@ -411,6 +417,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     signed_in: false,
                     host,
                     handle: None,
+                    display_name: None,
                     tier: None,
                     avatar: None,
                     last_sync_at: None,

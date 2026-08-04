@@ -45,10 +45,14 @@ enum Theme {
     /// thing at a glance and you could not tell which workspace you were in.
     static let rowSelected = accent.opacity(0.18)
     /// A selected row nested inside a selected one, such as the session showing
-    /// inside the open workspace. Same hue, lighter, so the pair reads as
-    /// "this folder, and this terminal within it" rather than as two equal
-    /// selections competing.
-    static let rowSelectedNested = accent.opacity(0.09)
+    /// inside the open workspace.
+    ///
+    /// Neutral, not tinted. It was the accent at half strength, which put two
+    /// purple blocks one above the other and made the pair read as two
+    /// competing selections rather than as "this folder, and this terminal
+    /// within it". The folder carries the colour, this one just lifts off the
+    /// background.
+    static let rowSelectedNested = Color.adaptive(light: hex(0xDEDEE3), dark: hex(0x26262B))
 
     /// The accent at card strength, for a fill that has to read as tinted
     /// rather than as coloured.
@@ -283,8 +287,13 @@ struct SectionLabel: View {
 /// Not a segmented `Picker`: those are capsule shaped and centred, and this has
 /// to sit flush with the top of the pane and read as part of the chrome.
 struct TabStrip<Tab: Hashable>: View {
+    /// An empty `symbol` draws the label alone, for a strip narrow enough that
+    /// icons would push the labels into truncation.
     var tabs: [(tab: Tab, label: String, symbol: String)]
     @Binding var selection: Tab
+    /// Nil lets whatever is behind show through, for a strip sitting on the
+    /// window's material rather than on the flat content column.
+    var background: Color? = Theme.background
 
     var body: some View {
         HStack(spacing: 0) {
@@ -294,10 +303,13 @@ struct TabStrip<Tab: Hashable>: View {
                     selection = item.tab
                 } label: {
                     HStack(spacing: Theme.Space.xs) {
-                        Image(systemName: item.symbol)
-                            .font(.system(size: 11))
+                        if !item.symbol.isEmpty {
+                            Image(systemName: item.symbol)
+                                .font(.system(size: 11))
+                        }
                         Text(item.label)
                             .font(.system(size: 13, weight: active ? .medium : .regular))
+                            .lineLimit(1)
                     }
                     .foregroundStyle(active ? Color.primary : Color.secondary)
                     .padding(.horizontal, Theme.Space.m)
@@ -318,10 +330,32 @@ struct TabStrip<Tab: Hashable>: View {
             Spacer()
         }
         .frame(height: 32)
-        .background(Theme.background)
+        .background(background ?? .clear)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+}
+
+/// The account tier, as a small uppercase pill.
+///
+/// One component so the badge is the same object wherever it appears. Uppercase
+/// and tracked out, because a tier is a label and not a word in a sentence:
+/// "Patron" beside a name reads as part of the name, "PATRON" reads as a badge.
+struct TierBadge: View {
+    var tier: String
+    var size: CGFloat = 10
+
+    var body: some View {
+        Text(tier.uppercased())
+            .font(.system(size: size, weight: .bold))
+            .tracking(0.6)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Theme.accentSoft, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.accent.opacity(0.28), lineWidth: 1))
+            .fixedSize()
     }
 }
 

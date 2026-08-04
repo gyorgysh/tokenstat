@@ -70,24 +70,28 @@ struct HomeView: View {
             )
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(account.account?.handle ?? "Not signed in")
-                    .font(.system(size: 20, weight: .semibold))
-                HStack(spacing: Theme.Space.xs) {
+                HStack(spacing: Theme.Space.s) {
+                    Text(account.account?.title ?? "Not signed in")
+                        .font(.system(size: 20, weight: .semibold))
                     if let tier = account.account?.tier, !tier.isEmpty {
-                        Text(tier.capitalized)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(Theme.accent)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Theme.accentSoft, in: Capsule())
+                        TierBadge(tier: tier)
                     }
-                    Text(account.signedIn
-                         ? (account.lastSyncSummary ?? "Everything stays on this machine until you sync.")
-                         : "Working locally. Sign in to sync aggregate numbers.")
-                        .font(.caption)
+                }
+                // The handle, and nothing else. The privacy sentence that was
+                // here is on the Account screen where someone reading about
+                // privacy would go looking for it, and repeating it on the
+                // screen you see every single launch turns a real guarantee
+                // into a slogan.
+                if let handle = account.account?.handle,
+                   handle != account.account?.title
+                {
+                    Text("@\(handle)")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                } else if !account.signedIn {
+                    Text("Working locally")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             }
 

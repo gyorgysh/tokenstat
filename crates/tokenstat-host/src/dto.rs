@@ -289,10 +289,20 @@ pub struct AccountDto {
     pub signed_in: bool,
     pub host: String,
     pub handle: Option<String>,
+    /// The name the user chose to be shown as, when they set one. The handle is
+    /// the identifier and this is the label, and a UI that shows only the
+    /// handle is showing a slug where a name belongs.
+    pub display_name: Option<String>,
     pub tier: Option<String>,
     /// Profile picture URL, when the account has one. Fetched by the front end
     /// rather than here: this crate has no business downloading images, and a
     /// slow avatar host must not hold up the account call.
+    ///
+    /// **The API does not send this yet.** `/api/v1/me` currently returns
+    /// `display_name`, `handle`, `machines`, `profile_public`, `schema`, `sync`
+    /// and `tier`, so this is always `None` and the front ends draw a monogram.
+    /// The key is read rather than removed because the field belongs to the
+    /// account and the website is a separate project.
     pub avatar: Option<String>,
     pub last_sync_at: Option<String>,
     pub machines: Vec<MachineDto>,

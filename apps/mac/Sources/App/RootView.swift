@@ -99,7 +99,7 @@ struct RootView: View {
         .task { await terminals.load() }
         #endif
         .toolbar {
-            if destination == .insights || destination == .workspaces {
+            if destinationHasInspector {
                 ToolbarItem {
                     Button {
                         isInspectorPresented.toggle()
@@ -113,14 +113,24 @@ struct RootView: View {
     }
 
     /// Which destinations have an optional right pane.
+    ///
+    /// The write-back is guarded. Without the guard, moving to a destination
+    /// with no inspector made the getter return false, SwiftUI wrote that false
+    /// straight back into `isInspectorPresented`, and the pane was then closed
+    /// for the rest of the session: selecting a workspace showed no Changes
+    /// panel and nothing the user did had asked for that.
     private var showsInspector: Binding<Bool> {
         Binding(
-            get: {
-                isInspectorPresented
-                    && (destination == .insights || destination == .workspaces)
-            },
-            set: { isInspectorPresented = $0 }
+            get: { isInspectorPresented && destinationHasInspector },
+            set: { open in
+                guard destinationHasInspector else { return }
+                isInspectorPresented = open
+            }
         )
+    }
+
+    private var destinationHasInspector: Bool {
+        destination == .insights || destination == .workspaces
     }
 
     // MARK: - Sidebar
@@ -236,7 +246,6 @@ struct RootView: View {
                             ForEach(activeSessions) { session in
                                 ActiveSessionRow(
                                     session: session,
-                                    workspaceName: folder.name,
                                     // Selected only when this session is the one
                                     // actually on screen: the right workspace,
                                     // its active session, and a terminal rather
@@ -332,24 +341,20 @@ struct RootView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
-                HStack(spacing: Theme.Space.xs) {
-                    Text(account.account?.handle ?? "Not signed in")
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let tier = account.account?.tier, !tier.isEmpty {
-                        Text("·")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.tertiary)
-                        Text(tier.capitalized)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.accent)
-                            .lineLimit(1)
-                    }
-                }
+                Text(account.account?.title ?? "Not signed in")
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
 
             Spacer(minLength: Theme.Space.xs)
+
+            // The tier sits against the trailing edge rather than beside the
+            // name. As a middle dot and a coloured word it read as part of the
+            // name; as a badge in the corner it reads as a badge.
+            if !account.isSyncing, let tier = account.account?.tier, !tier.isEmpty {
+                TierBadge(tier: tier, size: 9)
+            }
             Image(systemName: "chevron.up.chevron.down")
                 .font(.system(size: 8))
                 .foregroundStyle(.tertiary)
@@ -471,7 +476,6 @@ private struct SidebarRow: View {
 /// A shortcut to a running session, independent of which workspace is open.
 private struct ActiveSessionRow: View {
     let session: TerminalSession
-    let workspaceName: String
     let isSelected: Bool
     let action: () -> Void
 
@@ -481,30 +485,27 @@ private struct ActiveSessionRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 if let harnessID = session.harnessID {
-                    HarnessMark(id: harnessID, size: 18)
+                    HarnessMark(id: harnessID, size: 16)
                 } else {
                     Image(systemName: "terminal")
-                        .font(.system(size: 13))
+                        .font(.system(size: 12))
                         .foregroundStyle(Theme.accent)
-                        .frame(width: 18, height: 18)
+                        .frame(width: 16, height: 16)
                 }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(session.title?.isEmpty == false ? session.title! : session.command)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(workspaceName)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                // One line, and no workspace name. The row is drawn directly
+                // beneath the folder it belongs to, so repeating the folder's
+                // name under it says nothing and made the row twice the height
+                // of the one above, which is what looked misaligned.
+                Text(session.title?.isEmpty == false ? session.title! : session.command)
+                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: Theme.Space.xs)
                 Circle()
-                    .fill(.green)
-                    .frame(width: 6, height: 6)
+                    .fill(Theme.success)
+                    .frame(width: 5, height: 5)
             }
-            .padding(.leading, Theme.Space.l)
+            .padding(.leading, Theme.Space.m)
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, 5)
             .background(background)
@@ -515,24 +516,22 @@ private struct ActiveSessionRow: View {
         .help(session.cwd)
     }
 
-    /// The same treatment as a selected workspace, but lighter.
-    ///
     /// A session sits inside a workspace and the two are selected together, so
-    /// they must not compete: the folder is the strong tint and the terminal
-    /// within it is the same hue at half strength, with a thinner bar.
+    /// they must not compete. The folder carries the accent bar and the tint;
+    /// this is a plain neutral fill and no bar of its own, indented to sit
+    /// under the folder's row.
+    ///
+    /// It used to repeat the folder's treatment at half strength, which put two
+    /// purple bars at slightly different offsets one above the other.
     private var background: some View {
-        ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Theme.rowSelectedNested : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear))
-            if isSelected {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Theme.accent.opacity(0.6))
-                    .frame(width: 2)
-                    .padding(.vertical, 4)
-            }
-        }
-        .padding(.leading, Theme.Space.l)
-        .padding(.trailing, Theme.Space.xs)
+        RoundedRectangle(cornerRadius: 6)
+            .fill(
+                isSelected
+                    ? Theme.rowSelectedNested
+                    : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+            )
+            .padding(.leading, Theme.Space.l)
+            .padding(.trailing, Theme.Space.xs)
     }
 }
 #endif
