@@ -459,6 +459,57 @@ struct Banner: View {
     }
 }
 
+/// What a screen shows before it has anything to show.
+///
+/// One component for the whole app, for the reason `Banner` is one component:
+/// an empty Automations screen and an empty Insights screen are the same
+/// situation and should not look like two different products.
+///
+/// The rule it encodes is that an empty screen explains itself. "No runs yet"
+/// tells somebody what they can already see. The headline names what is
+/// missing, the line under it says what the thing is *for*, and the button is
+/// the one action that ends the empty state, so nobody has to go looking for
+/// where to start.
+struct EmptyState<Action: View>: View {
+    var symbol: String
+    var title: String
+    var message: String
+    @ViewBuilder var action: Action
+
+    init(
+        symbol: String,
+        title: String,
+        message: String,
+        @ViewBuilder action: () -> Action = { EmptyView() }
+    ) {
+        self.symbol = symbol
+        self.title = title
+        self.message = message
+        self.action = action()
+    }
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(.system(size: 28, weight: .light))
+                .foregroundStyle(Theme.accent.opacity(0.7))
+            Text(title)
+                .font(.system(size: 14, weight: .semibold))
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                // Wide enough to read, narrow enough that the eye does not have
+                // to travel back across a full-screen window to find the line.
+                .frame(maxWidth: 420)
+            action
+                .padding(.top, Theme.Space.xs)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.xl)
+    }
+}
+
 /// A short-lived confirmation that does not push the content column down.
 struct TransientToast: View {
     @Binding var message: String?

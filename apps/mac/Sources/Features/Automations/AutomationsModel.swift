@@ -48,6 +48,24 @@ final class AutomationsModel {
         runs.first(where: \.isRunning) ?? runs.first
     }
 
+    /// How a job last got on. The row carries this rather than the run list,
+    /// because "did my nightly check pass" is a question about the automation
+    /// and answering it should not mean reading a run history to find out which
+    /// entry belonged to which job.
+    func lastRun(for job: Automation) -> RunRecord? {
+        if let id = job.lastRunID, let run = runs.first(where: { $0.id == id }) {
+            return run
+        }
+        // A job whose last run predates the retained history still has an id
+        // that resolves to nothing. Fall back to the newest run it owns.
+        return runs.first { $0.jobId == job.id }
+    }
+
+    /// The runs a job produced, newest first.
+    func runs(of job: Automation) -> [RunRecord] {
+        runs.filter { $0.jobId == job.id }
+    }
+
     var selectedRun: RunRecord? {
         guard let selectedRunID else { return liveRun }
         return runs.first { $0.id == selectedRunID }
