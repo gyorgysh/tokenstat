@@ -35,6 +35,7 @@
 //! - [`remote`] serves other machines and reaches them, over the same dispatch.
 //! - [`server`] is the socket listener.
 
+pub mod automations;
 pub mod base64;
 pub mod dispatch;
 pub mod dto;

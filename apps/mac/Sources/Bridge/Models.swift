@@ -841,6 +841,31 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var isRemote: Bool { machineID != nil }
 }
 
+// MARK: - Automations
+
+/// A daemon-owned recurring command. The daemon persists the definition and
+/// owns the PTY, so it continues when this window closes.
+struct Automation: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var workspaceID: String
+    var command: String
+    var args: [String]
+    var intervalSeconds: UInt64
+    var budgetSeconds: UInt64
+    var enabled: Bool
+    var lastRunAtMs: Int64?
+    var nextRunAtMs: Int64?
+    var lastRunID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, workspaceID = "workspaceId", command, args
+        case intervalSeconds, budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID
+    }
+
+    var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+}
+
 // MARK: - Terminals
 
 /// A pty session as the host reports it.

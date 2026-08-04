@@ -553,6 +553,41 @@ extension Bridge {
     }
 }
 
+// MARK: - Automations
+
+extension Bridge {
+    static func automations() async throws -> [Automation] {
+        try await background("automation.list", as: [Automation].self)
+    }
+
+    static func createAutomation(_ job: Automation) async throws -> Automation {
+        try await background("automation.create", ["job": job.payload], as: Automation.self)
+    }
+
+    static func setAutomation(_ id: String, enabled: Bool) async throws -> Automation {
+        try await background(enabled ? "automation.enable" : "automation.disable", ["id": id], as: Automation.self)
+    }
+
+    static func runAutomation(_ id: String) async throws -> Automation {
+        try await background("automation.run", ["id": id], as: Automation.self)
+    }
+
+    static func removeAutomation(_ id: String) async throws {
+        _ = try await background("automation.remove", ["id": id], as: Removed.self)
+    }
+}
+
+private extension Automation {
+    var payload: [String: Any] {
+        [
+            "id": id, "name": name, "workspaceId": workspaceID, "command": command,
+            "args": args, "intervalSeconds": intervalSeconds, "budgetSeconds": budgetSeconds,
+            "enabled": enabled, "lastRunAtMs": lastRunAtMs as Any,
+            "nextRunAtMs": nextRunAtMs as Any, "lastRunID": lastRunID as Any,
+        ]
+    }
+}
+
 private struct PtyWriteAck: Codable, Sendable { let written: Int }
 private struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }
 

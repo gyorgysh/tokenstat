@@ -69,6 +69,7 @@ struct RootView: View {
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
     @State private var machines = MachinesModel()
+    @State private var automations = AutomationsModel()
     @State private var isInspectorPresented = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
@@ -101,6 +102,7 @@ struct RootView: View {
         .task { await account.load() }
         .task { await workspaces.load() }
         .task { await machines.load() }
+        .task { await automations.load() }
         #if os(macOS)
         .task { await terminals.load() }
         #endif
@@ -404,15 +406,7 @@ struct RootView: View {
                 destination = .insights
             }
         case .automations:
-            NotBuiltYet(
-                title: "Automations",
-                symbol: "bolt",
-                summary: """
-                Recurring agent jobs that keep running with the window closed, \
-                each with a budget it stops at rather than one it reports after.
-                """,
-                milestone: "Milestone 9"
-            )
+            AutomationsView(model: automations)
         case .machines:
             MachinesView(model: machines)
         case .account:

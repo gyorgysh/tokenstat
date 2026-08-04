@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 use tokenstat_core::{GroupBy, Query};
 
 use crate::PROTOCOL_VERSION;
+use crate::automations::Automation;
 use crate::dto::{
     AccountDto, BlockDto, BucketDto, CalendarDto, DeviceLoginDto, DevicePollDto, GroupByDto,
     InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
@@ -141,6 +142,14 @@ struct PtyIdParams {
     rows: Option<u16>,
     #[serde(default)]
     cols: Option<u16>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct AutomationParams {
+    id: Option<String>,
+    job: Option<Automation>,
+    enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -854,6 +863,48 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        "automation.list" => {
+            serde_json::to_value(crate::automations::shared().list()).map_err(|e| e.to_string())
+        }
+        "automation.create" => {
+            let mut p: AutomationParams = parse(params)?;
+            let mut job = p.job.take().ok_or("automation.create needs job")?;
+            if job.id.is_empty() {
+                job.id = format!("automation-{}", now_ms());
+            }
+            serde_json::to_value(crate::automations::shared().create(job)?)
+                .map_err(|e| e.to_string())
+        }
+        "automation.update" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared().update(p.job.ok_or("automation.update needs job")?)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "automation.remove" => {
+            let p: AutomationParams = parse(params)?;
+            Ok(
+                json!({"removed": crate::automations::shared().remove(&p.id.ok_or("automation.remove needs id")?)?}),
+            )
+        }
+        "automation.enable" | "automation.disable" => {
+            let p: AutomationParams = parse(params)?;
+            let enabled = method == "automation.enable";
+            serde_json::to_value(
+                crate::automations::shared()
+                    .set_enabled(&p.id.ok_or("automation needs id")?, enabled)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "automation.run" => {
+            let p: AutomationParams = parse(params)?;
+            serde_json::to_value(
+                crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?, s)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+
         other => match sessionless(other, params) {
             Some(result) => result,
             None => Err(format!("unknown method: {other}")),
@@ -1078,6 +1129,7 @@ mod tests {
             ("nonsense", "{}"),
             ("totals", "not json at all"),
             ("report", "{}"),
+            ("automation.list", "{}"),
         ] {
             let out = call(&mut s, method, params);
             let v: Value = serde_json::from_str(&out)
