@@ -439,12 +439,14 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // percentage we worked out ourselves would be a guess wearing a
         // number's clothes.
         //
-        // Codex reads off the disk and is instant. Claude is a request, so this
-        // is slow enough that a caller should treat it as a refresh rather than
-        // something to poll.
+        // Codex reads off the disk and is instant. The other providers make a
+        // request, so this is a refresh rather than something to poll.
         "usage.limits" => {
             let providers = std::thread::scope(|scope| {
                 let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
+                let cursor = scope.spawn(tokenstat_sync::cursor::limits);
+                let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
+                let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
                 let codex = tokenstat_core::limits::codex_limits();
                 let claude = claude.join().unwrap_or_else(|_| {
                     tokenstat_core::limits::ProviderLimits::unavailable(
@@ -452,7 +454,25 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         "Reading the Claude Code limits failed unexpectedly.",
                     )
                 });
-                vec![claude, codex]
+                let cursor = cursor.join().unwrap_or_else(|_| {
+                    tokenstat_core::limits::ProviderLimits::unavailable(
+                        "cursor",
+                        "Reading the Cursor limits failed unexpectedly.",
+                    )
+                });
+                let opencode = opencode.join().unwrap_or_else(|_| {
+                    tokenstat_core::limits::ProviderLimits::unavailable(
+                        "opencode",
+                        "Reading the OpenCode limits failed unexpectedly.",
+                    )
+                });
+                let antigravity = antigravity.join().unwrap_or_else(|_| {
+                    tokenstat_core::limits::ProviderLimits::unavailable(
+                        "antigravity",
+                        "Reading the Antigravity limits failed unexpectedly.",
+                    )
+                });
+                vec![claude, codex, cursor, opencode, antigravity]
             });
             serde_json::to_value(providers).map_err(|e| e.to_string())
         }
@@ -711,7 +731,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
 /// Test repositories live in the system temp directory and must never appear
 /// in the user's workspace list if a test process was interrupted mid-cleanup.
 fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
-    let in_temp = ws.path.starts_with(std::env::temp_dir());
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let in_temp = ws.path.starts_with(temp);
     let name = ws.path.file_name().and_then(|name| name.to_str());
     in_temp
         && name.is_some_and(|name| {

@@ -35,6 +35,7 @@ pub mod cursor;
 pub mod discover;
 pub mod host;
 pub mod keychain;
+pub mod opencode_limits;
 pub mod pricing;
 pub mod profile;
 pub mod schema;

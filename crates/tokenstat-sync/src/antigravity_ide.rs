@@ -17,6 +17,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use serde_json::Value;
+use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 use tokenstat_core::sources::antigravity_cache;
 
 use crate::creds::{cache_is_fresh, cache_path};
@@ -55,6 +56,113 @@ pub struct IdeSyncReport {
     pub connections: usize,
     pub from_cache: bool,
     pub message: String,
+}
+
+/// Read per-model quota windows from the running Antigravity IDE language server.
+pub fn limits() -> ProviderLimits {
+    let connections = match detect_connections() {
+        Ok(connections) => connections,
+        Err(error) => {
+            return ProviderLimits::unavailable(
+                "antigravity",
+                format!("Antigravity discovery failed: {error}"),
+            );
+        }
+    };
+    if connections.is_empty() {
+        return ProviderLimits::unavailable(
+            "antigravity",
+            "Antigravity is not running, so its model limits cannot be read.",
+        );
+    }
+
+    let mut grouped: HashMap<(String, String), (f64, Option<i64>)> = HashMap::new();
+    let mut plan = None;
+    for connection in connections {
+        let Ok(response) = rpc_request(&connection, "GetUserStatus", &serde_json::json!({})) else {
+            continue;
+        };
+        let status = response.get("userStatus").unwrap_or(&response);
+        plan = plan.or_else(|| {
+            status
+                .pointer("/planStatus/planInfo/planName")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        let Some(models) = status
+            .pointer("/cascadeModelConfigData/clientModelConfigs")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for model in models {
+            let label = model
+                .get("label")
+                .and_then(Value::as_str)
+                .or_else(|| model.pointer("/modelOrAlias/model").and_then(Value::as_str))
+                .unwrap_or("model");
+            let Some(quota) = model.get("quotaInfo") else {
+                continue;
+            };
+            let Some(remaining) = quota.get("remainingFraction").and_then(Value::as_f64) else {
+                continue;
+            };
+            if !remaining.is_finite() || !(0.0..=1.0).contains(&remaining) {
+                continue;
+            }
+            let percent = (1.0 - remaining) * 100.0;
+            let group = if label.to_ascii_lowercase().contains("gemini") {
+                "Gemini models"
+            } else {
+                "Claude and GPT models"
+            };
+            let resets_at_ms = quota
+                .get("resetTime")
+                .and_then(Value::as_str)
+                .and_then(|raw| raw.parse::<jiff::Timestamp>().ok())
+                .map(|timestamp| timestamp.as_millisecond());
+            let window = if resets_at_ms.is_some_and(|reset| reset - now_ms() > 10 * 60 * 60 * 1000)
+            {
+                "weekly"
+            } else {
+                "5-hour"
+            };
+            let entry = grouped
+                .entry((group.to_string(), window.to_string()))
+                .or_insert((0.0, resets_at_ms));
+            if percent > entry.0 {
+                *entry = (percent, resets_at_ms);
+            }
+        }
+    }
+    let mut windows: Vec<UsageWindow> = grouped
+        .into_iter()
+        .map(|((group, window), (percent, resets_at_ms))| UsageWindow {
+            label: format!("{group} · {window}"),
+            percent,
+            resets_at_ms,
+            severity: LimitSeverity::from_percent(percent),
+        })
+        .collect();
+    windows.sort_by_key(|window| {
+        (
+            !window.label.starts_with("Gemini"),
+            !window.label.ends_with("weekly"),
+        )
+    });
+    if windows.is_empty() {
+        return ProviderLimits::unavailable(
+            "antigravity",
+            "Antigravity reported no model quota windows.",
+        );
+    }
+    ProviderLimits {
+        source: "antigravity".to_string(),
+        plan,
+        windows,
+        observed_at_ms: now_ms(),
+        note: None,
+    }
 }
 
 /// Discover a running Antigravity language server, pull generator metadata, and

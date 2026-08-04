@@ -72,11 +72,12 @@ struct InsightsView: View {
                 if model.planLimits.isEmpty { await model.loadPlanLimits() }
             }
 
-            PlanUsageCard(rows: model.planBySource)
-
             Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
                 DailyChart(rows: model.daily)
             }
+
+            PlanUsageCard(rows: model.planBySource)
+
             HStack(alignment: .top, spacing: Theme.Space.m) {
                 Card(title: "Top models", subtitle: "List-rate value") {
                     MiniList(rows: model.byModel, showsValue: true, monospaced: true)

@@ -10,6 +10,7 @@
 use std::fs;
 
 use serde::Deserialize;
+use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 use tokenstat_core::{
     BillingMode, Confidence, Counters, EventId, Extras, SourceId, Store, Timestamp, UsageEvent,
 };
@@ -18,7 +19,8 @@ use crate::creds::{self, TokenSource, cache_is_fresh, cache_path, token_with_sou
 use crate::{FETCH_TTL, FetchReport, Vendor};
 
 const CSV_URL: &str = "https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens";
-const SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
+const PERIOD_USAGE_URL: &str =
+    "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage";
 const EVENTS_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetFilteredUsageEvents";
 
@@ -45,6 +47,195 @@ pub fn auth_auto() -> anyhow::Result<(std::path::PathBuf, TokenSource)> {
 pub fn logout() -> anyhow::Result<()> {
     creds::clear_token(Vendor::Cursor)?;
     Ok(())
+}
+
+/// Read Cursor's own subscription windows from its dashboard summary.
+pub fn limits() -> ProviderLimits {
+    let Some((token, _)) = token_with_source(Vendor::Cursor).ok().flatten() else {
+        return ProviderLimits::unavailable(
+            "cursor",
+            "No Cursor session was found, so its limits cannot be read.",
+        );
+    };
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return unavailable_limits(format!("Could not prepare the Cursor request: {error}"));
+        }
+    };
+    let mut request = client
+        .post(PERIOD_USAGE_URL)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({}))
+        .header("Referer", "https://cursor.com/settings");
+    if looks_like_jwt(&token) {
+        request = request.bearer_auth(&token);
+    } else {
+        request = request.header(
+            "Cookie",
+            format!("WorkosCursorSessionToken={}", token.trim()),
+        );
+    }
+    let response = match request.send() {
+        Ok(response) => response,
+        Err(error) => return unavailable_limits(format!("Could not reach Cursor: {error}")),
+    };
+    if !response.status().is_success() {
+        let status = response.status();
+        let note = if status == reqwest::StatusCode::UNAUTHORIZED
+            || status == reqwest::StatusCode::FORBIDDEN
+        {
+            "Cursor usage sync works with the local token, but its dashboard quota endpoint rejected it. A WorkosCursorSessionToken from cursor.com is required for limits.".to_string()
+        } else {
+            format!("Cursor returned {status} for its usage endpoint.")
+        };
+        return unavailable_limits(note);
+    }
+    let body: serde_json::Value = match response.json() {
+        Ok(body) => body,
+        Err(error) => {
+            return unavailable_limits(format!("Could not read Cursor's usage answer: {error}"));
+        }
+    };
+    let observed_at_ms = now_ms();
+    let mut windows = [
+        (
+            "5-hour",
+            ["rolling5h", "fiveHour", "five_hour", "5h"].as_slice(),
+        ),
+        (
+            "weekly",
+            ["weekly", "sevenDay", "seven_day", "7d"].as_slice(),
+        ),
+        ("monthly", ["monthly", "month", "30d"].as_slice()),
+    ]
+    .into_iter()
+    .filter_map(|(label, keys)| {
+        let value = find_named_object(&body, keys)?;
+        let percent = number(value, &["usagePercent", "usedPercent", "percentUsed"])?;
+        if !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+            return None;
+        }
+        Some(UsageWindow {
+            label: label.to_string(),
+            percent,
+            resets_at_ms: reset_at_ms(value, observed_at_ms),
+            severity: LimitSeverity::from_percent(percent),
+        })
+    })
+    .collect::<Vec<_>>();
+    if windows.is_empty() {
+        if let Some(plan) = body.get("planUsage").or_else(|| {
+            body.get("individualUsage")
+                .and_then(|usage| usage.get("plan"))
+        }) {
+            if let Some(percent) = number(
+                plan,
+                &["totalPercentUsed", "apiPercentUsed", "autoPercentUsed"],
+            ) {
+                if percent.is_finite() && (0.0..=100.0).contains(&percent) {
+                    windows.push(UsageWindow {
+                        label: "billing cycle".to_string(),
+                        percent,
+                        resets_at_ms: body.get("billingCycleEnd").and_then(epoch_or_iso_ms),
+                        severity: LimitSeverity::from_percent(percent),
+                    });
+                }
+            }
+        }
+    }
+    if windows.is_empty() {
+        return unavailable_limits("Cursor reported no subscription usage windows.".to_string());
+    }
+    ProviderLimits {
+        source: "cursor".to_string(),
+        plan: string_value(&body, &["plan", "membershipType", "planName", "planType"]),
+        windows,
+        observed_at_ms,
+        note: None,
+    }
+}
+
+fn unavailable_limits(note: String) -> ProviderLimits {
+    ProviderLimits::unavailable("cursor", note)
+}
+
+fn find_named_object<'a>(
+    value: &'a serde_json::Value,
+    names: &[&str],
+) -> Option<&'a serde_json::Value> {
+    match value {
+        serde_json::Value::Object(object) => {
+            for name in names {
+                if let Some(value) = object.get(*name) {
+                    if value.is_object() {
+                        return Some(value);
+                    }
+                }
+            }
+            object
+                .values()
+                .find_map(|value| find_named_object(value, names))
+        }
+        serde_json::Value::Array(values) => values
+            .iter()
+            .find_map(|value| find_named_object(value, names)),
+        _ => None,
+    }
+}
+
+fn number(value: &serde_json::Value, names: &[&str]) -> Option<f64> {
+    names.iter().find_map(|name| value.get(*name)?.as_f64())
+}
+
+fn string_value(value: &serde_json::Value, names: &[&str]) -> Option<String> {
+    names
+        .iter()
+        .find_map(|name| value.get(*name)?.as_str().map(str::to_string))
+}
+
+fn epoch_or_iso_ms(value: &serde_json::Value) -> Option<i64> {
+    if let Some(ms) = value.as_i64() {
+        return Some(ms);
+    }
+    let raw = value.as_str()?;
+    if let Ok(ms) = raw.parse::<i64>() {
+        return Some(ms);
+    }
+    raw.parse::<jiff::Timestamp>()
+        .ok()
+        .map(|timestamp| timestamp.as_millisecond())
+}
+
+fn reset_at_ms(value: &serde_json::Value, observed_at_ms: i64) -> Option<i64> {
+    for key in ["resetAtMs", "resetsAtMs"] {
+        if let Some(ms) = value.get(key).and_then(serde_json::Value::as_i64) {
+            return Some(ms);
+        }
+    }
+    for key in ["resetInSec", "resetInSeconds", "resetsInSeconds"] {
+        if let Some(seconds) = value.get(key).and_then(serde_json::Value::as_i64) {
+            return Some(observed_at_ms.saturating_add(seconds.saturating_mul(1000)));
+        }
+    }
+    for key in ["resetAt", "resetsAt", "resetTime"] {
+        if let Some(raw) = value.get(key).and_then(serde_json::Value::as_str) {
+            if let Ok(timestamp) = raw.parse::<jiff::Timestamp>() {
+                return Some(timestamp.as_millisecond());
+            }
+        }
+    }
+    None
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Pull Cursor usage into the archive, using the on-disk cache when fresh.
@@ -308,23 +499,6 @@ fn download_csv(session_token: &str) -> anyhow::Result<String> {
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    let summary = client
-        .get(SUMMARY_URL)
-        .header(
-            "Cookie",
-            format!("WorkosCursorSessionToken={}", session_token.trim()),
-        )
-        .header("Referer", "https://cursor.com/settings")
-        .send()?;
-    if summary.status() == reqwest::StatusCode::UNAUTHORIZED
-        || summary.status() == reqwest::StatusCode::FORBIDDEN
-    {
-        anyhow::bail!(
-            "Cursor session rejected ({}). Sign in to Cursor, or pass a fresh WorkosCursorSessionToken.",
-            summary.status()
-        );
-    }
-
     let resp = client
         .get(CSV_URL)
         .header(
@@ -532,5 +706,62 @@ Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Toke
         assert!(looks_like_jwt("aaa.bbb.ccc"));
         assert!(!looks_like_jwt("user_01ABC%3A%3AeyJhbGciOiJ"));
         assert!(!looks_like_jwt("user_01ABC::eyJhbGciOiJ"));
+    }
+
+    #[test]
+    fn parses_nested_summary_windows() {
+        let summary = serde_json::json!({
+            "plan": "Pro",
+            "includedUsage": {
+                "fiveHour": {"usagePercent": 42.0, "resetInSec": 60},
+                "weekly": {"usagePercent": 12.5, "resetInSec": 3600}
+            }
+        });
+        let observed = 1_000_000;
+        let windows: Vec<_> = [
+            (
+                "5-hour",
+                ["rolling5h", "fiveHour", "five_hour", "5h"].as_slice(),
+            ),
+            (
+                "weekly",
+                ["weekly", "sevenDay", "seven_day", "7d"].as_slice(),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(label, keys)| {
+            let value = find_named_object(&summary, keys)?;
+            let percent = number(value, &["usagePercent", "usedPercent", "percentUsed"])?;
+            Some(UsageWindow {
+                label: label.to_string(),
+                percent,
+                resets_at_ms: reset_at_ms(value, observed),
+                severity: LimitSeverity::from_percent(percent),
+            })
+        })
+        .collect();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].resets_at_ms, Some(1_060_000));
+        assert_eq!(string_value(&summary, &["plan"]), Some("Pro".to_string()));
+    }
+
+    #[test]
+    fn parses_cursor_billing_cycle_summary() {
+        let summary = serde_json::json!({
+            "billingCycleEnd": "1787650795000",
+            "planUsage": {"autoPercentUsed": 100, "apiPercentUsed": 100}
+        });
+        let plan = summary.get("planUsage").unwrap();
+        assert_eq!(
+            number(
+                plan,
+                &["totalPercentUsed", "apiPercentUsed", "autoPercentUsed"]
+            ),
+            Some(100.0)
+        );
+        assert_eq!(
+            epoch_or_iso_ms(summary.get("billingCycleEnd").unwrap()),
+            Some(1787650795000)
+        );
     }
 }
