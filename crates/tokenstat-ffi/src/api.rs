@@ -246,6 +246,12 @@ fn dispatch(method: &str, params: &str) -> Result<Value, String> {
                     host: s.host,
                     handle: s.handle,
                     tier: s.tier,
+                    avatar: s
+                        .raw
+                        .get("avatar")
+                        .and_then(|v| v.as_str())
+                        .filter(|v| !v.is_empty())
+                        .map(str::to_string),
                     last_sync_at: s.last_sync_at,
                     machines: s.machines.iter().map(MachineDto::from_value).collect(),
                     schema_current: s.schema_current,
@@ -256,6 +262,7 @@ fn dispatch(method: &str, params: &str) -> Result<Value, String> {
                     host,
                     handle: None,
                     tier: None,
+                    avatar: None,
                     last_sync_at: None,
                     machines: Vec::new(),
                     schema_current: None,

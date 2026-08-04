@@ -287,6 +287,10 @@ pub struct AccountDto {
     pub host: String,
     pub handle: Option<String>,
     pub tier: Option<String>,
+    /// Profile picture URL, when the account has one. Fetched by the front end
+    /// rather than here: this crate has no business downloading images, and a
+    /// slow avatar host must not hold up the account call.
+    pub avatar: Option<String>,
     pub last_sync_at: Option<String>,
     pub machines: Vec<MachineDto>,
     pub schema_current: Option<u32>,
