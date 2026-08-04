@@ -17,13 +17,9 @@ struct InspectorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
                 period
-                if let row = model.selected {
-                    Divider()
-                    selection(row)
-                }
-                Divider()
+                selection
                 archive
             }
             .padding(Theme.Space.m)
@@ -31,10 +27,49 @@ struct InspectorView: View {
         .background(Theme.sidebarMaterial)
     }
 
+    /// Panels rather than sections divided by rules.
+    ///
+    /// This pane used to be flat label/value rows separated by dividers, which
+    /// made it the one surface in the app that did not look like the rest of
+    /// it. Home is cards, Insights is cards, and the inspector is now the same
+    /// object at sidebar width.
     private var period: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionLabel(text: "This period")
+        Card(title: "This period", subtitle: nil) {
+            if isEmptyArchive {
+                nothingScanned
+            } else {
+                periodFigures
+            }
+        }
+    }
 
+    /// Nothing at all, as opposed to nothing yet or nothing readable.
+    ///
+    /// An archive that has been read and holds no events is a machine where
+    /// nobody has scanned. A load still in flight is not, and neither is one
+    /// that failed, so both of those keep the figures and let the screen's own
+    /// banner do the talking.
+    private var isEmptyArchive: Bool {
+        guard let totals = model.totals else { return false }
+        return totals.events == 0 && model.errorMessage == nil && !model.isLoading
+    }
+
+    /// An archive with nothing in it is not an error and not a zero: it is a
+    /// machine where nobody has scanned yet, and every figure on this pane
+    /// reading "$0.00" says the opposite of that.
+    private var nothingScanned: some View {
+        EmptyState(
+            symbol: "tray",
+            title: "Nothing scanned yet",
+            message: """
+            tokenstat reads the session logs the tools on this machine already \
+            write. Run a scan and this fills in.
+            """
+        )
+    }
+
+    private var periodFigures: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             Stat(
                 label: "Value at list rates",
                 value: model.periodValue.formatted,
@@ -74,10 +109,31 @@ struct InspectorView: View {
         }
     }
 
+    /// The selected row, or an invitation to select one.
+    ///
+    /// The panel used to disappear when nothing was selected, so the pane
+    /// changed height as you clicked around and the counters that only exist
+    /// here were a feature you had to discover by accident.
+    @ViewBuilder
+    private var selection: some View {
+        Card(title: "Selected", subtitle: nil) {
+            if let row = model.selected {
+                selection(row)
+            } else {
+                EmptyState(
+                    symbol: "hand.tap",
+                    title: "Nothing selected",
+                    message: """
+                    Pick a row on the left to see what it is made of: fresh \
+                    input, cache, output, and what the tools did not report.
+                    """
+                )
+            }
+        }
+    }
+
     private func selection(_ row: Bucket) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            SectionLabel(text: "Selected")
-
             Text(row.key.isEmpty ? "unknown" : row.key)
                 .font(Theme.mono(12))
                 .textSelection(.enabled)
@@ -150,8 +206,13 @@ struct InspectorView: View {
     }
 
     private var archive: some View {
+        Card(title: "Archive", subtitle: nil) {
+            archiveRows
+        }
+    }
+
+    private var archiveRows: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            SectionLabel(text: "Archive")
             if let info = model.info {
                 KeyValue(key: "Timezone", value: info.timezone)
                 KeyValue(key: "Core", value: info.coreVersion)
