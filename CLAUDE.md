@@ -104,6 +104,13 @@ work); GPL/AGPL/LGPL and friends are not.
 and one merged patch would end pueev's ability to ship the apps, permanently and
 irreversibly. Issues are welcome. See `CONTRIBUTING.md` and `docs/licensing.md`.
 
+**No generated file may be tracked.** `scripts/check-no-artifacts.sh` enforces
+it, CI job `no build artifacts`. `.gitignore` alone is not enough and this is
+not hypothetical: a commit created while checked out at an older revision uses
+*that* revision's ignore rules, so a `git add -A` there swept in the generated
+Xcode project and a 30 MB static library. Prefer `git add <paths>` over
+`git add -A` when the checkout is not at the tip.
+
 ## Commands
 
 ```bash

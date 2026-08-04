@@ -83,6 +83,17 @@ jobs:
       - name: No dependency may block shipping the app
         run: bash scripts/check-app-licences.sh
 
+  # .gitignore is not enough on its own: a commit built at an older revision
+  # uses that revision's rules, which is how a 30 MB static library once got in.
+  no-artifacts:
+    name: no build artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: No generated file may be tracked
+        run: bash scripts/check-no-artifacts.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
