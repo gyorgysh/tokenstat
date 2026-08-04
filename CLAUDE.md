@@ -44,7 +44,8 @@ crates/tokenstat-core/   Parsing, normalization, pricing, aggregation. NO NETWOR
 crates/tokenstat-cli/    Command line front end
 crates/tokenstat-sync/   The only crate allowed to link a network stack
 crates/tokenstat-mcp/    MCP server over the core facade
-crates/tokenstat-ffi/    C ABI bridge for native apps. JSON in, JSON out.
+crates/tokenstat-host/   Protocol, session, dispatch, and the socket daemon
+crates/tokenstat-ffi/    C ABI transport over the host. JSON in, JSON out.
 apps/mac/                SwiftUI universal app (macOS now, iOS/iPadOS later)
 xtask/                   Fixture redaction, benches
 fixtures/                Redacted test data, committed
@@ -57,6 +58,11 @@ Inside the CLI, `render/` and `interactive/` are module directories, split by
 what the reader is looking at rather than by widget type. `render/mod.rs` and
 `interactive/mod.rs` hold only what their submodules share. Keep new output code
 in the submodule that owns that screen.
+
+Every method a front end can call lives once, in `tokenstat-host::dispatch`.
+The C ABI (`tokenstat-ffi`) and the unix socket (`tokenstat-host::server`) are
+transports over that one function, so a method cannot exist over one and be
+missing from the other. Add methods there, never in a transport.
 
 Keep logic in `tokenstat-core`. Front ends should contain argument parsing,
 formatting, and nothing else. Anything another client would also need belongs
@@ -74,8 +80,8 @@ privacy claim. Anything that makes a request belongs in `tokenstat-sync`.
 job and runnable locally. It walks the resolved tree, so a transitive HTTP
 client fails it exactly like a direct one. Guarded today: `tokenstat-core` and
 `tokenstat-mcp`. Deliberately not guarded: `tokenstat-sync`, which is the one
-crate allowed a network stack, and `tokenstat-ffi`, which depends on it so the
-app can offer account and sync.
+crate allowed a network stack, and `tokenstat-host` / `tokenstat-ffi`, which
+depend on it so the app can offer account and sync.
 
 Add a crate to the `GUARDED` list when it should never make a request. Do not
 remove one to make a build pass.
@@ -112,6 +118,23 @@ Add iOS slices when that target starts:
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 scripts/build-ffi-xcframework.sh macos ios sim
 ```
+
+### The host daemon
+
+```bash
+cargo build --release -p tokenstat-host
+./target/release/tokenstat-hostd --socket /tmp/ts.sock   # foreground
+printf '{"id":1,"method":"info"}\n' | nc -U /tmp/ts.sock
+```
+
+Lifetime belongs to launchd, not to the binary: `scripts/install-host-agent.sh`
+installs it as a user agent with `KeepAlive`. A daemon the app spawns dies with
+the window, and an Automation that stops when you close a window is not an
+automation.
+
+Unix socket paths are capped near 104 bytes. The default under the data
+directory is well inside that, but a deep sandbox or temp path is not, so
+`bind` checks and says so in words.
 
 ### Local install for manual testing
 

@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
+// licensed with the code. See TRADEMARK.md.
+
+//! The protocol every tokenstat front end speaks, and the daemon that serves it.
+//!
+//! # Why this crate exists
+//!
+//! iOS and iPadOS cannot fork or exec, so a mobile client can never run an
+//! agent locally and is inherently a client of a machine that can. Building the
+//! desktop app as a monolith would mean rewriting it when mobile lands.
+//! Everything therefore goes through one dispatch, reachable over more than one
+//! transport:
+//!
+//! - [`dispatch::call`] in process, which is what the C ABI in `tokenstat-ffi`
+//!   wraps for the Mac app today.
+//! - [`server`] over a unix socket, which is the same dispatch with a different
+//!   way in, and the seam where a network transport will attach.
+//!
+//! There is deliberately no second implementation. A method cannot exist over
+//! one transport and be missing from the other.
+//!
+//! # Layout
+//!
+//! - [`dto`] is the wire contract. Change it deliberately, it is public API.
+//! - [`session`] is one open archive. A plain struct, not a global.
+//! - [`dispatch`] maps a method name onto the core.
+//! - [`server`] is the socket listener.
+
+pub mod dispatch;
+pub mod dto;
+pub mod server;
+pub mod session;
+
+pub use dispatch::call;
+pub use session::{OpenParams, Session};
+
+/// Version of the wire contract, not of the crate.
+///
+/// A front end should refuse to talk to a host whose major version it does not
+/// recognize, which is what makes the eventual remote transport safe to upgrade
+/// independently at each end.
+pub const PROTOCOL_VERSION: &str = "1";

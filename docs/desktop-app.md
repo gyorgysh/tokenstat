@@ -89,10 +89,10 @@ crates/tokenstat-workspace/  NEW  workspace model, git status,
                                   graph, file tree, discovery   shared
 crates/tokenstat-pty/        NEW  portable-pty sessions,
                                   agent launch profiles         desktop only
-crates/tokenstat-host/       NEW  the daemon. Owns workspaces
-                                  and PTYs. Versioned JSON-RPC
-                                  over a unix socket now, over
-                                  the network later.
+crates/tokenstat-host/       DONE protocol, session, dispatch,
+                                  and a unix socket daemon. Gains
+                                  workspaces and PTYs at M4/M5,
+                                  and a network transport later.
 crates/tokenstat-ffi/        DONE C ABI bridge, JSON in and out.
                                   Links a network stack, which core
                                   must never do. Watch that boundary.
@@ -173,9 +173,25 @@ What did need building was splitting `profile::login` into `device_start` and
 blocking until confirmation, which a window cannot do. `login` now composes the
 two halves, so the CLI is unchanged.
 
-**M3. The daemon.** Extract `tokenstat-host` and move M1's reads through it.
-Boring, invisible to the user, and much cheaper before the terminal exists than
-after.
+**M3. The daemon. Built.** `tokenstat-host` now owns the protocol, the session
+and the dispatch. `tokenstat-ffi` is a transport over it rather than the place
+methods live, and `tokenstat-host::server` is a second transport over the same
+function, so a method cannot exist over one and be missing from the other.
+
+Line-delimited JSON over a unix socket at `<data dir>/host.sock`, mode 0600,
+with request ids echoed back. Verified against the live archive: the daemon
+returns the same 9.01B tokens and 1193 sessions the app shows.
+
+**Lifetime is launchd's**, via `scripts/install-host-agent.sh`, as a user agent
+with `KeepAlive` and `RunAtLoad`. A daemon the app spawns dies with the window,
+and an Automation that stops when you close a window is not an automation. A
+user agent rather than a system daemon because it runs as you, reads your logs,
+and has no business existing before you log in.
+
+Still to do: the app talks to the in-process bridge, not the socket. That is
+deliberate. Pointing it at the socket means deciding what happens when no host
+is running, and the honest answer is a local fast path with the socket as the
+remote case, which belongs with M6 rather than here.
 
 **M4. Workspaces.** Folder picker, file tree, git status and graph, the Files
 and Changes panels. Still no terminal. Product identity gets decided here, so

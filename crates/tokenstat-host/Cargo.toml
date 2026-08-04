@@ -1,0 +1,30 @@
+[package]
+name = "tokenstat-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Local host daemon and the protocol every tokenstat front end speaks"
+
+[lib]
+name = "tokenstat_host"
+path = "src/lib.rs"
+
+# The daemon. Named `tokenstat-hostd` rather than `tokenstat-host` so it cannot
+# be confused with the `tokenstat` CLI on a PATH listing.
+[[bin]]
+name = "tokenstat-hostd"
+path = "src/bin/tokenstat-hostd.rs"
+
+[dependencies]
+tokenstat-core.workspace = true
+# Account and sync belong to the host, so it links a network stack. That stays
+# forbidden in `tokenstat-core`, which is what makes the privacy claim
+# structural. See scripts/check-no-network.sh.
+tokenstat-sync.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+directories.workspace = true

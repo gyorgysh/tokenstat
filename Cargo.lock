@@ -2139,6 +2139,15 @@ dependencies = [
 name = "tokenstat-ffi"
 version = "0.1.3"
 dependencies = [
+ "serde_json",
+ "tokenstat-host",
+]
+
+[[package]]
+name = "tokenstat-host"
+version = "0.1.3"
+dependencies = [
+ "directories",
  "serde",
  "serde_json",
  "tokenstat-core",
