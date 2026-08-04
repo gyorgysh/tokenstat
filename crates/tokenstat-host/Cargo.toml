@@ -27,6 +27,7 @@ tokenstat-core.workspace = true
 tokenstat-sync.workspace = true
 tokenstat-workspace.workspace = true
 tokenstat-pty.workspace = true
+tokenstat-highlight.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 directories.workspace = true

@@ -50,6 +50,65 @@ enum Theme {
     /// selections competing.
     static let rowSelectedNested = accent.opacity(0.09)
 
+    /// The accent at card strength, for a fill that has to read as tinted
+    /// rather than as coloured.
+    static let accentSoft = accent.opacity(0.12)
+
+    // Semantic colours. Before these existed, a live session was `.green` and
+    // an unsaved file was `.orange`, written at the call site, so the app had
+    // no single answer to what "good" looks like.
+    static let success = Color(red: 0x3F / 255, green: 0xC1 / 255, blue: 0x7E / 255)
+    static let warning = Color(red: 0xE8 / 255, green: 0xA1 / 255, blue: 0x3A / 255)
+    static let danger = Color(red: 0xE8 / 255, green: 0x5D / 255, blue: 0x5D / 255)
+
+    /// Five steps of activity, idle first.
+    ///
+    /// Built from the accent rather than from the usual green, because the
+    /// heatmap is the largest coloured object in the app and a green grid in a
+    /// purple product looks like a screenshot from something else. Step 0 is a
+    /// day inside the range with no usage, which has to read as "nothing here"
+    /// and not as "no data".
+    static let heat: [Color] = [
+        Color.adaptive(light: hex(0xE9E9EC), dark: hex(0x1A1A1D)),
+        accent.opacity(0.28),
+        accent.opacity(0.48),
+        accent.opacity(0.72),
+        accent,
+    ]
+
+    /// Colour for a syntax kind.
+    ///
+    /// The whole palette in one place, and the only place the app decides what
+    /// a keyword looks like. `tokenstat-highlight` sends kinds and never
+    /// colours, which is what lets this switch on appearance for free.
+    static func syntax(_ kind: SyntaxKind) -> Color {
+        switch kind {
+        case .keyword:
+            return accent
+        case .string:
+            return Color.adaptive(light: hex(0x8F5C1E), dark: hex(0xD8A657))
+        case .number, .constant:
+            return Color.adaptive(light: hex(0x1F6F5C), dark: hex(0x7FD1B9))
+        case .comment:
+            return Color.adaptive(light: hex(0x8A8A93), dark: hex(0x6B6B76))
+        case .type:
+            return secondary
+        case .function:
+            return Color.adaptive(light: hex(0x2D62C4), dark: hex(0x89B4FA))
+        case .attribute:
+            return Color.adaptive(light: hex(0x9A5CC4), dark: hex(0xC79BF0))
+        case .property:
+            return Color.adaptive(light: hex(0x1F5F8F), dark: hex(0x9CC5E0))
+        case .markup:
+            return Color.adaptive(light: hex(0x1F6F5C), dark: hex(0x8FD6BE))
+        // Variables, operators and punctuation stay the text colour. Colouring
+        // every token is how a file ends up unreadable: what stands out is what
+        // is coloured, so most of it must not be.
+        case .variable, .operator, .punctuation, .unknown:
+            return .primary
+        }
+    }
+
     private static func hex(_ value: UInt32) -> Color {
         Color(
             red: Double((value >> 16) & 0xFF) / 255,
@@ -263,6 +322,56 @@ struct TabStrip<Tab: Hashable>: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+}
+
+/// A line of status across the top of a pane.
+///
+/// One banner for the whole app. There used to be three: a red-tinted bar in
+/// the editor, this in Insights, and orange caption text in the sidebar footer,
+/// so the same severity looked like three different things depending on which
+/// screen you were on.
+struct Banner: View {
+    enum Severity {
+        case info
+        case success
+        case warning
+        case danger
+
+        var tint: Color {
+            switch self {
+            case .info: return Theme.secondary
+            case .success: return Theme.success
+            case .warning: return Theme.warning
+            case .danger: return Theme.danger
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .info: return "info.circle.fill"
+            case .success: return "checkmark.circle.fill"
+            case .warning: return "exclamationmark.triangle.fill"
+            case .danger: return "exclamationmark.octagon.fill"
+            }
+        }
+    }
+
+    var text: String
+    var severity: Severity = .warning
+    /// Overrides the severity's own symbol where a more specific one says more.
+    var symbol: String?
+
+    var body: some View {
+        Label(text, systemImage: symbol ?? severity.symbol)
+            .font(.callout)
+            .foregroundStyle(severity.tint)
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                severity.tint.opacity(0.12),
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+            )
     }
 }
 

@@ -29,10 +29,10 @@ struct InsightsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let message = model.errorMessage {
-                    Banner(text: message)
+                    Banner(text: message, severity: .warning)
                 }
                 if let message = model.actionMessage {
-                    Banner(text: message, tint: Theme.secondary, symbol: "checkmark.circle.fill")
+                    Banner(text: message, severity: .success)
                 }
 
                 switch model.tab {
@@ -368,20 +368,5 @@ struct EmptyHint: View {
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, Theme.Space.s)
-    }
-}
-
-struct Banner: View {
-    var text: String
-    var tint: Color = .orange
-    var symbol: String = "exclamationmark.triangle.fill"
-
-    var body: some View {
-        Label(text, systemImage: symbol)
-            .font(.callout)
-            .foregroundStyle(tint)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 }

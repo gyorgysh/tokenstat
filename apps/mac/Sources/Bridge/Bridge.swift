@@ -248,6 +248,16 @@ extension Bridge {
         try await background("workspace.read", ["id": id, "path": path], as: FileText.self)
     }
 
+    /// Colour a buffer.
+    ///
+    /// Takes the text rather than a workspace and a path, for two reasons. The
+    /// buffer on screen is what wants colouring, and it is usually not what is
+    /// on disk. And it needs no session, so it answers without queuing behind a
+    /// `git status` the way anything on the workspace path would.
+    static func highlight(path: String, text: String) async throws -> Highlighting {
+        try await background("highlight", ["path": path, "text": text], as: Highlighting.self)
+    }
+
     /// One commit in full: message, files, and their diffs.
     static func workspaceShow(id: String, commit: String) async throws -> CommitDetail {
         try await background("workspace.show", ["id": id, "path": commit], as: CommitDetail.self)

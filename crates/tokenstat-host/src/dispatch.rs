@@ -120,6 +120,27 @@ struct PtyIdParams {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+struct HighlightParams {
+    /// The buffer to colour, which is what is on screen rather than what is on
+    /// disk. `highlight.syntax` leaves it empty.
+    text: String,
+    /// Used to work out the language. The file is never opened.
+    path: String,
+    /// Overrides `path`, for a buffer whose name says nothing useful.
+    language: Option<String>,
+}
+
+impl HighlightParams {
+    fn language(&self) -> Option<tokenstat_highlight::Language> {
+        match self.language.as_deref() {
+            Some(id) => tokenstat_highlight::Language::from_id(id),
+            None => tokenstat_highlight::Language::detect(&self.path),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct SyncParams {
     /// Build and validate the payload without sending it.
     dry_run: bool,
@@ -752,8 +773,28 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
 ///
 /// `pty.spawn` is deliberately not here: it resolves a workspace id, which only
 /// the session knows. It happens once per session rather than per frame.
+///
+/// `highlight` is here for the same reason as the terminal: it is called on a
+/// keystroke debounce, and it is a pure function of the text the caller already
+/// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
+/// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(match method {
+        "highlight" => highlight(params),
+
+        "highlight.syntax" => serde_json::from_str::<HighlightParams>(params.trim())
+            .map_err(|e| e.to_string())
+            .and_then(|p| {
+                let Some(language) = p.language() else {
+                    return Ok(json!({"language": Value::Null}));
+                };
+                serde_json::to_value(json!({
+                    "language": language.id(),
+                    "syntax": language.syntax(),
+                }))
+                .map_err(|e| e.to_string())
+            }),
+
         "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
             .map_err(|e: serde_json::Error| e.to_string()),
 
@@ -818,6 +859,37 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
 fn pty_id(params: &str) -> Result<PtyIdParams, String> {
     serde_json::from_str(params.trim()).map_err(|e| e.to_string())
+}
+
+/// Colour a buffer.
+///
+/// Answers with `spans: []` and a reason rather than failing when the language
+/// is unknown or the file is too large. Both are ordinary states of an editor,
+/// and an error would put a red banner over a file that opened perfectly well
+/// and simply is not colourable.
+fn highlight(params: &str) -> Result<Value, String> {
+    let p: HighlightParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    let Some(language) = p.language() else {
+        return Ok(json!({
+            "language": Value::Null,
+            "spans": [],
+            "note": "No grammar for this file type.",
+        }));
+    };
+    match tokenstat_highlight::spans(language, &p.text) {
+        Ok(spans) => Ok(json!({
+            "language": language.id(),
+            "syntax": language.syntax(),
+            "spans": spans,
+            "note": Value::Null,
+        })),
+        Err(e) => Ok(json!({
+            "language": language.id(),
+            "syntax": language.syntax(),
+            "spans": [],
+            "note": e.to_string(),
+        })),
+    }
 }
 
 /// Answer a call that needs no session, or `None` when it needs one.
@@ -896,6 +968,11 @@ mod tests {
             "pty.resize",
             "pty.kill",
             "pty.close",
+            // The editor re-highlights on a keystroke debounce, so it is on the
+            // same footing as the terminal. It is also a pure function of the
+            // text the caller sent, so it has nothing to ask the session about.
+            "highlight",
+            "highlight.syntax",
         ] {
             let out = call_sessionless(method, r#"{"id":"pty-none"}"#)
                 .unwrap_or_else(|| panic!("{method} must be answerable without a session"));
@@ -912,6 +989,39 @@ mod tests {
                 "{method} must not bypass the session"
             );
         }
+    }
+
+    /// The editor's contract, pinned at the transport rather than only in the
+    /// highlight crate: an uncolourable file is a normal answer with a reason,
+    /// not an error, because an error puts a red banner over a file that opened
+    /// perfectly well.
+    #[test]
+    fn highlighting_answers_for_files_it_cannot_colour() {
+        let coloured = call_sessionless(
+            "highlight",
+            r#"{"path":"src/main.rs","text":"fn main() {}\n"}"#,
+        )
+        .expect("highlight is sessionless");
+        let v: Value = serde_json::from_str(&coloured).expect("json");
+        assert_eq!(v["ok"], true, "{coloured}");
+        assert_eq!(v["result"]["language"], "rust");
+        assert!(
+            v["result"]["spans"]
+                .as_array()
+                .is_some_and(|s| !s.is_empty()),
+            "{coloured}"
+        );
+        // The editor needs these to indent and to toggle a comment, and it must
+        // not carry its own second table of them.
+        assert_eq!(v["result"]["syntax"]["lineComment"], "//");
+        assert_eq!(v["result"]["syntax"]["indent"], 4);
+
+        let unknown = call_sessionless("highlight", r#"{"path":"LICENSE","text":"anything"}"#)
+            .expect("highlight is sessionless");
+        let v: Value = serde_json::from_str(&unknown).expect("json");
+        assert_eq!(v["ok"], true, "an unknown file type is not a failure");
+        assert!(v["result"]["language"].is_null());
+        assert!(v["result"]["note"].is_string(), "{unknown}");
     }
 
     #[test]

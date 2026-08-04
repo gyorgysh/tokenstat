@@ -1,0 +1,38 @@
+[package]
+name = "tokenstat-highlight"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+description = "Syntax spans for the workspace editor, computed once and shared by every front end"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+
+# tree-sitter parses incrementally and has a grammar for everything, which is
+# the whole reason not to hand-write a tokenizer per language in each front end.
+# `tree-sitter-highlight` is the part that turns a parse tree plus the grammar's
+# own highlight query into capture events, so the mapping from syntax to a span
+# kind is the grammar author's work rather than ours.
+#
+# Every grammar below is MIT, which `scripts/check-app-licences.sh` cares about:
+# these crates end up inside what the desktop app links. Check the licence of a
+# new grammar before adding it, because the remedy for a copyleft one is
+# dropping the language.
+tree-sitter = "0.26"
+tree-sitter-highlight = "0.26"
+
+tree-sitter-rust = "0.24"
+tree-sitter-swift = "0.7"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-yaml = "0.7"
+tree-sitter-md = "0.5"
+tree-sitter-bash = "0.25"

@@ -76,6 +76,21 @@ struct TerminalPane: View {
                 missingFolder
             }
         }
+        // Three buttons and not two, because "Cancel" and "Don't Save" are
+        // different answers and a two-button dialog forces one of them to mean
+        // both.
+        .confirmationDialog(
+            "Save changes before closing?",
+            isPresented: closingUnsaved,
+            titleVisibility: .visible,
+            presenting: workspaces.pendingClose
+        ) { pending in
+            Button("Save") { Task { await workspaces.saveAndClosePending() } }
+            Button("Don't Save", role: .destructive) { workspaces.discardAndClosePending() }
+            Button("Cancel", role: .cancel) { workspaces.pendingClose = nil }
+        } message: { pending in
+            Text("\(pending.path) has changes that are not written to disk.")
+        }
         .alert("Could not start session", isPresented: launchFailed) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -134,6 +149,13 @@ struct TerminalPane: View {
         }
     }
 
+    private var closingUnsaved: Binding<Bool> {
+        Binding(
+            get: { workspaces.pendingClose != nil },
+            set: { if !$0 { workspaces.pendingClose = nil } }
+        )
+    }
+
     private var launchFailed: Binding<Bool> {
         Binding(
             get: { terminals.errorMessage != nil },
@@ -182,11 +204,14 @@ struct TerminalPane: View {
                     path: path,
                     symbol: "doc.text",
                     label: String(path.split(separator: "/").last ?? ""),
-                    isSelected: openCommit == nil && activeFile == path
+                    isSelected: openCommit == nil && activeFile == path,
+                    isDirty: workspaces.isEditorDirty(path, in: folder.id)
                 ) {
                     Task { await workspaces.openFile(path, in: folder.id) }
                 } onClose: {
-                    workspaces.closeFile(path, in: folder.id)
+                    // Asks first when the file has unsaved changes. A tab close
+                    // is one click from a tab select.
+                    workspaces.requestClose(path, in: folder.id)
                 }
             }
 
@@ -356,6 +381,10 @@ private struct FileChip: View {
     let symbol: String
     let label: String
     let isSelected: Bool
+    /// Marks a file with unsaved changes, the way every editor does. Without
+    /// it, an unsaved file is only visible on the tab you are already looking
+    /// at, which is the one tab that does not need telling.
+    var isDirty: Bool = false
     let onSelect: () -> Void
     let onClose: () -> Void
 
@@ -373,6 +402,11 @@ private struct FileChip: View {
                         .font(.system(size: 12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    if isDirty {
+                        Circle()
+                            .fill(Theme.warning)
+                            .frame(width: 5, height: 5)
+                    }
                 }
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                 .padding(.horizontal, Theme.Space.s)

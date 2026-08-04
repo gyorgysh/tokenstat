@@ -127,6 +127,82 @@ struct FileText: Codable, Sendable, Hashable {
     var content: String
 }
 
+// MARK: - Syntax highlighting
+
+/// What a run of source text is.
+///
+/// Mirrors `tokenstat_highlight::Kind`. The Rust side never sends a colour, so
+/// the mapping from a kind to a colour lives in `Theme` and switching to light
+/// mode is not a round trip through a parser.
+enum SyntaxKind: String, Codable, Sendable, Hashable {
+    case keyword
+    case string
+    case number
+    case comment
+    case type
+    case function
+    case constant
+    case attribute
+    case property
+    case variable
+    case `operator`
+    case punctuation
+    case markup
+    /// A kind this build does not know. Newer core, older app: colour it as
+    /// plain text rather than refusing to decode the whole file.
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = SyntaxKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// One coloured run.
+///
+/// `start` and `length` are **UTF-16 code units**, which is what `NSTextStorage`
+/// indexes by, so they drop straight into an `NSRange` with no conversion. The
+/// Rust side does that conversion in the pass it was already making.
+struct SyntaxSpan: Codable, Sendable, Hashable {
+    var start: Int
+    var len: Int
+    var kind: SyntaxKind
+
+    var range: NSRange { NSRange(location: start, length: len) }
+}
+
+/// How a language is commented and indented.
+///
+/// Comes from the core so there is one table of these facts rather than one per
+/// front end.
+struct SyntaxRules: Codable, Sendable, Hashable {
+    var lineComment: String?
+    var blockComment: [String]?
+    var indent: Int
+
+    /// What pressing Tab inserts.
+    var indentUnit: String { String(repeating: " ", count: max(1, indent)) }
+
+    static let fallback = SyntaxRules(lineComment: nil, blockComment: nil, indent: 4)
+}
+
+/// The answer to a highlight request.
+///
+/// A file with no grammar and a file over the size limit both come back as a
+/// successful call with an empty `spans` and a `note`. Neither is an error: the
+/// file opened, it just is not colourable, and a red banner over a perfectly
+/// good file is worse than plain text.
+struct Highlighting: Codable, Sendable, Hashable {
+    var language: String?
+    var syntax: SyntaxRules?
+    var spans: [SyntaxSpan]
+    var note: String?
+
+    static let none = Highlighting(language: nil, syntax: nil, spans: [], note: nil)
+
+    var rules: SyntaxRules { syntax ?? .fallback }
+}
+
 struct Info: Codable, Sendable, Hashable {
     var protocolVersion: String
     var coreVersion: String

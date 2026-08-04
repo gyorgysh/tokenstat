@@ -76,8 +76,13 @@ final class WorkspacesModel {
     /// The open file being shown, or nil when the pane is showing a terminal.
     private(set) var activeFile: [String: String] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
-    private(set) var fileContents: [String: String] = [:]
-    private(set) var dirtyFiles: Set<String> = []
+    /// One document per open file, keyed the same way as the diffs.
+    ///
+    /// This replaced a pair of dictionaries holding the text and the dirty
+    /// paths. Once a file also carries syntax spans, a saved copy, changed-line
+    /// marks and an in-flight highlight, keeping them as parallel dictionaries
+    /// means five things keyed alike that fall out of step one at a time.
+    private(set) var documents: [String: EditorDocument] = [:]
     var editorError: String?
 
     private static func treeKey(_ workspaceID: String, _ path: String) -> String {
@@ -129,6 +134,45 @@ final class WorkspacesModel {
         await loadText(path, in: workspaceID)
     }
 
+    /// A close that would lose unsaved work, waiting on the user's answer.
+    ///
+    /// The alternative was for `closeFile` to discard the buffer, which it did.
+    /// Closing a tab is one click away from clicking the tab, and no editor
+    /// gets to throw away typing on a mis-click.
+    struct PendingClose: Identifiable {
+        let workspaceID: String
+        let path: String
+        var id: String { "\(workspaceID):\(path)" }
+    }
+
+    var pendingClose: PendingClose?
+
+    /// Close a file, asking first when it has unsaved changes.
+    func requestClose(_ path: String, in workspaceID: String) {
+        if isEditorDirty(path, in: workspaceID) {
+            pendingClose = PendingClose(workspaceID: workspaceID, path: path)
+            return
+        }
+        closeFile(path, in: workspaceID)
+    }
+
+    /// Save the pending file and then close it.
+    func saveAndClosePending() async {
+        guard let pending = pendingClose else { return }
+        pendingClose = nil
+        await saveText(pending.path, in: pending.workspaceID)
+        // A failed write leaves the document dirty and the error on screen, and
+        // closing then would lose exactly what the user asked to keep.
+        guard !isEditorDirty(pending.path, in: pending.workspaceID) else { return }
+        closeFile(pending.path, in: pending.workspaceID)
+    }
+
+    func discardAndClosePending() {
+        guard let pending = pendingClose else { return }
+        pendingClose = nil
+        closeFile(pending.path, in: pending.workspaceID)
+    }
+
     func closeFile(_ path: String, in workspaceID: String) {
         var files = openFiles[workspaceID] ?? []
         files.removeAll { $0 == path }
@@ -138,7 +182,9 @@ final class WorkspacesModel {
             // what this pane is mainly for.
             activeFile[workspaceID] = nil
         }
-        diffs[Self.treeKey(workspaceID, path)] = nil
+        let key = Self.treeKey(workspaceID, path)
+        diffs[key] = nil
+        documents[key] = nil
     }
 
     /// Put the terminal back in front without closing any open file.
@@ -158,40 +204,60 @@ final class WorkspacesModel {
         diffs[Self.treeKey(workspaceID, path)]
     }
 
-    func editorText(for path: String, in workspaceID: String) -> String {
-        fileContents[Self.treeKey(workspaceID, path)] ?? ""
-    }
-
-    func setEditorText(_ text: String, for path: String, in workspaceID: String) {
-        let key = Self.treeKey(workspaceID, path)
-        fileContents[key] = text
-        dirtyFiles.insert(key)
+    func document(for path: String, in workspaceID: String) -> EditorDocument? {
+        documents[Self.treeKey(workspaceID, path)]
     }
 
     func isEditorDirty(_ path: String, in workspaceID: String) -> Bool {
-        dirtyFiles.contains(Self.treeKey(workspaceID, path))
+        document(for: path, in: workspaceID)?.isDirty ?? false
     }
 
+    /// True when any open file has unsaved changes. Used to warn before an
+    /// action that would lose them.
+    var hasUnsavedWork: Bool {
+        documents.values.contains(where: \.isDirty)
+    }
+
+    /// Read a file and open a document for it.
+    ///
+    /// An already open document is left alone unless it is clean. Re-reading a
+    /// file someone has unsaved edits in, because they clicked its tab again,
+    /// would throw their work away without asking.
     func loadText(_ path: String, in workspaceID: String) async {
+        let key = Self.treeKey(workspaceID, path)
+        if let existing = documents[key], existing.isDirty { return }
         do {
             let file = try await Bridge.workspaceRead(id: workspaceID, path: path)
-            let key = Self.treeKey(workspaceID, path)
-            fileContents[key] = file.content
-            dirtyFiles.remove(key)
+            if let existing = documents[key] {
+                existing.adopt(saved: file.content)
+            } else {
+                let document = EditorDocument(
+                    workspaceID: workspaceID, path: path, content: file.content
+                )
+                documents[key] = document
+                document.scheduleHighlight()
+            }
+            documents[key]?.applyDiff(diffs[key])
             editorError = nil
         } catch {
             editorError = error.localizedDescription
         }
     }
 
-    /// Save only from the editor's button. File writes never run from a watcher
-    /// or refresh path.
+    /// Save only from the editor's own command. File writes never run from a
+    /// watcher or a refresh path.
     func saveText(_ path: String, in workspaceID: String) async {
         let key = Self.treeKey(workspaceID, path)
-        guard let content = fileContents[key] else { return }
+        guard let document = documents[key], document.isDirty else { return }
         do {
-            _ = try await Bridge.workspaceWrite(id: workspaceID, path: path, content: content)
-            dirtyFiles.remove(key)
+            let outcome = try await Bridge.workspaceWrite(
+                id: workspaceID, path: path, content: document.text
+            )
+            guard outcome.ok else {
+                editorError = outcome.message
+                return
+            }
+            document.markSaved()
             editorError = nil
             await loadDiff(path, in: workspaceID)
         } catch {
@@ -200,10 +266,13 @@ final class WorkspacesModel {
     }
 
     func loadDiff(_ path: String, in workspaceID: String) async {
+        let key = Self.treeKey(workspaceID, path)
         do {
-            diffs[Self.treeKey(workspaceID, path)] = try await Bridge.workspaceDiff(
-                id: workspaceID, path: path
-            )
+            let diff = try await Bridge.workspaceDiff(id: workspaceID, path: path)
+            diffs[key] = diff
+            // The editor's gutter marks come from the same diff the Changes
+            // panel shows, so the two cannot disagree about what changed.
+            documents[key]?.applyDiff(diff)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -217,6 +286,18 @@ final class WorkspacesModel {
             for path in paths where diffs[Self.treeKey(workspaceID, path)] != nil {
                 await loadDiff(path, in: workspaceID)
             }
+        }
+    }
+
+    /// Pick up changes an agent made to a file that is open here.
+    ///
+    /// This is the ordinary case rather than an edge one: the whole point of
+    /// the app is that a session is editing the same repository. A document
+    /// with unsaved changes is left alone, because `loadText` refuses to
+    /// overwrite one, and the two edits are a conflict only a person can settle.
+    func refreshOpenDocuments() async {
+        for document in documents.values where !document.isDirty {
+            await loadText(document.path, in: document.workspaceID)
         }
     }
 
@@ -293,8 +374,11 @@ final class WorkspacesModel {
         for id in history.keys {
             await loadHistory(for: id)
         }
-        // A diff on screen must not go stale while the file changes underneath.
+        // A diff on screen must not go stale while the file changes underneath,
+        // and neither must the file itself: an agent running in the terminal
+        // beside this pane edits the same repository.
         await refreshOpenDiffs()
+        await refreshOpenDocuments()
     }
 
     /// Read the recent commits for a workspace.

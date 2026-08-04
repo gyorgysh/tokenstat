@@ -20,7 +20,7 @@ cd "$ROOT"
 # the one crate allowed to link a network stack. `tokenstat-ffi` is absent too,
 # because the app needs account and sync, and it depends on `tokenstat-sync`
 # on purpose.
-GUARDED=(tokenstat-core tokenstat-mcp)
+GUARDED=(tokenstat-core tokenstat-mcp tokenstat-highlight)
 
 # Anything that can open a socket or speak HTTP. Matched against crate names in
 # the resolved tree.

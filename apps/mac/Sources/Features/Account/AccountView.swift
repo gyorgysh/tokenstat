@@ -14,10 +14,10 @@ struct AccountView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.l) {
                 if let message = model.errorMessage {
-                    Banner(text: message, tint: .orange, symbol: "exclamationmark.triangle.fill")
+                    Banner(text: message, severity: .warning)
                 }
                 if let summary = model.lastSyncSummary {
-                    Banner(text: summary, tint: Theme.secondary, symbol: "checkmark.circle.fill")
+                    Banner(text: summary, severity: .success)
                 }
 
                 if let device = model.pendingLogin {
