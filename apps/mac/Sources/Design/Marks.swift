@@ -99,6 +99,7 @@ struct Avatar: View {
     }
 }
 
+
 /// The tokenstat mark: three ascending bars on a shared baseline.
 ///
 /// Drawn rather than shipped as an image. It is three rounded rectangles, so an
@@ -106,13 +107,22 @@ struct Avatar: View {
 /// for no benefit, and a drawn mark is sharp at any size on any display.
 ///
 /// The geometry is the website's, from `brand-assets/tokenstat/logo`: bars 12
-/// wide on a 15 pitch, sharing a baseline, in a 64 unit square. **They share a
-/// baseline on purpose**, which is what makes them read as a chart instead of
-/// three floating shapes. The colours are the dark-context ramp the favicon
-/// badge uses, since this sits on the app's own dark chrome. Change these with
-/// the website, not on their own.
+/// wide on a 15 pitch, sharing a baseline, drawn in a 64 unit artboard. **They
+/// share a baseline on purpose**, which is what makes them read as a chart
+/// instead of three floating shapes. The colours are the dark-context ramp the
+/// favicon badge uses, since this sits on the app's own dark chrome. Change
+/// these with the website, not on their own.
+///
+/// The view's frame is the *ink*, not the artboard. The artwork occupies
+/// x 11...53 and y 10...52 of that 64 unit square, so using the artboard as the
+/// frame padded the mark with a fifth of its own height in empty space and left
+/// it sitting visibly high next to any text beside it.
 struct LogoMark: View {
     var size: CGFloat = 18
+
+    /// Ink bounds inside the 64 unit artboard.
+    private static let inkOrigin = CGPoint(x: 11, y: 10)
+    private static let inkSide: CGFloat = 42
 
     private static let bars: [(y: CGFloat, height: CGFloat, color: Color)] = [
         (34, 18, Color(red: 0xC3 / 255, green: 0xB0 / 255, blue: 0xFF / 255)),
@@ -121,16 +131,19 @@ struct LogoMark: View {
     ]
 
     var body: some View {
-        // One scale factor from the 64 unit artboard, so every number below is
-        // the website's own and none of them are re-derived by hand.
-        let unit = size / 64
+        // One scale factor from the artboard, so every number above is the
+        // website's own and none of them are re-derived by hand.
+        let unit = size / Self.inkSide
 
         ZStack(alignment: .topLeading) {
             ForEach(Array(Self.bars.enumerated()), id: \.offset) { index, bar in
                 RoundedRectangle(cornerRadius: 3.5 * unit)
                     .fill(bar.color)
                     .frame(width: 12 * unit, height: bar.height * unit)
-                    .offset(x: (11 + CGFloat(index) * 15) * unit, y: bar.y * unit)
+                    .offset(
+                        x: (11 + CGFloat(index) * 15 - Self.inkOrigin.x) * unit,
+                        y: (bar.y - Self.inkOrigin.y) * unit
+                    )
             }
         }
         .frame(width: size, height: size)
@@ -141,8 +154,12 @@ struct LogoMark: View {
 /// The mark and the name, for the top of the sidebar.
 struct Wordmark: View {
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            LogoMark(size: 20)
+        // `.firstTextBaseline` would sit the mark on the text's baseline, which
+        // drops a square glyph below the descender line. Centring on the text's
+        // cap height is what actually looks aligned, and that is what a centred
+        // stack gives once the mark's frame is its ink.
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            LogoMark(size: 17)
             Text("tokenstat")
                 .font(.system(size: 15, weight: .semibold))
                 // Lowercase, always. It is the command you type.
@@ -152,11 +169,16 @@ struct Wordmark: View {
     }
 }
 
-/// The tier, as the glyph the website puts beside a name.
+/// The tier, as the silhouette the website puts beside a name.
 ///
-/// A crown for Patron, a star for Supporter, matching `TIER_BADGES` on the
-/// site. Free has no mark at all: a badge that everyone has is decoration, and
-/// the profile page shows nothing there either.
+/// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crown for
+/// Patron, a star for Supporter. SF Symbols was the first attempt and it is the
+/// wrong call for a badge. `crown.fill` is Apple's crown, not this brand's, and
+/// a mark that is nearly the website's is worse than one that is obviously
+/// different, because it reads as the same badge rendered badly.
+///
+/// Free has no mark at all. A badge everyone holds is decoration, and the
+/// profile page shows nothing there either.
 ///
 /// Used where the name is large enough to carry a glyph beside it. The sidebar
 /// footer keeps the written pill, because a crown alone in the corner of a
@@ -165,24 +187,103 @@ struct TierMark: View {
     var tier: String
     var size: CGFloat = 15
 
-    private var symbol: String? {
-        switch tier.lowercased() {
-        case "patron": return "crown.fill"
-        case "supporter": return "star.fill"
-        case "free", "": return nil
-        // An unknown tier still gets a mark rather than disappearing: a new
-        // tier on the server should not make an account look downgraded.
-        default: return "seal.fill"
-        }
-    }
-
     var body: some View {
-        if let symbol {
-            Image(systemName: symbol)
-                .font(.system(size: size))
-                .foregroundStyle(Theme.accent)
+        if let shape = BadgeShape(tier: tier) {
+            shape
+                .fill(
+                    LinearGradient(
+                        // The logo's own two strongest bars, so a badge beside
+                        // a name belongs to the same brand as the mark in the
+                        // corner.
+                        colors: [
+                            Color(red: 0x8B / 255, green: 0x5C / 255, blue: 0xF6 / 255),
+                            Color(red: 0xC0 / 255, green: 0x26 / 255, blue: 0xD3 / 255),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: size, height: size)
                 .help("\(tier.capitalized) tier")
                 .accessibilityLabel("\(tier.capitalized) tier")
         }
+    }
+}
+
+/// The badge silhouettes, in the website's 24 unit square.
+///
+/// Transcribed from the SVG rather than approximated, so the two stay the same
+/// shape. Points are absolute here; the source mixes absolute and relative
+/// commands and the conversion is done once, here, instead of at every reader.
+struct BadgeShape: Shape {
+    enum Kind {
+        case crown
+        case star
+        /// A tier this build does not know. A new tier on the server must not
+        /// make an account look downgraded, so it still gets a mark.
+        case seal
+    }
+
+    let kind: Kind
+
+    init?(tier: String) {
+        switch tier.lowercased() {
+        case "patron": kind = .crown
+        case "supporter": kind = .star
+        case "free", "": return nil
+        default: kind = .seal
+        }
+    }
+
+    init(kind: Kind) {
+        self.kind = kind
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let unit = min(rect.width, rect.height) / 24
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * unit, y: rect.minY + y * unit)
+        }
+
+        var path = Path()
+        switch kind {
+        case .crown:
+            // The band, and the bar under it, as two closed subpaths.
+            path.move(to: point(3, 7.4))
+            path.addLine(to: point(7.6, 10.6))
+            path.addLine(to: point(12, 3.4))
+            path.addLine(to: point(16.4, 10.6))
+            path.addLine(to: point(21, 7.4))
+            path.addLine(to: point(19.3, 18.6))
+            path.addLine(to: point(4.7, 18.6))
+            path.closeSubpath()
+
+            path.addRect(
+                CGRect(
+                    origin: point(4.7, 20.1),
+                    size: CGSize(width: 14.6 * unit, height: 1.9 * unit)
+                )
+            )
+        case .star:
+            path.move(to: point(12, 2.6))
+            path.addLine(to: point(14.7, 8.5))
+            path.addLine(to: point(21, 9.2))
+            path.addLine(to: point(16.3, 13.5))
+            path.addLine(to: point(17.6, 19.8))
+            path.addLine(to: point(12, 16.7))
+            path.addLine(to: point(6.4, 19.8))
+            path.addLine(to: point(7.7, 13.5))
+            path.addLine(to: point(3, 9.2))
+            path.addLine(to: point(9.3, 8.5))
+            path.closeSubpath()
+        case .seal:
+            path.addEllipse(
+                in: CGRect(
+                    origin: point(4, 4),
+                    size: CGSize(width: 16 * unit, height: 16 * unit)
+                )
+            )
+        }
+        return path
     }
 }
