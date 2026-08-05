@@ -30,8 +30,11 @@ use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(unix)]
+use std::sync::Arc;
+use std::sync::{Mutex, PoisonError};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -52,7 +55,6 @@ struct Request {
 ///
 /// In the data directory rather than a temp dir so it survives a reboot's
 /// cleanup and so the archive and its socket are found the same way.
-#[cfg(unix)]
 pub fn default_socket_path() -> Result<PathBuf, String> {
     let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
         .ok_or("no data directory on this platform")?;
