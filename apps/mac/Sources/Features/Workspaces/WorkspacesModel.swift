@@ -90,6 +90,7 @@ final class WorkspacesModel {
     /// unstage a selection someone had already made.
     var stagedSelection: [String: Set<String>] = [:]
     var commitMessage: [String: String] = [:]
+    var commitDescription: [String: String] = [:]
     /// Result of the last write, for the banner. Cleared on the next attempt.
     var gitOutcome: GitOutcome?
     var isCommitting = false
@@ -128,11 +129,13 @@ final class WorkspacesModel {
     /// in History rather than accumulated as tabs.
     private(set) var openCommit: [String: CommitDetail] = [:]
     private(set) var loadingCommit: [String: String] = [:]
+    private(set) var reviewingWorkingTree: Set<String> = []
 
     /// Read a commit and show it. Replaces whatever the pane was showing.
     func showCommit(_ id: String, in workspaceID: String) async {
         loadingCommit[workspaceID] = id
         activeFile[workspaceID] = nil
+        reviewingWorkingTree.remove(workspaceID)
         do {
             let detail = try await Bridge.workspaceShow(id: workspaceID, commit: id)
             // The user may have clicked another commit while this was in flight.
@@ -150,11 +153,24 @@ final class WorkspacesModel {
         loadingCommit[workspaceID] = nil
     }
 
+    func reviewWorkingTree(in workspaceID: String) {
+        activeFile[workspaceID] = nil
+        activeBrowserID[workspaceID] = nil
+        filesShown.remove(workspaceID)
+        closeCommit(in: workspaceID)
+        reviewingWorkingTree.insert(workspaceID)
+    }
+
+    func closeWorkingTreeReview(in workspaceID: String) {
+        reviewingWorkingTree.remove(workspaceID)
+    }
+
     /// Show a file in the centre pane, opening it if it is not already there.
     func openFile(_ path: String, in workspaceID: String) async {
         // A file and a commit are both "what the pane is showing", so opening
         // one puts the other away.
         closeCommit(in: workspaceID)
+        reviewingWorkingTree.remove(workspaceID)
         var files = openFiles[workspaceID] ?? []
         if !files.contains(path) {
             files.append(path)
@@ -223,6 +239,7 @@ final class WorkspacesModel {
         activeBrowserID[workspaceID] = nil
         filesShown.remove(workspaceID)
         closeCommit(in: workspaceID)
+        reviewingWorkingTree.remove(workspaceID)
     }
 
     func browserTabs(in workspaceID: String) -> [WorkspaceBrowserTab] {
@@ -235,6 +252,7 @@ final class WorkspacesModel {
         activeFile[workspaceID] = nil
         filesShown.remove(workspaceID)
         closeCommit(in: workspaceID)
+        reviewingWorkingTree.remove(workspaceID)
         if let id, let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) {
             activeBrowserID[workspaceID] = id
             return tab
@@ -279,6 +297,7 @@ final class WorkspacesModel {
             && !filesShown.contains(workspaceID)
             && openCommit[workspaceID] == nil
             && loadingCommit[workspaceID] == nil
+            && !reviewingWorkingTree.contains(workspaceID)
     }
 
     func diff(for path: String, in workspaceID: String) -> FileDiff? {
@@ -586,13 +605,15 @@ final class WorkspacesModel {
     /// either step stops and reports git's own words.
     func commit(_ folder: WorkspaceFolder) async {
         let paths = Array(stagedSelection[folder.id] ?? [])
-        let message = (commitMessage[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = (commitMessage[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = (commitDescription[folder.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = description.isEmpty ? title : "\(title)\n\n\(description)"
         guard !paths.isEmpty else {
             gitOutcome = GitOutcome(ok: false, message: "Tick at least one file to commit.")
             return
         }
-        guard !message.isEmpty else {
-            gitOutcome = GitOutcome(ok: false, message: "A commit needs a message.")
+        guard !title.isEmpty else {
+            gitOutcome = GitOutcome(ok: false, message: "A commit needs a title.")
             return
         }
 
@@ -609,6 +630,7 @@ final class WorkspacesModel {
             guard committed.ok else { return }
             stagedSelection[folder.id] = []
             commitMessage[folder.id] = ""
+            commitDescription[folder.id] = ""
             await refresh()
             await loadHistory(for: folder.id)
         } catch {

@@ -20,8 +20,10 @@ struct AutomationsView: View {
     /// The registered folders, shared with the workspaces screen. Passed in so
     /// this screen never runs a second `workspace.list`.
     var folders: [WorkspaceFolder]
+    var onNavigate: ((Destination) -> Void)? = nil
 
     @State private var creating = false
+    @State private var search = ""
 
     var body: some View {
         ScrollView {
@@ -29,11 +31,23 @@ struct AutomationsView: View {
                 if let error = model.errorMessage {
                     Banner(text: error, severity: .warning)
                 }
-                if model.jobs.isEmpty && model.runs.isEmpty {
+                intro
+                TextField("Search automations", text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .overlay(alignment: .leading) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 8)
+                    }
+                    .padding(.leading, 4)
+                if filteredJobs.isEmpty {
                     nothingYet
                 } else {
-                    automationsCard
-                    runsCard
+                    taskSection("Active", jobs: filteredJobs.filter(\.enabled))
+                    taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
+                }
+                if !model.runs.isEmpty {
+                    recentRuns
                 }
             }
             .padding(Theme.Space.m)
@@ -46,11 +60,10 @@ struct AutomationsView: View {
                     Label("New automation", systemImage: "plus")
                 }
                 .help("Set up an agent to run on a schedule")
-                .disabled(model.backends.isEmpty || folders.isEmpty)
             }
         }
         .sheet(isPresented: $creating) {
-            NewAutomationSheet(model: model, folders: folders)
+            NewAutomationSheet(model: model, folders: folders, onNavigate: onNavigate)
         }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -59,6 +72,65 @@ struct AutomationsView: View {
         .task {
             await model.load()
             model.syncWatching()
+        }
+    }
+
+    private var intro: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("Automations")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("Give an agent a job, a folder, and a time. It runs in the background and stops at your limit.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button { creating = true } label: {
+                Label("Create", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var filteredJobs: [Automation] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return model.jobs }
+        return model.jobs.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.prompt.localizedCaseInsensitiveContains(query)
+                || $0.backend.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func taskSection(_ title: String, jobs: [Automation]) -> AnyView {
+        guard !jobs.isEmpty else { return AnyView(EmptyView()) }
+        return AnyView(VStack(alignment: .leading, spacing: 0) {
+            Text(title.uppercased())
+                .font(Theme.sectionHeader)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, Theme.Space.xs)
+            VStack(spacing: 0) {
+                ForEach(jobs) { job in
+                    AutomationRow(job: job, model: model,
+                                  folder: folders.first { $0.id == job.workspaceID })
+                    if job.id != jobs.last?.id { Divider() }
+                }
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        })
+    }
+
+    private var recentRuns: some View {
+        Card(title: "Recent runs", subtitle: "The latest result from each scheduled job.") {
+            VStack(spacing: 0) {
+                ForEach(Array(model.runs.prefix(5))) { run in
+                    runRow(run)
+                    if run.id != model.runs.prefix(5).last?.id { Divider() }
+                }
+            }
         }
     }
 
@@ -247,6 +319,8 @@ private struct AutomationRow: View {
     var folder: WorkspaceFolder?
 
     @State private var confirmingDelete = false
+    @State private var showingHistory = false
+    @State private var editing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -258,12 +332,7 @@ private struct AutomationRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             facts
         }
-        .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        )
+        .padding(.vertical, Theme.Space.s)
         .opacity(job.enabled ? 1 : 0.6)
         .confirmationDialog(
             "Delete \(job.name)?",
@@ -335,11 +404,23 @@ private struct AutomationRow: View {
             Button("Run now") { Task { await model.run(job) } }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
+            Button("History") { showingHistory = true }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            Button("Edit") { editing = true }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
             Button(role: .destructive) { confirmingDelete = true } label: {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
             .help("Delete this automation")
+        }
+        .sheet(isPresented: $showingHistory) {
+            AutomationHistorySheet(job: job, model: model)
+        }
+        .sheet(isPresented: $editing) {
+            NewAutomationSheet(model: model, folders: folder.map { [$0] } ?? [], existing: job)
         }
     }
 }
@@ -359,6 +440,48 @@ private struct StatusPill: View {
     }
 }
 
+private struct AutomationHistorySheet: View {
+    let job: Automation
+    @Bindable var model: AutomationsModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(job.name).font(.title3.weight(.semibold))
+                    Text("Run history").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+            if model.runs(of: job).isEmpty {
+                EmptyState(symbol: "clock", title: "No runs yet", message: "The first run will appear here with its result and output.")
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(model.runs(of: job)) { run in
+                            HStack(spacing: Theme.Space.s) {
+                                Circle().fill(AutomationsView.statusTint(run.status)).frame(width: 8, height: 8)
+                                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.callout)
+                                Spacer()
+                                StatusPill(status: run.status, text: run.endedLabel)
+                                Button("View") { model.watch(run); dismiss() }
+                                    .buttonStyle(.borderless)
+                            }
+                            .padding(.vertical, Theme.Space.s)
+                            Divider()
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Theme.Space.l)
+        .frame(width: 520, height: 360)
+    }
+}
+
 // MARK: - Creating one
 
 /// Setting up an automation, in a sheet.
@@ -370,6 +493,8 @@ private struct StatusPill: View {
 private struct NewAutomationSheet: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
+    var onNavigate: ((Destination) -> Void)?
+    var existing: Automation? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -383,6 +508,7 @@ private struct NewAutomationSheet: View {
     @State private var scheduleWeekday = 0
     @State private var budget = "900"
     @State private var working = false
+    @State private var step = 0
 
     /// Monday first, and zero-based, matching `AutomationSchedule.weekday` and
     /// the daemon's `to_monday_zero_offset`. The picker used to be one-based
@@ -395,38 +521,54 @@ private struct NewAutomationSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("New automation")
+                Text(existing == nil ? "New automation" : "Edit automation")
                     .font(.system(size: 15, weight: .semibold))
                 Text("An agent run headless in a folder, like a person launching it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
+            stepHeader
             fields
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
+                if step > 0 {
+                    Button("Back") { step -= 1 }
+                }
                 Button {
-                    working = true
-                    Task {
-                        await create()
-                        working = false
-                        if model.errorMessage == nil { dismiss() }
+                    if step < 2 {
+                        step += 1
+                    } else {
+                        working = true
+                        Task {
+                            await save()
+                            working = false
+                            if model.errorMessage == nil { dismiss() }
+                        }
                     }
                 } label: {
-                    Label("Create", systemImage: "plus")
+                    Label(step < 2 ? "Continue" : (existing == nil ? "Create" : "Save"), systemImage: step < 2 ? "arrow.right" : "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canCreate || working)
+                .disabled(!canContinue || working)
             }
         }
         .padding(Theme.Space.l)
         .frame(width: 520)
         .background(Theme.panel)
         .onAppear {
+            if let existing, name.isEmpty {
+                name = existing.name
+                backendID = existing.backend
+                workspaceID = existing.workspaceID
+                prompt = existing.prompt
+                scheduleKind = existing.schedule.kind
+                budget = String(existing.budgetSeconds)
+            }
             if backendID.isEmpty, let first = model.backends.first {
                 backendID = first.id
             }
@@ -436,40 +578,86 @@ private struct NewAutomationSheet: View {
         }
     }
 
+    private var stepHeader: some View {
+        HStack(spacing: Theme.Space.xs) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(index <= step ? Theme.accent : Theme.border)
+                    .frame(height: 4)
+            }
+        }
+    }
+
     @ViewBuilder
     private var fields: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            TextField("Name", text: $name, prompt: Text("e.g. Nightly docs check"))
-            HStack(spacing: Theme.Space.s) {
-                Picker("Backend", selection: $backendID) {
+            switch step {
+            case 0:
+                TextField("Name", text: $name, prompt: Text("e.g. Nightly docs check"))
+                promptEditor
+            case 1:
+                if !Bridge.isHosted {
+                    setupHint("Background helper is not running. Set it up from Machines before scheduling this task.", action: "Open Machines") {
+                        dismiss()
+                        onNavigate?(.machines)
+                    }
+                } else if model.backends.isEmpty {
+                    setupHint("No supported agent CLI is installed yet. Install one, then reload this screen.", action: "Refresh agents") {
+                        Task { await model.load() }
+                    }
+                } else if folders.isEmpty {
+                    setupHint("Add a workspace before choosing where this task should run.", action: "Go to Workspaces") {
+                        dismiss()
+                        onNavigate?(.workspaces)
+                    }
+                }
+                Picker("Agent", selection: $backendID) {
                     ForEach(model.backends) { backend in
                         Text(backend.label).tag(backend.id)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Picker("Folder", selection: $workspaceID) {
-                    Text("Choose a folder").tag("")
+                Picker("Workspace", selection: $workspaceID) {
+                    Text("Choose a workspace").tag("")
                     ForEach(folders) { folder in
                         Text(folder.name).tag(folder.id)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            promptEditor
-            scheduleControls
-            HStack(spacing: 4) {
-                Text("Stop it after")
+                Text("The agent runs on this machine, in the selected workspace.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("Budget", text: $budget)
-                    .frame(width: 70)
-                Text("seconds")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            default:
+                scheduleControls
+                HStack(spacing: 4) {
+                    Text("Stop after")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Budget", text: $budget)
+                        .frame(width: 70)
+                    Text("seconds")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .textFieldStyle(.roundedBorder)
         .controlSize(.small)
+    }
+
+    private func setupHint(_ message: String, action: String, perform: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(Theme.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(action, action: perform)
+                    .buttonStyle(.link)
+                    .font(.caption)
+            }
+        }
+        .padding(Theme.Space.s)
+        .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     private var promptEditor: some View {
@@ -552,7 +740,19 @@ private struct NewAutomationSheet: View {
             && !backendID.isEmpty
     }
 
-    private func create() async {
+    private var canContinue: Bool {
+        switch step {
+        case 0:
+            return !name.trimmingCharacters(in: .whitespaces).isEmpty
+                && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case 1:
+            return !workspaceID.isEmpty && !backendID.isEmpty
+        default:
+            return canCreate
+        }
+    }
+
+    private func save() async {
         let cal = Calendar.current
         let comps = cal.dateComponents([.hour, .minute], from: scheduleTime)
         let every = (UInt64(intervalMinutes) ?? 60) * 60
@@ -563,13 +763,29 @@ private struct NewAutomationSheet: View {
             minute: scheduleKind == .daily || scheduleKind == .weekly ? (comps.minute ?? 0) : 0,
             weekday: scheduleKind == .weekly ? scheduleWeekday : 0
         )
-        await model.create(
-            name: name.trimmingCharacters(in: .whitespaces),
-            backend: backendID,
-            workspaceID: workspaceID,
-            prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
-            schedule: spec,
-            budget: UInt64(budget) ?? 900
-        )
+        if let existing {
+            await model.update(Automation(
+                id: existing.id,
+                name: name.trimmingCharacters(in: .whitespaces),
+                backend: backendID,
+                workspaceID: workspaceID,
+                prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+                schedule: spec,
+                budgetSeconds: max(UInt64(budget) ?? 900, 60),
+                enabled: existing.enabled,
+                lastRunAtMs: existing.lastRunAtMs,
+                nextRunAtMs: existing.nextRunAtMs,
+                lastRunID: existing.lastRunID
+            ))
+        } else {
+            await model.create(
+                name: name.trimmingCharacters(in: .whitespaces),
+                backend: backendID,
+                workspaceID: workspaceID,
+                prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
+                schedule: spec,
+                budget: UInt64(budget) ?? 900
+            )
+        }
     }
 }

@@ -103,6 +103,16 @@ final class AutomationsModel {
         }
     }
 
+    func update(_ job: Automation) async {
+        do {
+            _ = try await Bridge.updateAutomation(job)
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func run(_ job: Automation) async {
         do {
             _ = try await Bridge.runAutomation(job.id)

@@ -95,6 +95,9 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Tsx,
+    Html,
+    Css,
+    Go,
     Python,
     Json,
     Toml,
@@ -112,6 +115,9 @@ impl Language {
             Self::JavaScript => "javascript",
             Self::TypeScript => "typescript",
             Self::Tsx => "tsx",
+            Self::Html => "html",
+            Self::Css => "css",
+            Self::Go => "go",
             Self::Python => "python",
             Self::Json => "json",
             Self::Toml => "toml",
@@ -128,6 +134,9 @@ impl Language {
             "javascript" => Self::JavaScript,
             "typescript" => Self::TypeScript,
             "tsx" => Self::Tsx,
+            "html" => Self::Html,
+            "css" => Self::Css,
+            "go" => Self::Go,
             "python" => Self::Python,
             "json" => Self::Json,
             "toml" => Self::Toml,
@@ -154,6 +163,9 @@ impl Language {
                 "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
                 "ts" | "mts" | "cts" => Some(Self::TypeScript),
                 "tsx" => Some(Self::Tsx),
+                "html" | "htm" | "xhtml" => Some(Self::Html),
+                "css" => Some(Self::Css),
+                "go" => Some(Self::Go),
                 "py" | "pyi" => Some(Self::Python),
                 "json" | "jsonc" => Some(Self::Json),
                 "toml" => Some(Self::Toml),
@@ -182,10 +194,25 @@ impl Language {
     /// the alternative is a second table of the same facts in every front end.
     pub fn syntax(self) -> Syntax {
         match self {
-            Self::Rust | Self::Swift | Self::JavaScript | Self::TypeScript | Self::Tsx => Syntax {
+            Self::Rust
+            | Self::Swift
+            | Self::JavaScript
+            | Self::TypeScript
+            | Self::Tsx
+            | Self::Go => Syntax {
                 line_comment: Some("//"),
                 block_comment: Some(("/*", "*/")),
                 indent: 4,
+            },
+            Self::Css => Syntax {
+                line_comment: None,
+                block_comment: Some(("/*", "*/")),
+                indent: 2,
+            },
+            Self::Html => Syntax {
+                line_comment: None,
+                block_comment: Some(("<!--", "-->")),
+                indent: 2,
             },
             Self::Python => Syntax {
                 line_comment: Some("#"),
@@ -362,6 +389,24 @@ fn configuration(language: Language) -> Result<&'static HighlightConfiguration, 
             TSX_HIGHLIGHTS.as_str(),
             "",
             tree_sitter_typescript::LOCALS_QUERY,
+        ),
+        Language::Html => (
+            tree_sitter_html::LANGUAGE.into(),
+            tree_sitter_html::HIGHLIGHTS_QUERY,
+            tree_sitter_html::INJECTIONS_QUERY,
+            "",
+        ),
+        Language::Css => (
+            tree_sitter_css::LANGUAGE.into(),
+            tree_sitter_css::HIGHLIGHTS_QUERY,
+            "",
+            "",
+        ),
+        Language::Go => (
+            tree_sitter_go::LANGUAGE.into(),
+            tree_sitter_go::HIGHLIGHTS_QUERY,
+            "",
+            "",
         ),
         Language::Python => (
             tree_sitter_python::LANGUAGE.into(),
@@ -621,6 +666,9 @@ mod tests {
             (Language::JavaScript, "function a() {}"),
             (Language::TypeScript, "function a(): void {}"),
             (Language::Tsx, "const a = <b />;"),
+            (Language::Html, "<main class=\"app\">Hello</main>"),
+            (Language::Css, ".app { color: red; }"),
+            (Language::Go, "package main\nfunc main() {}"),
             (Language::Python, "def a():\n    pass\n"),
             (Language::Json, "{\"a\": 1}"),
             (Language::Toml, "a = 1\n"),
@@ -682,6 +730,7 @@ mod tests {
             (Language::JavaScript, "// note\nfunction a() {}\n", "//"),
             (Language::TypeScript, "// note\nfunction a() {}\n", "//"),
             (Language::Tsx, "// note\nconst a = 1;\n", "//"),
+            (Language::Go, "// note\nfunc main() {}\n", "//"),
             (Language::Python, "# note\ndef a():\n    pass\n", "#"),
             (Language::Toml, "# note\na = 1\n", "#"),
             (Language::Yaml, "# note\na: 1\n", "#"),

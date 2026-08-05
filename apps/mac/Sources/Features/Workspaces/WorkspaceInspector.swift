@@ -30,8 +30,8 @@ struct InspectorEmptyState: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 360)
         }
-        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -64,26 +64,18 @@ struct WorkspaceInspector: View {
                 tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
                 selection: tab
             )
-            content
+            // Give every tab the same measured rectangle.  Using an unbounded
+            // max-height here lets a tab's internal VStack negotiate a
+            // different height, which makes the inspector appear to jump when
+            // switching between an empty state and a list.
+            GeometryReader { proxy in
+                content
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                    .clipped()
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.sidebarMaterial)
-        // When a folder is not a git repository, Changes and History have nothing
-        // to show; redirect to Files which always works.
-        .onChange(of: folder?.git?.isRepo) { _, isRepo in
-            if isRepo == false || isRepo == nil,
-               model.inspectorTab == .changes || model.inspectorTab == .history {
-                model.inspectorTab = .files
-            }
-        }
-        .onAppear {
-            if let git = folder?.git, !git.isRepo,
-               model.inspectorTab == .changes || model.inspectorTab == .history {
-                model.inspectorTab = .files
-            } else if folder?.git == nil,
-                      model.inspectorTab == .changes || model.inspectorTab == .history {
-                model.inspectorTab = .files
-            }
-        }
     }
 
     // The empty band above this panel is the window's toolbar, not padding this
@@ -119,6 +111,7 @@ struct WorkspaceHistoryView: View {
 
     var body: some View {
         historyBody
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.sidebarMaterial)
             // Keyed on the folder, so switching workspaces reads the right history
             // instead of leaving the previous one on screen.

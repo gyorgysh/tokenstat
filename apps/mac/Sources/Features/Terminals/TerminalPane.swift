@@ -35,6 +35,10 @@ struct TerminalPane: View {
         workspaces.openCommit[folder.id]
     }
 
+    private var reviewingWorkingTree: Bool {
+        workspaces.reviewingWorkingTree.contains(folder.id)
+    }
+
     private var browserShown: Bool {
         workspaces.activeBrowserID[folder.id] != nil
     }
@@ -54,7 +58,7 @@ struct TerminalPane: View {
 
     /// True when the pane is showing a terminal rather than a file or a commit.
     private var showsTerminal: Bool {
-        activeFile == nil && !browserShown && !filesShown && openCommit == nil && loadingCommit == nil
+        activeFile == nil && !browserShown && !filesShown && openCommit == nil && loadingCommit == nil && !reviewingWorkingTree
     }
 
     /// Size of the terminal area, measured rather than assumed.
@@ -139,7 +143,10 @@ struct TerminalPane: View {
                 )
                 .frame(width: size.width, height: size.height)
 
-                if let commit = openCommit {
+                if reviewingWorkingTree {
+                    WorkingTreeReviewView(folder: folder, model: workspaces)
+                        .frame(width: size.width, height: size.height)
+                } else if let commit = openCommit {
                     CommitView(detail: commit)
                         .frame(width: size.width, height: size.height)
                         .id(commit.id)

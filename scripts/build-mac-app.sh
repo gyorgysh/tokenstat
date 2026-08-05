@@ -95,6 +95,15 @@ if [ ! -d "$APP" ]; then
     exit 1
 fi
 
+# The host helper is tokenstat-owned infrastructure, so the shipped app must
+# carry it. The Machines screen installs this copy into the user's support
+# directory and owns its launch agent; it never silently installs an external
+# agent CLI.
+echo "Building bundled tokenstat-hostd"
+cargo build --release --locked -p tokenstat-host --bin tokenstat-hostd
+cp "$ROOT/target/release/tokenstat-hostd" "$APP/Contents/Resources/tokenstat-hostd"
+chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
+
 # The permissive dependencies ask that their notices travel with the binary, and
 # a .app is a binary somebody receives. Inside Resources, so it cannot be
 # separated from the thing it describes.

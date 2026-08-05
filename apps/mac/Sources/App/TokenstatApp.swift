@@ -30,7 +30,7 @@ struct TokenstatApp: App {
         // window the plan asks for, without drawing custom window controls.
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: 1180, height: 720)
         #endif
     }
 }

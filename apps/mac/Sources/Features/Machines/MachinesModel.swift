@@ -16,11 +16,23 @@ import Observation
 @MainActor
 @Observable
 final class MachinesModel {
+    enum DeviceState: String {
+        case ready = "Ready"
+        case settingUp = "Setting up"
+        case needsPermission = "Needs permission"
+        case needsSignIn = "Needs sign-in"
+        case unavailable = "Unavailable"
+        case connected = "Connected"
+        case waitingApproval = "Waiting for approval"
+    }
     private(set) var identity: MachineIdentity?
     private(set) var status: RemoteStatus?
     private(set) var peers: [Peer] = []
+    private(set) var accountMachines: [Machine] = []
+    private(set) var account: Account?
     private(set) var discovered: [DiscoveredDaemon] = []
     private(set) var loading = false
+    private(set) var settingUpHelper = false
     var errorMessage: String?
     /// Set after an action that worked, so the screen confirms rather than
     /// leaving somebody wondering whether the button did anything.
@@ -39,6 +51,26 @@ final class MachinesModel {
     /// this one, which is a real and different state.
     var reachable: [Peer] {
         peers.filter { $0.trust == .approved && $0.address?.isEmpty == false }
+    }
+
+    func peer(for machine: Machine) -> Peer? {
+        let identity = machine.publicIdentity ?? machine.machineID
+        return peers.first { peer in
+            peer.key == identity || peer.fingerprint == identity || peer.label == machine.label
+        }
+    }
+
+    func state(for machine: Machine) -> DeviceState {
+        if machine.machineID == account?.thisMachineID { return Bridge.isHosted ? .connected : .settingUp }
+        if let peer = peer(for: machine) {
+            switch peer.trust {
+            case .pending: return .waitingApproval
+            case .approved: return peer.address?.isEmpty == false ? .connected : .unavailable
+            case .revoked: return .unavailable
+            }
+        }
+        if machine.online == true { return .ready }
+        return .unavailable
     }
 
     /// The one string to move to the other machine.
@@ -70,10 +102,67 @@ final class MachinesModel {
             identity = try await Bridge.machineIdentity()
             status = try await Bridge.remoteStatus()
             peers = try await Bridge.peers()
+            if let accountResult = try? await Bridge.account(), accountResult.signedIn {
+                account = accountResult
+                accountMachines = accountResult.machines
+            } else {
+                account = nil
+                accountMachines = []
+            }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Provision the tokenstat-owned helper when this screen is opened. It is
+    /// safe to repeat: the installer repairs the launch agent and reconnects
+    /// the bridge instead of asking the user to restart the app.
+    func ensureHelper() async {
+        #if os(macOS)
+        guard !Bridge.isHosted, !settingUpHelper else { return }
+        await setupHelper()
+        #endif
+    }
+
+    /// Keep the device list live while the screen is open. In particular this
+    /// catches a launch agent that comes up after the initial bridge probe.
+    func refresh() async {
+        if !Bridge.isHosted {
+            Bridge.reconnect()
+            if Bridge.isHosted {
+                await load()
+                return
+            }
+        }
+        do {
+            status = try await Bridge.remoteStatus()
+            peers = try await Bridge.peers()
+            if let accountResult = try? await Bridge.account(), accountResult.signedIn {
+                account = accountResult
+                accountMachines = accountResult.machines
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func setupHelper() async {
+        #if os(macOS)
+        guard !settingUpHelper else { return }
+        settingUpHelper = true
+        errorMessage = nil
+        defer { settingUpHelper = false }
+        do {
+            try HostAgentInstaller.installAndStart()
+            Bridge.reconnect()
+            await load()
+            showNotice(Bridge.isHosted ? "Background helper is running." : "Helper installed. It is still starting; try again in a moment.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        #endif
     }
 
     /// Call this machine something, or clear the name to get the computer's own
@@ -178,6 +267,20 @@ final class MachinesModel {
     func forget(_ peer: Peer) async {
         await change(peer) { try await Bridge.forget(key: peer.key) }
         showNotice("\(peer.label) is forgotten. It will arrive as a stranger next time.")
+    }
+
+    func connect(_ peer: Peer) async {
+        guard peer.address?.isEmpty == false else {
+            errorMessage = "\(peer.label) is approved but has no reachable address yet. Wait for it to appear on the network, then try again."
+            return
+        }
+        do {
+            _ = try await Bridge.remoteWorkspaces(peer: peer)
+            errorMessage = nil
+            showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func change(_ peer: Peer, _ action: () async throws -> Void) async {

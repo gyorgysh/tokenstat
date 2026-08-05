@@ -98,7 +98,7 @@ struct RootView: View {
                     // path onto two lines and a commit subject onto three,
                     // which is a column of text pretending to be a panel. The
                     // minimum went up with it: nothing here reads at 240.
-                    .inspectorColumnWidth(min: 280, ideal: 360, max: 520)
+                    .inspectorColumnWidth(min: 370, ideal: 400, max: 520)
                 }
         }
         .task { await model.load() }
@@ -412,7 +412,7 @@ struct RootView: View {
                 destination = .insights
             }
         case .automations:
-            AutomationsView(model: automations, folders: workspaces.folders)
+            AutomationsView(model: automations, folders: workspaces.folders) { destination = $0 }
         case .todo:
             TodoView(model: todo, folders: workspaces.folders)
         case .machines:

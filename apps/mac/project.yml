@@ -32,8 +32,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.3"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
@@ -56,6 +56,11 @@ targets:
       # Vendor marks for the harnesses. See TRADEMARK.md: these belong to
       # their owners and are not covered by this project's licence.
       - path: Resources
+        buildPhase: resources
+      # Icon Composer source. Xcode 26 compiles this into the modern
+      # appearance-aware app icon and prefers it over the legacy AppIcon set.
+      - path: Design/AppIcon/AppIcon.icon
+        buildPhase: resources
     dependencies:
       # Linked, not embedded: it is a static library, so it ends up inside the
       # binary and there is nothing to copy into the bundle.

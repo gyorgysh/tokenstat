@@ -473,11 +473,19 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     var machineID: String?
     var label: String?
     var lastSyncAt: String?
+    var online: Bool?
+    var lastSeenAt: String?
+    var publicIdentity: String?
+    var trustState: String?
 
     enum CodingKeys: String, CodingKey {
         case machineID = "id"
         case label
         case lastSyncAt
+        case online
+        case lastSeenAt
+        case publicIdentity
+        case trustState
     }
 
     /// Falls back to the label so two unnamed machines do not collapse into

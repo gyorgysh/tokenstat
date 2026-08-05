@@ -182,17 +182,28 @@ struct BranchChip: View {
 struct WorkspaceChangesView: View {
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
+    @State private var expandedDiffs: Set<String> = []
 
     var body: some View {
-        VStack(spacing: 0) {
+        changesSurface
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(Theme.sidebarMaterial)
+    }
+
+    @ViewBuilder
+    private var changesSurface: some View {
+        #if os(macOS)
+        if let folder, folder.exists, folder.git?.isRepo == true {
             changesBody
-            #if os(macOS)
-            if let folder, folder.exists, folder.git?.isRepo == true {
-                CommitBox(model: model, folder: folder)
-            }
-            #endif
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    CommitBox(model: model, folder: folder)
+                }
+        } else {
+            changesBody
         }
-        .background(Theme.sidebarMaterial)
+        #else
+        changesBody
+        #endif
     }
 
     @ViewBuilder
@@ -248,25 +259,9 @@ struct WorkspaceChangesView: View {
                 #if os(macOS)
                 selectAll(git, in: folder)
                 #endif
-                ForEach(groupByDirectory(git.files), id: \.directory) { group in
-                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text(group.directory.isEmpty ? "ROOT" : group.directory.uppercased())
-                            .font(Theme.sectionHeader)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .padding(.top, Theme.Space.s)
-                        ForEach(group.files) { file in
-                            ChangeRow(
-                                file: file,
-                                isStaged: model.isStaged(file.path, in: folder.id),
-                                isOpen: model.activeFile[folder.id] == file.path,
-                                onToggle: { model.toggleStaged(file.path, in: folder.id) },
-                                onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
-                            )
-                        }
-                    }
-                }
+                diffControls(git, in: folder)
+                changeSection("Staged", files: git.files.filter { model.isStaged($0.path, in: folder.id) }, in: folder)
+                changeSection("Unstaged", files: git.files.filter { !model.isStaged($0.path, in: folder.id) }, in: folder)
             }
         } else {
             InspectorEmptyState(
@@ -314,6 +309,90 @@ struct WorkspaceChangesView: View {
             }
         }
     }
+
+    private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text("Review")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button("Expand all") {
+                expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
+                Task {
+                    for file in git.files {
+                        await model.loadDiff(file.path, in: folder.id)
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+            Button("Collapse all") {
+                expandedDiffs.subtract(git.files.map { diffKey($0, in: folder) })
+            }
+            .buttonStyle(.borderless)
+            Button("Review") {
+                model.reviewWorkingTree(in: folder.id)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .layoutPriority(1)
+        }
+        .font(.caption)
+        .padding(.top, Theme.Space.s)
+    }
+
+    @ViewBuilder
+    private func changeSection(_ title: String, files: [FileChange], in folder: WorkspaceFolder) -> some View {
+        if !files.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack {
+                    Text(title.uppercased())
+                        .font(Theme.sectionHeader)
+                        .foregroundStyle(.tertiary)
+                    Text("\(files.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .padding(.top, Theme.Space.s)
+                ForEach(files) { file in
+                    let key = diffKey(file, in: folder)
+                    ChangeRow(
+                        file: file,
+                        isStaged: model.isStaged(file.path, in: folder.id),
+                        isOpen: model.activeFile[folder.id] == file.path,
+                        isExpanded: expandedDiffs.contains(key),
+                        onToggle: { model.toggleStaged(file.path, in: folder.id) },
+                        onToggleDiff: {
+                            if expandedDiffs.contains(key) {
+                                expandedDiffs.remove(key)
+                            } else {
+                                expandedDiffs.insert(key)
+                                Task { await model.loadDiff(file.path, in: folder.id) }
+                            }
+                        },
+                        onOpen: { Task { await model.openFile(file.path, in: folder.id) } }
+                    )
+                    if expandedDiffs.contains(key) {
+                        if let diff = model.diff(for: file.path, in: folder.id) {
+                            ScrollView([.vertical, .horizontal]) {
+                                DiffBody(diff: diff)
+                            }
+                            .frame(maxHeight: 260)
+                                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+                                .padding(.leading, Theme.Space.l)
+                        } else {
+                            ProgressView().controlSize(.small).padding(.leading, Theme.Space.l)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func diffKey(_ file: FileChange, in folder: WorkspaceFolder) -> String {
+        "\(folder.id):\(file.path)"
+    }
 }
 
 #if os(macOS)
@@ -327,10 +406,17 @@ private struct CommitBox: View {
     @Bindable var model: WorkspacesModel
     let folder: WorkspaceFolder
 
-    private var message: Binding<String> {
+    private var title: Binding<String> {
         Binding(
             get: { model.commitMessage[folder.id] ?? "" },
             set: { model.commitMessage[folder.id] = $0 }
+        )
+    }
+
+    private var description: Binding<String> {
+        Binding(
+            get: { model.commitDescription[folder.id] ?? "" },
+            set: { model.commitDescription[folder.id] = $0 }
         )
     }
 
@@ -351,15 +437,36 @@ private struct CommitBox: View {
                     .padding(.horizontal, Theme.Space.m)
             }
 
-            TextField("Commit message", text: message, axis: .vertical)
+            TextField("Commit title", text: title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .lineLimit(2 ... 5)
+                .lineLimit(1)
                 .padding(Theme.Space.s)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
                 .overlay(
                     RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
                 )
+                .padding(.horizontal, Theme.Space.m)
+
+            TextEditor(text: description)
+                .font(.system(size: 12))
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: 44, maxHeight: 82)
+                .padding(Theme.Space.xs)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
+                )
+                .overlay(alignment: .topLeading) {
+                    if description.wrappedValue.isEmpty {
+                        Text("Description (optional)")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, Theme.Space.s)
+                            .padding(.vertical, Theme.Space.s)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .padding(.horizontal, Theme.Space.m)
 
             HStack(spacing: Theme.Space.s) {
@@ -397,7 +504,9 @@ private struct ChangeRow: View {
     var file: FileChange
     var isStaged: Bool
     var isOpen: Bool
+    var isExpanded: Bool
     var onToggle: () -> Void
+    var onToggleDiff: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
@@ -425,6 +534,13 @@ private struct ChangeRow: View {
             }
             .buttonStyle(.plain)
             .help("Open the diff")
+            Button(action: onToggleDiff) {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse diff" : "Expand diff")
             Spacer(minLength: Theme.Space.xs)
             if let added = file.added, added > 0 {
                 Text("+\(added)").font(Theme.numeric(11)).foregroundStyle(Theme.success)

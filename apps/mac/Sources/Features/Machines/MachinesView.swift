@@ -20,12 +20,16 @@ import SwiftUI
 /// whoever is debugging their own network.
 struct MachinesView: View {
     @Bindable var model: MachinesModel
+    @State private var addingDevice = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
+                }
+                if !Bridge.isHosted {
+                    hostSetup
                 }
                 // First, because it is the only thing here that is waiting on a
                 // person. Everything else can be read at leisure.
@@ -37,10 +41,13 @@ struct MachinesView: View {
                 if !model.discovered.isEmpty {
                     discoveredMachines
                 }
+                if !model.accountMachines.isEmpty {
+                    accountDevices
+                }
                 if !model.known.isEmpty {
                     knownMachines
                 }
-                pairing
+                addDeviceAction
                 privacyNote
             }
             .padding(Theme.Space.m)
@@ -51,7 +58,63 @@ struct MachinesView: View {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .task { if model.identity == nil { await model.load() } }
+        .task {
+            if model.identity == nil { await model.load() }
+            await model.ensureHelper()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                await model.refresh()
+            }
+        }
+        .sheet(isPresented: $addingDevice) {
+            PairingForm { key, label, address in
+                await model.pair(key: key, label: label, address: address)
+                addingDevice = false
+            }
+            .padding(Theme.Space.l)
+            .frame(width: 500)
+        }
+    }
+
+    private var addDeviceAction: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add a device")
+                    .font(.callout.weight(.medium))
+                Text("Use nearby discovery or paste a connection invite for a device elsewhere.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Add device") { addingDevice = true }
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private var hostSetup: some View {
+        Card(title: "This Mac is not ready for background connections", subtitle: "The app can still show local data. A small background helper is needed for machines and automations to keep working when this window is closed.") {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.success)
+                Text("Local app mode")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Button {
+                    Task { await model.setupHelper() }
+                } label: {
+                    if model.settingUpHelper {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Set up helper")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.settingUpHelper)
+            }
+        }
     }
 
     // MARK: - This machine
@@ -59,7 +122,7 @@ struct MachinesView: View {
     private var thisMachine: some View {
         Card(
             title: "This machine",
-            subtitle: "What the other machine sees when it finds this one."
+            subtitle: "One simple identity for every connection."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
@@ -79,36 +142,10 @@ struct MachinesView: View {
                                 .textSelection(.enabled)
                         }
                     }
-                    if let code = model.pairingCode {
-                        LabeledContent("Pairing code") {
-                            HStack(spacing: Theme.Space.xs) {
-                                Text(code)
-                                    .font(Theme.mono(10))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .textSelection(.enabled)
-                                Button {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(code, forType: .string)
-                                    model.noticeMessage = "Pairing code copied."
-                                } label: {
-                                    Image(systemName: "doc.on.doc")
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.secondary)
-                                .help("Copy it, then paste it on the other machine")
-                            }
-                        }
-                    }
                 }
                 Divider()
                 serving
-                Text("""
-                Machines on the same network find each other, so there is \
-                nothing to type. Anywhere else, copy the pairing code and paste \
-                it into the other machine.
-                """)
+                Text("Nearby Macs appear automatically. For a machine elsewhere, use Add device once and approve the connection on both sides.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
@@ -160,12 +197,8 @@ struct MachinesView: View {
                     set: { enabled in Task { await model.setServing(enabled) } }
                 )) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Let other machines reach this one")
-                        Text("""
-                        Off until you turn it on. A machine that connects can \
-                        run commands and change files here, so nothing is \
-                        served until you approve it by name.
-                        """)
+                        Text("Link devices")
+                        Text("Only approved devices can open sessions or change files here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
@@ -193,10 +226,7 @@ struct MachinesView: View {
                     // Rare now that a taken port falls back to a free one, so
                     // this means the machine would not let us listen at all.
                     Banner(
-                        text: """
-                        Turned on, but not reachable. This machine refused to \
-                        accept connections at all, which is usually a firewall.
-                        """,
+                        text: "The helper is not listening yet. Set up the background helper, then try again.",
                         severity: .warning
                     )
                 }
@@ -208,8 +238,8 @@ struct MachinesView: View {
 
     private var discoveredMachines: some View {
         Card(
-            title: "Machines nearby",
-            subtitle: "Found on this network. Nothing to type."
+            title: "Nearby devices",
+            subtitle: "Connect with one click, then approve the pairing."
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.discovered) { daemon in
@@ -240,10 +270,7 @@ struct MachinesView: View {
                             .strokeBorder(Theme.border, lineWidth: 1)
                     )
                 }
-                Text("""
-                Check the two words against the ones on that machine's screen \
-                before it can reach this one.
-                """)
+                Text("Check the matching device name before approving access.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -253,8 +280,8 @@ struct MachinesView: View {
 
     private var waitingForApproval: some View {
         Card(
-            title: "Waiting for you",
-            subtitle: "These machines tried to connect and were turned away."
+            title: "Needs your approval",
+            subtitle: "Nothing can run here until you approve it."
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.pending) { peer in
@@ -266,10 +293,7 @@ struct MachinesView: View {
                         }
                     }
                 }
-                Text("""
-                Check the two words against the ones on that machine before \
-                approving. They match, or something is answering in its place.
-                """)
+                Text("Approve only devices you recognize. You can revoke access later.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -278,7 +302,7 @@ struct MachinesView: View {
     }
 
     private var knownMachines: some View {
-        Card(title: "Known machines", subtitle: nil) {
+        Card(title: "Your devices", subtitle: "Manage connections you have already approved.") {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.known) { peer in
                     PeerRow(peer: peer) {
@@ -296,11 +320,70 @@ struct MachinesView: View {
         }
     }
 
-    // MARK: - Pairing
+    private var accountDevices: some View {
+        Card(title: "Account-linked devices", subtitle: "Machines linked to this account. Presence and direct connection arrive when the host reports them.") {
+            VStack(spacing: 0) {
+                ForEach(model.accountMachines) { machine in
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: machine.machineID == model.account?.thisMachineID ? "laptopcomputer" : "desktopcomputer")
+                            .foregroundStyle(Theme.accent)
+                            .frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(machine.displayName)
+                                .font(.callout.weight(.medium))
+                            Text(machine.machineID == model.account?.thisMachineID
+                                ? "This device"
+                                : (formatRelativeDate(machine.lastSyncAt).map { "Last synced \($0)" } ?? "No sync recorded"))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if machine.machineID == model.account?.thisMachineID {
+                            Text("Here")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(Theme.accent)
+                        } else if let online = machine.online {
+                            Text(online ? "Online" : "Offline")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(online ? AnyShapeStyle(Theme.success) : AnyShapeStyle(.tertiary))
+                        } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                            Text("Seen \(seen)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        DeviceStateBadge(state: model.state(for: machine))
+                        if let peer = model.peer(for: machine) {
+                            accountPeerActions(peer)
+                        } else if machine.online == true {
+                            Button("Connect") { }
+                                .buttonStyle(.bordered)
+                                .disabled(true)
+                                .help("Connection details are not available from this account record yet")
+                        }
+                    }
+                    .padding(.vertical, Theme.Space.s)
+                    if machine.id != model.accountMachines.last?.id { Divider() }
+                }
+            }
+        }
+    }
 
-    private var pairing: some View {
-        PairingForm { key, label, address in
-            await model.pair(key: key, label: label, address: address)
+    @ViewBuilder
+    private func accountPeerActions(_ peer: Peer) -> some View {
+        switch peer.trust {
+        case .pending:
+            Button("Approve") { Task { await model.approve(peer) } }
+                .buttonStyle(.borderedProminent)
+        case .approved:
+            if peer.address?.isEmpty == false {
+                Button("Connect") { Task { await model.connect(peer) } }
+                    .buttonStyle(.borderedProminent)
+            }
+            Button("Revoke") { Task { await model.revoke(peer) } }
+                .buttonStyle(.bordered)
+        case .revoked:
+            Button("Approve") { Task { await model.approve(peer) } }
+                .buttonStyle(.bordered)
         }
     }
 
@@ -314,6 +397,28 @@ struct MachinesView: View {
         .font(.caption)
         .foregroundStyle(.tertiary)
         .padding(.top, Theme.Space.xs)
+    }
+}
+
+private struct DeviceStateBadge: View {
+    let state: MachinesModel.DeviceState
+
+    var body: some View {
+        Text(state.rawValue)
+            .font(.caption2.weight(.medium))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.14), in: Capsule())
+            .foregroundStyle(color)
+    }
+
+    private var color: Color {
+        switch state {
+        case .connected, .ready: return Theme.success
+        case .settingUp, .waitingApproval: return Theme.warning
+        case .needsPermission, .needsSignIn: return Theme.accent
+        case .unavailable: return .secondary
+        }
     }
 }
 
@@ -456,8 +561,8 @@ private struct PairingForm: View {
 
     var body: some View {
         Card(
-            title: "Add a machine",
-            subtitle: "Paste the pairing code from its Machines screen."
+            title: "Connect another device",
+            subtitle: "Paste an invite from the other device. Nearby devices do not need this step."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField(

@@ -33,6 +33,7 @@ struct WorkspaceFilesView: View {
 
     var body: some View {
         filesBody
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(backdrop)
             .task(id: folder?.id) {
                 guard let folder, folder.exists else { return }

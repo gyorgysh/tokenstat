@@ -337,6 +337,13 @@ pub struct MachineDto {
     pub id: Option<String>,
     pub label: Option<String>,
     pub last_sync_at: Option<String>,
+    /// Presence and trust are optional because older account APIs omit them.
+    /// Keeping them in the normalized DTO lets newer servers power the
+    /// Machines screen without breaking older profiles.
+    pub online: Option<bool>,
+    pub last_seen_at: Option<String>,
+    pub public_identity: Option<String>,
+    pub trust_state: Option<String>,
 }
 
 impl MachineDto {
@@ -349,6 +356,10 @@ impl MachineDto {
             id: field("id"),
             label: field("label"),
             last_sync_at: field("last_sync_at"),
+            online: v.get("online").and_then(|x| x.as_bool()),
+            last_seen_at: field("last_seen_at").or_else(|| field("last_seen")),
+            public_identity: field("public_identity").or_else(|| field("identity")),
+            trust_state: field("trust_state").or_else(|| field("trust")),
         }
     }
 }

@@ -83,6 +83,13 @@ enum Bridge {
         isHosted = true
     }
 
+    /// Re-probe the host after the app provisions or repairs its launch agent.
+    /// Existing callers keep using the same transport abstraction; only the
+    /// owner of future calls changes.
+    static func reconnect() {
+        connect()
+    }
+
     private static func socketPath(fromEnvelope json: String) -> String? {
         struct Reply: Decodable { let path: String }
         let envelope = try? JSONDecoder().decode(Envelope<Reply>.self, from: Data(json.utf8))
