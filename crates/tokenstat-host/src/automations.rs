@@ -842,7 +842,7 @@ mod tests {
         store.push_run(run).unwrap();
 
         let (command, args) = test_shell_command(if cfg!(windows) {
-            "echo hello"
+            "echo hello & exit /b 0"
         } else {
             "printf hello"
         });
