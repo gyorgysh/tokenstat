@@ -99,9 +99,19 @@ fi
 # carry it. The Machines screen installs this copy into the user's support
 # directory and owns its launch agent; it never silently installs an external
 # agent CLI.
-echo "Building bundled tokenstat-hostd"
-cargo build --release --locked -p tokenstat-host --bin tokenstat-hostd
-cp "$ROOT/target/release/tokenstat-hostd" "$APP/Contents/Resources/tokenstat-hostd"
+# Universal, for the same reason the app is: the helper travels inside a bundle
+# that runs on both kinds of Mac, and a host binary that has no slice for the
+# machine it landed on cannot even be told apart from one that is missing.
+echo "Building bundled tokenstat-hostd ($ARCHS)"
+HOSTD_SLICES=()
+for pair in "aarch64-apple-darwin:arm64" "x86_64-apple-darwin:x86_64"; do
+    target="${pair%%:*}"
+    arch="${pair##*:}"
+    grep -qw "$arch" <<< "$ARCHS" || continue
+    cargo build --release --locked --target "$target" -p tokenstat-host --bin tokenstat-hostd
+    HOSTD_SLICES+=("$ROOT/target/$target/release/tokenstat-hostd")
+done
+lipo -create "${HOSTD_SLICES[@]}" -output "$APP/Contents/Resources/tokenstat-hostd"
 chmod 755 "$APP/Contents/Resources/tokenstat-hostd"
 
 # The permissive dependencies ask that their notices travel with the binary, and
