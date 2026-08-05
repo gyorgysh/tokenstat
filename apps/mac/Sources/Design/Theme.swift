@@ -201,17 +201,29 @@ struct Card<Content: View>: View {
     var subtitle: String?
     /// Trailing accessory in the header, for a count or a control.
     var accessory: AnyView?
+    /// Take all the height offered rather than only what the content needs.
+    ///
+    /// Off by default, because a card in a scrolling column should end where
+    /// its content ends. On for a card sharing a row with others: the row is
+    /// already sized to the tallest card, and a card that does not fill it
+    /// leaves its border stopping short while its neighbour's carries on, which
+    /// is what "the panels do not match" looks like. Filling has to happen
+    /// *inside* the card, before the background is drawn, which is why this is
+    /// a parameter here and not a `.frame` at the call site.
+    var fillsHeight = false
     @ViewBuilder var content: Content
 
     init(
         title: String,
         subtitle: String? = nil,
         accessory: AnyView? = nil,
+        fillsHeight: Bool = false,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
         self.accessory = accessory
+        self.fillsHeight = fillsHeight
         self.content = content()
     }
 
@@ -233,9 +245,19 @@ struct Card<Content: View>: View {
                 }
             }
             content
+            // Content sits at the top of a filled card, rather than being
+            // spread down it. A quota bar belongs under its heading whatever
+            // the neighbour's card happens to be doing.
+            if fillsHeight {
+                Spacer(minLength: 0)
+            }
         }
         .padding(Theme.cardPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: fillsHeight ? .infinity : nil,
+            alignment: .topLeading
+        )
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)

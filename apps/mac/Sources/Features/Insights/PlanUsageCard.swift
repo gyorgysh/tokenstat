@@ -14,9 +14,15 @@ import SwiftUI
 /// A source can have plan usage without publishing a remaining-limit endpoint.
 struct PlanUsageCard: View {
     let rows: [Bucket]
+    /// True when this card shares a row with others and has to match them.
+    var fillsHeight = false
 
     var body: some View {
-        Card(title: "Plan usage", subtitle: "Subscription-covered usage recorded in the archive") {
+        Card(
+            title: "Plan usage",
+            subtitle: "Subscription-covered usage recorded in the archive",
+            fillsHeight: fillsHeight
+        ) {
             if rows.isEmpty {
                 Text("No plan-covered usage recorded in this period.")
                     .font(.callout)

@@ -55,13 +55,16 @@ enum PlanLimits {
 struct PlanLimitPanel: View {
     let provider: ProviderLimits
     let isLoading: Bool
+    /// True when this panel shares a row with others and has to match them.
+    var fillsHeight = false
     let refresh: () -> Void
 
     var body: some View {
         Card(
             title: harnessName(provider.source),
             subtitle: subtitle,
-            accessory: AnyView(header)
+            accessory: AnyView(header),
+            fillsHeight: fillsHeight
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if provider.hasWindows {
