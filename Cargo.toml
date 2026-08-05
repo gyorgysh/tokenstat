@@ -73,7 +73,7 @@ tungstenite = { version = "0.27", default-features = false, features = ["handsha
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }
-anstream = "0.6"
+anstream = "1.0"
 anstyle = "1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }
 crossterm = "0.29"
