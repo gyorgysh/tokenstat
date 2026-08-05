@@ -4,7 +4,7 @@
 //! required. Project *paths*, session ids, and prompts never appear on the
 //! wire. The network stack lives in `tokenstat-sync`.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::Serialize;
 use sha2::Sha256;
 

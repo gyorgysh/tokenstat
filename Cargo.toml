@@ -50,7 +50,7 @@ serde_json = "1"
 thiserror = "2"
 jiff = "0.2"
 blake3 = "1"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 walkdir = "2"
 rayon = "1"
 directories = "6"
@@ -60,9 +60,9 @@ zstd = "0.13"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
 anyhow = "1"
 flate2 = "1"
-sha2 = "0.10"
-hmac = "0.12"
-getrandom = "0.3"
+sha2 = "0.11"
+hmac = "0.13"
+getrandom = "0.4"
 
 # Machine identity and the remote transport. The static key a peer pins is the
 # same key the Noise handshake authenticates, so there is one key and one
@@ -73,7 +73,7 @@ tungstenite = { version = "0.27", default-features = false, features = ["handsha
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }
-anstream = "0.6"
+anstream = "1"
 anstyle = "1"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "crossterm_0_29"] }
 crossterm = "0.29"

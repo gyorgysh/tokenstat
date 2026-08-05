@@ -117,7 +117,10 @@ pub fn read_etag(snapshot_path: &Path, etag_path: &Path) -> Option<String> {
 }
 
 pub fn sha256(contents: &str) -> String {
-    format!("{:x}", Sha256::digest(contents.as_bytes()))
+    Sha256::digest(contents.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Write owner-readable and atomically, creating parent directories.
