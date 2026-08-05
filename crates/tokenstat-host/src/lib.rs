@@ -43,6 +43,7 @@ mod machine;
 pub mod remote;
 pub mod server;
 pub mod session;
+#[cfg(unix)]
 mod sync_scheduler;
 mod todo;
 
