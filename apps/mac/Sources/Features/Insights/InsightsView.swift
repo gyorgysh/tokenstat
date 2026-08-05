@@ -358,7 +358,20 @@ private struct DailyChart: View {
                     RuleMark(x: .value("Selected day", row.key))
                         .foregroundStyle(Theme.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
-                        .annotation(position: .top, alignment: .leading) {
+                        // Resolved against the chart's own bounds, never by
+                        // padding the scale. The default makes room for an
+                        // annotation by growing the y domain, so hovering a bar
+                        // rescaled the axis and squashed every bar on the
+                        // screen: the chart moved under the pointer that was
+                        // only asking what one day was worth.
+                        .annotation(
+                            position: .top,
+                            alignment: .leading,
+                            overflowResolution: AnnotationOverflowResolution(
+                                x: .fit(to: .chart),
+                                y: .fit(to: .chart)
+                            )
+                        ) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(shortDay(row.key))
                                     .font(.caption.weight(.semibold))
