@@ -33,6 +33,7 @@ pub mod config;
 pub mod creds;
 pub mod cursor;
 pub mod discover;
+pub mod grok_limits;
 pub mod host;
 pub mod keychain;
 pub mod opencode_limits;

@@ -600,6 +600,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let providers = std::thread::scope(|scope| {
                 let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
                 let cursor = scope.spawn(tokenstat_sync::cursor::limits);
+                let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
                 let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
                 let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
                 let codex = tokenstat_core::limits::codex_limits();
@@ -615,6 +616,12 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         "Reading the Cursor limits failed unexpectedly.",
                     )
                 });
+                let grok = grok.join().unwrap_or_else(|_| {
+                    tokenstat_core::limits::ProviderLimits::unavailable(
+                        "grok",
+                        "Reading the Grok limits failed unexpectedly.",
+                    )
+                });
                 let opencode = opencode.join().unwrap_or_else(|_| {
                     tokenstat_core::limits::ProviderLimits::unavailable(
                         "opencode",
@@ -627,7 +634,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         "Reading the Antigravity limits failed unexpectedly.",
                     )
                 });
-                vec![claude, codex, cursor, opencode, antigravity]
+                vec![claude, codex, cursor, grok, opencode, antigravity]
             });
             // A vendor that could not be read this time is not a vendor whose
             // quota is unknown. Remember every real reading and hand back the
