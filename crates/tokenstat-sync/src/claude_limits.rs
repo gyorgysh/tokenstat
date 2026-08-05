@@ -18,6 +18,7 @@ use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
 /// Anthropic's OAuth API wants this on every call, and returns 401 without it.
 const OAUTH_BETA: &str = "oauth-2025-04-20";
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+#[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 #[derive(Debug, Deserialize)]

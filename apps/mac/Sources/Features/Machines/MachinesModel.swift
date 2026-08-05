@@ -120,7 +120,7 @@ final class MachinesModel {
     func setServing(_ enabled: Bool) async {
         guard let status else { return }
         do {
-            let outcome = try await Bridge.setServing(enabled, port: status.port)
+            let outcome = try await Bridge.setServing(enabled, tunnel: status.tunnel, port: status.port)
             showNotice(outcome.serving
                 ? "Other machines can now reach this one."
                 : "This machine no longer accepts connections.")
@@ -129,6 +129,20 @@ final class MachinesModel {
         } catch {
             // The likeliest failure is the port already being in use, and the
             // Rust side already names it. Do not rewrite that.
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func setTunnel(_ enabled: Bool) async {
+        guard let status else { return }
+        do {
+            _ = try await Bridge.setServing(status.serving, tunnel: enabled, port: status.port)
+            showNotice(enabled
+                ? "Remote reach is on. Direct connections are still preferred."
+                : "Remote reach is off.")
+            errorMessage = nil
+            await load()
+        } catch {
             errorMessage = error.localizedDescription
         }
     }

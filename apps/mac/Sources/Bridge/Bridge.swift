@@ -738,9 +738,11 @@ extension Bridge {
     /// Slow enough to await: it binds or unbinds a port. Never called on a
     /// timer, and never on launch: whether this machine serves is the user's
     /// standing decision, stored by the daemon.
-    static func setServing(_ enabled: Bool, port: Int) async throws -> ServingOutcome {
+    static func setServing(_ enabled: Bool, tunnel: Bool, port: Int) async throws -> ServingOutcome {
         try await background(
-            "remote.serve", ["enable": enabled, "port": port], as: ServingOutcome.self
+            "remote.serve",
+            ["enable": enabled, "tunnel": tunnel, "port": port],
+            as: ServingOutcome.self
         )
     }
 

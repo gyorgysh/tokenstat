@@ -172,6 +172,19 @@ struct MachinesView: View {
                 }
                 .toggleStyle(.switch)
 
+                Toggle(isOn: Binding(
+                    get: { status.tunnel },
+                    set: { enabled in Task { await model.setTunnel(enabled) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Reach machines from anywhere")
+                        Text("Uses end-to-end encryption. The service can see which machines talked, when, and how much, but not what they said.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+
                 // The setting and the truth are different facts. A port already
                 // in use leaves the first on and the second off, and a screen
                 // that showed only the setting would be lying. Which port is

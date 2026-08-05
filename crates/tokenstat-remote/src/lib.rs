@@ -384,53 +384,57 @@ impl Server {
             .set_nodelay(true)
             .map_err(|e| Refused::Handshake(e.into()))?;
         match handshake_responder(Box::new(stream), &MachineIdentity::from_secret(self.secret)) {
-            Ok(connection) => self.authorize(connection, address),
+            Ok(connection) => authorize(connection, address),
             Err(e) => Err(Refused::Handshake(e)),
         }
     }
+}
 
-    fn authorize(&self, connection: Connection, address: &str) -> Result<Connection, Refused> {
-        let Connection {
+/// Authorize an authenticated connection against the local peer store.
+///
+/// This is shared by direct TCP and tunnel connections. The transport used to
+/// reach a machine must not change the approval rule.
+pub fn authorize(connection: Connection, address: &str) -> Result<Connection, Refused> {
+    let Connection {
+        stream,
+        noise,
+        peer,
+    } = connection;
+    let trust_result = {
+        let mut store = match PeerStore::load() {
+            Ok(store) => store,
+            Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
+        };
+        let known = store.get(&peer).is_some();
+        let trust = store.seen(&peer, "", Some(address), &crate::now());
+        if !known {
+            let _ = store.save();
+        }
+        (known, trust)
+    };
+    match trust_result {
+        (_, Trust::Approved) => Ok(Connection {
             stream,
             noise,
             peer,
-        } = connection;
-        let trust_result = {
-            let mut store = match PeerStore::load() {
-                Ok(store) => store,
-                Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
-            };
-            let known = store.get(&peer).is_some();
-            let trust = store.seen(&peer, "", Some(address), &crate::now());
-            if !known {
-                let _ = store.save();
-            }
-            (known, trust)
-        };
-        match trust_result {
-            (_, Trust::Approved) => Ok(Connection {
+        }),
+        (known, _) => {
+            let mut refusal = Connection {
                 stream,
                 noise,
                 peer,
-            }),
-            (known, _) => {
-                let mut refusal = Connection {
-                    stream,
-                    noise,
-                    peer,
-                };
-                let _ = refusal.send(NOT_APPROVED.as_bytes());
-                refusal.close();
-                if known {
-                    Err(Refused::NotApproved {
-                        fingerprint: fingerprint(&peer),
-                    })
-                } else {
-                    Err(Refused::Unknown {
-                        fingerprint: fingerprint(&peer),
-                        label: address.to_string(),
-                    })
-                }
+            };
+            let _ = refusal.send(NOT_APPROVED.as_bytes());
+            refusal.close();
+            if known {
+                Err(Refused::NotApproved {
+                    fingerprint: fingerprint(&peer),
+                })
+            } else {
+                Err(Refused::Unknown {
+                    fingerprint: fingerprint(&peer),
+                    label: address.to_string(),
+                })
             }
         }
     }

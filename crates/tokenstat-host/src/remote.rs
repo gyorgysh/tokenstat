@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
-use tokenstat_remote::{DEFAULT_PORT, Refused, Server};
+use tokenstat_remote::{DEFAULT_PORT, Refused, Server, authorize};
 
 use crate::session::Session;
 
@@ -52,10 +52,19 @@ pub struct RemoteSettings {
     pub serving: bool,
     #[serde(default = "default_port")]
     pub port: u16,
+    /// Off by default because a tunnel carries terminal output and file data.
+    #[serde(default)]
+    pub tunnel: bool,
+    #[serde(default = "default_tunnel_endpoint")]
+    pub tunnel_endpoint: String,
 }
 
 fn default_port() -> u16 {
     DEFAULT_PORT
+}
+
+fn default_tunnel_endpoint() -> String {
+    "wss://tunnel.tokenstat.ai".into()
 }
 
 impl Default for RemoteSettings {
@@ -63,6 +72,8 @@ impl Default for RemoteSettings {
         Self {
             serving: false,
             port: DEFAULT_PORT,
+            tunnel: false,
+            tunnel_endpoint: default_tunnel_endpoint(),
         }
     }
 }
@@ -319,6 +330,11 @@ fn listening() -> &'static Mutex<Option<Listening>> {
     LISTENING.get_or_init(|| Mutex::new(None))
 }
 
+fn tunnel_running() -> &'static AtomicBool {
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    &RUNNING
+}
+
 /// The session a peer will be answered from.
 ///
 /// Registered by the daemon, and by nothing else. The in-process bridge inside
@@ -353,14 +369,75 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
 pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     register_session(Arc::clone(&session));
     let settings = load_settings();
-    if !settings.serving {
+    if settings.serving {
+        if let Err(e) = start(Arc::clone(&session), settings.port) {
+            // Not fatal. A machine whose port is taken still has to serve its own
+            // window, and the Machines screen will show that serving is off.
+            eprintln!("remote: could not listen on port {}: {e}", settings.port);
+        }
+    }
+    start_tunnel_if_enabled(session, &settings);
+}
+
+fn account_token() -> Result<String, String> {
+    let host = tokenstat_sync::config::load()
+        .ok()
+        .and_then(|config| config.sync.host)
+        .unwrap_or_else(|| "https://tokenstat.ai".into());
+    tokenstat_sync::keychain::load_token(&host)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "sign in to tokenstat.ai before enabling remote reach".into())
+}
+
+fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
+    if !settings.tunnel {
         return;
     }
-    if let Err(e) = start(session, settings.port) {
-        // Not fatal. A machine whose port is taken still has to serve its own
-        // window, and the Machines screen will show that serving is off.
-        eprintln!("remote: could not listen on port {}: {e}", settings.port);
+    if tunnel_running()
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
     }
+    let endpoint = settings.tunnel_endpoint.clone();
+    let token = match account_token() {
+        Ok(token) => token,
+        Err(error) => {
+            eprintln!("remote: tunnel is enabled but unavailable: {error}");
+            tunnel_running().store(false, Ordering::Release);
+            return;
+        }
+    };
+    let identity = match MachineIdentity::load_or_create() {
+        Ok(identity) => identity,
+        Err(error) => {
+            eprintln!("remote: tunnel identity unavailable: {error}");
+            tunnel_running().store(false, Ordering::Release);
+            return;
+        }
+    };
+    std::thread::spawn(move || {
+        while tunnel_running().load(Ordering::Acquire) {
+            match tokenstat_remote::tunnel::listen(&endpoint, &identity, &token) {
+                Ok(connection) => match authorize(connection, "tunnel") {
+                    Ok(connection) => {
+                        let peer_session = Arc::clone(&session);
+                        std::thread::spawn(move || serve_peer(connection, &peer_session));
+                    }
+                    Err(refused) => report(&refused),
+                },
+                Err(error) => {
+                    eprintln!("remote: tunnel connection failed: {error}");
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+            }
+        }
+        tunnel_running().store(false, Ordering::Release);
+    });
+}
+
+fn stop_tunnel() {
+    tunnel_running().store(false, Ordering::Release);
 }
 
 /// Bind the preferred port, or any free one.
@@ -593,12 +670,7 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
             peer.label
         ));
     }
-    let address = peer.address.clone().ok_or_else(|| {
-        format!(
-            "no address for {}. Pair it again with a host and port.",
-            peer.label
-        )
-    })?;
+    let address = peer.address.clone();
     let label = peer.label.clone();
     drop(store);
 
@@ -618,11 +690,55 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     }
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let mut fresh = tokenstat_remote::dial(&address, &identity, Some(expected), &label)
-        .map_err(|e| e.to_string())?;
+    let mut fresh = match address {
+        Some(address) => {
+            match tokenstat_remote::dial(&address, &identity, Some(expected), &label) {
+                Ok(connection) => connection,
+                Err(direct_error) => {
+                    tunnel_dial(&settings(), expected, &identity, &label, direct_error)?
+                }
+            }
+        }
+        None => tunnel_dial(
+            &settings(),
+            expected,
+            &identity,
+            &label,
+            "no direct address",
+        )?,
+    };
     let answer = round_trip(&mut fresh, request.as_bytes()).map_err(|e| e.to_string())?;
     checkin(peer_hex, fresh);
     Ok(answer)
+}
+
+fn settings() -> RemoteSettings {
+    load_settings()
+}
+
+fn tunnel_dial(
+    settings: &RemoteSettings,
+    peer: tokenstat_identity::PublicKey,
+    identity: &MachineIdentity,
+    label: &str,
+    direct_error: impl std::fmt::Display,
+) -> Result<tokenstat_remote::Connection, String> {
+    if !settings.tunnel {
+        return Err(format!("could not reach {label} directly: {direct_error}"));
+    }
+    let token = account_token()?;
+    tokenstat_remote::tunnel::dial(
+        &settings.tunnel_endpoint,
+        peer,
+        identity,
+        Some(peer),
+        &token,
+    )
+    .map_err(|tunnel_error| {
+        format!(
+            "could not reach {label} directly ({direct_error}) or through the tunnel: {tunnel_error}"
+        )
+    })
 }
 
 fn round_trip(
@@ -678,6 +794,8 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
 struct ServeParams {
     enable: bool,
     port: Option<u16>,
+    tunnel: Option<bool>,
+    tunnel_endpoint: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -702,6 +820,7 @@ fn status() -> Result<Value, String> {
         // port is taken, and a screen that showed only the setting would say
         // "serving" about a daemon that is not.
         "serving": settings.serving,
+        "tunnel": settings.tunnel,
         "listening": address.is_some(),
         // The port actually bound, which is not always the one asked for: a
         // taken port falls back to any free one rather than refusing to serve.
@@ -729,18 +848,33 @@ fn serve(params: &str) -> Result<Value, String> {
     if let Some(port) = p.port {
         settings.port = port;
     }
+    if let Some(tunnel) = p.tunnel {
+        settings.tunnel = tunnel;
+    }
+    if let Some(endpoint) = p.tunnel_endpoint {
+        settings.tunnel_endpoint = endpoint;
+    }
     settings.serving = p.enable;
     save_settings(&settings)?;
+    if p.tunnel == Some(false) {
+        stop_tunnel();
+    }
 
     if p.enable {
         // Restart rather than ignore, so changing the port takes effect now
         // instead of at the next daemon start.
         stop()?;
         let address = start(session_for_serving()?, settings.port)?;
-        Ok(json!({"serving": true, "address": address}))
+        if settings.tunnel {
+            start_tunnel_if_enabled(session_for_serving()?, &settings);
+        }
+        Ok(json!({"serving": true, "tunnel": settings.tunnel, "address": address}))
     } else {
         stop()?;
-        Ok(json!({"serving": false, "address": Value::Null}))
+        if p.tunnel == Some(true) {
+            start_tunnel_if_enabled(session_for_serving()?, &settings);
+        }
+        Ok(json!({"serving": false, "tunnel": settings.tunnel, "address": Value::Null}))
     }
 }
 
@@ -831,6 +965,11 @@ mod tests {
     fn serving_is_off_unless_a_file_says_otherwise() {
         assert!(!RemoteSettings::default().serving);
         assert_eq!(RemoteSettings::default().port, DEFAULT_PORT);
+        assert!(!RemoteSettings::default().tunnel);
+        assert_eq!(
+            RemoteSettings::default().tunnel_endpoint,
+            "wss://tunnel.tokenstat.ai"
+        );
     }
 
     /// Trust is not transitive. An approved peer must not be able to use this

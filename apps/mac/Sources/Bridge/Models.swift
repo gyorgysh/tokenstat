@@ -1170,6 +1170,8 @@ struct Peer: Codable, Sendable, Identifiable, Hashable {
 struct RemoteStatus: Codable, Sendable {
     /// What the user chose.
     let serving: Bool
+    /// Whether this machine keeps an outbound connection to the blind tunnel.
+    let tunnel: Bool
     /// What is actually true. These differ when the port is taken, and a screen
     /// showing only the first would claim to be serving when it is not.
     let listening: Bool
