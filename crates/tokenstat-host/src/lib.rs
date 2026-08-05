@@ -46,6 +46,7 @@ pub mod session;
 #[cfg(unix)]
 mod sync_scheduler;
 mod todo;
+pub mod workspaces;
 
 pub use dispatch::call;
 pub use session::{OpenParams, Session};

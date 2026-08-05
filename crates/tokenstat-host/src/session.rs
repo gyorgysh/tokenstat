@@ -25,11 +25,12 @@ pub struct OpenParams {
 /// cached for the same reason: the interactive CLI was re-reading it every
 /// frame before that was fixed, and a GUI would make the same mistake more
 /// often.
+/// The registered folders are deliberately **not** here. They live in
+/// `crate::workspaces`, behind their own lock, because a folder method reads
+/// git rather than the archive and must not queue behind a scan. See that
+/// module for why.
 pub struct Session {
     pub engine: Engine,
-    /// Folders the user registered. Loaded once and written back on change, so
-    /// a reporting call does not touch the disk.
-    pub workspaces: tokenstat_workspace::Registry,
     pub prices: PriceTable,
     /// Device authorization awaiting confirmation.
     ///
@@ -44,13 +45,8 @@ impl Session {
         let path = p.db_path.as_ref().map(std::path::PathBuf::from);
         let engine =
             Engine::open(path.as_deref(), p.timezone.as_deref()).map_err(|e| e.to_string())?;
-        // A registry that will not parse is surfaced as an empty one rather
-        // than refusing to open the archive: reports should still work when
-        // the workspace list is the broken part.
-        let workspaces = tokenstat_workspace::Registry::load().unwrap_or_default();
         Ok(Session {
             engine,
-            workspaces,
             prices: PriceTable::load_with_catalog(),
             pending_login: None,
         })

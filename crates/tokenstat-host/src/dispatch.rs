@@ -292,22 +292,6 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
     }
 }
 
-/// Look up a registered folder, refusing one that is not on disk.
-///
-/// Every per-folder method needs the same two checks, and a missing folder has
-/// to fail with words rather than with whatever git says about a path that is
-/// not there.
-fn folder<'a>(b: &'a Session, id: &str) -> Result<&'a tokenstat_workspace::Workspace, String> {
-    let ws = b
-        .workspaces
-        .get(id)
-        .ok_or_else(|| format!("no workspace with id {id}"))?;
-    if !ws.exists() {
-        return Err(format!("the folder is missing: {}", ws.path.display()));
-    }
-    Ok(ws)
-}
-
 /// Apply a closure to the session.
 ///
 /// A thin wrapper kept because it reads well at every call site and because it
@@ -601,240 +585,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         }),
 
         // Workspaces are registered folders, nothing to do with the archive.
-        // Git is read for each on every list: a status call is cheap, and a
-        // cached one that lies about a dirty tree is worse than none.
-        "workspace.list" => with_session(s, |b| {
-            // One thread per folder. Reading git means three subprocesses, and
-            // doing that serially made the whole list cost the sum of every
-            // repository rather than the slowest one. The folders are
-            // independent, so there is nothing to coordinate.
-            let dtos: Vec<WorkspaceDto> = std::thread::scope(|scope| {
-                let handles: Vec<_> = b
-                    .workspaces
-                    .workspaces
-                    .iter()
-                    .filter(|ws| !is_test_workspace(ws))
-                    .map(|ws| scope.spawn(move || describe(ws)))
-                    .collect();
-                handles
-                    .into_iter()
-                    // A panic reading one folder must not lose the others, and
-                    // there is nothing useful to say about it here.
-                    .filter_map(|h| h.join().ok())
-                    .collect()
-            });
-            serde_json::to_value(dtos).map_err(|e| e.to_string())
-        }),
-
-        "workspace.add" => {
-            let p: WorkspacePathParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            with_session(s, |b| {
-                let ws = b
-                    .workspaces
-                    .add(std::path::Path::new(&p.path), now_ms())
-                    .map_err(|e| e.to_string())?;
-                b.workspaces.save().map_err(|e| e.to_string())?;
-                serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
-            })
-        }
-
-        // Forgets the entry. Never touches the folder.
-        "workspace.remove" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            with_session(s, |b| {
-                let removed = b.workspaces.remove(&p.id);
-                if removed {
-                    b.workspaces.save().map_err(|e| e.to_string())?;
-                }
-                Ok(json!({"removed": removed}))
-            })
-        }
-
-        "workspace.rename" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let name = p.name.unwrap_or_default();
-            with_session(s, |b| {
-                let renamed = b.workspaces.rename(&p.id, &name);
-                if renamed {
-                    b.workspaces.save().map_err(|e| e.to_string())?;
-                }
-                Ok(json!({"renamed": renamed}))
-            })
-        }
-
-        "workspace.status" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            with_session(s, |b| {
-                let ws = b
-                    .workspaces
-                    .get(&p.id)
-                    .ok_or_else(|| format!("no workspace with id {}", p.id))?;
-                serde_json::to_value(describe(ws)).map_err(|e| e.to_string())
-            })
-        }
-
-        // Recent commits. Separate from `workspace.status` because status runs
-        // on a file-change timer and history does not change nearly as often,
-        // so joining them would spawn a `git log` every time a file is saved.
-        "workspace.log" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            // Enough to scroll, few enough that a repository with a decade of
-            // history does not send its whole life over the bridge.
-            let limit = p.limit.unwrap_or(100).min(500);
-            with_session(s, |b| {
-                let ws = b
-                    .workspaces
-                    .get(&p.id)
-                    .ok_or_else(|| format!("no workspace with id {}", p.id))?;
-                let commits = if ws.exists() {
-                    tokenstat_workspace::git::log(&ws.path, limit)
-                } else {
-                    Vec::new()
-                };
-                serde_json::to_value(commits).map_err(|e| e.to_string())
-            })
-        }
-
-        // One directory of the file tree. Lazy per directory: a monorepo has
-        // hundreds of thousands of files and nobody looks at more than one
-        // level at a time.
-        "workspace.tree" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let relative = p.path.unwrap_or_default();
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let entries = tokenstat_workspace::tree::list(&ws.path, &relative)
-                    .map_err(|e| e.to_string())?;
-                serde_json::to_value(entries).map_err(|e| e.to_string())
-            })
-        }
-
-        // One commit in full. Separate from `workspace.log`, which is a list:
-        // reading every commit's diff to draw a list would be absurd.
-        "workspace.show" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let rev = p.path.ok_or("workspace.show needs a commit id")?;
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                match tokenstat_workspace::git::show(&ws.path, &rev) {
-                    Some(detail) => serde_json::to_value(detail).map_err(|e| e.to_string()),
-                    None => Err(format!("no commit {rev} in this workspace")),
-                }
-            })
-        }
-
-        "workspace.diff" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let path = p.path.ok_or("workspace.diff needs a path")?;
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let diff = tokenstat_workspace::git::diff(&ws.path, &path);
-                serde_json::to_value(diff).map_err(|e| e.to_string())
-            })
-        }
-
-        "workspace.read" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let path = p.path.ok_or("workspace.read needs a path")?;
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let content = tokenstat_workspace::tree::read_text(&ws.path, &path)
-                    .map_err(|e| e.to_string())?;
-                serde_json::to_value(json!({"path": path, "content": content}))
-                    .map_err(|e| e.to_string())
-            })
-        }
-
-        // Everything below changes the repository. These exist because the app
-        // is a place to work, not a reporter: they run when someone presses a
-        // button and are never reachable from a timer or a status path. See
-        // `tokenstat_workspace::gitwrite`.
-        "workspace.stage" | "workspace.unstage" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let paths = p.paths.unwrap_or_default();
-            let staging = method == "workspace.stage";
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let outcome = if staging {
-                    tokenstat_workspace::gitwrite::stage(&ws.path, &paths)
-                } else {
-                    tokenstat_workspace::gitwrite::unstage(&ws.path, &paths)
-                };
-                serde_json::to_value(outcome).map_err(|e| e.to_string())
-            })
-        }
-
-        "workspace.commit" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let message = p.message.unwrap_or_default();
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let outcome = tokenstat_workspace::gitwrite::commit(&ws.path, &message);
-                serde_json::to_value(outcome).map_err(|e| e.to_string())
-            })
-        }
-
-        "workspace.write" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            let path = p.path.ok_or("workspace.write needs a path")?;
-            let content = p.content.ok_or("workspace.write needs content")?;
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let outcome = tokenstat_workspace::gitwrite::write_text(&ws.path, &path, &content);
-                serde_json::to_value(outcome).map_err(|e| e.to_string())
-            })
-        }
-
-        "workspace.push" => {
-            let p: WorkspaceIdParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            with_session(s, |b| {
-                let ws = folder(b, &p.id)?;
-                let outcome = tokenstat_workspace::gitwrite::push(&ws.path);
-                serde_json::to_value(outcome).map_err(|e| e.to_string())
-            })
-        }
-
-        // Terminals. The process is owned here rather than by the front end,
-        // which is what lets an iPad watch a session running on a Mac and what
-        // keeps an automation alive after a window closes.
-        "pty.spawn" => {
-            let p: PtySpawnParams =
-                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-            with_session(s, |b| {
-                let ws = b
-                    .workspaces
-                    .get(&p.workspace_id)
-                    .ok_or_else(|| format!("no workspace with id {}", p.workspace_id))?;
-                if !ws.exists() {
-                    return Err(format!("the folder is missing: {}", ws.path.display()));
-                }
-                let info = tokenstat_pty::manager()
-                    .spawn(&tokenstat_pty::Spawn {
-                        command: p.command.clone(),
-                        args: p.args.clone(),
-                        cwd: ws.path.clone(),
-                        workspace_id: Some(ws.id.clone()),
-                        rows: p.rows,
-                        cols: p.cols,
-                    })
-                    .map_err(|e| e.to_string())?;
-                serde_json::to_value(info).map_err(|e| e.to_string())
-            })
-        }
-
         "automation.list" => {
             serde_json::to_value(crate::automations::shared().list()).map_err(|e| e.to_string())
         }
@@ -872,7 +622,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         "automation.run" => {
             let p: AutomationParams = parse(params)?;
             serde_json::to_value(
-                crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?, s)?,
+                crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?)?,
             )
             .map_err(|e| e.to_string())
         }
@@ -942,7 +692,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         "todo.delegate" => {
             let p: TodoParams = parse(params)?;
             serde_json::to_value(
-                crate::todo::shared().delegate(&p.id.ok_or("todo.delegate needs an id")?, s)?,
+                crate::todo::shared().delegate(&p.id.ok_or("todo.delegate needs an id")?)?,
             )
             .map_err(|e| e.to_string())
         }
@@ -988,6 +738,253 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
 /// keystroke debounce, and it is a pure function of the text the caller already
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
+/// The registered folders, and the terminals that run in them.
+///
+/// A separate function, and tried before the session lock, because all of this
+/// reads git and the filesystem and none of it reads the archive. It used to
+/// sit behind the one daemon-wide mutex, and the cost was exactly what you
+/// would expect: pressing a button to open a terminal waited for whatever scan
+/// or report happened to hold the session.
+///
+/// Returns `None` for a method it does not own, the same shape as
+/// `machine::call` and `remote::call`.
+fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
+    match method {
+        "workspace.list" | "workspace.add" | "workspace.remove" | "workspace.rename"
+        | "workspace.status" | "workspace.log" | "workspace.tree" | "workspace.show"
+        | "workspace.diff" | "workspace.read" | "workspace.stage" | "workspace.unstage"
+        | "workspace.commit" | "workspace.write" | "workspace.push" | "pty.spawn" => {}
+        _ => return None,
+    }
+    Some(folder_call(method, params))
+}
+
+/// The bodies, split out so they can use `?` on a `Result`.
+///
+/// Each takes the registry lock only long enough to copy the folder it needs.
+/// Nothing here runs a subprocess with a guard in hand.
+fn folder_call(method: &str, params: &str) -> Result<Value, String> {
+    match method {
+        // The registered folders, and the terminals that run in them. All of
+        // this reads git and the filesystem, never the archive, so none of it
+        // belongs behind the session lock. It used to be, and the cost was
+        // exactly what you would expect: pressing a button to open a terminal
+        // waited for whatever scan or report happened to hold the session.
+        //
+        // Each arm takes the registry lock only long enough to copy the folder
+        // it needs. Nothing below runs a subprocess with a guard in hand.
+        //
+        // Git is read for each on every list: a status call is cheap, and a
+        // cached one that lies about a dirty tree is worse than none.
+        "workspace.list" => {
+            let folders: Vec<tokenstat_workspace::Workspace> = crate::workspaces::read()
+                .workspaces
+                .iter()
+                .filter(|ws| !is_test_workspace(ws))
+                .cloned()
+                .collect();
+            // One thread per folder. Reading git means three subprocesses, and
+            // doing that serially made the whole list cost the sum of every
+            // repository rather than the slowest one. The folders are
+            // independent, so there is nothing to coordinate.
+            let dtos: Vec<WorkspaceDto> = std::thread::scope(|scope| {
+                let handles: Vec<_> = folders
+                    .iter()
+                    .map(|ws| scope.spawn(move || describe(ws)))
+                    .collect();
+                handles
+                    .into_iter()
+                    // A panic reading one folder must not lose the others, and
+                    // there is nothing useful to say about it here.
+                    .filter_map(|h| h.join().ok())
+                    .collect()
+            });
+            serde_json::to_value(dtos).map_err(|e| e.to_string())
+        }
+
+        "workspace.add" => {
+            let p: WorkspacePathParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = {
+                let mut registry = crate::workspaces::write();
+                let ws = registry
+                    .add(std::path::Path::new(&p.path), now_ms())
+                    .map_err(|e| e.to_string())?;
+                registry.save().map_err(|e| e.to_string())?;
+                ws
+            };
+            // Described after the guard is dropped: this runs git.
+            serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
+        }
+
+        // Forgets the entry. Never touches the folder.
+        "workspace.remove" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let mut registry = crate::workspaces::write();
+            let removed = registry.remove(&p.id);
+            if removed {
+                registry.save().map_err(|e| e.to_string())?;
+            }
+            Ok(json!({"removed": removed}))
+        }
+
+        "workspace.rename" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let name = p.name.unwrap_or_default();
+            let mut registry = crate::workspaces::write();
+            let renamed = registry.rename(&p.id, &name);
+            if renamed {
+                registry.save().map_err(|e| e.to_string())?;
+            }
+            Ok(json!({"renamed": renamed}))
+        }
+
+        "workspace.status" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::get(&p.id)?;
+            serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
+        }
+
+        // Recent commits. Separate from `workspace.status` because status runs
+        // on a file-change timer and history does not change nearly as often,
+        // so joining them would spawn a `git log` every time a file is saved.
+        "workspace.log" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            // Enough to scroll, few enough that a repository with a decade of
+            // history does not send its whole life over the bridge.
+            let limit = p.limit.unwrap_or(100).min(500);
+            let ws = crate::workspaces::get(&p.id)?;
+            let commits = if ws.exists() {
+                tokenstat_workspace::git::log(&ws.path, limit)
+            } else {
+                Vec::new()
+            };
+            serde_json::to_value(commits).map_err(|e| e.to_string())
+        }
+
+        // One directory of the file tree. Lazy per directory: a monorepo has
+        // hundreds of thousands of files and nobody looks at more than one
+        // level at a time.
+        "workspace.tree" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let relative = p.path.unwrap_or_default();
+            let ws = crate::workspaces::folder(&p.id)?;
+            let entries =
+                tokenstat_workspace::tree::list(&ws.path, &relative).map_err(|e| e.to_string())?;
+            serde_json::to_value(entries).map_err(|e| e.to_string())
+        }
+
+        // One commit in full. Separate from `workspace.log`, which is a list:
+        // reading every commit's diff to draw a list would be absurd.
+        "workspace.show" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let rev = p.path.ok_or("workspace.show needs a commit id")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            match tokenstat_workspace::git::show(&ws.path, &rev) {
+                Some(detail) => serde_json::to_value(detail).map_err(|e| e.to_string()),
+                None => Err(format!("no commit {rev} in this workspace")),
+            }
+        }
+
+        "workspace.diff" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.diff needs a path")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let diff = tokenstat_workspace::git::diff(&ws.path, &path);
+            serde_json::to_value(diff).map_err(|e| e.to_string())
+        }
+
+        "workspace.read" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.read needs a path")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let content =
+                tokenstat_workspace::tree::read_text(&ws.path, &path).map_err(|e| e.to_string())?;
+            serde_json::to_value(json!({"path": path, "content": content}))
+                .map_err(|e| e.to_string())
+        }
+
+        // Everything below changes the repository. These exist because the app
+        // is a place to work, not a reporter: they run when someone presses a
+        // button and are never reachable from a timer or a status path. See
+        // `tokenstat_workspace::gitwrite`.
+        "workspace.stage" | "workspace.unstage" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let paths = p.paths.unwrap_or_default();
+            let staging = method == "workspace.stage";
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = if staging {
+                tokenstat_workspace::gitwrite::stage(&ws.path, &paths)
+            } else {
+                tokenstat_workspace::gitwrite::unstage(&ws.path, &paths)
+            };
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.commit" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let message = p.message.unwrap_or_default();
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = tokenstat_workspace::gitwrite::commit(&ws.path, &message);
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.write" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let path = p.path.ok_or("workspace.write needs a path")?;
+            let content = p.content.ok_or("workspace.write needs content")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = tokenstat_workspace::gitwrite::write_text(&ws.path, &path, &content);
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.push" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = tokenstat_workspace::gitwrite::push(&ws.path);
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        // Terminals. The process is owned here rather than by the front end,
+        // which is what lets an iPad watch a session running on a Mac and what
+        // keeps an automation alive after a window closes.
+        //
+        // This is the arm the session lock hurt most. Spawning a shell is a
+        // fork away, but it used to queue behind every scan and report first,
+        // so opening a terminal took tens of seconds on a busy daemon.
+        "pty.spawn" => {
+            let p: PtySpawnParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.workspace_id)?;
+            let info = tokenstat_pty::manager()
+                .spawn(&tokenstat_pty::Spawn {
+                    command: p.command.clone(),
+                    args: p.args.clone(),
+                    cwd: ws.path.clone(),
+                    workspace_id: Some(ws.id.clone()),
+                    rows: p.rows,
+                    cols: p.cols,
+                })
+                .map_err(|e| e.to_string())?;
+            serde_json::to_value(info).map_err(|e| e.to_string())
+        }
+        // `folders` filtered these, so nothing else can arrive.
+        other => Err(format!("unknown folder method: {other}")),
+    }
+}
+
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     // Identity and the peer list. Sessionless because the Machines screen is
     // where somebody goes when something is wrong, and an archive that will not
@@ -1000,6 +997,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     // a call being forwarded to an idle machine must not queue behind a scan
     // running on this one.
     if let Some(answer) = crate::remote::call(method, params) {
+        return Some(answer);
+    }
+
+    // Folders and terminals. Same reasoning: none of it reads the archive.
+    if let Some(answer) = folders(method, params) {
         return Some(answer);
     }
 
@@ -1346,9 +1348,27 @@ mod tests {
         // slowest one. It is not exercised here because calling it would make
         // those requests from the test suite.
 
-        // Everything else still goes through the session, `pty.spawn` included:
-        // it resolves a workspace id, which only the session knows.
-        for method in ["pty.spawn", "workspace.list", "info", "totals"] {
+        // `pty.spawn` is on the list too, and that is the point of the folder
+        // registry living outside the session. Spawning a shell is a fork away,
+        // but while the workspace lookup needed the session it queued behind
+        // every scan and report first, and opening a terminal took tens of
+        // seconds on a busy daemon. Empty params fail to parse, so this reaches
+        // the envelope without starting a process.
+        let out = call_sessionless("pty.spawn", "{}")
+            .expect("pty.spawn must be answerable without a session");
+        let v: Value = serde_json::from_str(&out).expect("pty.spawn returned non-JSON");
+        assert!(v["ok"].is_boolean(), "pty.spawn lacks ok: {out}");
+
+        // The folder methods are sessionless for the same reason. Not called
+        // here: `workspace.list` runs git over whatever this machine actually
+        // has registered, which is not a test's business.
+        assert!(
+            folders("workspace.list", "{}").is_some(),
+            "workspace.list must not need the session"
+        );
+
+        // Anything that reads the archive still does.
+        for method in ["info", "totals"] {
             assert!(
                 call_sessionless(method, "{}").is_none(),
                 "{method} must not bypass the session"

@@ -17,8 +17,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::session::Session;
-
 /// How many completed runs to remember per machine.
 const RUNS_KEPT: usize = 100;
 
@@ -512,21 +510,8 @@ impl Store {
 
     /// Run a job that is not part of the stored list: the todo board's
     /// delegate path. Returns the run so the caller can link it to its card.
-    pub fn run_adhoc(
-        self: &Arc<Store>,
-        job: Automation,
-        session: &Session,
-    ) -> Result<RunRecord, String> {
-        let workspace = session
-            .workspaces
-            .get(&job.workspace_id)
-            .ok_or_else(|| format!("no workspace with id {}", job.workspace_id))?;
-        if !workspace.exists() {
-            return Err(format!(
-                "the folder is missing: {}",
-                workspace.path.display()
-            ));
-        }
+    pub fn run_adhoc(self: &Arc<Store>, job: Automation) -> Result<RunRecord, String> {
+        let workspace = crate::workspaces::folder(&job.workspace_id)?;
         let argv = agent_command(&job.backend, &job.prompt)?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
@@ -568,13 +553,13 @@ impl Store {
     }
 
     /// Run one stored job immediately, or one due job from the scheduler.
-    pub fn run(self: &Arc<Store>, id: &str, session: &Session) -> Result<Automation, String> {
+    pub fn run(self: &Arc<Store>, id: &str) -> Result<Automation, String> {
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
             .ok_or_else(|| format!("no automation with id {id}"))?;
-        let run = self.run_adhoc(job.clone(), session)?;
+        let run = self.run_adhoc(job.clone())?;
         job.last_run_at_ms = Some(run.started_at_ms);
         job.last_run_id = Some(run.id.clone());
         job.next_run_at_ms = if job.enabled {
@@ -678,7 +663,7 @@ impl Store {
         }
     }
 
-    pub fn run_due(self: &Arc<Store>, session: &Session) {
+    pub fn run_due(self: &Arc<Store>) {
         let now = now_ms();
         let ids: Vec<String> = self
             .list()
@@ -687,7 +672,7 @@ impl Store {
             .map(|job| job.id)
             .collect();
         for id in ids {
-            let _ = self.run(&id, session);
+            let _ = self.run(&id);
         }
     }
 }
@@ -696,13 +681,15 @@ impl Store {
 
 /// Start the recurring scheduler. Only the daemon server calls this; the
 /// in-process bridge never runs jobs on a timer.
-pub fn start_scheduler(session: Arc<Mutex<Session>>) {
+/// Takes no session, and that matters. This used to lock the shared session on
+/// every tick and hold it while it spawned agents, so a five-second timer was
+/// enough to make an interactive call wait behind it. A job needs a folder and
+/// a pty, neither of which is the archive.
+pub fn start_scheduler() {
     let store = shared();
     std::thread::spawn(move || {
         loop {
-            if let Ok(guard) = session.lock() {
-                store.run_due(&guard);
-            }
+            store.run_due();
             std::thread::sleep(TICK);
         }
     });
@@ -841,14 +828,13 @@ mod tests {
         assert!(agent_command("claude", "   ").is_err());
     }
 
-    fn sh_workspace(dir: &Path) -> (Session, String) {
-        let mut session = Session::open(&crate::session::OpenParams {
-            db_path: Some(dir.join("archive.db").display().to_string()),
-            timezone: Some("UTC".into()),
-        })
-        .unwrap();
-        let ws = session.workspaces.add(dir, now_ms()).unwrap();
-        (session, ws.id)
+    /// Register `dir` in the shared registry and return its id.
+    ///
+    /// The registry is process-wide, so this adds rather than replaces. Tests
+    /// use their own temp folders, which keeps them independent of each other.
+    fn sh_workspace(dir: &Path) -> String {
+        let mut registry = crate::workspaces::write();
+        registry.add(dir, now_ms()).unwrap().id
     }
 
     /// The same script in whichever shell the platform has. Kept next to the
@@ -1009,7 +995,7 @@ mod tests {
     fn the_scheduler_runs_only_due_jobs() {
         let dir = temp_dir("sched");
         std::fs::create_dir_all(&dir).unwrap();
-        let (session, workspace_id) = sh_workspace(&dir);
+        let workspace_id = sh_workspace(&dir);
         let store = Arc::new(Store::at(dir.join("jobs.json")));
 
         // A job due long ago on the harmless shell backend, enabled. Seeded
@@ -1032,7 +1018,7 @@ mod tests {
         never.next_run_at_ms = Some(now_ms() + 60_000);
         store.seed(never);
 
-        store.run_due(&session);
+        store.run_due();
         let jobs = store.list();
         let due = jobs.iter().find(|j| j.id == "due").unwrap();
         assert!(due.last_run_at_ms.is_some(), "the due job ran");

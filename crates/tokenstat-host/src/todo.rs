@@ -10,8 +10,6 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
-use crate::session::Session;
-
 /// The columns, in order. Fixed, because a board with user-editable columns is
 /// a settings screen, and this milestone is the cards.
 pub const COLUMNS: [&str; 3] = ["backlog", "doing", "done"];
@@ -288,11 +286,7 @@ impl Board {
 
     /// Hand a card to an agent. The run is a one-shot automation whose
     /// transcript lands in the runs history.
-    pub fn delegate(
-        self: &std::sync::Arc<Board>,
-        id: &str,
-        session: &Session,
-    ) -> Result<Card, String> {
+    pub fn delegate(self: &std::sync::Arc<Board>, id: &str) -> Result<Card, String> {
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let (job, title) = {
             let card = cards
@@ -328,7 +322,7 @@ impl Board {
         };
         // The run starts while the board is locked, but it touches only the
         // automation store, so nothing here can deadlock.
-        let run = crate::automations::shared().run_adhoc(job, session)?;
+        let run = crate::automations::shared().run_adhoc(job)?;
         let idx = cards.iter().position(|c| c.id == id).unwrap();
         cards[idx].delegate = Some(Delegate {
             run_id: run.id.clone(),
@@ -453,13 +447,8 @@ mod tests {
         let dir = std::env::temp_dir().join("tokenstat-todo-test4");
         let board = std::sync::Arc::new(Board::at(dir.join("todo.json")));
         board.create(card("a")).unwrap();
-        let session = Session::open(&crate::session::OpenParams {
-            db_path: Some(dir.join("archive.db").display().to_string()),
-            timezone: Some("UTC".into()),
-        })
-        .unwrap();
         // Workspace "w" does not exist, so delegation fails with words.
-        let err = board.delegate("a", &session).unwrap_err();
+        let err = board.delegate("a").unwrap_err();
         assert!(err.contains("no workspace"), "{err}");
     }
 }
