@@ -76,9 +76,8 @@ impl FetchError {
             || lower.contains("not logged in")
             || lower.contains("sign in")
             || lower.contains("token missing or revoked");
-        let upgrade = lower.contains("(402")
-            || lower.contains("upgrade_required")
-            || lower.contains("(403)");
+        let upgrade =
+            lower.contains("(402") || lower.contains("upgrade_required") || lower.contains("(403)");
         let reason = if authentication {
             FailureReason::Authentication
         } else if upgrade {
@@ -275,9 +274,8 @@ mod tests {
     fn a_plan_limitation_is_expected_but_not_an_auth_problem() {
         // "Your plan does not include this" is a settled fact about the
         // account, not a fault, but signing in again would not fix it.
-        let error = FetchError::new(
-            "the account refused this request (403): upgrade_required".to_string(),
-        );
+        let error =
+            FetchError::new("the account refused this request (403): upgrade_required".to_string());
         assert!(error.expected);
         assert_eq!(error.reason, FailureReason::UpgradeRequired);
     }
