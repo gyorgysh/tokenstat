@@ -106,6 +106,14 @@ struct CodeTextView: NSViewRepresentable {
         /// reported back as if the user had typed it.
         private var isApplyingEdit = false
 
+        /// What the text view holds, as this class last saw it.
+        ///
+        /// Kept so `sync` can tell whether the model has moved without reading
+        /// the buffer back out of the text storage. It is not a second source
+        /// of truth: every path that changes the view updates it in the same
+        /// breath.
+        private var syncedText = ""
+
         init(document: EditorDocument, onSave: @escaping () -> Void) {
             self.document = document
             self.onSave = onSave
@@ -118,6 +126,8 @@ struct CodeTextView: NSViewRepresentable {
             isApplyingEdit = true
             textView.string = document.text
             isApplyingEdit = false
+            syncedText = document.text
+            textChangedSinceCount = true
             // A freshly opened file has no undo history worth keeping, and
             // leaving the previous document's would let Cmd+Z type another
             // file's text into this one.
@@ -138,11 +148,19 @@ struct CodeTextView: NSViewRepresentable {
             // The model's text and the view's disagree only when something
             // other than typing changed it: a save, or a re-read after the file
             // changed on disk. Typing is already in both.
-            if next.text != textView.string {
+            //
+            // Compared against the copy this class already has rather than
+            // against `textView.string`, which bridges the whole buffer out of
+            // the text storage every time it is read. `sync` runs on every
+            // SwiftUI update of this view, so that read was a full copy of the
+            // file for the common case of nothing having changed at all.
+            if next.text != syncedText {
                 let selection = textView.selectedRange()
                 isApplyingEdit = true
                 textView.string = next.text
                 isApplyingEdit = false
+                syncedText = next.text
+                textChangedSinceCount = true
                 textView.setSelectedRange(
                     NSRange(
                         location: min(selection.location, (next.text as NSString).length), length: 0
@@ -204,19 +222,66 @@ struct CodeTextView: NSViewRepresentable {
             storage.endEditing()
         }
 
+        /// Lines counted last time, and the length they were counted at.
+        private var lineCount = 1
+        private var countedLength = -1
+        /// Set by `textDidChange`, so an edit that happens to leave the length
+        /// alone still forces a recount. Replacing a character with a newline
+        /// is exactly that case, and a gutter that misses it is wrong until
+        /// the next unrelated edit.
+        private var textChangedSinceCount = true
+
         func refreshRuler(_ textView: NSTextView) {
             ruler?.changedLines = document.changedLines
-            ruler?.sizeToFit(lineCount: textView.string.reduce(into: 1) { count, c in
-                if c == "\n" { count += 1 }
-            })
+            ruler?.sizeToFit(lineCount: lines(in: textView))
             ruler?.needsDisplay = true
+        }
+
+        /// How many lines the buffer has.
+        ///
+        /// Counted through the text storage's `NSString`, in one pass, and only
+        /// when the text has actually changed. The obvious version, reducing
+        /// over `textView.string`, bridges the whole file into a Swift `String`
+        /// and then walks it grapheme by grapheme. That ran on every keystroke
+        /// and on every SwiftUI update, so a large file cost two full passes
+        /// over its own text per character typed.
+        private func lines(in textView: NSTextView) -> Int {
+            guard let storage = textView.textStorage else { return 1 }
+            let length = storage.length
+            guard textChangedSinceCount || length != countedLength else { return lineCount }
+
+            // Newlines plus one, which is the same rule the gutter has always
+            // used: a trailing newline means a real empty row at the bottom.
+            var count = 1
+            let text = storage.mutableString
+            var from = 0
+            while from < length {
+                let found = text.range(
+                    of: "\n",
+                    options: [],
+                    range: NSRange(location: from, length: length - from)
+                )
+                guard found.location != NSNotFound else { break }
+                count += 1
+                from = found.location + found.length
+            }
+
+            lineCount = count
+            countedLength = length
+            textChangedSinceCount = false
+            return lineCount
         }
 
         // MARK: - NSTextViewDelegate
 
         func textDidChange(_ notification: Notification) {
             guard !isApplyingEdit, let textView = notification.object as? NSTextView else { return }
-            document.setText(textView.string)
+            textChangedSinceCount = true
+            // One bridge of the buffer into a Swift string per keystroke, not
+            // two. `refreshRuler` used to take its own copy to count lines.
+            let text = textView.string
+            syncedText = text
+            document.setText(text)
             refreshRuler(textView)
         }
 

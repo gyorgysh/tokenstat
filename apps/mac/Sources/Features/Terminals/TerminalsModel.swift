@@ -50,6 +50,17 @@ final class TerminalsModel {
         return available.first
     }
 
+    /// Say which session is on screen, or nil when none is.
+    ///
+    /// Exactly one at a time: only one workspace pane is mounted, so a second
+    /// focused session would be a session nobody can see polling as though
+    /// somebody were typing into it.
+    func focus(_ id: String?) {
+        for session in sessions where session.isFocused != (session.id == id) {
+            session.isFocused = session.id == id
+        }
+    }
+
     func select(_ session: TerminalSession) {
         selectedID = session.id
         if !session.workspaceID.isEmpty {

@@ -16,6 +16,11 @@ final class AutomationsModel {
     private(set) var jobs: [Automation] = []
     private(set) var runs: [RunRecord] = []
     private(set) var backends: [AgentBackend] = []
+
+    /// True once the daemon has been read at least once. "No automations yet"
+    /// and "not asked yet" are different answers and must not look the same.
+    private(set) var hasLoaded = false
+
     var errorMessage: String?
     var noticeMessage: String?
 
@@ -28,6 +33,28 @@ final class AutomationsModel {
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
 
+    /// True while the screen is on show.
+    ///
+    /// The transcript poll is a live tail, at four hundred milliseconds. Its
+    /// only reader is a text view on this screen, so with the screen gone it is
+    /// a bridge round trip twice a second producing text nobody will read. The
+    /// model outlives the view, so this has to be said out loud.
+    private var isVisible = false
+
+    /// The screen appeared: load, and tail whatever is running.
+    func appeared() async {
+        isVisible = true
+        await load()
+        syncWatching()
+    }
+
+    /// The screen went away. The run carries on in the daemon, which is the
+    /// whole point of it living there, so only the tail stops.
+    func disappeared() {
+        isVisible = false
+        stopPolling()
+    }
+
     func load() async {
         do {
             async let j = Bridge.automations()
@@ -36,6 +63,7 @@ final class AutomationsModel {
             jobs = try await j
             runs = try await r
             backends = try await b
+            hasLoaded = true
             errorMessage = nil
             syncWatching()
         } catch {
@@ -162,7 +190,7 @@ final class AutomationsModel {
     }
 
     private func startPolling(_ id: String) {
-        guard pollTask == nil else { return }
+        guard isVisible, pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }

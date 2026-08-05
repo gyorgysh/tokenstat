@@ -108,7 +108,12 @@ struct RootView: View {
         // Checked, fetched and put in place without being asked. Only the
         // restart is a decision, and it waits in the sidebar until it is taken.
         .task { await appUpdate.checkAndInstall() }
-        .task { await workspaces.load() }
+        .task {
+            await workspaces.load()
+            // Other machines on their own slow schedule. Local folders refresh
+            // from the file watcher, which must not dial anybody.
+            await workspaces.watchPeers()
+        }
         #if os(macOS)
         .task { await terminals.load() }
         // The daemon outlives the app, so a helper installed by an older build

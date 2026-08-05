@@ -1126,15 +1126,36 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
 
 /// One poll's worth of terminal output.
 ///
-/// `data` is base64 because the bytes are not valid UTF-8 in general: an
-/// escape sequence can be cut in half at a read boundary.
-struct PtyChunk: Codable, Sendable {
-    var data: String
+/// The wire carries base64, because the bytes are not valid UTF-8 in general:
+/// an escape sequence can be cut in half at a read boundary. The decode happens
+/// here, in `init(from:)`, which runs on the bridge's own queue. That placement
+/// is the point: a burst of build output is up to half a megabyte per poll, and
+/// decoding it in the session actor put that work on the thread that draws.
+struct PtyChunk: Decodable, Sendable {
+    /// The output itself, already decoded.
+    var bytes: Data
     /// Offset to ask for next time.
     var nextOffset: UInt64
     /// Bytes dropped before this chunk because this reader fell behind the
     /// host's bounded buffer. Zero in normal use, and never silently ignored.
     var dropped: UInt64
+
+    private enum CodingKeys: String, CodingKey {
+        case data
+        case nextOffset
+        case dropped
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let encoded = try container.decode(String.self, forKey: .data)
+        // An unreadable chunk is empty output rather than a failed poll. The
+        // offset still advances, so the session carries on instead of asking
+        // for the same bytes forever.
+        bytes = Data(base64Encoded: encoded) ?? Data()
+        nextOffset = try container.decode(UInt64.self, forKey: .nextOffset)
+        dropped = try container.decode(UInt64.self, forKey: .dropped)
+    }
 }
 
 // MARK: - Machines

@@ -12,10 +12,37 @@ import Observation
 final class TodoModel {
     private(set) var cards: [TodoCard] = []
     private(set) var backends: [AgentBackend] = []
+
+    /// True once the board has been read at least once.
+    ///
+    /// An empty board and a board that has not loaded look identical, and they
+    /// mean opposite things. Without this the columns said "No cards" for the
+    /// length of the first read, which is a claim rather than a wait.
+    private(set) var hasLoaded = false
     var errorMessage: String?
     var noticeMessage: String?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
+
+    /// True while the board is on screen.
+    ///
+    /// Polling is for keeping a board somebody is watching honest. The model
+    /// outlives the view, so without this the two-second loop carried on
+    /// running for the rest of the session after a single visit to a screen
+    /// with a delegated card on it.
+    private var isVisible = false
+
+    /// The board appeared. Load, and start polling if anything is running.
+    func appeared() async {
+        isVisible = true
+        await load()
+    }
+
+    /// The board went away. Nothing to keep honest.
+    func disappeared() {
+        isVisible = false
+        syncPolling()
+    }
 
     /// Cards for a column, in board order.
     func cards(in column: String) -> [TodoCard] {
@@ -28,6 +55,7 @@ final class TodoModel {
             async let b = Bridge.automationBackends()
             cards = try await c
             backends = try await b
+            hasLoaded = true
             errorMessage = nil
             syncPolling()
         } catch {
@@ -131,9 +159,10 @@ final class TodoModel {
         }
     }
 
-    /// While any card is running, keep the board honest without a push channel.
+    /// While any card is running and somebody is looking, keep the board honest
+    /// without a push channel.
     private func syncPolling() {
-        let running = cards.contains { $0.delegate?.isRunning == true }
+        let running = isVisible && cards.contains { $0.delegate?.isRunning == true }
         if running && pollTask == nil {
             pollTask = Task { [weak self] in
                 while !Task.isCancelled {

@@ -410,35 +410,57 @@ final class WorkspacesModel {
         folders.first { $0.id == selectedID }
     }
 
+    /// This machine's folders, as the host last reported them.
+    private var localFolders: [WorkspaceFolder] = []
     /// Remote folders by peer key, so the list can be refreshed without
     /// re-dialling every peer on every file change.
     private var remoteFolders: [String: [WorkspaceFolder]] = [:]
-    /// When a failed peer may be tried again. A dead machine stays listed with
-    /// its last known folders rather than disappearing on the next refresh.
-    private var remotePeerRetryAt: [String: Date] = [:]
+    /// When each peer may be dialled again, whether the last dial worked or
+    /// not. A dead machine stays listed with its last known folders rather than
+    /// disappearing on the next refresh, and a live one is not re-dialled at
+    /// the rate files change.
+    private var remotePeerNextDial: [String: Date] = [:]
 
+    /// Everything: this machine's folders and every reachable peer's.
+    ///
+    /// The full version, for opening the screen and for an explicit refresh.
+    /// The file watcher does **not** call this, see `refresh()`.
     func load() async {
+        await loadLocal()
+        await loadRemote()
+    }
+
+    /// This machine's registered folders, with their git state.
+    ///
+    /// One host call. Cheap enough to run whenever files change, which is what
+    /// separates it from `loadRemote`.
+    func loadLocal() async {
         isLoading = true
         defer { isLoading = false }
         do {
             let loaded = try await Bridge.workspaces()
-            // Publish local folders before dialing peers. The sidebar and the
-            // selected workspace should not wait for a machine that is asleep.
-            folders = loaded + remoteFolders.values.flatMap { $0 }
+            localFolders = loaded
+            publishFolders()
             errorMessage = nil
-            if let id = selectedID, !folders.contains(where: { $0.id == id }) {
-                selectedID = folders.first?.id
-            }
-            if selectedID == nil { selectedID = folders.first?.id }
-            #if os(macOS)
-            syncWatcher()
-            #endif
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
 
-            // Remote workspaces are read through the local daemon. A peer that
-            // is offline does not make local folders disappear, so its failure
-            // is remembered rather than raised. The refresh timer and the file
-            // watcher call this constantly, so a dead peer must not be dialled
-            // again until the retry window has passed.
+    /// Folders on other machines, read through the local daemon.
+    ///
+    /// Deliberately not part of the file-watcher path. Every peer here is a TCP
+    /// dial with a connect timeout and a handshake, and this used to run inside
+    /// `load()` on every debounced file change: an agent writing files in a
+    /// terminal had the app dialling every paired machine roughly twice a
+    /// second. A peer's folder list does not change that fast, and a machine
+    /// being asleep is not news worth re-learning at that rate.
+    ///
+    /// A peer that is offline does not make local folders disappear: its
+    /// failure is remembered rather than raised, and its last known folders
+    /// stay listed.
+    func loadRemote() async {
+        do {
             let peers = try await Bridge.peers().filter {
                 $0.trust == .approved && $0.address?.isEmpty == false
             }
@@ -447,27 +469,53 @@ final class WorkspacesModel {
                 remoteFolders.removeValue(forKey: key)
             }
             for peer in peers {
-                if let retryAt = remotePeerRetryAt[peer.key], Date() < retryAt { continue }
+                if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
-                    remotePeerRetryAt[peer.key] = nil
+                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                 } catch {
-                    remotePeerRetryAt[peer.key] = Date().addingTimeInterval(30)
+                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRetrySeconds)
                 }
             }
-            folders = loaded + remoteFolders.values.flatMap { $0 }
-            // A folder removed elsewhere should not leave the detail pane
-            // describing something that is no longer in the list.
-            if let id = selectedID, !folders.contains(where: { $0.id == id }) {
-                selectedID = folders.first?.id
-            }
-            if selectedID == nil { selectedID = folders.first?.id }
-            #if os(macOS)
-            syncWatcher()
-            #endif
+            publishFolders()
         } catch {
-            errorMessage = error.localizedDescription
+            // Not surfaced. The peer list failing is not a reason to put an
+            // error over a screen full of working local folders.
         }
+    }
+
+    /// Keep peer folders current while the app is open.
+    ///
+    /// A slow loop of its own, because the thing that used to keep them current
+    /// was the file watcher, and that made a save on this machine dial every
+    /// other machine. Runs from the root view's `.task`, so it stops when the
+    /// window does.
+    func watchPeers() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(Self.peerRefreshSeconds))
+            guard !Task.isCancelled else { return }
+            await loadRemote()
+        }
+    }
+
+    /// How long a peer that answered is left alone before being asked again.
+    private static let peerRefreshSeconds: TimeInterval = 60
+    /// How long a peer that did not answer is left alone. Shorter, because a
+    /// machine waking up should show up reasonably soon.
+    private static let peerRetrySeconds: TimeInterval = 30
+
+    /// Put local and remote folders together and keep the selection valid.
+    private func publishFolders() {
+        folders = localFolders + remoteFolders.values.flatMap { $0 }
+        // A folder removed elsewhere should not leave the detail pane
+        // describing something that is no longer in the list.
+        if let id = selectedID, !folders.contains(where: { $0.id == id }) {
+            selectedID = folders.first?.id
+        }
+        if selectedID == nil { selectedID = folders.first?.id }
+        #if os(macOS)
+        syncWatcher()
+        #endif
     }
 
     #if os(macOS)
@@ -504,11 +552,11 @@ final class WorkspacesModel {
 
     /// Re-read git for the folders already registered.
     ///
-    /// Separate from `load` only in intent: both call the same method, because
-    /// the host reads git as part of listing. Kept as its own name so call
-    /// sites read as what they mean.
+    /// The file watcher's path, so it is local only. Peers are on their own
+    /// slower schedule in `loadRemote`, because dialling every paired machine
+    /// is not something a file save should cause.
     func refresh() async {
-        await load()
+        await loadLocal()
         // Only histories somebody has already opened. Loading one nobody asked
         // for would put a `git log` behind every file save.
         for id in history.keys {

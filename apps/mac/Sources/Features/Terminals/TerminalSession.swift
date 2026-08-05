@@ -76,13 +76,37 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     private var writerTask: Task<Void, Never>?
     private var colorSchemeApplied: ColorScheme?
 
+    /// True when this is the session the user is looking at.
+    ///
+    /// Only the visible session needs a keystroke-latency poll. A background
+    /// session still has to drain the host's bounded buffer or it loses its
+    /// earliest output, but nobody is waiting on those bytes to appear, so it
+    /// drains at a rate that costs a fraction of the round trips. With several
+    /// agents running at once that difference is most of the polling the app
+    /// does.
+    var isFocused = false {
+        didSet {
+            guard isFocused, isFocused != oldValue else { return }
+            // Coming to the front should not wait out a background delay.
+            wake()
+        }
+    }
+
     /// How long to wait before the next read. Held at the floor while output is
     /// flowing and backed off when it is not, because a fixed fast poll is a
     /// bridge round trip per session per frame forever, and idle sessions are
     /// the normal case.
     private var pollDelay = minPollDelay
     private static let minPollDelay = 8
+    /// The floor for a session nobody is looking at. Still far faster than the
+    /// host's buffer fills, so no output is lost.
+    private static let backgroundPollDelay = 60
     private static let maxPollDelay = 250
+
+    /// The fastest this session polls right now.
+    private var pollFloor: Int {
+        isFocused ? Self.minPollDelay : Self.backgroundPollDelay
+    }
     /// Milliseconds of polling since the last liveness check.
     private var sinceInfo = 0
 
@@ -179,14 +203,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             do {
                 let chunk = try await Bridge.ptyRead(id: id, offset: offset)
                 if chunk.dropped > 0 { droppedOutput = true }
-                if !chunk.data.isEmpty, let bytes = Data(base64Encoded: chunk.data) {
-                    feed(bytes)
+                if !chunk.bytes.isEmpty {
+                    feed(chunk.bytes)
                     offset = chunk.nextOffset
                     // Output is flowing, so stay at the floor: this is where
                     // typing latency comes from.
-                    pollDelay = Self.minPollDelay
+                    pollDelay = pollFloor
                 } else {
-                    pollDelay = min(pollDelay * 2, Self.maxPollDelay)
+                    pollDelay = min(max(pollDelay, pollFloor) * 2, Self.maxPollDelay)
                 }
             } catch {
                 // The session is gone on the host side; nothing more to read.
@@ -208,9 +232,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                         // One last read in case output arrived right at exit.
                         if let final = try? await Bridge.ptyRead(id: id, offset: offset) {
                             if final.dropped > 0 { droppedOutput = true }
-                            if let bytes = Data(base64Encoded: final.data), !bytes.isEmpty {
+                            if !final.bytes.isEmpty {
                                 offset = final.nextOffset
-                                feed(bytes)
+                                feed(final.bytes)
                             }
                         }
                         break
@@ -239,7 +263,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// should produce output right away, so the first keystroke after an idle
     /// stretch does not wait out a backed-off delay.
     func wake() {
-        pollDelay = Self.minPollDelay
+        pollDelay = pollFloor
     }
 
     // MARK: - TerminalViewDelegate
