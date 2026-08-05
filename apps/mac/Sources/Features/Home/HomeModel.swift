@@ -51,10 +51,14 @@ final class HomeModel {
             async let daily = Bridge.report(group: .day, query: Query())
             async let plan = Bridge.report(group: .source, query: Query(billing: "plan"))
 
+            // Published one at a time, in the order the screen draws them,
+            // rather than held back until all three have answered. The heatmap
+            // is the largest thing on Home and the first query to return, so
+            // waiting for the other two only kept it behind a blur for longer.
             let grid = try await calendar
-            let days = try await daily
             self.calendar = grid
-            self.planBySource = try await plan
+
+            let days = try await daily
 
             // The archive returns days oldest first. The last seven rows are
             // the last seven days *with data*, which is not the same as the
@@ -63,6 +67,8 @@ final class HomeModel {
             let anchor = grid?.last ?? days.last?.key ?? ""
             self.today = days.last { $0.key == anchor }
             self.week = Array(days.suffix(7))
+
+            self.planBySource = try await plan
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

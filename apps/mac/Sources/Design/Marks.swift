@@ -134,6 +134,14 @@ struct Avatar: View {
 /// it sitting visibly high next to any text beside it.
 struct LogoMark: View {
     var size: CGFloat = 18
+    /// Draw the bars rising in turn, for a screen that is waiting on something.
+    ///
+    /// The mark's own bars and the mark's own colours, moving the only way a
+    /// bar chart can move. Anything else on a launch screen is a second logo
+    /// nobody chose.
+    var animated: Bool = false
+
+    @State private var raised = false
 
     /// Ink bounds inside the 64 unit artboard.
     private static let inkOrigin = CGPoint(x: 11, y: 10)
@@ -155,6 +163,18 @@ struct LogoMark: View {
                 RoundedRectangle(cornerRadius: 3.5 * unit)
                     .fill(bar.color)
                     .frame(width: 12 * unit, height: bar.height * unit)
+                    // Anchored at the foot, so a bar grows out of the baseline
+                    // it shares with the other two rather than shrinking in
+                    // place. Each starts a beat after the one before it.
+                    .scaleEffect(y: animated && !raised ? 0.35 : 1, anchor: .bottom)
+                    .animation(
+                        animated
+                            ? .easeInOut(duration: 0.62)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.14)
+                            : nil,
+                        value: raised
+                    )
                     .offset(
                         x: (11 + CGFloat(index) * 15 - Self.inkOrigin.x) * unit,
                         y: (bar.y - Self.inkOrigin.y) * unit
@@ -163,6 +183,7 @@ struct LogoMark: View {
         }
         .frame(width: size, height: size)
         .accessibilityLabel("tokenstat")
+        .onAppear { if animated { raised = true } }
     }
 }
 

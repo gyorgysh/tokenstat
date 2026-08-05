@@ -33,10 +33,7 @@ struct HomeView: View {
                     panels(width: width)
 
                     if limitsPending {
-                        Text("Reading what each vendor says is left…")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, Theme.Space.s)
+                        panelPlaceholder
                     }
                 }
             }
@@ -46,17 +43,34 @@ struct HomeView: View {
             .padding(Theme.Space.s)
         }
         .background(Theme.background)
-        .task {
-            await model.load()
-            // A network call for one provider, so once on arrival rather than
-            // on every refresh.
-            if model.planLimits.isEmpty { await model.loadPlanLimits() }
-        }
         .overlay {
-            if model.isLoading && model.calendar == nil {
-                HomeWarmupView()
+            if isWarming {
+                // The mark alone, over the blurred cards. No panel, no
+                // headline, no sentence about opening an archive: by the time
+                // anyone finishes reading one, the data is already there.
+                LogoMark(size: 34, animated: true)
+                    .transition(.opacity)
             }
         }
+        .animation(.easeOut(duration: 0.22), value: isWarming)
+        .task {
+            // Started together, not one after the other. The vendor limits
+            // include a network call for one provider, and waiting for the
+            // archive first only meant the panels arrived a round trip later
+            // than they had to. They land in whichever order they finish.
+            async let archive: Void = model.load()
+            // Once on arrival rather than on every refresh.
+            if model.planLimits.isEmpty { await model.loadPlanLimits() }
+            await archive
+        }
+    }
+
+    /// Whether the archive has yet to say anything.
+    ///
+    /// The screen is drawn either way. There is no separate launch screen: the
+    /// cards are the launch screen, quiet until they have something to say.
+    private var isWarming: Bool {
+        model.isLoading && model.calendar == nil && model.errorMessage == nil
     }
 
     // MARK: - Panels
@@ -185,7 +199,19 @@ struct HomeView: View {
             // Streaks live beside the name rather than inside the activity
             // card: they are about the person, and the card below is about the
             // data.
-            if let calendar = model.calendar {
+            if isWarming {
+                // The same three slots the streaks will fill, so the name
+                // beside them does not shift sideways when they arrive.
+                HStack(spacing: Theme.Space.l) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        VStack(alignment: .leading, spacing: 4) {
+                            bar(width: 44, height: 8)
+                            bar(width: 62, height: 20)
+                        }
+                    }
+                }
+                .warming(true)
+            } else if let calendar = model.calendar {
                 HStack(spacing: Theme.Space.l) {
                     streak(
                         "Streak",
@@ -205,6 +231,55 @@ struct HomeView: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
+    }
+
+    /// One panel's worth of room while the vendors are still being asked.
+    ///
+    /// A panel rather than a sentence about waiting. How many there will be
+    /// depends on what is installed, so this claims one and no more.
+    private var panelPlaceholder: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            bar(width: 96, height: 11)
+            bar(width: nil, height: 10)
+            bar(width: nil, height: 10)
+        }
+        .padding(Theme.cardPadding)
+        .frame(width: .panelWidth, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .warming(true)
+    }
+
+    /// The activity card's own layout, with nothing in it yet.
+    ///
+    /// Same shapes and same heights as the real thing, so the card does not
+    /// jump when the archive answers and the heatmap takes its place.
+    private var activityPlaceholder: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .top, spacing: Theme.Space.xl) {
+                ForEach(0..<3, id: \.self) { _ in
+                    VStack(alignment: .leading, spacing: 6) {
+                        bar(width: 54, height: 9)
+                        bar(width: 88, height: 18)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            // The height the heatmap reserves for its grid, so the card is the
+            // size it will still be a moment later.
+            bar(width: nil, height: 187)
+        }
+        .warming(true)
+    }
+
+    private func bar(width: CGFloat?, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(Theme.border)
+            .frame(width: width, height: height)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
     }
 
     private func streak(
@@ -276,7 +351,7 @@ struct HomeView: View {
                 // have never scanned is the wrong one.
                 EmptyHint(text: "The activity could not be read. See the message above.")
             } else if model.isLoading {
-                EmptyHint(text: "Reading the archive…")
+                activityPlaceholder
             } else {
                 // A brand new install, not a failure. Saying so beats an empty
                 // grid that looks like a year of doing nothing.
@@ -286,40 +361,30 @@ struct HomeView: View {
     }
 }
 
-private struct HomeWarmupView: View {
-    @State private var animate = false
+/// Hold a card's own shape while it waits for its first answer.
+///
+/// Blurred and dimmed rather than replaced by something that spins. The screen
+/// people are waiting for is already the best thing to show them: it says how
+/// much is coming and where each piece will be, and it does not put a brand
+/// animation between them and their own data. Nothing here moves, and nothing
+/// here is tinted: a launch is not an event worth celebrating.
+private struct Warming: ViewModifier {
+    let active: Bool
 
-    var body: some View {
-        VStack(spacing: Theme.Space.s) {
-            HStack(alignment: .bottom, spacing: 5) {
-                ForEach(0..<3, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Theme.accent.opacity(0.55 + Double(index) * 0.15))
-                        .frame(width: 9, height: CGFloat(18 + index * 10))
-                        .scaleEffect(y: animate ? 1 : 0.55, anchor: .bottom)
-                        .animation(
-                            .easeInOut(duration: 0.7)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(index) * 0.12),
-                            value: animate
-                        )
-                }
-            }
-            Text("Warming up tokenstat")
-                .font(.headline)
-            Text("Opening your local archive…")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, Theme.Space.xl)
-        .padding(.vertical, Theme.Space.l)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
-        )
-        .onAppear { animate = true }
-        .transition(.opacity)
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: active ? 7 : 0)
+            .opacity(active ? 0.45 : 1)
+            .allowsHitTesting(!active)
+            // Short, and only on the way out. Arriving data should look like
+            // the screen coming into focus, not like a transition playing.
+            .animation(.easeOut(duration: 0.22), value: active)
+    }
+}
+
+extension View {
+    fileprivate func warming(_ active: Bool) -> some View {
+        modifier(Warming(active: active))
     }
 }
 
