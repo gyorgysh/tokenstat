@@ -709,17 +709,17 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
     }
 }
 
-/// Test repositories live in the system temp directory and must never appear
-/// in the user's workspace list if a test process was interrupted mid-cleanup.
+/// Anything under the system temp directory is hidden from the workspace list.
+///
+/// Test repositories live there and must never appear in the user's list if a
+/// test process was interrupted mid-cleanup. This used to match two known name
+/// prefixes, which is exactly the wrong shape: it hid the leaks it already knew
+/// about and showed every new one. A third prefix duly appeared and landed in
+/// the interface. The location is the signal, not the name, and nobody keeps a
+/// project they are working in inside a folder the system deletes.
 fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
-    let in_temp = ws.path.starts_with(temp);
-    let name = ws.path.file_name().and_then(|name| name.to_str());
-    in_temp
-        && name.is_some_and(|name| {
-            name.starts_with("tokenstat-dispatch-git-")
-                || name.starts_with("tokenstat-ws-dispatch-")
-        })
+    ws.path.starts_with(temp)
 }
 
 /// Methods that never touch the session.
@@ -810,7 +810,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 let ws = registry
                     .add(std::path::Path::new(&p.path), now_ms())
                     .map_err(|e| e.to_string())?;
-                registry.save().map_err(|e| e.to_string())?;
+                crate::workspaces::save(&registry)?;
                 ws
             };
             // Described after the guard is dropped: this runs git.
@@ -824,7 +824,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let mut registry = crate::workspaces::write();
             let removed = registry.remove(&p.id);
             if removed {
-                registry.save().map_err(|e| e.to_string())?;
+                crate::workspaces::save(&registry)?;
             }
             Ok(json!({"removed": removed}))
         }
@@ -836,7 +836,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let mut registry = crate::workspaces::write();
             let renamed = registry.rename(&p.id, &name);
             if renamed {
-                registry.save().map_err(|e| e.to_string())?;
+                crate::workspaces::save(&registry)?;
             }
             Ok(json!({"renamed": renamed}))
         }
