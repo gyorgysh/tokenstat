@@ -76,6 +76,12 @@ struct RootView: View {
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
     @State private var isInspectorPresented = true
+    /// Whether the window is wide enough to carry the inspector at all.
+    ///
+    /// Separate from `isInspectorPresented`, which is what the user asked for.
+    /// Conflating them would spend the user's choice on a window resize: narrow
+    /// the window once and the pane would stay shut after widening it again.
+    @State private var inspectorFits = true
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var collapsedWorkspaces: Set<String> = []
@@ -100,6 +106,21 @@ struct RootView: View {
                     // minimum went up with it: nothing here reads at 240.
                     .inspectorColumnWidth(min: 370, ideal: 400, max: 520)
                 }
+        }
+        // Watch the width of the whole split view, not the detail pane: the
+        // detail's own width already reflects the inspector being open, so
+        // driving the decision from it oscillates.
+        //
+        // `onGeometryChange` would be the tidy way to write this and needs
+        // macOS 15. This app targets 14.
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { inspectorFits = Self.fits(proxy.size.width) }
+                    .onChange(of: proxy.size.width) { _, width in
+                        inspectorFits = Self.fits(width)
+                    }
+            }
         }
         .task { await model.load() }
         // Loaded up front, not on first visit, so the sidebar can show the
@@ -136,24 +157,62 @@ struct RootView: View {
                     } label: {
                         Image(systemName: "sidebar.right")
                     }
-                    .help(isInspectorPresented ? "Hide inspector" : "Show inspector")
+                    // Disabled rather than hidden when there is no room. A
+                    // control that vanishes on resize reads as a bug, and one
+                    // that stays but does nothing is worse: this says why.
+                    .disabled(!inspectorFits)
+                    .help(
+                        inspectorFits
+                            ? (isInspectorPresented ? "Hide inspector" : "Show inspector")
+                            : "The window is too narrow for the inspector"
+                    )
                 }
             }
         }
     }
 
-    /// Which destinations have an optional right pane.
+    /// The narrowest the window may get: sidebar at its 200 floor, detail at
+    /// the 560 where the Overview's cards still sit side by side.
+    ///
+    /// This is the window's minimum size, set from here so it cannot drift from
+    /// the number below. It must stay **smaller** than a window a user can
+    /// actually make. A content minimum larger than the window does not shrink
+    /// the window, it overflows it: the layout is built at the minimum and the
+    /// right hand side is simply cut off by the window edge. That was the
+    /// clipped inspector, and it also blinded the measurement below, which sits
+    /// inside the clamp and so could only ever read the clamped width back.
+    static let minimumContentWidth: CGFloat = 760
+
+    /// What the inspector asks for, matching `inspectorColumnWidth(min:)`.
+    private static let inspectorMinimumWidth: CGFloat = 370
+
+    /// The narrowest window that can hold all three columns.
+    ///
+    /// `.inspector` does not enforce this itself: given less room it keeps its
+    /// width and lets the trailing edge run off the window.
+    private static let widthForThreeColumns = minimumContentWidth + inspectorMinimumWidth
+
+    private static func fits(_ width: CGFloat) -> Bool {
+        width >= widthForThreeColumns
+    }
+
+    /// Whether the right pane is on screen, and the only place that is decided.
     ///
     /// The write-back is guarded. Without the guard, moving to a destination
     /// with no inspector made the getter return false, SwiftUI wrote that false
     /// straight back into `isInspectorPresented`, and the pane was then closed
     /// for the rest of the session: selecting a workspace showed no Changes
-    /// panel and nothing the user did had asked for that.
+    /// panel and nothing the user did had asked for that. Width is guarded for
+    /// the same reason, one step further: a resize would otherwise spend the
+    /// user's choice.
     private var showsInspector: Binding<Bool> {
         Binding(
-            get: { isInspectorPresented && destinationHasInspector },
+            get: { isInspectorPresented && destinationHasInspector && inspectorFits },
+            // A resize must not be recorded as a decision. Only a press of the
+            // toolbar button changes what the user asked for, so widening the
+            // window brings the pane back exactly as they left it.
             set: { open in
-                guard destinationHasInspector else { return }
+                guard destinationHasInspector, inspectorFits else { return }
                 isInspectorPresented = open
             }
         )

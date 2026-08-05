@@ -23,7 +23,12 @@ struct TokenstatApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .frame(minWidth: 1040, minHeight: 620)
+                // The minimum is what the window needs *without* the
+                // inspector, not with it. Asking for more than the user can
+                // give does not enlarge the window, it overflows it, and the
+                // pane that runs past the right edge is the one that gets cut.
+                // The inspector closes itself below its own threshold instead.
+                .frame(minWidth: RootView.minimumContentWidth, minHeight: 620)
         }
         #if os(macOS)
         // Unified toolbar and a hidden title give the rounded, chrome-light
