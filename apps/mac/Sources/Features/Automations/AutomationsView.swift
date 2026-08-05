@@ -40,7 +40,16 @@ struct AutomationsView: View {
                             .padding(.leading, 8)
                     }
                     .padding(.leading, 4)
-                if filteredJobs.isEmpty {
+                if isWarming {
+                    // "Nothing yet" is an answer, and it must not be given
+                    // before the question has been asked. Grey job rows say
+                    // the daemon is being read instead.
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Skeleton.CardPlaceholder(rows: 2)
+                        Skeleton.CardPlaceholder(rows: 2)
+                    }
+                    .warming(true)
+                } else if filteredJobs.isEmpty {
                     nothingYet
                 } else {
                     taskSection("Active", jobs: filteredJobs.filter(\.enabled))
@@ -69,10 +78,14 @@ struct AutomationsView: View {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .task {
-            await model.load()
-            model.syncWatching()
-        }
+        .task { await model.appeared() }
+        // The model outlives this view, and the transcript tail must not.
+        .onDisappear { model.disappeared() }
+    }
+
+    /// Waiting on the first read of the daemon's job list.
+    private var isWarming: Bool {
+        !model.hasLoaded && model.errorMessage == nil
     }
 
     private var intro: some View {

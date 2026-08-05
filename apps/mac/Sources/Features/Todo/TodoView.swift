@@ -56,7 +56,14 @@ struct TodoView: View {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .task { await model.load() }
+        .task { await model.appeared() }
+        // The model outlives this view, and its poll loop must not.
+        .onDisappear { model.disappeared() }
+    }
+
+    /// Waiting on the first read of the board.
+    private var isWarming: Bool {
+        !model.hasLoaded && model.errorMessage == nil
     }
 
     private func column(_ id: String, _ label: String) -> some View {
@@ -80,7 +87,16 @@ struct TodoView: View {
                     ForEach(model.cards(in: id)) { card in
                         CardView(model: model, card: card, folders: folders)
                     }
-                    if model.cards(in: id).isEmpty {
+                    if isWarming {
+                        // Card-shaped grey, so the columns are already the
+                        // right width and the board does not jump when the
+                        // real cards land. Backlog gets more of them because
+                        // that is where cards usually are.
+                        ForEach(0..<(id == "backlog" ? 3 : 1), id: \.self) { _ in
+                            Skeleton.CardPlaceholder(rows: 2)
+                        }
+                        .warming(true)
+                    } else if model.cards(in: id).isEmpty {
                         Text(id == "done" ? "Nothing done yet" : "No cards")
                             .font(.caption)
                             .foregroundStyle(.tertiary)

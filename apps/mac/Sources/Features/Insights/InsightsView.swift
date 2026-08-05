@@ -53,28 +53,59 @@ struct InsightsView: View {
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                 }
 
-                switch model.tab {
-                case .overview:
-                    overview
-                case .models, .projects, .harnesses, .sessions:
-                    BreakdownTable(
-                        rows: model.rows,
-                        selected: $model.selected,
-                        showsValue: model.tab == .models,
-                        // A session id or a project path is read character by
-                        // character. A harness has a name, not an id.
-                        monospaced: model.tab != .harnesses,
-                        isHarness: model.tab == .harnesses
-                    )
+                if isWarming {
+                    // The shape of the screen that is coming, not a spinner in
+                    // the middle of an empty pane. The report is a chart over
+                    // three lists, and saying so while it loads is more use
+                    // than saying "wait".
+                    placeholder
+                } else {
+                    switch model.tab {
+                    case .overview:
+                        overview
+                    case .models, .projects, .harnesses, .sessions:
+                        BreakdownTable(
+                            rows: model.rows,
+                            selected: $model.selected,
+                            showsValue: model.tab == .models,
+                            // A session id or a project path is read character
+                            // by character. A harness has a name, not an id.
+                            monospaced: model.tab != .harnesses,
+                            isHarness: model.tab == .harnesses
+                        )
+                    }
                 }
             }
             .padding(Theme.Space.m)
         }
-        .overlay {
-            if model.isLoading && model.totals == nil {
-                ProgressView()
+    }
+
+    /// Waiting on the first report of the session.
+    ///
+    /// Only the first. A period change re-reads the archive with the whole
+    /// screen already drawn, and blanking it out to redraw the same layout
+    /// makes a fast query look slower than it is.
+    private var isWarming: Bool {
+        model.isLoading && model.totals == nil && model.errorMessage == nil
+    }
+
+    /// The overview's layout in grey: the daily chart, then the row of lists.
+    private var placeholder: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
+                Skeleton.Bar(width: nil, height: 160)
+            }
+            WidthReader { width in
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    Skeleton.CardPlaceholder(rows: 5)
+                    Skeleton.CardPlaceholder(rows: 5)
+                    if width >= .twoColumnWidth {
+                        Skeleton.CardPlaceholder(rows: 5)
+                    }
+                }
             }
         }
+        .warming(true)
     }
 
     private var overview: some View {

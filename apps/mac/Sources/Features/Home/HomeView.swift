@@ -124,12 +124,13 @@ struct HomeView: View {
         case let .limits(provider):
             PlanLimitPanel(
                 provider: provider,
-                isLoading: model.isLoadingLimits
+                isLoading: model.isLoadingLimits,
+                fillsHeight: true
             ) {
                 Task { await model.loadPlanLimits() }
             }
         case let .planUsage(rows):
-            PlanUsageCard(rows: rows)
+            PlanUsageCard(rows: rows, fillsHeight: true)
         }
     }
 
@@ -276,11 +277,10 @@ struct HomeView: View {
         .warming(true)
     }
 
+    /// Home's own name for the shared placeholder bar, so the call sites below
+    /// read the way they did before it moved into `Skeleton`.
     private func bar(width: CGFloat?, height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(Theme.border)
-            .frame(width: width, height: height)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+        Skeleton.Bar(width: width, height: height)
     }
 
     private func streak(
@@ -364,31 +364,6 @@ struct HomeView: View {
 
 /// Hold a card's own shape while it waits for its first answer.
 ///
-/// Blurred and dimmed rather than replaced by something that spins. The screen
-/// people are waiting for is already the best thing to show them: it says how
-/// much is coming and where each piece will be, and it does not put a brand
-/// animation between them and their own data. Nothing here moves, and nothing
-/// here is tinted: a launch is not an event worth celebrating.
-private struct Warming: ViewModifier {
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .blur(radius: active ? 7 : 0)
-            .opacity(active ? 0.45 : 1)
-            .allowsHitTesting(!active)
-            // Short, and only on the way out. Arriving data should look like
-            // the screen coming into focus, not like a transition playing.
-            .animation(.easeOut(duration: 0.22), value: active)
-    }
-}
-
-extension View {
-    fileprivate func warming(_ active: Bool) -> some View {
-        modifier(Warming(active: active))
-    }
-}
-
 /// One panel in the Home grid.
 private struct HomePanel: Identifiable {
     enum Kind {

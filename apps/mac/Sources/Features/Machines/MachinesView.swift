@@ -142,6 +142,16 @@ struct MachinesView: View {
                                 .textSelection(.enabled)
                         }
                     }
+                } else {
+                    // The identity comes from the daemon, so this card is empty
+                    // for a moment on a cold launch. Two grey rows keep the card
+                    // the height it will be rather than letting the whole screen
+                    // shuffle upward when the name arrives.
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        Skeleton.Bar(width: 220)
+                        Skeleton.Bar(width: 160)
+                    }
+                    .warming(true)
                 }
                 Divider()
                 serving
