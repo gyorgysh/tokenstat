@@ -86,6 +86,39 @@ pub struct Chunk {
     pub dropped: u64,
 }
 
+/// A Device Status Report asking where the cursor is.
+const CURSOR_POSITION_REQUEST: &[u8] = b"\x1b[6n";
+
+/// The answer: row 1, column 1.
+///
+/// A real terminal reports where its cursor actually is. Nothing here draws a
+/// screen, so there is no cursor to report and the top left corner is the
+/// honest answer for a session that has printed nothing yet.
+const CURSOR_POSITION_REPLY: &[u8] = b"\x1b[1;1R";
+
+/// Whether this output asked the terminal where the cursor is.
+///
+/// It has to be answered. Windows builds its pseudoconsole with
+/// `PSEUDOCONSOLE_INHERIT_CURSOR`, so the console host asks this question
+/// before it will let the program start, and waits for the reply. With nobody
+/// answering, the command never runs at all: no output, no exit, a session that
+/// looks alive until its budget kills it.
+///
+/// `tail` carries the last few bytes of the previous read, because a read
+/// boundary can fall in the middle of the request.
+fn wants_cursor_position(tail: &mut Vec<u8>, bytes: &[u8]) -> bool {
+    let split = CURSOR_POSITION_REQUEST.len() - 1;
+    tail.extend_from_slice(bytes);
+    let found = tail
+        .windows(CURSOR_POSITION_REQUEST.len())
+        .any(|w| w == CURSOR_POSITION_REQUEST);
+    if tail.len() > split {
+        let keep = tail.len() - split;
+        tail.drain(..keep);
+    }
+    found
+}
+
 /// A bounded window over one session's output.
 struct Buffer {
     data: Vec<u8>,
@@ -136,7 +169,9 @@ impl Buffer {
 struct Session {
     info: Mutex<SessionInfo>,
     buffer: Arc<Mutex<Buffer>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    /// Shared with the reader thread, which answers the terminal's own
+    /// questions. See `wants_cursor_position`.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
@@ -231,20 +266,30 @@ impl Manager {
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
+        let writer = Arc::new(Mutex::new(writer));
 
         {
             let buffer = Arc::clone(&buffer);
             let alive = Arc::clone(&alive);
+            let writer = Arc::clone(&writer);
             std::thread::spawn(move || {
                 let mut chunk = [0u8; 8 * 1024];
+                // Enough to catch a status request split across two reads.
+                let mut tail: Vec<u8> = Vec::new();
                 loop {
                     match reader.read(&mut chunk) {
                         Ok(0) => break,
                         Ok(n) => {
+                            let bytes = &chunk[..n];
+                            if wants_cursor_position(&mut tail, bytes) {
+                                let mut w = writer.lock().unwrap_or_else(PoisonError::into_inner);
+                                let _ = w.write_all(CURSOR_POSITION_REPLY);
+                                let _ = w.flush();
+                            }
                             buffer
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
-                                .push(&chunk[..n]);
+                                .push(bytes);
                         }
                         Err(_) => break,
                     }
@@ -268,7 +313,7 @@ impl Manager {
         let session = Arc::new(Session {
             info: Mutex::new(info.clone()),
             buffer,
-            writer: Mutex::new(writer),
+            writer,
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
             alive,
@@ -555,6 +600,20 @@ mod tests {
         m.close(&s.id).unwrap();
         assert!(m.list().is_empty());
         assert!(matches!(m.read(&s.id, 0), Err(PtyError::NoSession(_))));
+    }
+
+    #[test]
+    fn a_cursor_position_request_is_recognised_across_a_read_boundary() {
+        // Windows will not start the command until this is answered, and the
+        // request can arrive in two pieces, so a scan of one read alone would
+        // miss it and hang the session for its whole budget.
+        let mut tail = Vec::new();
+        assert!(!wants_cursor_position(&mut tail, b"\x1b[6"));
+        assert!(wants_cursor_position(&mut tail, b"n"));
+
+        let mut tail = Vec::new();
+        assert!(wants_cursor_position(&mut tail, b"before\x1b[6nafter"));
+        assert!(!wants_cursor_position(&mut tail, b"plain output"));
     }
 
     #[test]
