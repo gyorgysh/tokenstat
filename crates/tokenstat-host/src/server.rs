@@ -25,8 +25,11 @@
 //! `scan` from blocking another client's connect, which is the part that would
 //! actually be felt.
 
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -49,6 +52,7 @@ struct Request {
 ///
 /// In the data directory rather than a temp dir so it survives a reboot's
 /// cleanup and so the archive and its socket are found the same way.
+#[cfg(unix)]
 pub fn default_socket_path() -> Result<PathBuf, String> {
     let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
         .ok_or("no data directory on this platform")?;
@@ -62,6 +66,7 @@ pub fn default_socket_path() -> Result<PathBuf, String> {
 /// use". Refusing to start in that case would mean the daemon never recovers
 /// from a kill -9 without manual cleanup, so a socket that accepts no
 /// connection is treated as debris.
+#[cfg(unix)]
 pub fn bind(path: &Path) -> Result<UnixListener, String> {
     // A unix socket address is a fixed-size struct, so the path has a hard
     // limit of about 104 bytes on macOS and 108 on Linux. The kernel's own
@@ -110,6 +115,7 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
 }
 
 /// Serve until the listener fails. Blocks.
+#[cfg(unix)]
 pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     let shared = Arc::new(Mutex::new(session));
     crate::automations::start_scheduler(Arc::clone(&shared));
@@ -138,6 +144,7 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn handle(stream: UnixStream, session: &Mutex<Session>) -> Result<(), String> {
     let mut out = stream.try_clone().map_err(|e| e.to_string())?;
     let reader = BufReader::new(stream);
@@ -206,7 +213,7 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::session::OpenParams;

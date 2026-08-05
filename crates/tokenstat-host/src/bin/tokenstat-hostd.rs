@@ -30,6 +30,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[cfg(unix)]
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let mut socket = None;
@@ -64,6 +65,11 @@ fn run() -> Result<(), String> {
     eprintln!("tokenstat-hostd listening on {}", path.display());
 
     server::serve(listener, session)
+}
+
+#[cfg(windows)]
+fn run() -> Result<(), String> {
+    Err("tokenstat-hostd's local socket transport is not available on Windows".into())
 }
 
 const USAGE: &str = "\
