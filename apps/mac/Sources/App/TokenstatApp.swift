@@ -56,14 +56,17 @@ struct TokenstatApp: App {
                 // give does not enlarge the window, it overflows it, and the
                 // pane that runs past the right edge is the one that gets cut.
                 // The inspector closes itself below its own threshold instead.
-                .frame(minWidth: RootView.minimumContentWidth, minHeight: 620)
+                .frame(
+                    minWidth: RootView.minimumContentWidth,
+                    minHeight: RootView.minimumContentHeight
+                )
         }
         #if os(macOS)
         // Unified toolbar and a hidden title give the rounded, chrome-light
         // window the plan asks for, without drawing custom window controls.
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .defaultSize(width: 1180, height: 720)
+        .defaultSize(Self.initialWindowSize)
         .commands {
             // Adding a folder is the app's "open", so it belongs in the File
             // menu with the shortcut people already try. The model that does
@@ -78,4 +81,20 @@ struct TokenstatApp: App {
         }
         #endif
     }
+
+    #if os(macOS)
+    /// The window's opening size, clamped to the display it opens on.
+    ///
+    /// A fixed 1180×720 is wider than the whole screen on a compact display
+    /// set to a low effective resolution, and a window that is born wider than
+    /// its display reads as a window that does not fit. Start inside the
+    /// screen's visible frame and let the user make it bigger.
+    private static var initialWindowSize: CGSize {
+        let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        return CGSize(
+            width: min(1180, frame.width * 0.94),
+            height: min(720, frame.height * 0.90)
+        )
+    }
+    #endif
 }

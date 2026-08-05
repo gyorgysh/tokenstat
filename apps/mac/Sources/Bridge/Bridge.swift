@@ -160,10 +160,11 @@ enum Bridge {
 
         // Every transport answers with an envelope or throws, so the only
         // failure modes left below are decoding ones.
-        let json = try currentRoute.transport.call(
+        let json = try Self.call(
             method: method,
             params: paramString,
-            patience: patience
+            patience: patience,
+            route: currentRoute
         )
         let data = Data(json.utf8)
 
@@ -187,6 +188,123 @@ enum Bridge {
         }
         return result
     }
+
+    /// Run one transport call, repairing the local daemon when it is gone.
+    ///
+    /// A daemon that dies under the app is not something the user should fix
+    /// by hand: the bridge reinstalls and restarts the launch agent, waits for
+    /// the socket, and retries the call once before anything is reported. The
+    /// repair only runs for `host_unreachable` — a timeout means the daemon is
+    /// alive and busy, which is not the same situation at all.
+    private static func call(
+        method: String,
+        params: String,
+        patience: TimeInterval,
+        route: Route
+    ) throws -> String {
+        // A host that is still booting fails the first connect, then comes up.
+        // Repair and retry a bounded number of times so the caller gets its
+        // answer instead of an error the moment the host is ready again.
+        var attempt = 0
+        while true {
+            do {
+                return try route.transport.call(method: method, params: params, patience: patience)
+            } catch {
+                attempt += 1
+                guard route.isHosted,
+                      Self.isRepairable(error),
+                      attempt < maxHostRepairAttempts,
+                      Self.repairHost()
+                else {
+                    throw error
+                }
+            }
+        }
+    }
+
+    /// Whether a transport error means the daemon is gone rather than busy.
+    ///
+    /// Only connection-level failures are repairable. A timeout means the
+    /// daemon is alive and working, and restarting it would interrupt that
+    /// work for no reason.
+    private static func isRepairable(_ error: Error) -> Bool {
+        guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
+            return false
+        }
+        return code == "host_unreachable"
+    }
+
+    /// Whether an error means the host was unreachable or silent, which is
+    /// worth retrying once it is back.
+    ///
+    /// Screens use this to keep refreshing while the daemon boots instead of
+    /// pinning an error the user did not cause.
+    static func isHostRecoveryError(_ error: Error) -> Bool {
+        guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
+            return false
+        }
+        return code == "host_unreachable" || code == "host_timeout"
+    }
+
+    /// How many times a call is retried after repairing the host. The repair
+    /// itself waits for the socket, so a host that is merely slow to boot is
+    /// given this many chances to answer before an error is shown.
+    private static let maxHostRepairAttempts = 3
+
+    /// Bring the local daemon back after it stopped answering.
+    ///
+    /// Runs on the calls queue, so it can afford to block. Reinstalling the
+    /// launch agent is idempotent — it replaces a missing or stale helper and
+    /// reloads launchd — and needs no password, because the agent is this
+    /// user's own. The reinstall is gated by a cooldown so a burst of failing
+    /// calls does not boot the daemon repeatedly; the socket probe itself is
+    /// cheap and runs on every failure.
+    private static func repairHost() -> Bool {
+        #if os(macOS)
+        hostRepairLock.lock()
+        defer { hostRepairLock.unlock() }
+
+        if let last = lastHostRepairAt,
+           Date().timeIntervalSince(last) < hostRepairCooldown
+        {
+            // Another call already repaired; reuse it rather than repeating it.
+            return waitForSocket(seconds: hostRepairShareWait)
+        }
+        lastHostRepairAt = Date()
+
+        // A failure to reinstall is not the end: the daemon may already be
+        // coming up on its own, so the socket poll decides.
+        try? HostAgentInstaller.installAndStart()
+        return waitForSocket(seconds: hostRepairWait)
+        #else
+        return false
+        #endif
+    }
+
+    #if os(macOS)
+    private static let hostRepairLock = NSLock()
+    nonisolated(unsafe) private static var lastHostRepairAt: Date?
+    /// How long a completed repair stays fresh before launchd is touched again.
+    private static let hostRepairCooldown: TimeInterval = 30
+    /// How long to wait for the socket after the reinstall itself.
+    private static let hostRepairWait: TimeInterval = 8
+    /// How long a caller arriving mid-repair waits for the socket.
+    private static let hostRepairShareWait: TimeInterval = 2
+
+    private static func socketIsUp() -> Bool {
+        guard let path = localHostSocketPath else { return false }
+        return SocketTransport.connecting(to: path) != nil
+    }
+
+    private static func waitForSocket(seconds: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if socketIsUp() { return true }
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        return socketIsUp()
+    }
+    #endif
 
     /// Where blocking transport work runs.
     ///
@@ -247,10 +365,11 @@ enum Bridge {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
 
-        let json = try currentRoute.transport.call(
+        let json = try Self.call(
             method: method,
             params: paramString,
-            patience: patience
+            patience: patience,
+            route: currentRoute
         )
         let data = Data(json.utf8)
 

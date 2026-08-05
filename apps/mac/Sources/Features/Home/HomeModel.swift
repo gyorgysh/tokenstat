@@ -62,6 +62,11 @@ final class HomeModel {
 
     /// Why the grid on screen is not the one that was asked for.
     private(set) var scopeNotice: String?
+    /// True when the account grid fell back because signing in would fix it.
+    ///
+    /// The host says so with a structured code rather than a sentence, so the
+    /// screen can offer a sign-in button instead of quoting a CLI command.
+    private(set) var needsAccountSignIn = false
     private(set) var today: Bucket?
     private(set) var week: [Bucket] = []
 
@@ -75,6 +80,9 @@ final class HomeModel {
 
     var isLoading = false
     var errorMessage: String?
+
+    private var hostRetryTask: Task<Void, Never>?
+    private var hostRetryCount = 0
 
     /// Value at list rates over the last seven calendar days, the same measure
     /// the heatmap colours by, so the two cannot disagree.
@@ -103,6 +111,7 @@ final class HomeModel {
             // What came back, not what was asked for.
             deliveredScope = grid?.scope == "account" ? .allMachines : .thisMachine
             scopeNotice = grid?.notice
+            needsAccountSignIn = grid?.noticeCode == "auth"
 
             let days = try await daily
 
@@ -116,10 +125,35 @@ final class HomeModel {
 
             self.planBySource = try await plan
             errorMessage = nil
+            hostRetryCount = 0
+            hostRetryTask?.cancel()
         } catch {
             errorMessage = error.localizedDescription
+            scheduleHostRetryIfNeeded(error)
         }
     }
+
+    /// Keep trying while the host is still booting.
+    ///
+    /// The daemon can be down for a few seconds when the app opens ahead of
+    /// it, and the first load failing then is nobody's fault. Instead of
+    /// pinning an error banner the user would have to dismiss by hand, retry
+    /// quietly in the background until the host answers or a bounded number
+    /// of attempts runs out.
+    private func scheduleHostRetryIfNeeded(_ error: Error) {
+        guard Bridge.isHostRecoveryError(error), hostRetryCount < hostRetryLimit else {
+            return
+        }
+        hostRetryCount += 1
+        hostRetryTask?.cancel()
+        hostRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await self?.load()
+        }
+    }
+
+    private let hostRetryLimit = 10
 
     /// Switch what the grid counts and redraw it.
     func setScope(_ new: ActivityScope) async {

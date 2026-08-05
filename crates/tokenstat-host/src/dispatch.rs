@@ -19,6 +19,7 @@ use serde_json::{Value, json};
 use tokenstat_core::{GroupBy, Query};
 
 use crate::PROTOCOL_VERSION;
+use crate::account_activity::FailureReason;
 use crate::automations::Automation;
 use crate::dto::{
     AccountDto, BlockDto, BucketDto, CalendarDto, DeviceLoginDto, DevicePollDto, GroupByDto,
@@ -393,7 +394,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     {
                         Ok(Some(calendar)) => {
                             return serde_json::to_value(
-                                CalendarDto::from(calendar).scoped("account", None),
+                                CalendarDto::from(calendar).scoped("account", None, None),
                             )
                             .map_err(|e| e.to_string());
                         }
@@ -411,15 +412,33 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                                 .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
                                 .collect();
                             // The scope always says `local`, so the grid is
-                            // never labelled as the account's. The message is
-                            // only added when something actually went wrong:
-                            // being signed out is not news, and repeating it on
-                            // the screen that opens first is nagging.
-                            let notice = (!failure.expected)
-                                .then(|| format!("Showing this machine only: {}", failure.message));
+                            // never labelled as the account's. The notice says
+                            // why in one line and the code tells the front end
+                            // what to do about it. An auth failure gets an
+                            // actionable sentence rather than a CLI incantation
+                            // quoted at someone who is already sitting in the
+                            // app; the front end offers a sign-in from the code.
+                            let (notice, code) = match failure.reason {
+                                FailureReason::Authentication => (
+                                    Some(
+                                        "Showing this machine only. Sign in to tokenstat.ai \
+                                         to see usage from every machine."
+                                            .to_string(),
+                                    ),
+                                    Some("auth"),
+                                ),
+                                FailureReason::UpgradeRequired => (
+                                    Some(format!("Showing this machine only: {}", failure.message)),
+                                    Some("upgrade"),
+                                ),
+                                FailureReason::Other => (
+                                    Some(format!("Showing this machine only: {}", failure.message)),
+                                    Some("other"),
+                                ),
+                            };
                             return match tokenstat_core::activity::calendar(&days, p.weeks, today) {
                                 Some(calendar) => serde_json::to_value(
-                                    CalendarDto::from(calendar).scoped("local", notice),
+                                    CalendarDto::from(calendar).scoped("local", notice, code),
                                 )
                                 .map_err(|e| e.to_string()),
                                 None => Ok(Value::Null),

@@ -104,7 +104,11 @@ struct RootView: View {
                     // path onto two lines and a commit subject onto three,
                     // which is a column of text pretending to be a panel. The
                     // minimum went up with it: nothing here reads at 240.
-                    .inspectorColumnWidth(min: 370, ideal: 400, max: 520)
+                    .inspectorColumnWidth(
+                        min: DisplayFit.scale(370),
+                        ideal: DisplayFit.scale(400),
+                        max: DisplayFit.scale(520)
+                    )
                 }
         }
         // Watch the width of the whole split view, not the detail pane: the
@@ -189,16 +193,21 @@ struct RootView: View {
     /// right hand side is simply cut off by the window edge. That was the
     /// clipped inspector, and it also blinded the measurement below, which sits
     /// inside the clamp and so could only ever read the clamped width back.
-    static let minimumContentWidth: CGFloat = 760
+    static var minimumContentWidth: CGFloat { DisplayFit.scale(760) }
+
+    /// The narrowest the window may get vertically.
+    static var minimumContentHeight: CGFloat { DisplayFit.scale(620) }
 
     /// What the inspector asks for, matching `inspectorColumnWidth(min:)`.
-    private static let inspectorMinimumWidth: CGFloat = 370
+    private static var inspectorMinimumWidth: CGFloat { DisplayFit.scale(370) }
 
     /// The narrowest window that can hold all three columns.
     ///
     /// `.inspector` does not enforce this itself: given less room it keeps its
     /// width and lets the trailing edge run off the window.
-    private static let widthForThreeColumns = minimumContentWidth + inspectorMinimumWidth
+    private static var widthForThreeColumns: CGFloat {
+        minimumContentWidth + inspectorMinimumWidth
+    }
 
     /// How much wider than the threshold the window must get before the pane
     /// comes back.
@@ -582,12 +591,17 @@ struct RootView: View {
             WorkspacesView(model: workspaces)
             #endif
         case .home:
-            HomeView(model: home, account: account) { day in
-                // A click on a day is a question about that day, and Insights
-                // is where day-sized questions get answered.
-                model.focusOn(day: day.date)
-                destination = .insights
-            }
+            HomeView(
+                model: home,
+                account: account,
+                onSelectDay: { day in
+                    // A click on a day is a question about that day, and
+                    // Insights is where day-sized questions get answered.
+                    model.focusOn(day: day.date)
+                    destination = .insights
+                },
+                onShowAccount: { selectDestination(.account) }
+            )
         case .automations:
             AutomationsView(model: automations, folders: workspaces.folders) { destination = $0 }
         case .todo:
@@ -597,7 +611,13 @@ struct RootView: View {
         case .account:
             AccountView(model: account)
         case .insights:
-            InsightsView(model: model)
+            InsightsView(model: model) {
+                // The back arrow exists only for a day that came from Home, so
+                // the round trip has to end there too: clear the day filter
+                // and put Home back in front.
+                model.clearFocusedDay()
+                selectDestination(.home)
+            }
         }
     }
 

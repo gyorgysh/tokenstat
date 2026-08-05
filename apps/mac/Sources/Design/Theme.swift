@@ -641,15 +641,28 @@ struct RevealOnHover<Content: View>: View {
 struct InspectorCloseButton: View {
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
+                .foregroundStyle(isHovering ? Color.primary : .secondary)
+                .frame(width: 22, height: 22)
+                // A bare grey glyph floats on the dark sidebar material and
+                // reads as a smudge. A quiet circular seat makes it a control
+                // on any background, and the hover fills it like the tab close
+                // buttons already do.
+                .background(
+                    Circle().fill(isHovering ? Theme.rowHighlight : Color.primary.opacity(0.07))
+                )
+                .overlay(
+                    Circle().strokeBorder(Theme.border.opacity(isHovering ? 0.9 : 0.55), lineWidth: 1)
+                )
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
         .help("Close the inspector")
         .accessibilityLabel("Close the inspector")
     }
@@ -694,7 +707,16 @@ private struct WidthKey: PreferenceKey {
 ///
 /// One number, so the breakpoints across the app cannot drift apart.
 extension CGFloat {
-    static let twoColumnWidth: CGFloat = 1_000
+    /// Folds the display the window opens on into the fixed breakpoints.
+    ///
+    /// macOS lays out in points, and a scaled display hands the app fewer of
+    /// them: a 13-inch MacBook at its default resolution presents about 1440
+    /// points, and a display set to a lower effective resolution fewer still.
+    /// The layout was tuned on a full-size desktop; on a small screen the
+    /// fixed columns add up to more than the window can hold and the inspector
+    /// runs past the edge. This factor shrinks those numbers with the screen,
+    /// so the same window fits a 1080p panel and a compact laptop.
+    static var twoColumnWidth: CGFloat { DisplayFit.scale(1_000) }
 
     /// How wide a self-contained panel wants to be in a flowing grid.
     ///
@@ -702,5 +724,35 @@ extension CGFloat {
     /// avoid wrapping its header and no more. The grid fits as many of these as
     /// the window allows, which is why the count of columns follows the window
     /// rather than a hard breakpoint.
-    static let panelWidth: CGFloat = 330
+    static var panelWidth: CGFloat { DisplayFit.scale(330) }
+}
+
+/// The display the window opens on, in points.
+enum DisplayFit {
+    #if os(macOS)
+    private static var screenWidth: CGFloat {
+        NSScreen.main?.visibleFrame.width ?? referenceWidth
+    }
+    #else
+    private static var screenWidth: CGFloat {
+        UIScreen.main.bounds.width
+    }
+    #endif
+
+    /// The width the fixed layout was tuned against.
+    private static let referenceWidth: CGFloat = 1440
+
+    /// The smallest the factor goes, so a very small screen still gets a
+    /// readable layout rather than a squeezed one.
+    private static let floor: CGFloat = 0.78
+
+    /// 1 on a full-size display, smaller on one that presents fewer points.
+    static var factor: CGFloat {
+        min(max(screenWidth / referenceWidth, floor), 1)
+    }
+
+    /// Scale a fixed width by the display fit.
+    static func scale(_ value: CGFloat) -> CGFloat {
+        value * factor
+    }
 }

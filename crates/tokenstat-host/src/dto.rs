@@ -443,6 +443,12 @@ pub struct CalendarDto {
     /// Why the answer is not what was asked for, in words a person reads.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// What kind of fallback this is, so a front end can act on it rather
+    /// than parse the sentence: `"auth"` (a sign-in would fix it), `"upgrade"`
+    /// (the account does not include it), `"other"`. Absent when the grid is
+    /// the one asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice_code: Option<String>,
 }
 
 fn local_scope() -> String {
@@ -507,15 +513,22 @@ impl From<tokenstat_core::activity::HeatCalendar> for CalendarDto {
             last: c.last.to_string(),
             scope: local_scope(),
             notice: None,
+            notice_code: None,
         }
     }
 }
 
 impl CalendarDto {
     /// Say which grid this is, and why if it is not the one asked for.
-    pub fn scoped(mut self, scope: &str, notice: Option<String>) -> CalendarDto {
+    pub fn scoped(
+        mut self,
+        scope: &str,
+        notice: Option<String>,
+        notice_code: Option<&str>,
+    ) -> CalendarDto {
         self.scope = scope.to_string();
         self.notice = notice;
+        self.notice_code = notice_code.map(str::to_string);
         self
     }
 }

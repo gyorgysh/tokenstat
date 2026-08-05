@@ -146,11 +146,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         do {
             fresh = try open()
         } catch {
-            throw BridgeError.core(
-                code: "host_unreachable",
-                message: "The tokenstat host is not answering at \(path). "
-                    + "Start it, or reopen the app to work in-process."
-            )
+            throw Self.unreachable(path: path)
         }
         do {
             fresh.patience = patience
@@ -162,7 +158,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
             throw Self.silence(path: path, patience: patience)
         } catch {
             release(fresh, reusable: false)
-            throw error
+            // A connection that was alive long enough to be opened and then
+            // died before answering is a daemon that went away mid-call — the
+            // same situation as a refused connect, and the bridge repairs it
+            // the same way. A raw transport error must never reach a screen
+            // as "The operation couldn't be completed".
+            throw Self.unreachable(path: path)
         }
     }
 
@@ -172,6 +173,19 @@ final class SocketTransport: Transport, @unchecked Sendable {
             message: "The tokenstat host at \(path) said nothing for "
                 + "\(Int(patience)) seconds. It may be busy with a scan, or it may "
                 + "have stopped answering."
+        )
+    }
+
+    /// The host is gone: connection refused, or a fresh connection died before
+    /// answering. The bridge treats this as repairable and retries after
+    /// restarting the launch agent, so the words say what happened and that
+    /// the app is on it — not what the user should do. They only surface when
+    /// the repair also failed.
+    private static func unreachable(path: String) -> BridgeError {
+        BridgeError.core(
+            code: "host_unreachable",
+            message: "The tokenstat host is not answering at \(path). "
+                + "tokenstat tried to restart it and will keep retrying."
         )
     }
 
@@ -379,9 +393,29 @@ private final class Connection {
 
 /// Why a transport could not carry the call. Never surfaced directly: the
 /// pool turns these into a `BridgeError` with words a user can act on.
-private enum TransportFailure: Error {
+///
+/// It still conforms to `LocalizedError`, so even a leaked instance reads as
+/// a sentence rather than "The operation couldn't be completed.
+/// (Tokenstat.TransportFailure …)" — that raw default is what made a host
+/// going away look like an internal crash instead of a daemon that was down.
+private enum TransportFailure: LocalizedError {
     case path(String)
     case system(String, Int32)
     /// The socket went quiet for longer than the call's patience.
     case timedOut
+
+    var errorDescription: String? {
+        switch self {
+        case .path(let why):
+            return why
+        case .system(let operation, let code):
+            return "The host connection failed during \(operation): \(Self.text(code))"
+        case .timedOut:
+            return "The host connection timed out."
+        }
+    }
+
+    private static func text(_ code: Int32) -> String {
+        String(cString: strerror(code))
+    }
 }

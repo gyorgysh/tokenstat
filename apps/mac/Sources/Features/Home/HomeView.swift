@@ -18,6 +18,9 @@ struct HomeView: View {
     @Bindable var account: AccountModel
     /// Clicking a day on the heatmap goes to Insights filtered to it.
     var onSelectDay: ((HeatCell) -> Void)?
+    /// Where the account flow lives, for the sign-in prompt when All machines
+    /// cannot be shown without one.
+    var onShowAccount: () -> Void
 
     var body: some View {
         ScrollView {
@@ -341,7 +344,7 @@ struct HomeView: View {
         let source = model.deliveredScope == .allMachines
             ? ", across every machine on your account"
             : ", on this machine"
-        if let notice = model.scopeNotice {
+        if let notice = model.scopeNotice, !model.needsAccountSignIn {
             return base + source + ". " + notice
         }
         return base + source
@@ -356,6 +359,9 @@ struct HomeView: View {
         ) {
             if let calendar = model.calendar {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if model.needsAccountSignIn {
+                        accountSignInPrompt
+                    }
                     // Grouped at the leading edge rather than spread across
                     // the card. These three are meant to be read against each
                     // other, and a full-screen window put them a third of a
@@ -399,6 +405,37 @@ struct HomeView: View {
                 EmptyHint(text: "Nothing scanned yet. Run a scan from Insights to fill this in.")
             }
         }
+    }
+
+    /// The account grid fell back because a sign-in is missing or stale.
+    ///
+    /// The heatmap below is this machine's own year, and saying that in the
+    /// subtitle is not enough: the fix lives on the Account screen, so offer
+    /// the jump from the card that failed rather than quoting `tokenstat login`
+    /// at somebody who is already sitting in the app.
+    private var accountSignInPrompt: some View {
+        HStack(spacing: Theme.Space.s) {
+            Label(
+                "All machines needs your tokenstat.ai account",
+                systemImage: "person.crop.circle.badge.exclamationmark"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
+
+            Spacer(minLength: Theme.Space.s)
+
+            Button {
+                account.signIn()
+                onShowAccount()
+            } label: {
+                Text(account.signedIn ? "Reconnect" : "Sign in")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(Theme.accent)
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 }
 

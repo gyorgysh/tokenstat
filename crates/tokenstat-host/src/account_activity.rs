@@ -52,20 +52,46 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 /// about the account rather than faults, and repeating either of them on the
 /// screen that opens first is nagging. The caller falls back either way, but
 /// only says why when there is something to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureReason {
+    /// Not signed in, or the token was rejected. The fix is a sign-in, and a
+    /// front end can offer one instead of quoting a CLI command.
+    Authentication,
+    /// The account exists but does not include this route.
+    UpgradeRequired,
+    /// Anything else: network, server, cache.
+    Other,
+}
+
 pub struct FetchError {
     pub message: String,
+    pub reason: FailureReason,
     pub expected: bool,
 }
 
 impl FetchError {
     fn new(message: String) -> FetchError {
         let lower = message.to_lowercase();
-        let expected = lower.contains("not signed in")
+        let authentication = lower.contains("not signed in")
             || lower.contains("not logged in")
             || lower.contains("sign in")
-            || lower.contains("(402")
-            || lower.contains("upgrade_required");
-        FetchError { message, expected }
+            || lower.contains("token missing or revoked");
+        let upgrade = lower.contains("(402")
+            || lower.contains("upgrade_required")
+            || lower.contains("(403)");
+        let reason = if authentication {
+            FailureReason::Authentication
+        } else if upgrade {
+            FailureReason::UpgradeRequired
+        } else {
+            FailureReason::Other
+        };
+        let expected = authentication || upgrade;
+        FetchError {
+            message,
+            reason,
+            expected,
+        }
     }
 }
 
@@ -223,5 +249,43 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
             }
             Err(FetchError::new(message))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_auth_failure_is_expected_and_actionable() {
+        // A front end turns `Authentication` into a sign-in button rather than
+        // an error banner, so the two revoked-token strings must classify
+        // the same way whether they come from the keychain or the server.
+        for message in [
+            tokenstat_sync::profile::NOT_LOGGED_IN.to_string(),
+            tokenstat_sync::profile::TOKEN_REVOKED.to_string(),
+        ] {
+            let error = FetchError::new(message);
+            assert!(error.expected);
+            assert_eq!(error.reason, FailureReason::Authentication);
+        }
+    }
+
+    #[test]
+    fn a_plan_limitation_is_expected_but_not_an_auth_problem() {
+        // "Your plan does not include this" is a settled fact about the
+        // account, not a fault, but signing in again would not fix it.
+        let error = FetchError::new(
+            "the account refused this request (403): upgrade_required".to_string(),
+        );
+        assert!(error.expected);
+        assert_eq!(error.reason, FailureReason::UpgradeRequired);
+    }
+
+    #[test]
+    fn a_real_failure_is_neither_expected_nor_an_auth_problem() {
+        let error = FetchError::new("usage request failed (500): boom".to_string());
+        assert!(!error.expected);
+        assert_eq!(error.reason, FailureReason::Other);
     }
 }

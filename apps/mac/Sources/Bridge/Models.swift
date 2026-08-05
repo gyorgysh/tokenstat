@@ -186,6 +186,11 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     var scope: String?
     /// Why this is not the grid that was asked for, in words to show.
     var notice: String?
+    /// What kind of fallback this is, so the interface can act on it instead
+    /// of parsing the sentence: `"auth"` (sign-in would fix it), `"upgrade"`
+    /// (the account does not include it), `"other"`. Absent when the grid is
+    /// the one asked for.
+    var noticeCode: String?
 }
 
 // MARK: - Syntax highlighting

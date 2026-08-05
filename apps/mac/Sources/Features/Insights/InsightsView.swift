@@ -10,6 +10,10 @@ import SwiftUI
 
 struct InsightsView: View {
     @Bindable var model: InsightsModel
+    /// Leave a day-focused view and return to Home, which is where it came
+    /// from. Nil when Insights was opened directly, so there is no back arrow
+    /// for a journey nobody took.
+    var onBackToHome: (() -> Void)?
 
     private var tabs: [(tab: InsightsModel.Tab, label: String, symbol: String)] {
         InsightsModel.Tab.allCases.map { ($0, $0.label, $0.symbol) }
@@ -146,6 +150,16 @@ struct InsightsView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        if model.focusedDay != nil {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    onBackToHome?()
+                } label: {
+                    Label("Home", systemImage: "chevron.left")
+                }
+                .help("Back to Home")
+            }
+        }
         ToolbarItem {
             Picker("Period", selection: $model.period) {
                 ForEach(InsightsModel.Period.allCases) { p in

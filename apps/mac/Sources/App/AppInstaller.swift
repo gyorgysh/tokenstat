@@ -41,7 +41,7 @@ enum AppInstaller {
         case noAppInImage
         case unsigned(String)
         case rejectedByGatekeeper(String)
-        case notWritable(String)
+        case authorizationFailed(String)
         case replaceFailed(String)
 
         var errorDescription: String? {
@@ -50,8 +50,8 @@ enum AppInstaller {
             case .noAppInImage: return "The download did not contain tokenstat."
             case .unsigned(let why): return "The download is not correctly signed: \(why)"
             case .rejectedByGatekeeper(let why): return "macOS refused the download: \(why)"
-            case .notWritable(let path):
-                return "\(path) cannot be replaced by this user. Install the update by hand."
+            case .authorizationFailed(let why):
+                return "The update needs your Mac password to replace the app: \(why)"
             case .replaceFailed(let why): return "The update could not be put in place: \(why)"
             }
         }
@@ -152,10 +152,23 @@ enum AppInstaller {
     private static func replaceRunningBundle(with fresh: URL) throws {
         let current = Bundle.main.bundleURL
         let parent = current.deletingLastPathComponent()
-        guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            throw Failure.notWritable(current.path)
+        if FileManager.default.isWritableFile(atPath: parent.path) {
+            try replaceUnprivileged(fresh, at: current, in: parent)
+            return
         }
+        // The ordinary failure: the app lives in /Applications and a normal
+        // user cannot write there. Replacing it is exactly what the user
+        // wants, so ask for their password and do the copy with admin rights
+        // rather than giving up and sending them to a download page.
+        try replaceAuthenticated(fresh, at: current, in: parent)
+    }
 
+    /// Swap the bundle in place when the folder is writable by this user.
+    private static func replaceUnprivileged(
+        _ fresh: URL,
+        at current: URL,
+        in parent: URL
+    ) throws {
         let fm = FileManager.default
         let staged = parent.appendingPathComponent("Tokenstat.app.incoming")
         try? fm.removeItem(at: staged)
@@ -171,6 +184,56 @@ enum AppInstaller {
             try? fm.removeItem(at: staged)
             throw Failure.replaceFailed(error.localizedDescription)
         }
+    }
+
+    /// Replace the bundle with administrator rights, asking for the password.
+    ///
+    /// Runs the copy through `osascript`'s `do shell script ... with
+    /// administrator privileges`, which puts up the standard macOS password
+    /// prompt. The bundle being copied was already checksum-verified and
+    /// code-signed before this point, so the only new trust being granted is
+    /// "let this user write to the folder the app lives in".
+    ///
+    /// Same staging shape as the unprivileged path: the new bundle is copied
+    /// to a sibling first, and only once it is whole on disk is the old one
+    /// removed and the new one moved over it. A failure part way through
+    /// leaves the running application untouched.
+    private static func replaceAuthenticated(
+        _ fresh: URL,
+        at current: URL,
+        in parent: URL
+    ) throws {
+        let staged = parent.appendingPathComponent("Tokenstat.app.incoming")
+        let command = [
+            "/bin/rm -rf \(shellQuote(staged.path))",
+            "/usr/bin/ditto \(shellQuote(fresh.path)) \(shellQuote(staged.path))",
+            "/bin/rm -rf \(shellQuote(current.path))",
+            "/bin/mv \(shellQuote(staged.path)) \(shellQuote(current.path))",
+            "/usr/bin/xattr -dr com.apple.quarantine \(shellQuote(current.path))",
+        ].joined(separator: " && ")
+
+        // The shell command goes inside an AppleScript string, so double
+        // quotes have to be escaped for AppleScript before the shell ever
+        // sees them.
+        let escaped = command
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "do shell script \"\(escaped)\" with administrator privileges"
+        let out = run("/usr/bin/osascript", ["-e", script])
+        guard out.status == 0 else {
+            let why = firstLine(out.errors.isEmpty ? out.output : out.errors)
+            throw Failure.authorizationFailed(why)
+        }
+    }
+
+    /// Quote a path for a `/bin/sh` command line.
+    ///
+    /// App paths can contain spaces and the mount point is under a temp
+    /// directory, so neither side can be trusted bare. Single-quoting handles
+    /// everything except a quote inside the path, which is escaped the shell
+    /// way.
+    private static func shellQuote(_ path: String) -> String {
+        "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     // MARK: - Relaunching

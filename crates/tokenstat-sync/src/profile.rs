@@ -127,6 +127,34 @@ struct ApiErrorBody {
     message: Option<String>,
 }
 
+/// Turn a non-401 refusal into an error that names the server's own reason.
+///
+/// A `401` means the token itself was rejected and becomes the revoked-token
+/// message. Other refusals — most often a `403` when the account's plan does
+/// not cover the route — are facts about the account, not about the token, and
+/// telling somebody whose token is fine to sign in again sends them through a
+/// login for nothing. The server's message says which fact it is, so surface
+/// it. A refusal with no reason at all is indistinguishable from a revoked
+/// token, and signing in again is the honest move there.
+fn refusal_error(text: &str, status: u16) -> ProfileError {
+    let body: ApiErrorBody = serde_json::from_str(text).unwrap_or(ApiErrorBody {
+        error: None,
+        message: None,
+    });
+    let detail = body
+        .message
+        .or(body.error)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| text.trim().to_string());
+    if detail.is_empty() {
+        return ProfileError::Message(TOKEN_REVOKED.into());
+    }
+    ProfileError::Message(format!(
+        "the account refused this request ({status}): {detail}"
+    ))
+}
+
 fn http_client() -> Result<reqwest::blocking::Client, ProfileError> {
     // No cookie jar: bearer routes must not attach a web session cookie.
     Ok(reqwest::blocking::Client::builder()
@@ -432,8 +460,11 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .send()?;
     let status = resp.status();
     let text = resp.text()?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
+    if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if status.as_u16() == 403 {
+        return Err(refusal_error(&text, 403));
     }
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
@@ -558,8 +589,11 @@ pub fn account_series(
         .send()?;
     let status = resp.status();
     let text = resp.text()?;
-    if status.as_u16() == 401 || status.as_u16() == 403 {
+    if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if status.as_u16() == 403 {
+        return Err(refusal_error(&text, 403));
     }
     if status.as_u16() == 429 {
         return Err(ProfileError::Message(
