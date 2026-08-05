@@ -42,6 +42,16 @@ use serde::Serialize;
 /// keeps its own scrollback; this is only the handoff window.
 const BUFFER_BYTES: usize = 512 * 1024;
 
+/// Slack allowed above [`BUFFER_BYTES`] before the buffer is trimmed.
+///
+/// Trimming exactly the excess on every push means shifting the whole buffer
+/// down by a few kilobytes for each read from the pty, which is a memmove of
+/// the entire window per 8 KB of output. A build that prints fast turns that
+/// into hundreds of megabytes a second of pure copying, per session. Letting it
+/// grow and then trimming in one go amortizes the copy to roughly one byte
+/// moved per byte produced.
+const TRIM_SLACK: usize = 128 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
     #[error("no session with id {0}")]
@@ -137,7 +147,10 @@ impl Buffer {
     fn push(&mut self, bytes: &[u8]) {
         self.data.extend_from_slice(bytes);
         self.total += bytes.len() as u64;
-        if self.data.len() > BUFFER_BYTES {
+        // Trim only once the slack is used up, and then all the way back to the
+        // window size. See `TRIM_SLACK`: the obvious version, dropping exactly
+        // the excess every time, copies the whole buffer per read.
+        if self.data.len() > BUFFER_BYTES + TRIM_SLACK {
             let excess = self.data.len() - BUFFER_BYTES;
             self.data.drain(..excess);
         }
@@ -633,11 +646,31 @@ mod tests {
         // Silently resuming would make a terminal look like the command
         // produced less output than it did.
         let mut b = Buffer::new();
-        b.push(&vec![b'a'; BUFFER_BYTES + 1000]);
+        let written = BUFFER_BYTES + TRIM_SLACK + 1000;
+        b.push(&vec![b'a'; written]);
         let chunk = b.read_from(0);
-        assert_eq!(chunk.dropped, 1000);
+        // Trimming goes back to the window size, not to the trigger point, so
+        // everything above `BUFFER_BYTES` is gone and is reported.
+        assert_eq!(chunk.dropped, (TRIM_SLACK + 1000) as u64);
         assert_eq!(chunk.bytes.len(), BUFFER_BYTES);
-        assert_eq!(chunk.next_offset, (BUFFER_BYTES + 1000) as u64);
+        assert_eq!(chunk.next_offset, written as u64);
+    }
+
+    #[test]
+    fn the_buffer_stays_bounded_without_copying_on_every_push() {
+        // The slack is what makes a fast build cheap: pushes inside it must not
+        // move anything, and the buffer must still never grow without limit.
+        let mut b = Buffer::new();
+        for _ in 0..4096 {
+            b.push(&[b'x'; 8 * 1024]);
+            assert!(
+                b.data.len() <= BUFFER_BYTES + TRIM_SLACK,
+                "buffer grew to {} bytes",
+                b.data.len()
+            );
+        }
+        assert!(b.data.len() >= BUFFER_BYTES, "trimmed below the window");
+        assert_eq!(b.total, 4096 * 8 * 1024);
     }
 
     #[test]
