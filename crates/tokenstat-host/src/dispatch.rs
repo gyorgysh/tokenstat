@@ -12,6 +12,8 @@
 //! straight into here, so a method cannot exist over one transport and not the
 //! other, and there is no second copy to keep in step.
 
+use std::sync::{Mutex, PoisonError};
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokenstat_core::{GroupBy, Query};
@@ -589,62 +591,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
-        // What each vendor says is left of its plan. Not derived from the
-        // archive: these are the vendor's own numbers about a quota, and a
-        // percentage we worked out ourselves would be a guess wearing a
-        // number's clothes.
-        //
-        // Codex reads off the disk and is instant. The other providers make a
-        // request, so this is a refresh rather than something to poll.
-        "usage.limits" => {
-            let providers = std::thread::scope(|scope| {
-                let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
-                let cursor = scope.spawn(tokenstat_sync::cursor::limits);
-                let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
-                let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
-                let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
-                let codex = tokenstat_core::limits::codex_limits();
-                let claude = claude.join().unwrap_or_else(|_| {
-                    tokenstat_core::limits::ProviderLimits::unavailable(
-                        "claude_code",
-                        "Reading the Claude Code limits failed unexpectedly.",
-                    )
-                });
-                let cursor = cursor.join().unwrap_or_else(|_| {
-                    tokenstat_core::limits::ProviderLimits::unavailable(
-                        "cursor",
-                        "Reading the Cursor limits failed unexpectedly.",
-                    )
-                });
-                let grok = grok.join().unwrap_or_else(|_| {
-                    tokenstat_core::limits::ProviderLimits::unavailable(
-                        "grok",
-                        "Reading the Grok limits failed unexpectedly.",
-                    )
-                });
-                let opencode = opencode.join().unwrap_or_else(|_| {
-                    tokenstat_core::limits::ProviderLimits::unavailable(
-                        "opencode",
-                        "Reading the OpenCode limits failed unexpectedly.",
-                    )
-                });
-                let antigravity = antigravity.join().unwrap_or_else(|_| {
-                    tokenstat_core::limits::ProviderLimits::unavailable(
-                        "antigravity",
-                        "Reading the Antigravity limits failed unexpectedly.",
-                    )
-                });
-                vec![claude, codex, cursor, grok, opencode, antigravity]
-            });
-            // A vendor that could not be read this time is not a vendor whose
-            // quota is unknown. Remember every real reading and hand back the
-            // last one, marked stale and dated, when a refresh comes back with
-            // only a reason.
-            tokenstat_core::limits::cache::store(&providers);
-            let providers = tokenstat_core::limits::cache::backfill(providers);
-            serde_json::to_value(providers).map_err(|e| e.to_string())
-        }
-
         // Remote vendor usage is fetched only after an explicit user action.
         // Local log scanning remains separate and never needs the network.
         "fetch" => with_session(s, |b| {
@@ -1113,6 +1059,21 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         "sync.scheduleStatus" => sync_schedule_status(),
 
+        // What each vendor says is left of its plan. Not derived from the
+        // archive: these are the vendor's own numbers about a quota, and a
+        // percentage we worked out ourselves would be a guess wearing a
+        // number's clothes.
+        //
+        // Codex reads off the disk and is instant. The other providers make a
+        // request, so this is a refresh rather than something to poll.
+        //
+        // Sessionless, and that is the important part. Five vendor requests
+        // with timeouts measured in tens of seconds used to run while holding
+        // the session, so one unreachable vendor froze reports, the workspace
+        // list and every other screen for as long as it took to give up. None
+        // of this reads the archive.
+        "usage.limits" => Ok(usage_limits()),
+
         "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
             .map_err(|e: serde_json::Error| e.to_string()),
 
@@ -1173,6 +1134,65 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         _ => return None,
     })
+}
+
+/// Ask every vendor what is left of its plan.
+///
+/// One refresh at a time, and that lock is the only thing this serializes
+/// against. The session used to provide the same guarantee by accident, and it
+/// charged every other screen for it. Two screens asking at once should share
+/// the wait, not fan out ten requests.
+fn usage_limits() -> Value {
+    static REFRESH: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
+
+    let providers = std::thread::scope(|scope| {
+        let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
+        let cursor = scope.spawn(tokenstat_sync::cursor::limits);
+        let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
+        let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
+        let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
+        let codex = tokenstat_core::limits::codex_limits();
+        let claude = claude.join().unwrap_or_else(|_| {
+            tokenstat_core::limits::ProviderLimits::unavailable(
+                "claude_code",
+                "Reading the Claude Code limits failed unexpectedly.",
+            )
+        });
+        let cursor = cursor.join().unwrap_or_else(|_| {
+            tokenstat_core::limits::ProviderLimits::unavailable(
+                "cursor",
+                "Reading the Cursor limits failed unexpectedly.",
+            )
+        });
+        let grok = grok.join().unwrap_or_else(|_| {
+            tokenstat_core::limits::ProviderLimits::unavailable(
+                "grok",
+                "Reading the Grok limits failed unexpectedly.",
+            )
+        });
+        let opencode = opencode.join().unwrap_or_else(|_| {
+            tokenstat_core::limits::ProviderLimits::unavailable(
+                "opencode",
+                "Reading the OpenCode limits failed unexpectedly.",
+            )
+        });
+        let antigravity = antigravity.join().unwrap_or_else(|_| {
+            tokenstat_core::limits::ProviderLimits::unavailable(
+                "antigravity",
+                "Reading the Antigravity limits failed unexpectedly.",
+            )
+        });
+        vec![claude, codex, cursor, grok, opencode, antigravity]
+    });
+    // A vendor that could not be read this time is not a vendor whose quota is
+    // unknown. Remember every real reading and hand back the last one, marked
+    // stale and dated, when a refresh comes back with only a reason.
+    tokenstat_core::limits::cache::store(&providers);
+    let providers = tokenstat_core::limits::cache::backfill(providers);
+    // Every field here is plain data the vendors just returned, so the only way
+    // this fails is a bug in the DTO, and an empty list says that plainly.
+    serde_json::to_value(providers).unwrap_or_else(|_| json!([]))
 }
 
 fn sync_schedule_status() -> Result<Value, String> {
@@ -1319,6 +1339,12 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{method} returned non-JSON: {out} ({e})"));
             assert!(v["ok"].is_boolean(), "{method} lacks ok: {out}");
         }
+
+        // `usage.limits` belongs on that list too, for a stronger reason: it
+        // makes five vendor requests with timeouts in the tens of seconds, and
+        // behind the session it froze every other screen for the length of the
+        // slowest one. It is not exercised here because calling it would make
+        // those requests from the test suite.
 
         // Everything else still goes through the session, `pty.spawn` included:
         // it resolves a workspace id, which only the session knows.
