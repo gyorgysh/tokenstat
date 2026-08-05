@@ -294,6 +294,15 @@ These are product requirements, not preferences.
   on this machine to fetch aggregate usage, are never written into the archive,
   and are not eligible for sync. Where a vendor has no local credential, the
   user can still paste a token.
+- **One credential is written back, on purpose**: when Claude Code's stored
+  access token has expired, `tokenstat-sync::claude_limits` renews it against
+  Anthropic and writes the renewed login into the store it came from. An access
+  token lives hours, and a machine that drives Claude Code without a fresh CLI
+  sign-in leaves that store expired for days, so the panel repeated advice that
+  was not working. The renewed refresh token replaces the one that was spent,
+  which is what keeps Claude Code itself signed in. This is the only place that
+  writes another tool's credential. Do not add a second one without the same
+  argument, and do not "fix" this one back: it is a decision, not an oversight.
 - Never commit real session logs. Use `fixtures/local/` while working, and
   commit only redacted fixtures.
 - Handle a missing or unreadable log directory as an empty result with a
