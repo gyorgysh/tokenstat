@@ -147,7 +147,7 @@ pub fn agent_command(backend: &str, prompt: &str) -> Result<Vec<String>, String>
         return Err("an automation needs a prompt".into());
     }
     let args: Vec<&str> = match backend {
-        "sh" => vec!["/bin/sh", "-c", p],
+        "sh" => shell_argv(p),
         "claude" => vec![
             "claude",
             "-p",
@@ -190,6 +190,16 @@ pub fn agent_command(backend: &str, prompt: &str) -> Result<Vec<String>, String>
         other => return Err(format!("unknown backend {other}")),
     };
     Ok(args.into_iter().map(str::to_string).collect())
+}
+
+#[cfg(unix)]
+fn shell_argv(prompt: &str) -> Vec<&str> {
+    vec!["/bin/sh", "-c", prompt]
+}
+
+#[cfg(windows)]
+fn shell_argv(prompt: &str) -> Vec<&str> {
+    vec!["cmd.exe", "/C", prompt]
 }
 
 /// The backends a client can choose from, in picker order.
@@ -798,6 +808,17 @@ mod tests {
         (session, ws.id)
     }
 
+    fn test_shell_command(script: &str) -> (String, Vec<String>) {
+        #[cfg(unix)]
+        {
+            ("/bin/sh".into(), vec!["-c".into(), script.into()])
+        }
+        #[cfg(windows)]
+        {
+            ("cmd.exe".into(), vec!["/C".into(), script.into()])
+        }
+    }
+
     #[test]
     fn a_run_drains_into_a_transcript_and_records_the_outcome() {
         let dir = temp_dir("run");
@@ -820,10 +841,15 @@ mod tests {
         };
         store.push_run(run).unwrap();
 
+        let (command, args) = test_shell_command(if cfg!(windows) {
+            "echo hello"
+        } else {
+            "printf hello"
+        });
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: "/bin/sh".into(),
-                args: vec!["-c".into(), "printf hello".into()],
+                command,
+                args,
                 cwd: dir.clone(),
                 workspace_id: None,
                 rows: 24,
@@ -895,10 +921,15 @@ mod tests {
         };
         store.push_run(run).unwrap();
 
+        let (command, args) = test_shell_command(if cfg!(windows) {
+            "ping -n 31 127.0.0.1 > nul"
+        } else {
+            "sleep 30"
+        });
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
-                command: "/bin/sh".into(),
-                args: vec!["-c".into(), "sleep 30".into()],
+                command,
+                args,
                 cwd: dir.clone(),
                 workspace_id: None,
                 rows: 24,
@@ -934,7 +965,11 @@ mod tests {
         let mut due = job("due", ScheduleSpec::default(), 30);
         due.workspace_id = workspace_id.clone();
         due.backend = "sh".into();
-        due.prompt = "true".into();
+        due.prompt = if cfg!(windows) {
+            "exit 0".into()
+        } else {
+            "true".into()
+        };
         due.enabled = true;
         due.next_run_at_ms = Some(now_ms() - 60_000);
         store.seed(due);
