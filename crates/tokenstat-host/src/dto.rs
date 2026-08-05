@@ -433,6 +433,20 @@ pub struct CalendarDto {
     pub busiest: Option<HeatCellDto>,
     pub first: String,
     pub last: String,
+    /// Which grid this actually is: `"local"` or `"account"`.
+    ///
+    /// Asked for and got are not the same thing. An account grid that could not
+    /// be fetched falls back to the local one, and a client that drew it as the
+    /// account's would be reporting one machine's spend as everybody's.
+    #[serde(default = "local_scope")]
+    pub scope: String,
+    /// Why the answer is not what was asked for, in words a person reads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+fn local_scope() -> String {
+    "local".into()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -491,6 +505,17 @@ impl From<tokenstat_core::activity::HeatCalendar> for CalendarDto {
             busiest: c.busiest.as_ref().map(HeatCellDto::from),
             first: c.first.to_string(),
             last: c.last.to_string(),
+            scope: local_scope(),
+            notice: None,
         }
+    }
+}
+
+impl CalendarDto {
+    /// Say which grid this is, and why if it is not the one asked for.
+    pub fn scoped(mut self, scope: &str, notice: Option<String>) -> CalendarDto {
+        self.scope = scope.to_string();
+        self.notice = notice;
+        self
     }
 }

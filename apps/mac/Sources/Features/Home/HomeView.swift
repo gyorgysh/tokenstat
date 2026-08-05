@@ -306,13 +306,53 @@ struct HomeView: View {
 
     // MARK: - Activity
 
+    /// Switches what the grid counts.
+    ///
+    /// On the card rather than on the screen, because it changes this card and
+    /// nothing else. Today and Last 7 days beside the grid stay local: they are
+    /// "what have I spent here", which is the question Home opens with.
+    private var scopePicker: some View {
+        Picker("", selection: Binding(
+            get: { model.scope },
+            set: { new in Task { await model.setScope(new) } }
+        )) {
+            ForEach(ActivityScope.allCases) { scope in
+                Text(scope.label).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .controlSize(.small)
+        .frame(width: 220)
+    }
+
+    /// What the figures under the title are counting, said plainly.
+    ///
+    /// Naming the scope matters here more than anywhere else on the screen. The
+    /// same number means two different things depending on whether it is one
+    /// laptop or every machine, and a grid that quietly fell back to local
+    /// while the control still said All machines would be reporting the wrong
+    /// one of the two.
+    private var activitySubtitle: String {
+        guard let calendar = model.calendar else {
+            return "What each day was worth at list rates"
+        }
+        let base = "\(formatSpend(calendar.total)) at list rates over \(calendar.activeDays) active days"
+        let source = model.deliveredScope == .allMachines
+            ? ", across every machine on your account"
+            : ", on this machine"
+        if let notice = model.scopeNotice {
+            return base + source + ". " + notice
+        }
+        return base + source
+    }
+
     @ViewBuilder
     private var activity: some View {
         Card(
             title: "Activity",
-            subtitle: model.calendar.map {
-                "\(formatSpend($0.total)) at list rates over \($0.activeDays) active days"
-            } ?? "What each day was worth at list rates"
+            subtitle: activitySubtitle,
+            accessory: AnyView(scopePicker)
         ) {
             if let calendar = model.calendar {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {

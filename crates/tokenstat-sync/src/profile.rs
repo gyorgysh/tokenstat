@@ -481,6 +481,112 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
     })
 }
 
+/// One day × source × model row of the account's own usage.
+///
+/// Token counts only. The service has never priced anything and does not start
+/// here: it hands back the grain, and the price book on this machine turns it
+/// into a figure. That is also what makes an account-wide number comparable
+/// with a local one, rather than two prices computed in two places.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SeriesRow {
+    pub day: String,
+    pub src: String,
+    pub model: String,
+    #[serde(rename = "in")]
+    pub input: u64,
+    #[serde(rename = "out")]
+    pub output: u64,
+    pub cr: u64,
+    pub cw5: u64,
+    pub cw1: u64,
+    #[serde(default)]
+    pub ev: u64,
+    #[serde(default)]
+    pub plan: u8,
+}
+
+/// `GET /api/v1/usage/series`, the account's usage across every machine.
+///
+/// `machine` narrows it to one. Both come from the same store, so "this
+/// machine" and "all machines" cannot disagree with each other the way a local
+/// archive and an account total can.
+///
+/// Not logged in is a plain error, not a panic and not an empty result: an
+/// empty grid and "we could not ask" are different answers and the caller has
+/// to be able to tell them apart.
+pub struct SeriesResult {
+    pub rows: Vec<SeriesRow>,
+    /// The window the service actually covered.
+    ///
+    /// Not the window that was asked for. A plan's history span narrows it, and
+    /// a caller that drew the days outside it would be showing days it was
+    /// never sent as days on which nothing happened.
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+pub fn account_series(
+    host_flag: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    machine: Option<&str>,
+) -> Result<SeriesResult, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+
+    let mut url = format!("{host}/api/v1/usage/series");
+    let mut query: Vec<String> = Vec::new();
+    if let Some(from) = from {
+        query.push(format!("from={from}"));
+    }
+    if let Some(to) = to {
+        query.push(format!("to={to}"));
+    }
+    if let Some(machine) = machine {
+        query.push(format!("machine={machine}"));
+    }
+    if !query.is_empty() {
+        url.push('?');
+        url.push_str(&query.join("&"));
+    }
+
+    let client = http_client()?;
+    let resp = client
+        .get(url)
+        .header("authorization", format!("Bearer {token}"))
+        .send()?;
+    let status = resp.status();
+    let text = resp.text()?;
+    if status.as_u16() == 401 || status.as_u16() == 403 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if status.as_u16() == 429 {
+        return Err(ProfileError::Message(
+            "the service asked us to slow down. The last figures stay on screen.".into(),
+        ));
+    }
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "usage request failed ({status}): {text}"
+        )));
+    }
+    let raw: Value = serde_json::from_str(&text)?;
+    let rows = raw.get("rows").cloned().unwrap_or(Value::Array(vec![]));
+    let window = raw.get("window");
+    let field = |name: &str| {
+        window
+            .and_then(|w| w.get(name))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    };
+    Ok(SeriesResult {
+        rows: serde_json::from_value(rows)?,
+        from: field("from"),
+        to: field("to"),
+    })
+}
+
 pub struct SyncOptions<'a> {
     pub host_flag: Option<&'a str>,
     pub prune: bool,

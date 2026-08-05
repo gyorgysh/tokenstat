@@ -61,8 +61,12 @@ struct MachinesView: View {
         .task {
             if model.identity == nil { await model.load() }
             await model.ensureHelper()
+            // The sleep is where cancellation lands when this screen goes away,
+            // and it throws rather than returning, so the check afterwards is
+            // what stops a final refresh going out on a torn-down view.
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { break }
                 await model.refresh()
             }
         }
@@ -136,10 +140,17 @@ struct MachinesView: View {
                             // The comparison a person actually performs. The
                             // fingerprint and the key still exist and are one
                             // disclosure away, under Connection details.
-                            Text(words)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.accent)
-                                .textSelection(.enabled)
+                            //
+                            // Blurred until hovered: this screen is often the
+                            // one on a shared display while two machines are
+                            // being paired, and these two words are the whole
+                            // check.
+                            RevealOnHover {
+                                Text(words)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.accent)
+                                    .textSelection(.enabled)
+                            }
                         }
                     }
                 } else {
@@ -176,9 +187,7 @@ struct MachinesView: View {
             DisclosureGroup("Connection details") {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     LabeledContent("Fingerprint") {
-                        Text(identity.fingerprint)
-                            .font(Theme.mono(11))
-                            .textSelection(.enabled)
+                        MaskedID(value: identity.fingerprint)
                     }
                     if let status = model.status {
                         LabeledContent("Port") { Text("\(status.port)") }
@@ -339,8 +348,19 @@ struct MachinesView: View {
                             .foregroundStyle(Theme.accent)
                             .frame(width: 24)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(machine.displayName)
-                                .font(.callout.weight(.medium))
+                            if let label = machine.label, !label.isEmpty {
+                                Text(label)
+                                    .font(.callout.weight(.medium))
+                            } else if let id = machine.machineID {
+                                MaskedID(value: id, size: 12)
+                            } else {
+                                Text(machine.displayName)
+                                    .font(.callout.weight(.medium))
+                            }
+                            if let subtitle = machine.subtitle {
+                                MaskedID(value: subtitle, size: 10)
+                                    .foregroundStyle(.tertiary)
+                            }
                             Text(machine.machineID == model.account?.thisMachineID
                                 ? "This device"
                                 : (formatRelativeDate(machine.lastSyncAt).map { "Last synced \($0)" } ?? "No sync recorded"))
@@ -499,11 +519,14 @@ private struct PeerRow<Actions: View>: View {
                 }
                 // The words rather than the key or the fingerprint: this line
                 // exists to be compared with another screen by a person, and
-                // that is the form they will read whole.
-                Text(peer.words ?? peer.fingerprint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                // that is the form they will read whole. Blurred until hovered,
+                // like this machine's own words above.
+                RevealOnHover {
+                    Text(peer.words ?? peer.fingerprint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
             Spacer()
             actions

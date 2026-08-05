@@ -586,6 +586,75 @@ struct NotBuiltYet: View {
     }
 }
 
+/// Rounds a measured length before anything is derived from it.
+///
+/// Writing state from a `GeometryReader` or an `onPreferenceChange` is a cycle:
+/// layout produces a number, the number changes state, the state changes the
+/// layout. AppKit is unforgiving about that when the state changes a hosted
+/// view's *minimum* size, because SwiftUI then calls `setNeedsUpdateConstraints`
+/// while AppKit is still inside its constraints update pass. That throws, and
+/// dragging a split divider was reliably hitting it.
+///
+/// Sub-pixel jitter from a live drag is not information: it is a stream of
+/// values that differ in the third decimal and invalidates everything
+/// downstream on every frame. Quantising turns most drag frames into no-ops,
+/// which is most of the cycle gone.
+func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
+    (length / step).rounded() * step
+}
+
+/// Hides its content behind a blur until the pointer is over it.
+///
+/// For the identity words. They are how a person checks that the machine
+/// knocking is the machine they are looking at, so they have to be readable on
+/// demand, and they are also the one line on the screen that should not be
+/// legible over a shoulder or in a screen recording. Blurred is the honest
+/// middle: the row keeps its size and its place, so nothing moves when it
+/// clears, and it is one hover away.
+///
+/// Blur only, never a substitution. Replacing the text with dots would change
+/// the layout and make the reveal a jump.
+struct RevealOnHover<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    @State private var hovering = false
+
+    var body: some View {
+        content
+            .blur(radius: hovering ? 0 : 4)
+            .opacity(hovering ? 1 : 0.85)
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .onHover { hovering = $0 }
+            // Without this the hover only registers over the glyphs
+            // themselves, so moving between two words un-blurs and re-blurs.
+            .contentShape(.rect)
+            .help(hovering ? "" : "Hover to reveal")
+            .accessibilityHidden(false)
+    }
+}
+
+/// Closes the right pane, from inside the right pane.
+///
+/// The toolbar has a toggle, but a toolbar button on the far side of the window
+/// is not where anyone looks to dismiss a panel: they look at the panel. Both
+/// inspectors carry one so the two panes behave the same way.
+struct InspectorCloseButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20, height: 20)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help("Close the inspector")
+        .accessibilityLabel("Close the inspector")
+    }
+}
+
 /// Hands its own width to its content, so a layout can change shape rather
 /// than stretch.
 ///
@@ -604,7 +673,13 @@ struct WidthReader<Content: View>: View {
                     Color.clear.preference(key: WidthKey.self, value: proxy.size.width)
                 }
             )
-            .onPreferenceChange(WidthKey.self) { width = $0 }
+            // Quantised, and only written when it actually moved. A live drag
+            // otherwise delivers a new sub-pixel width every frame and reshapes
+            // the whole card grid for a change nobody can see.
+            .onPreferenceChange(WidthKey.self) { measured in
+                let next = quantised(measured, step: 4)
+                if width != next { width = next }
+            }
     }
 }
 

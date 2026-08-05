@@ -58,7 +58,12 @@ fn run_once(session: &Mutex<Session>) {
         },
     );
     match result {
-        Ok(tokenstat_sync::ScheduledOutcome::Synced(_)) => {}
+        Ok(tokenstat_sync::ScheduledOutcome::Synced(_)) => {
+            // The account just changed, so the cached grid is stale by
+            // definition. Dropping it here is what makes a machine that has
+            // only just uploaded appear on Home without a wait.
+            crate::account_activity::invalidate();
+        }
         Ok(tokenstat_sync::ScheduledOutcome::NotLoggedIn)
         | Ok(tokenstat_sync::ScheduledOutcome::Held { .. }) => {}
         Ok(tokenstat_sync::ScheduledOutcome::Deferred { reason }) => {

@@ -44,6 +44,10 @@ final class WorkspaceFileWatcher {
         paths = existing
         guard !existing.isEmpty else { return }
 
+        // Unretained on purpose. Retaining here would make the stream own the
+        // watcher, `deinit` would never run, and the stream it is meant to tear
+        // down would outlive everything. The pointer is safe because `stop()`
+        // runs from `deinit`, before this object goes away.
         var context = FSEventStreamContext(
             version: 0,
             info: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),

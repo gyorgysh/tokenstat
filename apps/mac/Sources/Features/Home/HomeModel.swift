@@ -15,10 +15,53 @@ import Observation
 /// Keeping them apart is why the plan limit cards moved here: they were the
 /// first thing on the reporting screen and the last thing a reporting screen
 /// should be about.
+/// Which machines the activity grid counts.
+///
+/// The local archive is one machine's logs, which is the whole design: the
+/// parser reads what is on this disk. "What have I spent everywhere" is a
+/// different question, and the account the machines already upload to is the
+/// only thing that can answer it.
+enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
+    case thisMachine
+    case allMachines
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .thisMachine: return "This machine"
+        case .allMachines: return "All machines"
+        }
+    }
+
+    /// What the host calls it.
+    var wire: String {
+        switch self {
+        case .thisMachine: return "local"
+        case .allMachines: return "account"
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class HomeModel {
     private(set) var calendar: ActivityCalendar?
+
+    /// What the user asked the grid to count. Every machine by default: a
+    /// person with two Macs wants their year, not one laptop's share of it.
+    var scope: ActivityScope = .allMachines
+
+    /// What the host actually built.
+    ///
+    /// Not the same as `scope`. An account grid needs the network and an
+    /// account, and when it cannot be had the host falls back to this machine's
+    /// own archive. Drawing that as the account's would report one laptop's
+    /// spend as everybody's, so the two are kept apart.
+    private(set) var deliveredScope: ActivityScope = .thisMachine
+
+    /// Why the grid on screen is not the one that was asked for.
+    private(set) var scopeNotice: String?
     private(set) var today: Bucket?
     private(set) var week: [Bucket] = []
 
@@ -47,7 +90,7 @@ final class HomeModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            async let calendar = Bridge.activityCalendar()
+            async let calendar = Bridge.activityCalendar(scope: scope.wire)
             async let daily = Bridge.report(group: .day, query: Query())
             async let plan = Bridge.report(group: .source, query: Query(billing: "plan"))
 
@@ -57,6 +100,9 @@ final class HomeModel {
             // waiting for the other two only kept it behind a blur for longer.
             let grid = try await calendar
             self.calendar = grid
+            // What came back, not what was asked for.
+            deliveredScope = grid?.scope == "account" ? .allMachines : .thisMachine
+            scopeNotice = grid?.notice
 
             let days = try await daily
 
@@ -73,6 +119,13 @@ final class HomeModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Switch what the grid counts and redraw it.
+    func setScope(_ new: ActivityScope) async {
+        guard new != scope else { return }
+        scope = new
+        await load()
     }
 
     /// Vendor plan limits, loaded on their own.

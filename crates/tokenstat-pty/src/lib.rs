@@ -463,6 +463,20 @@ impl Manager {
 /// Ask the user's login shell for it so direct CLI launches work just like
 /// they do from Terminal.app. The inherited PATH remains the fallback.
 ///
+/// Resolve the login shell's PATH ahead of the first spawn.
+///
+/// Without this the cost lands inside the first `pty.spawn` of the process's
+/// life, where a person is sitting waiting for a terminal to open, and it is
+/// the largest single part of that wait. Called at daemon start, on a thread
+/// nobody is waiting on. Cheap and correct to call more than once: the work
+/// happens once and every later caller reads the answer.
+pub fn warm_login_shell_path() {
+    #[cfg(unix)]
+    std::thread::spawn(|| {
+        let _ = login_shell_path();
+    });
+}
+
 /// Asked once per process, not once per session. A login shell reads the
 /// user's whole startup file set, which is tens to hundreds of milliseconds
 /// spent before a terminal can open, and it answers the same thing every time.

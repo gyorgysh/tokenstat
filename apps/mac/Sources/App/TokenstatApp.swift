@@ -24,6 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 #endif
 
+#if os(macOS)
+extension Notification.Name {
+    /// Posted by the File menu, acted on by the window that owns the folders.
+    static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
+}
+#endif
+
 @main
 struct TokenstatApp: App {
     #if os(macOS)
@@ -57,6 +64,18 @@ struct TokenstatApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1180, height: 720)
+        .commands {
+            // Adding a folder is the app's "open", so it belongs in the File
+            // menu with the shortcut people already try. The model that does
+            // the work belongs to the window, so this posts and the window
+            // acts, rather than the menu holding a second copy of the state.
+            CommandGroup(after: .newItem) {
+                Button("Add Workspace…") {
+                    NotificationCenter.default.post(name: .addWorkspaceRequested, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+        }
         #endif
     }
 }

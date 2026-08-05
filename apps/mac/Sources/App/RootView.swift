@@ -95,9 +95,9 @@ struct RootView: View {
                     Group {
                         switch destination {
                         case .workspaces:
-                            WorkspaceInspector(model: workspaces)
+                            WorkspaceInspector(model: workspaces) { closeInspector() }
                         default:
-                            InspectorView(model: model)
+                            InspectorView(model: model) { closeInspector() }
                         }
                     }
                     // Wider than it was. At 300 the Changes list wrapped every
@@ -116,9 +116,9 @@ struct RootView: View {
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { inspectorFits = Self.fits(proxy.size.width) }
-                    .onChange(of: proxy.size.width) { _, width in
-                        inspectorFits = Self.fits(width)
+                    .onAppear { inspectorFits = Self.fits(proxy.size.width, open: inspectorFits) }
+                    .onChange(of: quantised(proxy.size.width, step: 4)) { _, width in
+                        updateInspectorFit(for: width)
                     }
             }
         }
@@ -137,6 +137,13 @@ struct RootView: View {
         }
         #if os(macOS)
         .task { await terminals.load() }
+        // The File menu's Add Workspace. The menu has no model, so it posts and
+        // this acts.
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
+                await workspaces.addFolder()
+            }
+        }
         // The daemon outlives the app, so a helper installed by an older build
         // keeps answering until something replaces it. Off the main actor and
         // after the first frame: it usually finds nothing to do, and when it
@@ -161,6 +168,7 @@ struct RootView: View {
                     // control that vanishes on resize reads as a bug, and one
                     // that stays but does nothing is worse: this says why.
                     .disabled(!inspectorFits)
+                    .keyboardShortcut("i", modifiers: [.command, .option])
                     .help(
                         inspectorFits
                             ? (isInspectorPresented ? "Hide inspector" : "Show inspector")
@@ -192,8 +200,35 @@ struct RootView: View {
     /// width and lets the trailing edge run off the window.
     private static let widthForThreeColumns = minimumContentWidth + inspectorMinimumWidth
 
-    private static func fits(_ width: CGFloat) -> Bool {
-        width >= widthForThreeColumns
+    /// How much wider than the threshold the window must get before the pane
+    /// comes back.
+    ///
+    /// Without it the decision is a single edge, and a drag that lands on that
+    /// edge adds and removes a whole split view column on alternating frames.
+    /// That is what threw inside AppKit's constraints pass: a hosted column
+    /// changing its minimum size while the pass was already running. The gap
+    /// means a drag has to mean it.
+    private static let inspectorFitHysteresis: CGFloat = 60
+
+    /// Whether the inspector fits, given whether it is currently showing.
+    private static func fits(_ width: CGFloat, open: Bool) -> Bool {
+        open
+            ? width >= widthForThreeColumns
+            : width >= widthForThreeColumns + inspectorFitHysteresis
+    }
+
+    /// Applies a measured width to `inspectorFits`, out of the layout pass that
+    /// produced it.
+    ///
+    /// The hop is the point. Adding or removing the inspector column from
+    /// inside layout is what AppKit refuses to do, and `.inspector`'s presence
+    /// is driven straight off this value.
+    private func updateInspectorFit(for width: CGFloat) {
+        let next = Self.fits(width, open: inspectorFits)
+        guard next != inspectorFits else { return }
+        Task { @MainActor in
+            if inspectorFits != next { inspectorFits = next }
+        }
     }
 
     /// Whether the right pane is on screen, and the only place that is decided.
@@ -220,6 +255,15 @@ struct RootView: View {
 
     private var destinationHasInspector: Bool {
         destination == .insights || destination == .workspaces
+    }
+
+    /// Shuts the pane on the user's behalf.
+    ///
+    /// Not `showsInspector.wrappedValue = false`: that setter refuses to run
+    /// when the window is too narrow, which is right for reopening and wrong
+    /// for closing. Closing is always allowed.
+    private func closeInspector() {
+        isInspectorPresented = false
     }
 
     // MARK: - Sidebar
@@ -261,6 +305,11 @@ struct RootView: View {
                         Image(systemName: "plus")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(.secondary)
+                            // A 9pt glyph is a 9pt target. The frame and the
+                            // shape are what make it clickable rather than
+                            // merely visible.
+                            .frame(width: 20, height: 20)
+                            .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
                     .help("Add a project folder")
@@ -271,7 +320,7 @@ struct RootView: View {
                 .padding(.bottom, Theme.Space.xs)
 
                 if workspaces.folders.isEmpty {
-                    Text("No folders yet. Use + to add one.")
+                    Text("No folders yet.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, Theme.Space.m)
@@ -367,6 +416,34 @@ struct RootView: View {
                         #endif
                     }
                 }
+
+                #if os(macOS)
+                // A row, always there, under whatever folders exist.
+                //
+                // The centre pane has a prominent Add Workspace button, but it
+                // is only reachable with no folders at all: the first folder
+                // added selects itself and the empty state is never seen again.
+                // That left one 9pt `+` in a section header as the only way to
+                // add a second folder, which is not somewhere anyone looks.
+                Button {
+                    Task { await workspaces.addFolder() }
+                } label: {
+                    HStack(spacing: Theme.Space.xs) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Add workspace…")
+                            .font(.callout)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.xs)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
+                #endif
             }
             .padding(.bottom, Theme.Space.m)
         }
@@ -398,11 +475,21 @@ struct RootView: View {
             }
             UpdateCard(update: appUpdate)
             Rectangle().fill(Theme.border).frame(height: 1)
+            if let notice = appUpdate.checkNotice {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.xs)
+            }
             Menu {
                 if account.signedIn {
                     Button("Account settings") { destination = .account }
                     Button("Sync now") { Task { await account.sync() } }
                         .disabled(account.isSyncing || account.syncCooldownUntil != nil)
+                    Divider()
+                    updateItem
                     Divider()
                     Button("Sign out") { Task { await account.signOut() } }
                 } else {
@@ -412,6 +499,8 @@ struct RootView: View {
                     }
                     Divider()
                     Button("Account") { destination = .account }
+                    Divider()
+                    updateItem
                 }
             } label: {
                 accountLabel
@@ -423,6 +512,19 @@ struct RootView: View {
             .padding(.vertical, Theme.Space.s)
         }
         .background(Theme.sidebarMaterial)
+    }
+
+    /// Check for an update, because somebody asked.
+    ///
+    /// The app already checks on launch, off the main actor and without saying
+    /// anything, and installs what it finds. That is the right default and it
+    /// is also invisible, so there is no way to answer "am I on the latest
+    /// version" without one of these. The launch check stays exactly as it was.
+    private var updateItem: some View {
+        Button(appUpdate.isChecking ? "Checking for updates…" : "Check for updates") {
+            Task { await appUpdate.checkNow() }
+        }
+        .disabled(appUpdate.isChecking)
     }
 
     /// Avatar, handle, plan, chevron.

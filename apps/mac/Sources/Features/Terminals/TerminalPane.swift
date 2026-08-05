@@ -195,8 +195,15 @@ struct TerminalPane: View {
             .frame(width: size.width, height: size.height)
             // Also the size a new session is spawned at, so it never opens at
             // 24x80 and jumps.
+            // Quantised to the cell grid's order of magnitude. This only feeds
+            // the spawn size, so sub-pixel precision buys nothing, and writing
+            // it every frame of a drag rebuilds this whole pane for a value no
+            // terminal can use.
             .onAppear { paneSize = size }
-            .onChange(of: size) { _, new in paneSize = new }
+            .onChange(of: CGSize(width: quantised(size.width, step: 8),
+                                 height: quantised(size.height, step: 8))) { _, new in
+                paneSize = new
+            }
         }
     }
 
@@ -573,6 +580,14 @@ private struct LaunchSurface: View {
 
     private var launcher: LaunchCatalog { LaunchCatalog.shared }
 
+    /// The tile that was pressed, while the host is still working on it.
+    ///
+    /// A spawn is a socket round trip and, on the first one of the daemon's
+    /// life, a login shell resolve behind it. Until it returns, `sessions` is
+    /// still empty and this whole surface is still on screen, so without this
+    /// the click produced nothing at all and people clicked again.
+    @State private var launching: String?
+
     var body: some View {
         VStack(spacing: Theme.Space.l) {
             Spacer()
@@ -616,7 +631,10 @@ private struct LaunchSurface: View {
     }
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
-        Button {
+        let isLaunching = launching == profile.id
+        return Button {
+            guard launching == nil else { return }
+            launching = profile.id
             Task {
                 await terminals.start(
                     workspace: folder,
@@ -625,33 +643,48 @@ private struct LaunchSurface: View {
                     rows: grid.rows,
                     cols: grid.cols
                 )
+                launching = nil
             }
         } label: {
             VStack(spacing: Theme.Space.s) {
-                if let harness = profile.harnessID {
+                // The spinner takes the mark's place rather than sitting beside
+                // it, so the tile does not change size the instant it is hit.
+                if isLaunching {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(height: 34)
+                } else if let harness = profile.harnessID {
                     HarnessMark(id: harness, size: 34)
                 } else {
                     Image(systemName: profile.symbol ?? "terminal")
                         .font(.system(size: 18))
                         .foregroundStyle(Theme.accent)
+                        .frame(height: 34)
                 }
                 Text(profile.name)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
-                Text(profile.command)
+                Text(isLaunching ? "Starting…" : profile.command)
                     .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.m)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .background(
+                isLaunching ? Theme.accent.opacity(0.12) : Theme.panel,
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
+                    .strokeBorder(isLaunching ? Theme.accent : Theme.border, lineWidth: 1)
             )
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // Every other tile goes quiet while one is starting. Two sessions from
+        // one impatient double click is not what the second click meant.
+        .disabled(launching != nil && !isLaunching)
+        .opacity(launching != nil && !isLaunching ? 0.5 : 1)
     }
 
     private func utilityButton(

@@ -181,6 +181,11 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     var busiest: HeatCell?
     var first: String
     var last: String
+    /// Which grid this is: `"local"` or `"account"`. Optional because a peer
+    /// running an older host does not send it, and a missing answer is local.
+    var scope: String?
+    /// Why this is not the grid that was asked for, in words to show.
+    var notice: String?
 }
 
 // MARK: - Syntax highlighting

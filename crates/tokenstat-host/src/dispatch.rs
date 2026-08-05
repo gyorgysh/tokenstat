@@ -61,6 +61,14 @@ struct CalendarParams {
     weeks: usize,
     #[serde(default)]
     query: QueryDto,
+    /// `"local"` or `"account"`. Anything else is treated as local.
+    ///
+    /// Local is this machine's own archive: complete, offline, and including
+    /// whatever has not been uploaded yet. Account is every machine that syncs,
+    /// which needs the network and an account, so it can fail in ways a local
+    /// grid cannot. The caller picks, and is told which one it got.
+    #[serde(default)]
+    scope: Option<String>,
 }
 
 impl Default for CalendarParams {
@@ -68,6 +76,7 @@ impl Default for CalendarParams {
         CalendarParams {
             weeks: default_weeks(),
             query: QueryDto::default(),
+            scope: None,
         }
     }
 }
@@ -371,7 +380,54 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // a plausible grid with every date in the wrong place.
         "activity.calendar" => {
             let p: CalendarParams = parse(params)?;
+            let wants_account = p.scope.as_deref() == Some("account");
             with_session(s, |b| {
+                // The account's own grid, across every machine that syncs.
+                //
+                // Tried first when asked for, and it falls back rather than
+                // failing: an empty Home because the network is down is a worse
+                // answer than this machine's own year with a line saying so.
+                if wants_account {
+                    let today = tokenstat_core::activity::today(b.engine.timezone());
+                    match crate::account_activity::calendar(&b.prices, b.engine.timezone(), p.weeks)
+                    {
+                        Ok(Some(calendar)) => {
+                            return serde_json::to_value(
+                                CalendarDto::from(calendar).scoped("account", None),
+                            )
+                            .map_err(|e| e.to_string());
+                        }
+                        // The account exists and has nothing in it. Not an
+                        // error, and not a reason to show this machine's grid
+                        // labelled as everybody's.
+                        Ok(None) => return Ok(Value::Null),
+                        Err(failure) => {
+                            let rows = b
+                                .engine
+                                .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
+                                .map_err(|e| e.to_string())?;
+                            let days: Vec<(String, u64)> = rows
+                                .iter()
+                                .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
+                                .collect();
+                            // The scope always says `local`, so the grid is
+                            // never labelled as the account's. The message is
+                            // only added when something actually went wrong:
+                            // being signed out is not news, and repeating it on
+                            // the screen that opens first is nagging.
+                            let notice = (!failure.expected)
+                                .then(|| format!("Showing this machine only: {}", failure.message));
+                            return match tokenstat_core::activity::calendar(&days, p.weeks, today) {
+                                Some(calendar) => serde_json::to_value(
+                                    CalendarDto::from(calendar).scoped("local", notice),
+                                )
+                                .map_err(|e| e.to_string()),
+                                None => Ok(Value::Null),
+                            };
+                        }
+                    }
+                }
+
                 let rows = b
                     .engine
                     .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
@@ -563,6 +619,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     },
                 )
                 .map_err(|e| e.to_string())?;
+                if !r.dry_run {
+                    // Same reason as the scheduled run: what the account holds
+                    // just changed, and the cached grid predates it.
+                    crate::account_activity::invalidate();
+                }
                 serde_json::to_value(SyncResultDto {
                     host: r.host,
                     rows: r.rows,

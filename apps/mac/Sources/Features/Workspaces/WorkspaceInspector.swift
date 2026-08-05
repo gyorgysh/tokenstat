@@ -43,6 +43,9 @@ struct InspectorEmptyState: View {
 /// "what is already in". Stacking them would bury whichever one you wanted.
 struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
+    /// Dismisses the pane. Owned by the root view, which is the only place the
+    /// inspector's presence is decided.
+    var onClose: () -> Void
 
     /// The chosen tab lives in the model, not in `@State` here.
     ///
@@ -58,12 +61,16 @@ struct WorkspaceInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabStrip(
-                // No icons: the inspector is 280pt at its narrowest and three
-                // labels plus three glyphs truncate before they fit.
-                tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
-                selection: tab
-            )
+            HStack(spacing: 0) {
+                TabStrip(
+                    // No icons: the inspector is 280pt at its narrowest and three
+                    // labels plus three glyphs truncate before they fit.
+                    tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
+                    selection: tab
+                )
+                InspectorCloseButton(action: onClose)
+                    .padding(.trailing, Theme.Space.s)
+            }
             // Give every tab the same measured rectangle.  Using an unbounded
             // max-height here lets a tab's internal VStack negotiate a
             // different height, which makes the inspector appear to jump when

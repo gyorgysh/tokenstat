@@ -18,6 +18,10 @@ struct TodoView: View {
     /// The tallest stack of cards on the board, measured.
     @State private var tallestColumn: CGFloat = 0
 
+    /// Whether the new-card form is open. Held here, not in the form, because
+    /// two rows open it: one above the backlog's cards and one below them.
+    @State private var addingCard = false
+
     /// How much of the window an empty board takes.
     ///
     /// Three columns stretched to the full height of a large window is a lot of
@@ -82,6 +86,10 @@ struct TodoView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.xs)
 
+            if id == "backlog" {
+                AddCardTrigger(expanded: $addingCard)
+            }
+
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
                     ForEach(model.cards(in: id)) { card in
@@ -118,7 +126,7 @@ struct TodoView: View {
             .frame(maxWidth: .infinity)
 
             if id == "backlog" {
-                NewCardForm(model: model, folders: folders)
+                NewCardForm(model: model, folders: folders, expanded: $addingCard)
             }
         }
         .frame(width: 300)
@@ -151,10 +159,11 @@ struct TodoView: View {
     /// than the resting share of the window and never more than all of it.
     private func boardHeight(available: CGFloat) -> CGFloat {
         guard available > 0 else { return 0 }
-        // The header, the new-card form under the backlog column, and the
-        // padding around the stack. Added so a column that has just enough
-        // cards to fill the window does not end up with its form cut off.
-        let chrome: CGFloat = 150
+        // The header, the add-card row above the list, the new-card form under
+        // the backlog column, and the padding around the stack. Added so a
+        // column that has just enough cards to fill the window does not end up
+        // with its form cut off.
+        let chrome: CGFloat = 182
         let resting = available * restingFraction
         return min(available, max(resting, tallestColumn + chrome))
     }
@@ -352,27 +361,59 @@ private struct CardView: View {
 
 // MARK: - New card
 
+/// The full-width row that opens the new-card form.
+///
+/// One of these sits above the card list and one below it, both driving the
+/// same `expanded` flag, so a long backlog never has to be scrolled to reach
+/// the way to add to it. Full width and with a hit shape of its own: the old
+/// control was a bare `Label`, so only the glyph and the two words were
+/// clickable, on a column 300pt wide.
+private struct AddCardTrigger: View {
+    @Binding var expanded: Bool
+
+    var body: some View {
+        Button {
+            expanded.toggle()
+        } label: {
+            Label(
+                expanded ? "New card" : "Add a card",
+                systemImage: expanded ? "chevron.up" : "plus"
+            )
+            .font(.caption.weight(.medium))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, Theme.Space.xs)
+            .background(
+                Theme.background.opacity(0.5),
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct NewCardForm: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
+    /// Shared with the trigger above the card list, so only one form is ever
+    /// open and either row closes it.
+    @Binding var expanded: Bool
 
     @State private var title = ""
     @State private var notes = ""
     @State private var backendID = ""
     @State private var workspaceID = ""
     @State private var budget = "900"
-    @State private var expanded = false
     @State private var kind: TodoKind = .task
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Button {
-                expanded.toggle()
-            } label: {
-                Label(expanded ? "New card" : "Add a card", systemImage: expanded ? "chevron.up" : "plus")
-                    .font(.caption.weight(.medium))
-            }
-            .buttonStyle(.plain)
+            AddCardTrigger(expanded: $expanded)
 
             if expanded {
                 Picker("Type", selection: $kind) {

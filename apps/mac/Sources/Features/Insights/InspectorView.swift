@@ -14,10 +14,17 @@ import SwiftUI
 /// than in a tooltip nobody hovers.
 struct InspectorView: View {
     var model: InsightsModel
+    /// Dismisses the pane. Owned by the root view, which is the only place the
+    /// inspector's presence is decided.
+    var onClose: () -> Void
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack {
+                    Spacer()
+                    InspectorCloseButton(action: onClose)
+                }
                 period
                 selection
                 archive

@@ -43,8 +43,13 @@ struct DiffView: View {
         .background(
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { paneWidth = proxy.size.width }
-                    .onChange(of: proxy.size.width) { _, new in paneWidth = new }
+                    // Quantised, because `minWidth` relays every row in the
+                    // diff and a drag otherwise delivers a new width, and so a
+                    // full relayout, on every frame.
+                    .onAppear { paneWidth = quantised(proxy.size.width, step: 8) }
+                    .onChange(of: quantised(proxy.size.width, step: 8)) { _, new in
+                        paneWidth = new
+                    }
             }
         )
     }

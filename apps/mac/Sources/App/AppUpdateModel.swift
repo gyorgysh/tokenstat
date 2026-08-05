@@ -46,6 +46,42 @@ final class AppUpdateModel {
         return nil
     }
 
+    var isChecking: Bool { stage == .checking || stage == .installing }
+
+    /// What a hand-triggered check found, for a moment.
+    ///
+    /// The check on launch is deliberately silent: nobody asked for it, and
+    /// "you are up to date" unprompted is noise. A check somebody pressed is
+    /// the opposite. Pressing a button and getting nothing back reads as a
+    /// broken button, so this says what happened and then goes away.
+    private(set) var checkNotice: String?
+
+    /// Check because a person asked.
+    ///
+    /// Separate from `checkAndInstall` only in that it will run again after a
+    /// previous check came back with nothing. That guard exists so the launch
+    /// check happens once; a person pressing the item means now.
+    func checkNow() async {
+        guard !isChecking else { return }
+        checkNotice = nil
+        let before = release?.latest
+        stage = .idle
+        await checkAndInstall()
+
+        if isReady {
+            checkNotice = "Update installed. Relaunch to finish."
+        } else if let failure {
+            checkNotice = failure
+        } else if isAvailable, release?.latest != before {
+            checkNotice = "Version \(latest) found."
+        } else {
+            checkNotice = "You are on the latest version."
+        }
+
+        try? await Task.sleep(for: .seconds(6))
+        checkNotice = nil
+    }
+
     /// Check, and install what is found.
     ///
     /// Failure is quiet in the sense that it never interrupts, but it is not

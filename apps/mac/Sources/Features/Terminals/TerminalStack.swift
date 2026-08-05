@@ -72,7 +72,15 @@ final class TerminalStackView: NSView {
             // Hiding a view makes AppKit drop first responder, so the one now in
             // front has to take it back or the terminal accepts no keystrokes
             // until it is clicked.
-            window?.makeFirstResponder(active)
+            //
+            // Not from here, though. `sync` is called from `updateNSView`, which
+            // SwiftUI runs inside a layout pass, and moving first responder there
+            // re-enters layout on a hierarchy that is already being laid out.
+            // Next turn of the runloop is soon enough for a keystroke.
+            DispatchQueue.main.async { [weak self, weak active] in
+                guard let self, let active, active.superview === self else { return }
+                self.window?.makeFirstResponder(active)
+            }
         } else if active == nil {
             shown = nil
         }

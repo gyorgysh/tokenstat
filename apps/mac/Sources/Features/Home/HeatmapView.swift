@@ -37,8 +37,14 @@ struct HeatmapView: View {
             // drew a year of squares against the right edge and left half the
             // card empty.
             GeometryReader { proxy in
-                let cell = cellSize(for: proxy.size.width)
-                let gap = gapSize(for: proxy.size.width, cell: cell)
+                // Quantised before anything is derived from it. There are 371
+                // squares here, and a live drag otherwise hands this a new
+                // sub-pixel width every frame, each one a new cell size and a
+                // new frame for every square. Rounding to 4 points turns most
+                // frames of a drag into the same grid.
+                let width = quantised(proxy.size.width, step: 4)
+                let cell = cellSize(for: width)
+                let gap = gapSize(for: width, cell: cell)
                 VStack(alignment: .leading, spacing: gap) {
                     months(cell: cell, gap: gap)
                     ForEach(0 ..< calendar.rows.count, id: \.self) { row in

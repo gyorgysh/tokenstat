@@ -304,9 +304,23 @@ enum Bridge {
     ///
     /// Returns nil for an archive with nothing in it yet, which is a state and
     /// not a failure: it is the first thing a new install will ever show.
-    static func activityCalendar(weeks: Int = 53) async throws -> ActivityCalendar? {
+    /// The activity grid.
+    ///
+    /// `scope` is `"local"` for this machine's archive or `"account"` for every
+    /// machine that syncs. The host answers with which one it actually built,
+    /// because an account grid can fall back to a local one and a client that
+    /// assumed otherwise would label one machine's year as everybody's.
+    static func activityCalendar(
+        weeks: Int = 53,
+        scope: String = "local"
+    ) async throws -> ActivityCalendar? {
         try await backgroundOptional(
-            "activity.calendar", ["weeks": weeks], as: ActivityCalendar.self
+            "activity.calendar",
+            ["weeks": weeks, "scope": scope],
+            // Longer than the default: an account grid is a network call on the
+            // host's side, and this one is on the screen that opens first.
+            patience: Patience.long,
+            as: ActivityCalendar.self
         )
     }
 
@@ -880,6 +894,24 @@ extension Bridge {
         as type: T.Type
     ) async throws -> T {
         try await background(
+            "remote.call",
+            ["peer": peer, "method": method, "params": params],
+            as: type
+        )
+    }
+
+    /// `onPeer` for a method whose answer may legitimately be nothing.
+    ///
+    /// The same distinction `invokeOptional` draws locally, kept over the
+    /// remote hop: a peer with an empty archive answers `null` to
+    /// `activity.calendar`, and that is an answer, not a failure.
+    static func onPeerOptional<T: Decodable & Sendable>(
+        _ peer: String,
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as type: T.Type
+    ) async throws -> T? {
+        try await backgroundOptional(
             "remote.call",
             ["peer": peer, "method": method, "params": params],
             as: type

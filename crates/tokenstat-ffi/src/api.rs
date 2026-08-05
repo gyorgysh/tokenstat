@@ -14,6 +14,17 @@ fn cell() -> &'static Mutex<Option<Session>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
+/// Work worth doing before anybody asks for it, started on first call.
+///
+/// Only the login shell's PATH so far. The daemon warms it in `serve`, and the
+/// in-process bridge needs the same head start: an app running without an
+/// installed host agent would otherwise pay a full shell startup inside its
+/// first `pty.spawn`, with a person watching an empty pane.
+fn warm() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(tokenstat_host::warm_login_shell_path);
+}
+
 /// Handle one call, opening the default archive on first use.
 ///
 /// Lazy rather than requiring a handshake, so a front end that wants one
@@ -21,6 +32,8 @@ fn cell() -> &'static Mutex<Option<Session>> {
 /// and never returns a non-JSON string, so the caller can decode
 /// unconditionally.
 pub fn call(method: &str, params: &str) -> String {
+    warm();
+
     // Answered without the lock where the method allows it. A terminal polls
     // for output continuously, and holding this mutex to do that would put
     // every keystroke behind whatever archive or git work was already running.

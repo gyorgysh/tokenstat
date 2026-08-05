@@ -55,6 +55,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     var rows: Int
     var cols: Int
 
+    /// The size AppKit last reported, kept outside observation.
+    ///
+    /// `sizeChanged` arrives from inside an AppKit layout pass. Comparing
+    /// against `rows`/`cols` there would be an observed *read* during layout,
+    /// and writing them would be an observed write, which invalidates SwiftUI
+    /// mid-pass. This shadow is what the delegate compares and writes; the
+    /// observed pair catches up on the next turn.
+    @ObservationIgnored private var reportedSize: (rows: Int, cols: Int)
+
     /// The title the program asked for via OSC 0/2, when it set one.
     var title: String?
     /// The directory the program reported via OSC 7, when it reported one.
@@ -97,10 +106,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// bridge round trip per session per frame forever, and idle sessions are
     /// the normal case.
     private var pollDelay = minPollDelay
-    private static let minPollDelay = 8
+    /// One display frame. Reading faster than the screen redraws buys nothing
+    /// visible and costs a bridge round trip per session per read, which is
+    /// what saturated the socket pool and made a launch click wait.
+    private static let minPollDelay = 16
     /// The floor for a session nobody is looking at. Still far faster than the
     /// host's buffer fills, so no output is lost.
-    private static let backgroundPollDelay = 60
+    private static let backgroundPollDelay = 150
     private static let maxPollDelay = 250
 
     /// The fastest this session polls right now.
@@ -131,6 +143,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
+        reportedSize = (info.rows, info.cols)
 
         view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         view.font = TerminalMetrics.font
@@ -224,9 +237,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             if sinceInfo >= 250 {
                 sinceInfo = 0
                 if let info = try? await Bridge.ptyInfo(id: id) {
-                    rows = info.rows
-                    cols = info.cols
-                    alive = info.alive
+                    // Guarded. These are observed, this runs several times a
+                    // second per session, and the values almost never change:
+                    // an unguarded write is a sidebar rebuild for nothing.
+                    if rows != info.rows { rows = info.rows }
+                    if cols != info.cols { cols = info.cols }
+                    if alive != info.alive { alive = info.alive }
                     if let code = info.exitCode {
                         exitCode = code
                         // One last read in case output arrived right at exit.
@@ -283,9 +299,18 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         // AppKit calls this on the main thread, which is where the actor lives.
         let changed = MainActor.assumeIsolated {
-            guard newCols != cols || newRows != rows else { return false }
-            cols = newCols
-            rows = newRows
+            guard newCols != reportedSize.cols || newRows != reportedSize.rows else {
+                return false
+            }
+            reportedSize = (newRows, newCols)
+            // Out of the layout pass this arrived in. AppKit is inside
+            // `setFrameSize` here, and an observed write from there makes
+            // SwiftUI invalidate a hierarchy AppKit is still laying out.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if cols != newCols { cols = newCols }
+                if rows != newRows { rows = newRows }
+            }
             return true
         }
         // A resize the pty already has is not a no-op: it still raises SIGWINCH,
