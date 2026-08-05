@@ -394,6 +394,11 @@ fn write_keychain(blob: &str) -> Result<(), String> {
         .ok_or_else(|| "the Keychain refused the renewed login".to_string())
 }
 
+/// The Keychain copy, on the platform that has one.
+///
+/// No stub for the others: the only caller is behind the same condition, and a
+/// version of this that always answers "nothing" is a function the compiler is
+/// right to complain about.
 #[cfg(target_os = "macos")]
 fn keychain_blob() -> Option<String> {
     let account = std::env::var("USER").ok()?;
@@ -407,11 +412,6 @@ fn keychain_blob() -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keychain_blob() -> Option<String> {
-    None
 }
 
 #[cfg(test)]
