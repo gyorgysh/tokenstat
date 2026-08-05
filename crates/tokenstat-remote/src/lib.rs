@@ -42,6 +42,8 @@ use std::time::Duration;
 use thiserror::Error;
 use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerprint};
 
+pub mod tunnel;
+
 /// The Noise pattern. XX rather than KK because the server does not know the
 /// client's key in advance: a machine that has never connected still has to
 /// reach the point where it can be *offered* for approval, and KK would refuse
@@ -100,6 +102,39 @@ pub enum RemoteError {
     FrameTooLarge(u64, usize),
     #[error("the connection closed before the answer arrived")]
     Closed,
+    #[error("tunnel: {0}")]
+    Tunnel(String),
+}
+
+/// A bidirectional byte stream used by the authenticated connection.
+pub trait Transport: Read + Write + Send {
+    /// Close the underlying stream or WebSocket.
+    fn close(&mut self);
+
+    /// Set the handshake timeout. Transports without a native deadline may
+    /// leave this as a no-op because their connection setup has its own limit.
+    fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
+}
+
+impl<T: Transport + ?Sized> Transport for Box<T> {
+    fn close(&mut self) {
+        (**self).close();
+    }
+
+    fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        (**self).set_deadline(timeout)
+    }
+}
+
+impl Transport for TcpStream {
+    fn close(&mut self) {
+        let _ = self.shutdown(std::net::Shutdown::Both);
+    }
+
+    fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.set_read_timeout(timeout)?;
+        self.set_write_timeout(timeout)
+    }
 }
 
 impl From<snow::Error> for RemoteError {
@@ -115,7 +150,7 @@ impl From<snow::Error> for RemoteError {
 /// same envelope; here the length is already framed by Noise, so there is
 /// nothing for a newline to disambiguate.
 pub struct Connection {
-    stream: TcpStream,
+    stream: Box<dyn Transport>,
     noise: snow::TransportState,
     /// Who is on the other end. Already checked by the time this exists.
     peer: PublicKey,
@@ -208,7 +243,7 @@ impl Connection {
     /// Close the socket. Idempotent, and a failure is not worth reporting: the
     /// connection is being abandoned either way.
     pub fn close(&mut self) {
-        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        self.stream.close();
     }
 }
 
@@ -232,8 +267,18 @@ pub fn dial(
         .ok_or_else(|| std::io::Error::other(format!("{address} resolves to nothing")))?;
     let stream = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT)?;
     stream.set_nodelay(true)?;
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    handshake_initiator(Box::new(stream), identity, expect, label_for_errors)
+}
+
+/// Run the initiator side of the Noise handshake over any bidirectional
+/// transport. The caller has already completed any transport-specific setup.
+pub fn handshake_initiator(
+    mut stream: Box<dyn Transport>,
+    identity: &MachineIdentity,
+    expect: Option<PublicKey>,
+    label_for_errors: &str,
+) -> Result<Connection, RemoteError> {
+    stream.set_deadline(Some(HANDSHAKE_TIMEOUT))?;
 
     let secret = identity.secret_bytes();
     let mut handshake = snow::Builder::new(PATTERN.parse().map_err(RemoteError::from)?)
@@ -270,8 +315,7 @@ pub fn dial(
 
     // The handshake timeout was for the handshake. A session read blocks until
     // there is an answer, which for a scan is a long time.
-    stream.set_read_timeout(None)?;
-    stream.set_write_timeout(None)?;
+    stream.set_deadline(None)?;
 
     Ok(Connection {
         stream,
@@ -336,37 +380,40 @@ impl Server {
     }
 
     fn handshake(&self, stream: TcpStream, address: &str) -> Result<Connection, Refused> {
-        match self.handshake_inner(stream) {
+        stream
+            .set_nodelay(true)
+            .map_err(|e| Refused::Handshake(e.into()))?;
+        match handshake_responder(Box::new(stream), &MachineIdentity::from_secret(self.secret)) {
+            Ok(connection) => self.authorize(connection, address),
             Err(e) => Err(Refused::Handshake(e)),
-            Ok((stream, noise, peer)) => {
-                let mut store = match PeerStore::load() {
-                    Ok(store) => store,
-                    Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
-                };
-                let known = store.get(&peer).is_some();
-                let trust = store.seen(&peer, "", Some(address), &crate::now());
-                // Written back only for a peer that was not already known, so
-                // a machine reconnecting every minute does not rewrite the
-                // file every minute. A new one has to be recorded or nobody
-                // can be asked about it.
-                if !known {
-                    let _ = store.save();
-                }
+        }
+    }
 
-                if trust == Trust::Approved {
-                    return Ok(Connection {
-                        stream,
-                        noise,
-                        peer,
-                    });
-                }
-
-                // Say why before hanging up. The handshake succeeded, so
-                // there is an encrypted channel to say it over, and a peer
-                // that simply had the socket closed on it reports "connection
-                // reset by peer" to somebody who needs to be told to go and
-                // approve a machine. The refusal is the same envelope every
-                // other failure uses, so no client needs a special case.
+    fn authorize(&self, connection: Connection, address: &str) -> Result<Connection, Refused> {
+        let Connection {
+            stream,
+            noise,
+            peer,
+        } = connection;
+        let trust_result = {
+            let mut store = match PeerStore::load() {
+                Ok(store) => store,
+                Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
+            };
+            let known = store.get(&peer).is_some();
+            let trust = store.seen(&peer, "", Some(address), &crate::now());
+            if !known {
+                let _ = store.save();
+            }
+            (known, trust)
+        };
+        match trust_result {
+            (_, Trust::Approved) => Ok(Connection {
+                stream,
+                noise,
+                peer,
+            }),
+            (known, _) => {
                 let mut refusal = Connection {
                     stream,
                     noise,
@@ -374,7 +421,6 @@ impl Server {
                 };
                 let _ = refusal.send(NOT_APPROVED.as_bytes());
                 refusal.close();
-
                 if known {
                     Err(Refused::NotApproved {
                         fingerprint: fingerprint(&peer),
@@ -388,37 +434,33 @@ impl Server {
             }
         }
     }
+}
 
-    fn handshake_inner(
-        &self,
-        stream: TcpStream,
-    ) -> Result<(TcpStream, snow::TransportState, PublicKey), RemoteError> {
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
-
-        let mut handshake = snow::Builder::new(PATTERN.parse().map_err(RemoteError::from)?)
-            .local_private_key(&self.secret)?
-            .build_responder()?;
-
-        let mut stream = stream;
-        let mut buffer = vec![0u8; MAX_NOISE_MESSAGE];
-
-        let first = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
-        handshake.read_message(&first, &mut buffer)?;
-
-        let n = handshake.write_message(&[], &mut buffer)?;
-        write_framed(&mut stream, &buffer[..n])?;
-        stream.flush()?;
-
-        let third = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
-        handshake.read_message(&third, &mut buffer)?;
-
-        let peer = remote_static(&handshake)?;
-        stream.set_read_timeout(None)?;
-        stream.set_write_timeout(None)?;
-        Ok((stream, handshake.into_transport_mode()?, peer))
-    }
+/// Run the responder side of the Noise handshake over any transport.
+pub fn handshake_responder(
+    mut stream: Box<dyn Transport>,
+    identity: &MachineIdentity,
+) -> Result<Connection, RemoteError> {
+    stream.set_deadline(Some(HANDSHAKE_TIMEOUT))?;
+    let secret = identity.secret_bytes();
+    let mut handshake = snow::Builder::new(PATTERN.parse().map_err(RemoteError::from)?)
+        .local_private_key(&secret)?
+        .build_responder()?;
+    let mut buffer = vec![0u8; MAX_NOISE_MESSAGE];
+    let first = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
+    handshake.read_message(&first, &mut buffer)?;
+    let n = handshake.write_message(&[], &mut buffer)?;
+    write_framed(&mut stream, &buffer[..n])?;
+    stream.flush()?;
+    let third = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
+    handshake.read_message(&third, &mut buffer)?;
+    let peer = remote_static(&handshake)?;
+    stream.set_deadline(None)?;
+    Ok(Connection {
+        stream,
+        noise: handshake.into_transport_mode()?,
+        peer,
+    })
 }
 
 /// What a peer is told when it is not approved.
@@ -482,7 +524,7 @@ fn format_epoch(secs: u64) -> String {
 /// Under the encryption rather than over it, so a listener on the wire learns
 /// frame sizes and nothing else. Big-endian because that is what every wire
 /// format does and there is no reason to be the exception.
-fn write_framed(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), RemoteError> {
+fn write_framed(stream: &mut dyn Transport, bytes: &[u8]) -> Result<(), RemoteError> {
     let len = u32::try_from(bytes.len())
         .map_err(|_| RemoteError::FrameTooLarge(bytes.len() as u64, MAX_NOISE_MESSAGE))?;
     stream.write_all(&len.to_be_bytes())?;
@@ -490,7 +532,7 @@ fn write_framed(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), RemoteError>
     Ok(())
 }
 
-fn read_framed(stream: &mut TcpStream, max: usize) -> Result<Vec<u8>, RemoteError> {
+fn read_framed(stream: &mut dyn Transport, max: usize) -> Result<Vec<u8>, RemoteError> {
     let mut header = [0u8; 4];
     stream.read_exact(&mut header)?;
     let len = u32::from_be_bytes(header) as usize;

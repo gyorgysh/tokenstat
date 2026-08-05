@@ -69,6 +69,7 @@ getrandom = "0.3"
 # question: is this the machine I agreed to talk to.
 x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
 snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom", "std"] }
+tungstenite = { version = "0.27", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }
