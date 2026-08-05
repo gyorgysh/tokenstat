@@ -92,7 +92,7 @@ struct HomeView: View {
             ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     ForEach(column) { panel in
-                        view(for: panel)
+                        view(for: panel).modifier(SteppedHeight())
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -358,6 +358,41 @@ struct HomeView: View {
                 EmptyHint(text: "Nothing scanned yet. Run a scan from Insights to fill this in.")
             }
         }
+    }
+}
+
+/// Round a panel's height up to the next hundred points, to a ceiling of four.
+///
+/// Packed columns put panels of wildly different heights beside each other: a
+/// vendor with one quota window next to one with three left a card barely
+/// taller than its own title. Snapping to a ladder makes them read as a set
+/// without stretching a short card the full height of the tallest.
+///
+/// The measurement is of the panel as laid out, and the floor only ever grows
+/// it, so a panel measured at 130 settles at 200 and stays there. A panel
+/// taller than the ceiling keeps its own height: the ladder is a floor, never
+/// a limit on what a card may say.
+private struct SteppedHeight: ViewModifier {
+    @State private var measured: CGFloat = 0
+
+    private static let step: CGFloat = 100
+    private static let ceiling: CGFloat = 400
+
+    private var floor: CGFloat {
+        guard measured > 0 else { return Self.step }
+        return min(Self.ceiling, (measured / Self.step).rounded(.up) * Self.step)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .frame(minHeight: floor, alignment: .top)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { measured = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, height in measured = height }
+                }
+            )
     }
 }
 
