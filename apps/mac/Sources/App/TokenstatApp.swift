@@ -17,6 +17,7 @@ struct TokenstatApp: App {
     /// different owner than the ones it ends with.
     init() {
         Bridge.connect()
+        DesktopSyncScheduler.start()
     }
 
     var body: some Scene {

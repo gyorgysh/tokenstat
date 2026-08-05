@@ -491,6 +491,15 @@ pub struct SyncOptions<'a> {
 
 /// Build and POST a complete window from the local archive.
 pub fn sync(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileError> {
+    if opts.dry_run {
+        return sync_unlocked(store, opts);
+    }
+    let _lock = try_sync_lock()?
+        .ok_or_else(|| ProfileError::Message("another sync is already running".into()))?;
+    sync_unlocked(store, opts)
+}
+
+fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, ProfileError> {
     let host = resolve_api_host(opts.host_flag)?;
     let client = http_client()?;
 
@@ -790,7 +799,41 @@ pub fn sync_scheduled(
     }
 
     thread::sleep(Duration::from_secs(sleep_secs));
-    match sync(store, opts) {
+    sync_scheduled_now(store, opts)
+}
+
+/// Run one scheduled sync without sleeping.
+///
+/// This is for the long-lived desktop host, which must not hold its archive
+/// mutex while the normal scheduled jitter is elapsing.
+pub fn sync_scheduled_now(
+    store: &Store,
+    opts: SyncOptions<'_>,
+) -> Result<ScheduledOutcome, ProfileError> {
+    let host = resolve_api_host(opts.host_flag)?;
+    if keychain::load_token(&host)?.is_none() {
+        return Ok(ScheduledOutcome::NotLoggedIn);
+    }
+
+    if let Some(cursor) = config::cursor_for(&host)? {
+        if let Some(next) = cursor.next_allowed_at.as_deref() {
+            if let Ok(next_ts) = next.parse::<jiff::Timestamp>() {
+                let grace = Duration::from_secs(SERVER_GRACE_SECS);
+                if jiff::Timestamp::now() + grace < next_ts {
+                    return Ok(ScheduledOutcome::Held {
+                        until: Some(next.to_string()),
+                    });
+                }
+            }
+        }
+    }
+
+    let Some(_lock) = try_sync_lock()? else {
+        return Ok(ScheduledOutcome::Deferred {
+            reason: "another sync is already running".into(),
+        });
+    };
+    match sync_unlocked(store, opts) {
         Ok(result) => Ok(ScheduledOutcome::Synced(Box::new(result))),
         Err(ProfileError::RateLimited {
             next_allowed_at, ..
@@ -853,6 +896,86 @@ pub fn scheduling_info(host_flag: Option<&str>) -> Result<SchedulingInfo, Profil
         min_interval,
         next_allowed_at,
     })
+}
+
+/// Whether the CLI's platform scheduler has an active sync entry.
+///
+/// The desktop host uses this to avoid taking ownership of sync when the CLI
+/// already has it configured. The executable itself is not enough evidence:
+/// many users install the CLI but never enable its scheduler.
+pub fn cli_sync_schedule_active() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        directories::BaseDirs::new()
+            .map(|dirs| {
+                dirs.home_dir()
+                    .join("Library/LaunchAgents/ai.tokenstat.sync.plist")
+                    .is_file()
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        directories::BaseDirs::new()
+            .map(|dirs| {
+                dirs.config_dir()
+                    .join("systemd/user/ai.tokenstat.sync.timer")
+                    .is_file()
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+            .map(|dirs| {
+                dirs.data_local_dir()
+                    .join("schedule/ai.tokenstat.sync.vbs")
+                    .is_file()
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        false
+    }
+}
+
+struct SyncLock {
+    path: std::path::PathBuf,
+}
+
+impl Drop for SyncLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn try_sync_lock() -> Result<Option<SyncLock>, ProfileError> {
+    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+        .ok_or_else(|| ProfileError::Message("no tokenstat data directory".into()))?;
+    let dir = dirs.data_dir();
+    std::fs::create_dir_all(dir)?;
+    let path = dir.join("sync.lock");
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(_) => Ok(Some(SyncLock { path })),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let stale = std::fs::metadata(&path)
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age > Duration::from_secs(15 * 60));
+            if stale {
+                let _ = std::fs::remove_file(&path);
+                return try_sync_lock();
+            }
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// The tolerance the server applies to its own interval check (lib/sync.js

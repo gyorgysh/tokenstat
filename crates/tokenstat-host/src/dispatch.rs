@@ -1104,6 +1104,8 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             .map(|path| json!({"path": path.display().to_string()}))
             .map_err(|e| e.to_string()),
 
+        "sync.scheduleStatus" => sync_schedule_status(),
+
         "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
             .map_err(|e: serde_json::Error| e.to_string()),
 
@@ -1164,6 +1166,20 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         _ => return None,
     })
+}
+
+fn sync_schedule_status() -> Result<Value, String> {
+    let info = tokenstat_sync::scheduling_info(None).map_err(|e| e.to_string())?;
+    let due = info.next_allowed_at.as_deref().is_none_or(|next| {
+        next.parse::<jiff::Timestamp>()
+            .map(|at| jiff::Timestamp::now() >= at)
+            .unwrap_or(true)
+    });
+    Ok(json!({
+        "loggedIn": info.logged_in,
+        "cliScheduleActive": tokenstat_sync::cli_sync_schedule_active(),
+        "due": due,
+    }))
 }
 
 fn pty_id(params: &str) -> Result<PtyIdParams, String> {

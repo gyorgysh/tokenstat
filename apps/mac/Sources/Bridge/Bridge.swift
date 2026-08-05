@@ -281,6 +281,10 @@ extension Bridge {
     static func sync(dryRun: Bool = false) async throws -> SyncOutcome {
         try await background("sync.run", ["dryRun": dryRun], as: SyncOutcome.self)
     }
+
+    static func syncScheduleStatus() async throws -> SyncScheduleStatus {
+        try await background("sync.scheduleStatus", as: SyncScheduleStatus.self)
+    }
 }
 
 /// For methods whose result is only "it worked".

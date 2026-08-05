@@ -512,6 +512,12 @@ struct SyncOutcome: Codable, Sendable, Hashable {
     var to: String
 }
 
+struct SyncScheduleStatus: Codable, Sendable {
+    let loggedIn: Bool
+    let cliScheduleActive: Bool
+    let due: Bool
+}
+
 /// Render an ISO-8601 instant from the server as something readable.
 ///
 /// Returns nil rather than a placeholder when it cannot be parsed, so the

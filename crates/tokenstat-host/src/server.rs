@@ -113,6 +113,7 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
 pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     let shared = Arc::new(Mutex::new(session));
     crate::automations::start_scheduler(Arc::clone(&shared));
+    crate::sync_scheduler::start(Arc::clone(&shared));
 
     // Only if the user turned it on. Binding a port is a decision, not a
     // default: a remote client can spawn processes and write files.

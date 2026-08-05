@@ -43,6 +43,7 @@ mod machine;
 pub mod remote;
 pub mod server;
 pub mod session;
+mod sync_scheduler;
 mod todo;
 
 pub use dispatch::call;
