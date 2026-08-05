@@ -44,20 +44,55 @@ private struct Envelope<T: Decodable>: Decodable {
 /// `Transport` carries a call is chosen once, at launch, by `Bridge.connect()`.
 /// Every method below is written as though there were only one.
 enum Bridge {
-    /// How calls leave this process.
+    /// How long a call waits on a silent host before giving up.
     ///
-    /// Set once by `connect()` before the first call and never afterwards.
-    /// Switching transports while running would strand whatever the previous
-    /// one owned, most visibly the terminals, so it is deliberately not a
-    /// thing that can happen.
-    nonisolated(unsafe) private static var transport: Transport = InProcessTransport()
+    /// Not a deadline on the call, a budget on silence: the socket resets it
+    /// every time bytes arrive, so a large answer is never truncated. The point
+    /// is that no call can wait forever, because a call that waits forever
+    /// holds the thread it runs on forever.
+    enum Patience {
+        /// Terminal polling, keystrokes, highlighting. A host that has not
+        /// answered one of these in a few seconds is not busy, it is stuck, and
+        /// the caller polls again in milliseconds anyway.
+        static let interactive: TimeInterval = 10
+
+        /// Reports, git, the workspace list. Slow work, but bounded work.
+        static let standard: TimeInterval = 60
+
+        /// `scan` walks every log on the machine and `sync` uploads. Both can
+        /// legitimately say nothing for minutes on a large archive.
+        static let long: TimeInterval = 600
+    }
+
+    /// How calls leave this process, and whether a daemon owns them.
+    ///
+    /// One box behind one lock, because these two are read together and must
+    /// agree. `connect()` can run after terminals are already polling from
+    /// other threads, so an unsynchronized `var` here was a real data race with
+    /// a crash that pointed nowhere useful.
+    private struct Route {
+        var transport: Transport
+        var isHosted: Bool
+    }
+
+    private static let routeLock = NSLock()
+    nonisolated(unsafe) private static var route = Route(
+        transport: InProcessTransport(),
+        isHosted: false
+    )
+
+    private static var currentRoute: Route {
+        routeLock.lock()
+        defer { routeLock.unlock() }
+        return route
+    }
 
     /// Which transport is in use, for the interface and for a bug report.
-    static var transportDescription: String { transport.describedAs }
+    static var transportDescription: String { currentRoute.transport.describedAs }
 
     /// True when a daemon owns this session's work, so terminals outlive the
     /// window. The Machines screen will need to say this out loud.
-    nonisolated(unsafe) private(set) static var isHosted = false
+    static var isHosted: Bool { currentRoute.isHosted }
 
     /// Choose a transport. Call once, before anything else.
     ///
@@ -76,13 +111,17 @@ enum Bridge {
         if let path = Self.localHostSocketPath,
            let hosted = SocketTransport.connecting(to: path)
         {
-            transport = hosted
-            isHosted = true
+            adopt(Route(transport: hosted, isHosted: true))
             return
         }
         #endif
-        transport = InProcessTransport()
-        isHosted = false
+        adopt(Route(transport: InProcessTransport(), isHosted: false))
+    }
+
+    private static func adopt(_ next: Route) {
+        routeLock.lock()
+        route = next
+        routeLock.unlock()
     }
 
     #if os(macOS)
@@ -95,9 +134,14 @@ enum Bridge {
     #endif
 
     /// Re-probe the host after the app provisions or repairs its launch agent.
-    /// Existing callers keep using the same transport abstraction; only the
-    /// owner of future calls changes.
+    ///
+    /// Only ever upgrades in-process to hosted. Going the other way would
+    /// strand every process the daemon owns behind an interface that had
+    /// quietly started answering from somewhere else, and the symptom is
+    /// terminals vanishing. If a daemon we were talking to has gone, the honest
+    /// answer is the error the socket already returns, not a silent demotion.
     static func reconnect() {
+        guard !isHosted else { return }
         connect()
     }
 
@@ -108,6 +152,7 @@ enum Bridge {
     private static func invoke<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as _: T.Type
     ) throws -> T {
         let paramData = try JSONSerialization.data(withJSONObject: params)
@@ -115,7 +160,11 @@ enum Bridge {
 
         // Every transport answers with an envelope or throws, so the only
         // failure modes left below are decoding ones.
-        let json = try transport.call(method: method, params: paramString)
+        let json = try currentRoute.transport.call(
+            method: method,
+            params: paramString,
+            patience: patience
+        )
         let data = Data(json.utf8)
 
         let decoder = JSONDecoder()
@@ -139,6 +188,34 @@ enum Bridge {
         return result
     }
 
+    /// Where blocking transport work runs.
+    ///
+    /// Deliberately its own queue and **not** the cooperative pool. A call is a
+    /// synchronous socket round trip, and the pool is sized to the core count:
+    /// `Task.detached` parked one of its threads per call in a `read(2)`, and
+    /// with a terminal poll task and a writer task per session plus the screens
+    /// that poll, the pool ran out of threads. Nothing else could make progress
+    /// while it did, so the app looked hung with an idle main thread.
+    ///
+    /// libdispatch grows this queue on demand and the connection ceiling in
+    /// `SocketTransport` bounds how many can be blocked at once.
+    private static let calls = DispatchQueue(
+        label: "ai.tokenstat.bridge.calls",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
+
+    /// Run blocking work on `calls` and await it.
+    private static func offMainActor<T: Sendable>(
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            calls.async {
+                continuation.resume(with: Result { try work() })
+            }
+        }
+    }
+
     /// Run a call off the main actor.
     ///
     /// Every method below goes through this. Reports run SQL and `scan` walks
@@ -146,11 +223,12 @@ enum Bridge {
     private static func background<T: Decodable & Sendable>(
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
-        try await Task.detached(priority: .userInitiated) {
-            try invoke(method, params, as: type)
-        }.value
+        try await offMainActor {
+            try invoke(method, params, patience: patience, as: type)
+        }
     }
 
     /// A call whose result may legitimately be `null`.
@@ -163,12 +241,17 @@ enum Bridge {
     private static func invokeOptional<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as _: T.Type
     ) throws -> T? {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
 
-        let json = try transport.call(method: method, params: paramString)
+        let json = try currentRoute.transport.call(
+            method: method,
+            params: paramString,
+            patience: patience
+        )
         let data = Data(json.utf8)
 
         let envelope: Envelope<T>
@@ -191,11 +274,12 @@ enum Bridge {
     private static func backgroundOptional<T: Decodable & Sendable>(
         _ method: String,
         _ params: [String: Any] = [:],
+        patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T? {
-        try await Task.detached(priority: .userInitiated) {
-            try invokeOptional(method, params, as: type)
-        }.value
+        try await offMainActor {
+            try invokeOptional(method, params, patience: patience, as: type)
+        }
     }
 
     // MARK: - Methods
@@ -233,12 +317,12 @@ enum Bridge {
     /// Read every discoverable log source into the archive. Slow by nature:
     /// this is the call that walks the disk.
     static func scan() async throws -> ScanReport {
-        try await background("scan", as: ScanReport.self)
+        try await background("scan", patience: Patience.long, as: ScanReport.self)
     }
 
     /// Fetch remote vendor usage after an explicit user action.
     static func fetchRemotes() async throws -> [FetchReport] {
-        try await background("fetch", as: [FetchReport].self)
+        try await background("fetch", patience: Patience.long, as: [FetchReport].self)
     }
 }
 
@@ -291,7 +375,12 @@ extension Bridge {
 
     /// Send the aggregate window to the account. Network-bound and slow.
     static func sync(dryRun: Bool = false) async throws -> SyncOutcome {
-        try await background("sync.run", ["dryRun": dryRun], as: SyncOutcome.self)
+        try await background(
+            "sync.run",
+            ["dryRun": dryRun],
+            patience: Patience.long,
+            as: SyncOutcome.self
+        )
     }
 
     static func syncScheduleStatus() async throws -> SyncScheduleStatus {
@@ -326,7 +415,7 @@ extension Bridge {
     /// Slow: Codex reads off the disk but Claude is a request. Treat it as a
     /// refresh the user asked for, not something to poll.
     static func usageLimits() async throws -> [ProviderLimits] {
-        try await background("usage.limits", as: [ProviderLimits].self)
+        try await background("usage.limits", patience: Patience.long, as: [ProviderLimits].self)
     }
 }
 
@@ -423,7 +512,12 @@ extension Bridge {
     /// on disk. And it needs no session, so it answers without queuing behind a
     /// `git status` the way anything on the workspace path would.
     static func highlight(path: String, text: String) async throws -> Highlighting {
-        try await background("highlight", ["path": path, "text": text], as: Highlighting.self)
+        try await background(
+            "highlight",
+            ["path": path, "text": text],
+            patience: Patience.interactive,
+            as: Highlighting.self
+        )
     }
 
     /// One commit in full: message, files, and their diffs.
@@ -543,17 +637,27 @@ extension Bridge {
     }
 
     static func ptyList() async throws -> [PtySessionInfo] {
-        try await background("pty.list", as: [PtySessionInfo].self)
+        try await background("pty.list", patience: Patience.interactive, as: [PtySessionInfo].self)
     }
 
     static func ptyInfo(id: String) async throws -> PtySessionInfo {
-        try await background("pty.info", ["id": id], as: PtySessionInfo.self)
+        try await background(
+            "pty.info",
+            ["id": id],
+            patience: Patience.interactive,
+            as: PtySessionInfo.self
+        )
     }
 
     /// Output after `offset`. Returns immediately, empty when there is none.
     /// Poll, do not push.
     static func ptyRead(id: String, offset: UInt64) async throws -> PtyChunk {
-        try await background("pty.read", ["id": id, "offset": offset], as: PtyChunk.self)
+        try await background(
+            "pty.read",
+            ["id": id, "offset": offset],
+            patience: Patience.interactive,
+            as: PtyChunk.self
+        )
     }
 
     /// Keystrokes. Bytes, not text: an escape sequence is a byte stream.
@@ -561,6 +665,7 @@ extension Bridge {
         _ = try await background(
             "pty.write",
             ["id": id, "data": Data(bytes).base64EncodedString()],
+            patience: Patience.interactive,
             as: PtyWriteAck.self
         )
     }
@@ -569,6 +674,7 @@ extension Bridge {
         _ = try await background(
             "pty.resize",
             ["id": id, "rows": rows, "cols": cols],
+            patience: Patience.interactive,
             as: PtySizeAck.self
         )
     }

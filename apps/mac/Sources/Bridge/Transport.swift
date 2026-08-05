@@ -23,7 +23,12 @@ protocol Transport: Sendable {
     /// Send `method` with a JSON `params` object and return the raw response
     /// JSON. Throws only when the transport itself failed. A method that was
     /// rejected still returns an envelope, and the caller reads `ok`.
-    func call(method: String, params: String) throws -> String
+    ///
+    /// `patience` is how long the transport waits without hearing anything
+    /// before it gives up. It is a silence budget rather than a deadline: a
+    /// long answer that keeps arriving is never cut off, and a daemon that
+    /// stopped answering is not waited on forever. See `Bridge.Patience`.
+    func call(method: String, params: String, patience: TimeInterval) throws -> String
 
     /// What to call this in the interface, and in a bug report.
     var describedAs: String { get }
@@ -37,7 +42,10 @@ protocol Transport: Sendable {
 struct InProcessTransport: Transport {
     var describedAs: String { "in-process" }
 
-    func call(method: String, params: String) throws -> String {
+    /// `patience` is ignored. This is a function call into the same process:
+    /// there is no socket to time out, and a call that hangs here has hung the
+    /// thread it was made on with nothing left to cancel.
+    func call(method: String, params: String, patience _: TimeInterval) throws -> String {
         guard let raw = tokenstat_ffi_call(method, params) else {
             throw BridgeError.core(code: "null", message: "The core returned nothing.")
         }
@@ -69,13 +77,23 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// machine that has thousands. The daemon already runs a thread per
     /// connection, and a slow `scan` on one connection is exactly what must not
     /// block a keystroke on another.
-    private let lock = NSLock()
+    private let lock = NSCondition()
     private var idle: [Connection] = []
+    /// Connections that exist right now, idle or in a call.
+    private var live = 0
 
     /// Kept small. Terminal polling, the file watcher and a report can be in
     /// flight together, and anything past that is a burst that can wait its
     /// turn rather than a reason to hold more descriptors open forever.
     private static let maxIdle = 8
+
+    /// Hard ceiling on connections, idle or busy.
+    ///
+    /// Without one, a burst opens a connection per concurrent call and the
+    /// daemon spawns a thread for each, so a screen that polls hard turns into
+    /// steady thread churn on the host. Callers past the ceiling wait for one
+    /// to come back rather than opening the next.
+    private static let maxLive = 16
 
     let path: String
 
@@ -94,26 +112,39 @@ final class SocketTransport: Transport, @unchecked Sendable {
         guard let probe = try? Connection(path: path) else { return nil }
         let transport = SocketTransport(path: path)
         transport.idle.append(probe)
+        transport.live = 1
         return transport
     }
 
-    func call(method: String, params: String) throws -> String {
+    func call(method: String, params: String, patience: TimeInterval) throws -> String {
         let request = Self.line(method: method, params: params)
 
         // One retry, and only on a connection taken from the pool. A daemon
         // that restarted leaves the pooled descriptors dead, and the first call
         // after that is not a failure the user should ever see. A freshly
         // opened connection failing is a real failure and is reported.
-        if let pooled = checkout() {
-            if let response = try? pooled.roundTrip(request) {
-                checkin(pooled)
+        //
+        // A connection that timed out is **not** retried and **not** returned
+        // to the pool. The daemon may still be working on that request, and its
+        // answer would arrive on the wire in front of the next call's, so the
+        // socket is finished even though nothing about it failed.
+        if let pooled = try acquire(patience: patience) {
+            do {
+                pooled.patience = patience
+                let response = try pooled.roundTrip(request)
+                release(pooled, reusable: true)
                 return response
+            } catch TransportFailure.timedOut {
+                release(pooled, reusable: false)
+                throw Self.silence(path: path, patience: patience)
+            } catch {
+                release(pooled, reusable: false)
             }
         }
 
         let fresh: Connection
         do {
-            fresh = try Connection(path: path)
+            fresh = try open()
         } catch {
             throw BridgeError.core(
                 code: "host_unreachable",
@@ -121,22 +152,70 @@ final class SocketTransport: Transport, @unchecked Sendable {
                     + "Start it, or reopen the app to work in-process."
             )
         }
-        let response = try fresh.roundTrip(request)
-        checkin(fresh)
-        return response
+        do {
+            fresh.patience = patience
+            let response = try fresh.roundTrip(request)
+            release(fresh, reusable: true)
+            return response
+        } catch TransportFailure.timedOut {
+            release(fresh, reusable: false)
+            throw Self.silence(path: path, patience: patience)
+        } catch {
+            release(fresh, reusable: false)
+            throw error
+        }
     }
 
-    private func checkout() -> Connection? {
-        lock.lock()
-        defer { lock.unlock() }
-        return idle.popLast()
+    private static func silence(path: String, patience: TimeInterval) -> BridgeError {
+        BridgeError.core(
+            code: "host_timeout",
+            message: "The tokenstat host at \(path) said nothing for "
+                + "\(Int(patience)) seconds. It may be busy with a scan, or it may "
+                + "have stopped answering."
+        )
     }
 
-    private func checkin(_ connection: Connection) {
+    /// A connection to use for one call: a pooled one, a new one, or nil when
+    /// the ceiling is reached and the caller should open its own path.
+    ///
+    /// Throws only when the wait for a free slot ran out, which is the same
+    /// silence the call itself would have reported.
+    private func acquire(patience: TimeInterval) throws -> Connection? {
         lock.lock()
         defer { lock.unlock() }
-        if idle.count < Self.maxIdle {
+        let deadline = Date().addingTimeInterval(patience)
+        while true {
+            if let pooled = idle.popLast() { return pooled }
+            if live < Self.maxLive { return nil }
+            // Every connection is busy. Waiting is right: opening more is what
+            // turns a burst into a thread storm on the daemon.
+            if !lock.wait(until: deadline) {
+                throw Self.silence(path: path, patience: patience)
+            }
+        }
+    }
+
+    /// Open a connection against the ceiling. The caller has no pooled one.
+    private func open() throws -> Connection {
+        let connection = try Connection(path: path)
+        lock.lock()
+        live += 1
+        lock.unlock()
+        return connection
+    }
+
+    private func release(_ connection: Connection, reusable: Bool) {
+        lock.lock()
+        defer {
+            // Somebody may be waiting for this slot, whether it came back as a
+            // reusable connection or as a closed one.
+            lock.signal()
+            lock.unlock()
+        }
+        if reusable, idle.count < Self.maxIdle {
             idle.append(connection)
+        } else {
+            live -= 1
         }
     }
 
@@ -171,6 +250,26 @@ private final class Connection {
     /// while one call uses one connection, but a stream is a stream: keeping
     /// them costs a few bytes and losing them would corrupt the next response.
     private var pending = Data()
+
+    /// How long a single read or write may find the socket silent.
+    ///
+    /// Per syscall rather than per call, which is the behaviour worth having:
+    /// an answer that keeps arriving is never cut off however large it is, and
+    /// a daemon that stopped answering is given up on. Applied lazily, because
+    /// a pooled connection carries the last caller's value and most calls in a
+    /// row want the same one.
+    var patience: TimeInterval = 0 {
+        didSet {
+            guard patience != oldValue else { return }
+            var timeout = timeval(
+                tv_sec: Int(patience),
+                tv_usec: Int32((patience - patience.rounded(.down)) * 1_000_000)
+            )
+            let size = socklen_t(MemoryLayout<timeval>.size)
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, size)
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, size)
+        }
+    }
 
     init(path: String) throws {
         let bytes = Array(path.utf8)
@@ -235,6 +334,7 @@ private final class Connection {
                 // A short write is normal on a socket. Only EINTR is worth
                 // retrying; everything else means this connection is finished.
                 if n < 0 && errno == EINTR { continue }
+                if n < 0 && Self.isTimeout(errno) { throw TransportFailure.timedOut }
                 throw TransportFailure.system("write", errno)
             }
         }
@@ -259,10 +359,21 @@ private final class Connection {
                 continue
             }
             if n < 0 && errno == EINTR { continue }
+            // The receive timeout expired. Distinct from a broken connection:
+            // the daemon is probably still there and still working, it just has
+            // not said anything for longer than the caller agreed to wait.
+            if n < 0 && Self.isTimeout(errno) { throw TransportFailure.timedOut }
             // Zero is the daemon closing the connection mid-answer, which is
             // indistinguishable from a crash and is treated the same way.
             throw TransportFailure.system("read", n == 0 ? ECONNRESET : errno)
         }
+    }
+
+    /// A socket timeout reports `EAGAIN`, and `EWOULDBLOCK` is the same value
+    /// on Darwin. Both are checked because the two names are not guaranteed to
+    /// stay equal and a missed one would read as a dead connection.
+    private static func isTimeout(_ code: Int32) -> Bool {
+        code == EAGAIN || code == EWOULDBLOCK
     }
 }
 
@@ -271,4 +382,6 @@ private final class Connection {
 private enum TransportFailure: Error {
     case path(String)
     case system(String, Int32)
+    /// The socket went quiet for longer than the call's patience.
+    case timedOut
 }
