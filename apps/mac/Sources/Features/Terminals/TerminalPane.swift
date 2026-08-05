@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 #if os(macOS)
+import Foundation
 import SwiftUI
 
 /// The centre pane below the workspace header: the session strip on top, the
@@ -713,14 +714,53 @@ private struct LaunchProfile: Identifiable {
     }
 
     static var shellArguments: [String] {
-        URL(fileURLWithPath: shellCommand).lastPathComponent == "zsh" ? ["-f"] : []
+        URL(fileURLWithPath: shellCommand).lastPathComponent == "zsh" ? ["-il"] : []
     }
 }
 
+/// Finder and launchd give the app a much smaller PATH than an interactive
+/// Terminal.app session. Resolve the user's login-shell PATH once so the
+/// launch surface can show CLIs that are installed through npm, Homebrew,
+/// Volta, or a shell profile.
+private let commandSearchPath: [String] = {
+    var paths = ProcessInfo.processInfo.environment["PATH"]?
+        .split(separator: ":")
+        .map(String.init) ?? []
+
+    let shell = LaunchProfile.shellCommand
+    if FileManager.default.isExecutableFile(atPath: shell) {
+        let output = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: shell)
+        process.arguments = ["-ilc", "printf %s \"$PATH\""]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        if (try? process.run()) != nil {
+            process.waitUntilExit()
+            if let loginPath = String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) {
+                paths.append(contentsOf: loginPath.split(separator: ":").map(String.init))
+            }
+        }
+    }
+
+    let home = FileManager.default.homeDirectoryForCurrentUser.path
+    paths.append(contentsOf: [
+        "\(home)/.local/bin",
+        "\(home)/.npm-global/bin",
+        "\(home)/.volta/bin",
+    ])
+    paths.append(contentsOf: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
+
+    var seen = Set<String>()
+    return paths.filter { !$0.isEmpty && seen.insert($0).inserted }
+}()
+
 /// Whether an executable is reachable on the PATH.
 private func commandAvailable(_ name: String) -> Bool {
-    guard let path = ProcessInfo.processInfo.environment["PATH"] else { return false }
-    for dir in path.split(separator: ":") where !dir.isEmpty {
+    for dir in commandSearchPath {
         if FileManager.default.isExecutableFile(atPath: "\(dir)/\(name)") {
             return true
         }

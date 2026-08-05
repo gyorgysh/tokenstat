@@ -27,6 +27,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -198,6 +200,10 @@ impl Manager {
         // Agent CLIs draw boxes and colour. Without this they fall back to
         // something far uglier, and some refuse interactive mode entirely.
         cmd.env("TERM", "xterm-256color");
+        #[cfg(unix)]
+        if let Some(path) = login_shell_path() {
+            cmd.env("PATH", path);
+        }
 
         let child = pair
             .slave
@@ -388,6 +394,23 @@ impl Manager {
             .remove(id);
         Ok(())
     }
+}
+
+/// A GUI app or launch agent does not inherit the interactive shell's PATH.
+/// Ask the user's login shell for it so direct CLI launches work just like
+/// they do from Terminal.app. The inherited PATH remains the fallback.
+#[cfg(unix)]
+fn login_shell_path() -> Option<String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let output = Command::new(shell)
+        .args(["-ilc", "printf %s \"$PATH\""])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    (!path.trim().is_empty()).then_some(path.trim().to_string())
 }
 
 #[cfg(test)]
