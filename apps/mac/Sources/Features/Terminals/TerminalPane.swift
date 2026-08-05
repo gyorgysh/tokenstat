@@ -62,6 +62,10 @@ struct TerminalPane: View {
         activeFile == nil && !browserShown && !filesShown && openCommit == nil && loadingCommit == nil && !reviewingWorkingTree
     }
 
+    /// Which harnesses this Mac can launch. Shared, and resolved off the main
+    /// actor: see `LaunchCatalog` for the crash that reading it inline caused.
+    private var launcher: LaunchCatalog { LaunchCatalog.shared }
+
     /// Size of the terminal area, measured rather than assumed.
     @State private var paneSize: CGSize = .zero
 
@@ -81,6 +85,12 @@ struct TerminalPane: View {
         terminals.active(in: folder.id)
     }
 
+    /// The session the user can actually see, which is nothing at all while a
+    /// file, a commit or the browser is over the top of it.
+    private var focusedSessionID: String? {
+        showsTerminal ? active?.id : nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if folder.exists {
@@ -94,6 +104,17 @@ struct TerminalPane: View {
                 missingFolder
             }
         }
+        // Only the session actually on screen polls at keystroke speed. The
+        // rest keep draining the host's buffer, just slower, which is the
+        // difference between a few round trips a second and a few hundred when
+        // several agents are running at once.
+        .onChange(of: focusedSessionID, initial: true) {
+            terminals.focus(focusedSessionID)
+        }
+        .onDisappear { terminals.focus(nil) }
+        // Asking the login shell for the real PATH. Once per launch, off the
+        // main actor, and the launch surface fills in when it answers.
+        .task { await launcher.resolve() }
         // Three buttons and not two, because "Cancel" and "Don't Save" are
         // different answers and a two-button dialog forces one of them to mean
         // both.
@@ -297,7 +318,7 @@ struct TerminalPane: View {
                     Label("Files", systemImage: "folder")
                 }
                 Divider()
-                ForEach(LaunchProfile.available) { profile in
+                ForEach(launcher.available) { profile in
                     Button {
                         start(profile)
                     } label: {
@@ -550,6 +571,8 @@ private struct LaunchSurface: View {
     /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
 
+    private var launcher: LaunchCatalog { LaunchCatalog.shared }
+
     var body: some View {
         VStack(spacing: Theme.Space.l) {
             Spacer()
@@ -574,7 +597,7 @@ private struct LaunchSurface: View {
                 utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
                     workspaces.showFiles(in: folder.id)
                 }
-                ForEach(LaunchProfile.available) { profile in
+                ForEach(launcher.available) { profile in
                     launchButton(profile)
                 }
             }
@@ -662,109 +685,4 @@ private struct LaunchSurface: View {
     }
 }
 
-/// What can be launched in a workspace.
-///
-/// These are the supported harness commands, keyed by the source id so the
-/// launch mark and the archive's mark are the same mark. Only commands actually
-/// on the PATH are offered.
-private struct LaunchProfile: Identifiable {
-    let id: String
-    let name: String
-    let command: String
-    let args: [String]
-    /// Source id for the brand mark, or nil for a plain SF symbol.
-    let harnessID: String?
-    let symbol: String?
-
-    /// The profiles whose command is actually installed.
-    ///
-    /// Resolved once. Working out what is on the PATH means a stat per
-    /// directory per command, and this list is read by the session strip, which
-    /// redraws on every keystroke in every terminal. Doing it per redraw put a
-    /// filesystem walk on the main thread sixty times a second.
-    static let available: [LaunchProfile] = all.filter {
-        // The shell is an absolute path; everything else is looked up on PATH.
-        $0.command.hasPrefix("/") || commandAvailable($0.command)
-    }
-
-    static let all: [LaunchProfile] = [
-        LaunchProfile(
-            id: "shell",
-            name: "Shell",
-            command: shellCommand,
-            args: shellArguments,
-            harnessID: nil,
-            symbol: "terminal"
-        ),
-        LaunchProfile(id: "claude_code", name: "Claude Code", command: "claude", args: [], harnessID: "claude_code", symbol: nil),
-        LaunchProfile(id: "codex", name: "Codex", command: "codex", args: [], harnessID: "codex", symbol: nil),
-        LaunchProfile(id: "opencode", name: "OpenCode", command: "opencode", args: [], harnessID: "opencode", symbol: nil),
-        LaunchProfile(id: "grok", name: "Grok Build", command: "grok", args: [], harnessID: "grok", symbol: nil),
-        LaunchProfile(id: "copilot", name: "Copilot CLI", command: "copilot", args: [], harnessID: "copilot", symbol: nil),
-        LaunchProfile(id: "cline", name: "Cline", command: "cline", args: [], harnessID: "cline", symbol: nil),
-        LaunchProfile(id: "openclaw", name: "OpenClaw", command: "openclaw", args: [], harnessID: "openclaw", symbol: nil),
-        LaunchProfile(id: "zed", name: "Zed", command: "zed", args: [], harnessID: "zed", symbol: nil),
-        LaunchProfile(id: "antigravity", name: "Antigravity", command: "agy", args: [], harnessID: "antigravity", symbol: nil),
-        LaunchProfile(id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [], harnessID: "cursor", symbol: nil),
-        LaunchProfile(id: "cursor", name: "Cursor CLI", command: "cursor", args: [], harnessID: "cursor", symbol: nil),
-    ]
-
-    static var shellCommand: String {
-        ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
-    }
-
-    static var shellArguments: [String] {
-        URL(fileURLWithPath: shellCommand).lastPathComponent == "zsh" ? ["-il"] : []
-    }
-}
-
-/// Finder and launchd give the app a much smaller PATH than an interactive
-/// Terminal.app session. Resolve the user's login-shell PATH once so the
-/// launch surface can show CLIs that are installed through npm, Homebrew,
-/// Volta, or a shell profile.
-private let commandSearchPath: [String] = {
-    var paths = ProcessInfo.processInfo.environment["PATH"]?
-        .split(separator: ":")
-        .map(String.init) ?? []
-
-    let shell = LaunchProfile.shellCommand
-    if FileManager.default.isExecutableFile(atPath: shell) {
-        let output = Pipe()
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        process.arguments = ["-ilc", "printf %s \"$PATH\""]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        if (try? process.run()) != nil {
-            process.waitUntilExit()
-            if let loginPath = String(
-                data: output.fileHandleForReading.readDataToEndOfFile(),
-                encoding: .utf8
-            ) {
-                paths.append(contentsOf: loginPath.split(separator: ":").map(String.init))
-            }
-        }
-    }
-
-    let home = FileManager.default.homeDirectoryForCurrentUser.path
-    paths.append(contentsOf: [
-        "\(home)/.local/bin",
-        "\(home)/.npm-global/bin",
-        "\(home)/.volta/bin",
-    ])
-    paths.append(contentsOf: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"])
-
-    var seen = Set<String>()
-    return paths.filter { !$0.isEmpty && seen.insert($0).inserted }
-}()
-
-/// Whether an executable is reachable on the PATH.
-private func commandAvailable(_ name: String) -> Bool {
-    for dir in commandSearchPath {
-        if FileManager.default.isExecutableFile(atPath: "\(dir)/\(name)") {
-            return true
-        }
-    }
-    return false
-}
 #endif
