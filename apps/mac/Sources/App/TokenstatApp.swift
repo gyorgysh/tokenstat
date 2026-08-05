@@ -6,9 +6,30 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+
+/// The one place this app needs AppKit's own launch order.
+///
+/// `applicationWillFinishLaunching` rather than the `App` initializer: moving
+/// the bundle puts a question in front of the user, and a modal panel wants an
+/// application that has finished waking up. It is also the last moment before
+/// any window exists, so the copy that gets relaunched is the one that draws.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            _ = AppRelocator.relocateIfNeeded()
+        }
+    }
+}
+#endif
 
 @main
 struct TokenstatApp: App {
+    #if os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    #endif
+
     /// Pick the transport before any view can call across it.
     ///
     /// In the initializer rather than in a `.task`, because a view that renders
