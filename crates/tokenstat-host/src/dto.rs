@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use tokenstat_core::{
-    BillingMode, Counters, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals,
+    BillingMode, Counters, DayPart, GroupBy, PricedBucket, Query, ScanReport, SplitBucket, Totals,
     UsageBlock, Warning,
 };
 use tokenstat_sync::DeviceLogin as SyncDeviceLogin;
@@ -453,6 +453,59 @@ pub struct CalendarDto {
 
 fn local_scope() -> String {
     "local".into()
+}
+
+/// One day's hover detail: the totals line plus every `model × source` row.
+///
+/// The shape the public profile page draws on hover. A client shows the
+/// totals, the first rows, a "+N more" line when the list is longer, and the
+/// input/output/cache split the counters add up to.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayDetailDto {
+    /// `YYYY-MM-DD`, echoed so a client does not have to hold it.
+    pub date: String,
+    pub tokens: u64,
+    pub events: u64,
+    /// List-rate value in micros, matching the heatmap cell's own unit.
+    pub value_micros: i64,
+    pub estimated: bool,
+    /// Models nothing could price. Non-empty means `value_micros` is a floor.
+    pub unpriced_models: Vec<String>,
+    pub rows: Vec<DayPartDto>,
+}
+
+/// One `model × source` slice of a day.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayPartDto {
+    pub model: String,
+    /// The harness that recorded the events, e.g. `"codex"` or `"claude_code"`.
+    pub src: String,
+    pub fresh: Option<u64>,
+    pub cache_read: Option<u64>,
+    pub cache_write_5m: Option<u64>,
+    pub cache_write_1h: Option<u64>,
+    pub output: Option<u64>,
+    /// Sum of every known counter field.
+    pub tokens: u64,
+    pub events: u64,
+}
+
+impl From<&DayPart> for DayPartDto {
+    fn from(p: &DayPart) -> DayPartDto {
+        DayPartDto {
+            model: p.model.clone(),
+            src: p.source.clone(),
+            fresh: p.counters.input_fresh,
+            cache_read: p.counters.cache_read,
+            cache_write_5m: p.counters.cache_write_5m,
+            cache_write_1h: p.counters.cache_write_1h,
+            output: p.counters.output,
+            tokens: p.counters.total(),
+            events: p.events,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

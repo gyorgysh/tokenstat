@@ -21,8 +21,16 @@ struct HeatmapView: View {
     let calendar: ActivityCalendar
     /// Clicking a day filters Insights to it.
     var onSelect: ((HeatCell) -> Void)?
+    /// The pointer moved over (or left) a day. The parent owns the detail
+    /// fetch and the popover, so this only carries which cell it is.
+    var onHover: ((HeatCell?) -> Void)?
 
     @State private var hovered: HeatCell?
+
+    /// The named coordinate space the popover reads cell frames in. Set on the
+    /// window's root view so a frame here is a window-space frame no matter
+    /// how deep the heatmap sits in the split view.
+    static let coordinateSpace = "tokenstat.window"
 
     private let gutter: CGFloat = 30
     /// Gap as a fraction of a cell, so the grid keeps its texture at any size.
@@ -146,12 +154,37 @@ struct HeatmapView: View {
                     RoundedRectangle(cornerRadius: 2.5)
                         .strokeBorder(
                             hovered == day ? Color.primary.opacity(0.55) : .clear,
-                            lineWidth: 1
+                                lineWidth: 1
                         )
                 )
-                .onHover { hovered = $0 ? day : (hovered == day ? nil : hovered) }
+                .onHover { over in
+                    if over {
+                        hovered = day
+                        onHover?(day)
+                    } else if hovered == day {
+                        hovered = nil
+                        onHover?(nil)
+                    }
+                }
                 .onTapGesture { onSelect?(day) }
-                .help("\(day.date): \(formatSpend(day.value)) at list rates")
+                .accessibilityLabel("\(day.date): \(formatSpend(day.value)) at list rates")
+                // The popover is anchored to this cell's window-space frame.
+                // Only the hovered cell reports, so the preference never
+                // carries more than one frame and moving between cells swaps
+                // it atomically.
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: HoveredCellFrameKey.self,
+                            value: hovered == day
+                                ? HoveredCellFrame(
+                                    date: day.date,
+                                    frame: geo.frame(in: .named(Self.coordinateSpace))
+                                )
+                                : nil
+                        )
+                    }
+                }
         } else {
             // A day after today. Left blank rather than drawn as idle: it has
             // not happened, which is not the same as nothing happening.
@@ -198,5 +231,21 @@ struct HeatmapView: View {
         case 4: return "Fri"
         default: return ""
         }
+    }
+}
+
+/// Where the hovered heatmap cell sits, in window coordinates.
+///
+/// A small value so the preference key can stay nil when nothing is hovered:
+/// the popover reads a nil frame as "hide".
+struct HoveredCellFrame: Equatable {
+    var date: String
+    var frame: CGRect
+}
+
+struct HoveredCellFrameKey: PreferenceKey {
+    static var defaultValue: HoveredCellFrame?
+    static func reduce(value: inout HoveredCellFrame?, nextValue: () -> HoveredCellFrame?) {
+        value = nextValue() ?? value
     }
 }

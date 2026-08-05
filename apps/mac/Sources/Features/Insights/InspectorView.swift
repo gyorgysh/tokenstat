@@ -91,14 +91,17 @@ struct InspectorView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: Theme.Space.m) {
-                Stat(label: "Tokens", value: formatTokens(model.totals?.counters.total ?? 0), size: 15)
-                Stat(label: "Sessions", value: "\(model.totals?.sessions ?? 0)", size: 15)
-            }
-            HStack(spacing: Theme.Space.m) {
-                Stat(label: "Events", value: formatTokens(model.totals?.events ?? 0), size: 15)
-                Stat(label: "Active days", value: "\(model.totals?.days ?? 0)", size: 15)
-            }
+            // Side by side where the pane is wide enough, stacked when the
+            // inspector is squeezed by a small window. A fixed pair of rows
+            // was what ran past the pane's edge at a low effective resolution.
+            statPair(
+                "Tokens", formatTokens(model.totals?.counters.total ?? 0),
+                "Sessions", "\(model.totals?.sessions ?? 0)"
+            )
+            statPair(
+                "Events", formatTokens(model.totals?.events ?? 0),
+                "Active days", "\(model.totals?.days ?? 0)"
+            )
 
             if let block = model.activeBlock {
                 Divider()
@@ -170,10 +173,10 @@ struct InspectorView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            HStack(spacing: Theme.Space.m) {
-                Stat(label: "Sessions", value: "\(row.sessions)", size: 15)
-                Stat(label: "Events", value: formatTokens(row.events), size: 15)
-            }
+            statPair(
+                "Sessions", "\(row.sessions)",
+                "Events", formatTokens(row.events)
+            )
 
             // Which agents produced this project's usage. Only meaningful on
             // the Projects tab: on any other tab the key is not a project.
@@ -208,6 +211,28 @@ struct InspectorView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+            }
+        }
+    }
+
+    /// Two headline numbers, side by side when there is room and stacked when
+    /// the pane is squeezed.
+    ///
+    /// The stacked fallback keeps the stats `expands: false` so the label and
+    /// value stay together instead of a value ending up a metre from its label
+    /// in a full-width row.
+    private func statPair(
+        _ label1: String, _ value1: String,
+        _ label2: String, _ value2: String
+    ) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Theme.Space.m) {
+                Stat(label: label1, value: value1, size: 15)
+                Stat(label: label2, value: value2, size: 15)
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Stat(label: label1, value: value1, size: 15, expands: false)
+                Stat(label: label2, value: value2, size: 15, expands: false)
             }
         }
     }

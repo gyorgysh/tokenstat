@@ -84,6 +84,19 @@ final class HomeModel {
     private var hostRetryTask: Task<Void, Never>?
     private var hostRetryCount = 0
 
+    // MARK: - Day hover detail
+
+    /// The day the pointer is over, by `YYYY-MM-DD`.
+    private(set) var hoveredDay: String?
+    /// The day's detail once it has answered, or nil while it loads.
+    private(set) var hoveredDetail: DayDetail?
+    private(set) var isLoadingDayDetail = false
+
+    /// Fetched details, kept per day so revisiting a cell is instant and a
+    /// quick sweep across the grid does not re-ask for every cell.
+    private var dayDetailCache: [String: DayDetail] = [:]
+    private var dayDetailTask: Task<Void, Never>?
+
     /// Value at list rates over the last seven calendar days, the same measure
     /// the heatmap colours by, so the two cannot disagree.
     var weekValue: Money {
@@ -109,7 +122,18 @@ final class HomeModel {
             let grid = try await calendar
             self.calendar = grid
             // What came back, not what was asked for.
-            deliveredScope = grid?.scope == "account" ? .allMachines : .thisMachine
+            let newScope: ActivityScope = grid?.scope == "account" ? .allMachines : .thisMachine
+            if newScope != deliveredScope {
+                // The grid underneath the popover changed identity (e.g. an
+                // account grid fell back to local). Stale day details would
+                // describe a different machine's usage, so they have to go.
+                dayDetailCache = [:]
+                hoveredDay = nil
+                hoveredDetail = nil
+                isLoadingDayDetail = false
+                dayDetailTask?.cancel()
+            }
+            deliveredScope = newScope
             scopeNotice = grid?.notice
             needsAccountSignIn = grid?.noticeCode == "auth"
 
@@ -155,9 +179,68 @@ final class HomeModel {
 
     private let hostRetryLimit = 10
 
+    /// The pointer moved over (or left) a heatmap cell.
+    ///
+    /// Keeps the hover state here rather than in the view so the popover can
+    /// render above the whole window and still read the same truth. A quiet
+    /// cell asks for nothing: the grid only lights priced days, and a day with
+    /// no value has nothing to show.
+    func hover(day: HeatCell?) {
+        dayDetailTask?.cancel()
+        guard let day, day.value > 0 else {
+            hoveredDay = nil
+            hoveredDetail = nil
+            isLoadingDayDetail = false
+            return
+        }
+
+        hoveredDay = day.date
+        if let cached = dayDetailCache[day.date] {
+            hoveredDetail = cached
+            isLoadingDayDetail = false
+            return
+        }
+
+        isLoadingDayDetail = true
+        hoveredDetail = nil
+        let scope = deliveredScope.wire
+        dayDetailTask = Task { [weak self] in
+            // A hover settle: crossing cells fast must not fire a request per
+            // cell. 140ms is short enough to feel instant, long enough to eat
+            // a sweep across the grid.
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled else { return }
+            let detail = try? await Bridge.dayDetail(date: day.date, scope: scope)
+            guard !Task.isCancelled else { return }
+            self?.finishDayDetail(day.date, detail)
+        }
+    }
+
+    private func finishDayDetail(_ date: String, _ detail: DayDetail?) {
+        if let detail {
+            dayDetailCache[date] = detail
+            if hoveredDay == date {
+                hoveredDetail = detail
+                isLoadingDayDetail = false
+            }
+        } else if hoveredDay == date {
+            // A day the archive knows nothing about: nothing to add. Keep the
+            // totals-only popover rather than a spinner that never lands.
+            hoveredDetail = nil
+            isLoadingDayDetail = false
+        }
+    }
+
     /// Switch what the grid counts and redraw it.
     func setScope(_ new: ActivityScope) async {
         guard new != scope else { return }
+        // The new grid is a different set of numbers; a cached hover from the
+        // old one would describe the wrong scope.
+        dayDetailCache = [:]
+        hoveredDay = nil
+        hoveredDetail = nil
+        isLoadingDayDetail = false
+        dayDetailTask?.cancel()
         scope = new
         await load()
     }

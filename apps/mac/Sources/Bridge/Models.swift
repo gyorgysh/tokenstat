@@ -193,6 +193,70 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     var noticeCode: String?
 }
 
+// MARK: - Day detail
+
+/// One day's hover detail, the same shape the profile page draws.
+///
+/// The heatmap cell carries one number so the grid can be built cheaply; this
+/// is what sits behind a hovered day: the totals line plus every
+/// `model × harness` slice, so the app and the website tell the same story
+/// about the day.
+struct DayDetail: Codable, Sendable, Hashable, Identifiable {
+    /// `YYYY-MM-DD`, echoed so the popover never has to guess which day it is
+    /// describing while a fetch races a hover change.
+    var date: String
+    var tokens: UInt64
+    var events: UInt64
+    var valueMicros: Int64
+    var estimated: Bool
+    var unpricedModels: [String]
+    var rows: [DayPart]
+
+    var id: String { date }
+
+    /// List-rate value, with the same "not billed / floor" qualifiers money
+    /// everywhere else carries.
+    var value: Money {
+        Money(micros: valueMicros, estimated: estimated, complete: unpricedModels.isEmpty)
+    }
+}
+
+/// One `model × harness` slice of a day.
+struct DayPart: Codable, Sendable, Hashable, Identifiable {
+    var model: String
+    /// The harness that recorded the events, e.g. `"codex"`.
+    var src: String
+    var fresh: UInt64?
+    var cacheRead: UInt64?
+    var cacheWrite5m: UInt64?
+    var cacheWrite1h: UInt64?
+    var output: UInt64?
+    /// Sum of every known counter field, as the host sent it.
+    var tokens: UInt64
+    var events: UInt64
+
+    var id: String { "\(src)\u{1}\(model)" }
+}
+
+/// Display label for a model id, matching tokenstat.ai.
+///
+/// Model ids are long and the useful part is at the end: "claude-opus-4-8"
+/// reads fine, "claude-haiku-4-5-20251001" does not. Cursor's auto router logs
+/// as bare "default"/"auto", which would otherwise render as a mystery.
+func shortModel(_ id: String) -> String {
+    let raw = id.trimmingCharacters(in: .whitespaces)
+    let leaf = raw.split(separator: "/").last.map(String.init) ?? raw
+    let lower = leaf.lowercased()
+    if ["default", "auto", "cursor-auto", "cursor-default", "cursor-router-auto"].contains(lower) {
+        return "cursor-router-auto"
+    }
+    if let colon = leaf.range(of: ": ") {
+        let after = String(leaf[colon.upperBound...]).trimmingCharacters(in: .whitespaces)
+        if !after.isEmpty { return after }
+    }
+    return leaf.isEmpty ? "model" : leaf
+}
+
 // MARK: - Syntax highlighting
 
 /// What a run of source text is.

@@ -71,6 +71,13 @@ struct WorkspaceInspector: View {
                 InspectorCloseButton(action: onClose)
                     .padding(.trailing, Theme.Space.s)
             }
+            // The strip's chrome has to cover the whole band, close button
+            // included. TabStrip only paints its own width, so without this the
+            // xmark sat on the grey pane material beside the dark tab band.
+            .background(Theme.tabStrip)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Theme.border).frame(height: 1)
+            }
             // Give every tab the same measured rectangle.  Using an unbounded
             // max-height here lets a tab's internal VStack negotiate a
             // different height, which makes the inspector appear to jump when

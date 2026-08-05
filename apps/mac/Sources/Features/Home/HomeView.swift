@@ -56,6 +56,9 @@ struct HomeView: View {
             }
         }
         .animation(.easeOut(duration: 0.22), value: isWarming)
+        // Leaving the screen while a cell is under the pointer: the popover
+        // must not stay pinned to a grid that is no longer there.
+        .onDisappear { model.hover(day: nil) }
         .task {
             // Started together, not one after the other. The vendor limits
             // include a network call for one provider, and waiting for the
@@ -390,7 +393,11 @@ struct HomeView: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    HeatmapView(calendar: calendar, onSelect: onSelectDay)
+                    HeatmapView(
+                        calendar: calendar,
+                        onSelect: onSelectDay,
+                        onHover: { model.hover(day: $0) }
+                    )
                 }
             } else if model.errorMessage != nil {
                 // "We could not look" and "there is nothing" are different

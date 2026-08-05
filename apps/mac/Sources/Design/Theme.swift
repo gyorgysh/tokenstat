@@ -730,25 +730,64 @@ extension CGFloat {
 /// The display the window opens on, in points.
 enum DisplayFit {
     #if os(macOS)
-    private static var screenWidth: CGFloat {
-        NSScreen.main?.visibleFrame.width ?? referenceWidth
+    /// The screen the fit was last computed for, if any.
+    private static var tracked: NSScreen?
+    #else
+    private static var trackedWidth: CGFloat?
+    #endif
+
+    /// The size the fixed layout was tuned against, in points.
+    private static let referenceWidth: CGFloat = 1440
+    private static let referenceHeight: CGFloat = 900
+
+    /// The smallest the factor goes.
+    ///
+    /// Small enough that a 1024×640 scaled display (about 720 visible points
+    /// wide) still fits the minimum content plus the inspector, and large
+    /// enough that the layout never collapses into a phone UI.
+    private static let floor: CGFloat = 0.6
+
+    /// Recompute the fit for a screen.
+    ///
+    /// Called when the window is created and again when it moves to another
+    /// display or the display's resolution changes. `nil` (no screen yet)
+    /// leaves the last known fit alone rather than snapping the layout.
+    #if os(macOS)
+    @MainActor
+    static func update(screen: NSScreen?) {
+        guard let screen else { return }
+        tracked = screen
     }
     #else
-    private static var screenWidth: CGFloat {
-        UIScreen.main.bounds.width
+    static func update(width: CGFloat?) {
+        trackedWidth = width
     }
     #endif
 
-    /// The width the fixed layout was tuned against.
-    private static let referenceWidth: CGFloat = 1440
-
-    /// The smallest the factor goes, so a very small screen still gets a
-    /// readable layout rather than a squeezed one.
-    private static let floor: CGFloat = 0.78
+    /// Current screen size in points.
+    #if os(macOS)
+    private static var screenSize: CGSize {
+        tracked?.visibleFrame.size ?? NSScreen.main?.visibleFrame.size ?? CGSize(
+            width: referenceWidth,
+            height: referenceHeight
+        )
+    }
+    #else
+    private static var screenSize: CGSize {
+        CGSize(width: trackedWidth ?? UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+    }
+    #endif
 
     /// 1 on a full-size display, smaller on one that presents fewer points.
+    ///
+    /// Both dimensions count: a 16:9 panel scaled to 1280×720 gives the width
+    /// of a desktop and the height of a laptop, and a layout sized to the
+    /// width alone overflows the window's height.
     static var factor: CGFloat {
-        min(max(screenWidth / referenceWidth, floor), 1)
+        let size = screenSize
+        let byWidth = size.width / referenceWidth
+        let byHeight = size.height / referenceHeight
+        return min(max(min(byWidth, byHeight), floor), 1)
     }
 
     /// Scale a fixed width by the display fit.

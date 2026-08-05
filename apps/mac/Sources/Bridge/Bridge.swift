@@ -443,6 +443,24 @@ enum Bridge {
         )
     }
 
+    /// One day's hover detail for the Home heatmap, mirroring the profile page.
+    ///
+    /// `scope` is `"local"` or `"account"`, matching `activityCalendar`. The
+    /// account answer comes from the same cached series the calendar uses, so
+    /// moving across the grid costs no extra network calls. A day with no
+    /// events is `nil`, which is an answer and not a failure.
+    static func dayDetail(
+        date: String,
+        weeks: Int = 53,
+        scope: String = "local"
+    ) async throws -> DayDetail? {
+        try await backgroundOptional(
+            "activity.day",
+            ["date": date, "weeks": weeks, "scope": scope],
+            as: DayDetail.self
+        )
+    }
+
     static func blocks(_ query: Query = Query()) async throws -> [Block] {
         try await background("blocks", ["query": query.payload], as: [Block].self)
     }

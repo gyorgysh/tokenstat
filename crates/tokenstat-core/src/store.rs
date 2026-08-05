@@ -56,6 +56,28 @@ pub struct SplitBucket {
     pub sessions: u64,
 }
 
+/// One `model × source` slice of a single day.
+///
+/// This is the day hover detail on the public profile: which models ran
+/// through which harnesses, and how the day's tokens split between fresh
+/// input, cache reads, cache writes and output. A day with events keeps one
+/// row per pair, so the client can draw the same rows the website draws
+/// without joining two reports.
+#[derive(Debug, Clone)]
+pub struct DayPart {
+    pub model: String,
+    pub source: String,
+    pub counters: Counters,
+    pub events: u64,
+}
+
+impl DayPart {
+    /// Total tokens across every disjoint counter field.
+    pub fn tokens(&self) -> u64 {
+        self.counters.total()
+    }
+}
+
 /// One 5 hour usage block, gap-based like Claude's rate-limit windows.
 #[derive(Debug, Clone)]
 pub struct UsageBlock {
@@ -464,6 +486,41 @@ impl Store {
         q: &Query,
     ) -> Result<Vec<SplitBucket>, CoreError> {
         self.report_split(group, GroupBy::Model, q)
+    }
+
+    /// One day's `model × source` rows, largest slice first.
+    ///
+    /// The day detail the profile page shows on hover. Grouped by both
+    /// dimensions because "Codex ran model X" is a different fact from "Claude
+    /// Code ran model X": the counters came from different providers and the
+    /// cache convention differs between them.
+    pub fn day_detail(&self, date: &str) -> Result<Vec<DayPart>, CoreError> {
+        let sql = r#"SELECT model, source,
+                            SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
+                            SUM(cache_write_1h), SUM(output),
+                            COUNT(*)
+                     FROM event
+                     WHERE local_date = ?1
+                     GROUP BY model, source
+                     ORDER BY (COALESCE(SUM(input_fresh),0)+COALESCE(SUM(cache_read),0)
+                              +COALESCE(SUM(cache_write_5m),0)+COALESCE(SUM(cache_write_1h),0)
+                              +COALESCE(SUM(output),0)) DESC"#;
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params![date], |r| {
+            Ok(DayPart {
+                model: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                source: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                counters: Counters {
+                    input_fresh: r.get::<_, Option<i64>>(2)?.map(|v| v as u64),
+                    cache_read: r.get::<_, Option<i64>>(3)?.map(|v| v as u64),
+                    cache_write_5m: r.get::<_, Option<i64>>(4)?.map(|v| v as u64),
+                    cache_write_1h: r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                    output: r.get::<_, Option<i64>>(6)?.map(|v| v as u64),
+                },
+                events: r.get::<_, i64>(7)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn totals(&self, q: &Query) -> Result<Totals, CoreError> {
@@ -904,6 +961,35 @@ mod tests {
         let r = s.report(GroupBy::Model, &Query::default()).unwrap();
         assert_eq!(r[0].key, "big");
         assert_eq!(r[1].key, "small");
+    }
+
+    #[test]
+    fn day_detail_groups_by_model_and_source_and_filters_the_date() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        // 2023-11-14 and 2023-11-15. The same model on the same day through two
+        // harnesses stays two rows; the same pair on another day stays out.
+        let mut codex = ev("a", 1_699_920_000_000, "gpt-x", 10);
+        codex.source = SourceId::Codex;
+        let mut claude = ev("b", 1_699_920_000_000, "gpt-x", 30);
+        claude.source = SourceId::ClaudeCode;
+        let mut next_day = ev("c", 1_700_006_400_000, "gpt-x", 50);
+        next_day.source = SourceId::Codex;
+        s.insert_events(&[codex, claude, next_day], &tz).unwrap();
+
+        let rows = s.day_detail("2023-11-14").unwrap();
+        assert_eq!(rows.len(), 2);
+        // Ordered by tokens descending: the Claude Code row is the larger one.
+        assert_eq!(rows[0].source, "claude_code");
+        assert_eq!(rows[0].model, "gpt-x");
+        assert_eq!(rows[0].counters.output, Some(30));
+        assert_eq!(rows[0].events, 1);
+        assert_eq!(rows[0].tokens(), 36); // 1 fresh + 2 cache read + 3 cache write + 30 out
+        assert_eq!(rows[1].source, "codex");
+        assert_eq!(rows[1].tokens(), 16);
+
+        // A day with no events is an empty list, not an error.
+        assert!(s.day_detail("2023-11-13").unwrap().is_empty());
     }
 
     #[test]

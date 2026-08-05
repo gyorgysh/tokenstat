@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 use tokenstat_core::activity::{self, HeatCalendar};
 use tokenstat_core::model::Counters;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable};
+use tokenstat_core::store::DayPart;
 use tokenstat_sync::profile::{self, SeriesRow};
 
 /// How long a fetched series stays good.
@@ -163,6 +164,86 @@ pub fn calendar(
 
     let days: Vec<(String, u64)> = by_day.into_iter().collect();
     Ok(activity::calendar(&days, weeks, today))
+}
+
+/// One day's `model × source` rows from the account's series, largest first.
+///
+/// The same cached series the calendar is built from, so a hover costs no
+/// network call of its own. Pricing is the caller's job (it owns the price
+/// book); this only folds the raw counters by `model × source`.
+///
+/// An empty list means the account has no events for that day, which is an
+/// answer rather than a failure. A fetch that fails is reported as an error
+/// exactly like [`calendar`], so the client can fall back or say why.
+pub fn day_detail(
+    date: &str,
+    tz: &jiff::tz::TimeZone,
+    weeks: usize,
+) -> Result<Vec<DayPart>, FetchError> {
+    let today = activity::today(tz);
+    let fetched = series(weeks, today)?;
+
+    let mut parts: Vec<DayPart> = Vec::new();
+    let mut index: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for row in fetched.rows.iter().filter(|r| r.day == date) {
+        let counters = Counters {
+            input_fresh: Some(row.input),
+            cache_read: Some(row.cr),
+            cache_write_5m: Some(row.cw5),
+            cache_write_1h: Some(row.cw1),
+            output: Some(row.output),
+        };
+        let key = (row.model.clone(), row.src.clone());
+        match index.get(&key) {
+            Some(&i) => {
+                parts[i].counters = add_counters(parts[i].counters, counters);
+                parts[i].events = parts[i].events.saturating_add(row.ev);
+            }
+            None => {
+                index.insert(key, parts.len());
+                parts.push(DayPart {
+                    model: row.model.clone(),
+                    source: row.src.clone(),
+                    counters,
+                    events: row.ev,
+                });
+            }
+        }
+    }
+
+    parts.sort_by(|a, b| b.tokens().cmp(&a.tokens()));
+    Ok(parts)
+}
+
+/// Sum two counters, treating a missing field as zero.
+///
+/// The series rows always carry every field, so this is only needed while
+/// folding them by `model × source`.
+fn add_counters(a: Counters, b: Counters) -> Counters {
+    Counters {
+        input_fresh: Some(
+            a.input_fresh
+                .unwrap_or(0)
+                .saturating_add(b.input_fresh.unwrap_or(0)),
+        ),
+        cache_read: Some(
+            a.cache_read
+                .unwrap_or(0)
+                .saturating_add(b.cache_read.unwrap_or(0)),
+        ),
+        cache_write_5m: Some(
+            a.cache_write_5m
+                .unwrap_or(0)
+                .saturating_add(b.cache_write_5m.unwrap_or(0)),
+        ),
+        cache_write_1h: Some(
+            a.cache_write_1h
+                .unwrap_or(0)
+                .saturating_add(b.cache_write_1h.unwrap_or(0)),
+        ),
+        output: Some(a.output.unwrap_or(0).saturating_add(b.output.unwrap_or(0))),
+    }
 }
 
 /// How many whole weeks the service actually covered, capped at what was asked.

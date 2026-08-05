@@ -82,6 +82,11 @@ struct RootView: View {
     /// Conflating them would spend the user's choice on a window resize: narrow
     /// the window once and the pane would stay shut after widening it again.
     @State private var inspectorFits = true
+    /// The hovered heatmap cell's window-space frame, fed up from the grid by
+    /// preference. Nil means nothing is hovered and the popover hides.
+    @State private var hoveredCell: HoveredCellFrame?
+    /// The window's content size, for popover placement and display fitting.
+    @State private var windowSize: CGSize = .zero
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var collapsedWorkspaces: Set<String> = []
@@ -111,6 +116,28 @@ struct RootView: View {
                     )
                 }
         }
+        // Cell frames are reported in this space, and the popover overlay is
+        // positioned in the same space, so a frame and its card agree wherever
+        // the window is.
+        .coordinateSpace(name: HeatmapView.coordinateSpace)
+        .onPreferenceChange(HoveredCellFrameKey.self) { hoveredCell = $0 }
+        // Track which screen the window is on so the display fit and the
+        // window frame follow it.
+        .background {
+            #if os(macOS)
+            WindowScreenObserver()
+            #else
+            Color.clear
+            #endif
+        }
+        .overlay {
+            DayDetailPopover(
+                detail: home.hoveredDetail,
+                isLoading: home.isLoadingDayDetail,
+                anchor: hoveredCell,
+                windowSize: windowSize
+            )
+        }
         // Watch the width of the whole split view, not the detail pane: the
         // detail's own width already reflects the inspector being open, so
         // driving the decision from it oscillates.
@@ -120,9 +147,25 @@ struct RootView: View {
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear { inspectorFits = Self.fits(proxy.size.width, open: inspectorFits) }
+                    .onAppear {
+                        inspectorFits = Self.fits(proxy.size.width, open: inspectorFits)
+                        windowSize = proxy.size
+                    }
                     .onChange(of: quantised(proxy.size.width, step: 4)) { _, width in
                         updateInspectorFit(for: width)
+                    }
+                    .onChange(of: quantised(proxy.size.height, step: 4)) { _, height in
+                        let next = CGSize(
+                            width: quantised(proxy.size.width, step: 4),
+                            height: height
+                        )
+                        guard next != windowSize else { return }
+                        // Off the layout pass, the same reason
+                        // `updateInspectorFit` defers: state written from
+                        // inside layout can feed straight back into it.
+                        Task { @MainActor in
+                            if windowSize != next { windowSize = next }
+                        }
                     }
             }
         }

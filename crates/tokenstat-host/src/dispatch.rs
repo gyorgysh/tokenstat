@@ -16,15 +16,16 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokenstat_core::{GroupBy, Query};
+use tokenstat_core::pricing::{EquivalentValue, display_usage_model_id};
+use tokenstat_core::{DayPart, GroupBy, Query};
 
 use crate::PROTOCOL_VERSION;
 use crate::account_activity::FailureReason;
 use crate::automations::Automation;
 use crate::dto::{
-    AccountDto, BlockDto, BucketDto, CalendarDto, DeviceLoginDto, DevicePollDto, GroupByDto,
-    InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
-    WorkspaceDto,
+    AccountDto, BlockDto, BucketDto, CalendarDto, DayDetailDto, DayPartDto, DeviceLoginDto,
+    DevicePollDto, GroupByDto, InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto,
+    SyncResultDto, TotalsDto, WorkspaceDto,
 };
 use crate::session::{OpenParams, Session};
 
@@ -77,6 +78,28 @@ impl Default for CalendarParams {
         CalendarParams {
             weeks: default_weeks(),
             query: QueryDto::default(),
+            scope: None,
+        }
+    }
+}
+
+/// Params for `activity.day`: one `YYYY-MM-DD`, plus the same scope/weeks the
+/// calendar accepts so an account hover reuses the calendar's series cache.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DayDetailParams {
+    date: String,
+    #[serde(default = "default_weeks")]
+    weeks: usize,
+    #[serde(default)]
+    scope: Option<String>,
+}
+
+impl Default for DayDetailParams {
+    fn default() -> Self {
+        DayDetailParams {
+            date: String::new(),
+            weeks: default_weeks(),
             scope: None,
         }
     }
@@ -313,6 +336,50 @@ fn with_session<T>(
     f(s)
 }
 
+/// Build the wire detail for a day, pricing every row at list rates.
+///
+/// The same `EquivalentValue` pricing the calendar's day buckets use, applied
+/// per `model × source` row, so the detail's value is the cell's value and the
+/// two surfaces cannot drift apart.
+fn day_detail_dto(
+    date: &str,
+    rows: &[DayPart],
+    prices: &tokenstat_core::pricing::PriceTable,
+) -> DayDetailDto {
+    let mut value_micros = 0i64;
+    let mut estimated = false;
+    let mut unpriced_models: Vec<String> = Vec::new();
+    let mut tokens = 0u64;
+    let mut events = 0u64;
+
+    for row in rows {
+        let lookup = display_usage_model_id(&row.model);
+        tokens = tokens.saturating_add(row.tokens());
+        events = events.saturating_add(row.events);
+        match EquivalentValue::price(prices, &lookup, &row.counters) {
+            Some(v) => {
+                value_micros = value_micros.saturating_add(v.micros().max(0));
+                estimated |= prices.is_estimate(&lookup);
+            }
+            None => {
+                if !unpriced_models.iter().any(|m| m == &lookup) {
+                    unpriced_models.push(lookup);
+                }
+            }
+        }
+    }
+
+    DayDetailDto {
+        date: date.to_string(),
+        tokens,
+        events,
+        value_micros,
+        estimated,
+        unpriced_models,
+        rows: rows.iter().map(DayPartDto::from).collect(),
+    }
+}
+
 /// Handle one call. Never panics on bad input, and never returns a non-JSON
 /// string, so the caller can decode unconditionally.
 pub fn call(session: &mut Session, method: &str, params: &str) -> String {
@@ -469,6 +536,38 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     // empty grid and says the archive has nothing in it yet.
                     None => Ok(Value::Null),
                 }
+            })
+        }
+
+        // One day's hover detail for the Home heatmap: totals plus every
+        // `model × source` row, the same shape the public profile draws.
+        //
+        // Priced here against the same price book the calendar uses, so a
+        // hovered day's value always matches its cell. Local comes from the
+        // archive; account comes from the same cached series the account
+        // calendar is built from, so moving across the grid costs no extra
+        // network calls.
+        "activity.day" => {
+            let p: DayDetailParams = parse(params)?;
+            with_session(s, |b| {
+                let rows = if p.scope.as_deref() == Some("account") {
+                    crate::account_activity::day_detail(&p.date, b.engine.timezone(), p.weeks)
+                        .map_err(|e| e.message)?
+                } else {
+                    b.engine
+                        .store()
+                        .day_detail(&p.date)
+                        .map_err(|e| e.to_string())?
+                };
+                // Nothing happened that day. An answer, not an error: the
+                // client only asks for days the grid lit up, so a miss is
+                // usually the account cache being narrower than the local
+                // archive, and the hover just shows nothing to add.
+                if rows.is_empty() {
+                    return Ok(Value::Null);
+                }
+                let dto = day_detail_dto(&p.date, &rows, &b.prices);
+                serde_json::to_value(dto).map_err(|e| e.to_string())
             })
         }
 
@@ -1642,6 +1741,65 @@ mod tests {
         let v: Value = serde_json::from_str(&out).expect("json");
         assert_eq!(v["ok"], true, "{out}");
         assert!(v["result"].is_null(), "{out}");
+    }
+
+    /// The hover detail is priced, grouped per model × source, and a quiet day
+    /// is a null answer rather than an error.
+    #[test]
+    fn the_day_detail_answers_with_priced_rows() {
+        let mut s = session();
+        use tokenstat_core::model::{Confidence, EventId, Extras, SourceId, Timestamp, UsageEvent};
+        let make = |id: &str, source: SourceId, out: u64| UsageEvent {
+            id: EventId::derive(&[id]),
+            source,
+            ts: Timestamp::from_ms(1_699_920_000_000), // 2023-11-14 UTC
+            model: "gpt-4.1".into(),
+            session: "s1".into(),
+            project: "p".into(),
+            counters: tokenstat_core::Counters {
+                input_fresh: Some(1),
+                cache_read: Some(2),
+                cache_write_5m: Some(3),
+                cache_write_1h: None,
+                output: Some(out),
+            },
+            extras: Extras::default(),
+            billing: tokenstat_core::model::BillingMode::Plan,
+            confidence: Confidence::Exact,
+        };
+        s.engine
+            .store_mut()
+            .insert_events(
+                &[
+                    make("a", SourceId::ClaudeCode, 10),
+                    make("b", SourceId::Codex, 20),
+                ],
+                &jiff::tz::TimeZone::UTC,
+            )
+            .unwrap();
+
+        let out = call(&mut s, "activity.day", r#"{"date":"2023-11-14"}"#);
+        let v: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(v["ok"], true, "{out}");
+        let r = &v["result"];
+        assert_eq!(r["date"], "2023-11-14");
+        assert_eq!(r["tokens"].as_u64(), Some(42), "{out}"); // (1+2+3+10) + (1+2+3+20)
+        assert_eq!(r["events"].as_u64(), Some(2), "{out}");
+        assert!(r["valueMicros"].as_i64().unwrap() > 0, "{out}");
+
+        let rows = r["rows"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2, "{out}");
+        // Largest slice first: the Codex row has 26 tokens, the Claude one 16.
+        assert_eq!(rows[0]["src"], "codex", "{out}");
+        assert_eq!(rows[0]["model"], "gpt-4.1", "{out}");
+        assert_eq!(rows[0]["tokens"].as_u64(), Some(26), "{out}");
+        assert_eq!(rows[1]["src"], "claude_code", "{out}");
+
+        // A day with no events is an answer, not a failure.
+        let quiet = call(&mut s, "activity.day", r#"{"date":"2023-11-13"}"#);
+        let q: Value = serde_json::from_str(&quiet).expect("json");
+        assert_eq!(q["ok"], true, "{quiet}");
+        assert!(q["result"].is_null(), "{quiet}");
     }
 
     /// The editor's contract, pinned at the transport rather than only in the
