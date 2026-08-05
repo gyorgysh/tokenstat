@@ -68,32 +68,37 @@ enum Bridge {
     /// installed the agent, not a faster path worth preferring: the socket's
     /// keystroke round trip measures in hundredths of a millisecond.
     static func connect() {
-        // The path comes from the Rust side rather than being rebuilt here. A
-        // client that computed the data directory itself would look in the
-        // wrong place the day those rules change and report "no daemon"
-        // instead of a mismatch.
-        guard let socket = try? InProcessTransport().call(method: "host.socketPath", params: "{}"),
-              let path = Self.socketPath(fromEnvelope: socket),
-              let hosted = SocketTransport.connecting(to: path)
-        else {
-            isHosted = false
+        #if os(macOS)
+        // Do not initialize the Rust archive synchronously just to discover
+        // the socket path. That made a cold Finder launch wait for the whole
+        // archive before SwiftUI could show its first frame. ProjectDirs uses
+        // this same standard Application Support location on macOS.
+        if let path = Self.localHostSocketPath,
+           let hosted = SocketTransport.connecting(to: path)
+        {
+            transport = hosted
+            isHosted = true
             return
         }
-        transport = hosted
-        isHosted = true
+        #endif
+        transport = InProcessTransport()
+        isHosted = false
     }
+
+    #if os(macOS)
+    private static var localHostSocketPath: String? {
+        FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first?.appendingPathComponent("ai.tokenstat.tokenstat/host.sock").path
+    }
+    #endif
 
     /// Re-probe the host after the app provisions or repairs its launch agent.
     /// Existing callers keep using the same transport abstraction; only the
     /// owner of future calls changes.
     static func reconnect() {
         connect()
-    }
-
-    private static func socketPath(fromEnvelope json: String) -> String? {
-        struct Reply: Decodable { let path: String }
-        let envelope = try? JSONDecoder().decode(Envelope<Reply>.self, from: Data(json.utf8))
-        return envelope?.result?.path
     }
 
     /// Call across the boundary and decode the result.

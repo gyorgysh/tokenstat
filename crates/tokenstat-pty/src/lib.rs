@@ -347,13 +347,18 @@ impl Manager {
     /// Current state, folding in whatever the reader thread and the child have
     /// since reported.
     fn snapshot(&self, s: &Arc<Session>) -> SessionInfo {
-        // Reap without blocking, so a finished process stops claiming to run.
-        if let Ok(mut child) = s.child.try_lock()
-            && let Ok(Some(status)) = child.try_wait()
+        // Reap here, so a finished process stops claiming to run. The lock is
+        // only ever held long enough to ask, so waiting for it is cheap, and a
+        // missed reap is not: nothing else ever asks the child again, so a
+        // session whose reap was skipped looks alive until something kills it.
+        // That is also why a poisoned lock is recovered rather than skipped.
         {
-            s.alive.store(false, Ordering::SeqCst);
-            s.exit_code
-                .store(status.exit_code() as i32, Ordering::SeqCst);
+            let mut child = s.child.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Ok(Some(status)) = child.try_wait() {
+                s.alive.store(false, Ordering::SeqCst);
+                s.exit_code
+                    .store(status.exit_code() as i32, Ordering::SeqCst);
+            }
         }
 
         let mut info = s
@@ -427,10 +432,30 @@ mod tests {
         false
     }
 
-    fn spawn(m: &Manager, args: &[&str]) -> SessionInfo {
+    /// Run a script in the platform's own shell.
+    ///
+    /// The two spellings are given side by side rather than hidden behind a
+    /// helper per test, because a fixture that only runs on one platform is a
+    /// fixture that stops being checked on the others.
+    fn spawn(m: &Manager, unix: &str, windows: &str) -> SessionInfo {
+        // Both are always passed, only one of them ever runs.
+        let _ = (unix, windows);
+        #[cfg(unix)]
+        let (command, args) = {
+            let _ = windows;
+            ("/bin/sh".to_string(), vec!["-c".to_string(), unix.into()])
+        };
+        // `/V:ON` turns on `!var!` expansion, which a script needs when it sets
+        // a variable and reads it back in the same line.
+        #[cfg(windows)]
+        let (command, args) = (
+            "cmd.exe".to_string(),
+            vec!["/V:ON".to_string(), "/C".to_string(), windows.into()],
+        );
+
         m.spawn(&Spawn {
-            command: "/bin/sh".into(),
-            args: args.iter().map(|s| s.to_string()).collect(),
+            command,
+            args,
             cwd: std::env::temp_dir(),
             workspace_id: None,
             rows: 24,
@@ -439,10 +464,15 @@ mod tests {
         .expect("spawn")
     }
 
+    /// A script that stays busy for roughly a minute without needing input.
+    fn stay_busy(m: &Manager) -> SessionInfo {
+        spawn(m, "sleep 60", "ping -n 61 127.0.0.1 > nul")
+    }
+
     #[test]
     fn output_is_captured_and_read_by_offset() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "echo hello-from-pty"]);
+        let s = spawn(&m, "echo hello-from-pty", "echo hello-from-pty");
 
         assert!(wait_for(|| {
             m.read(&s.id, 0)
@@ -450,22 +480,25 @@ mod tests {
                 .unwrap_or(false)
         }));
 
-        // Reading again from the returned offset yields nothing new, which is
-        // what lets a client poll without reprocessing everything each time.
+        // Reading again from the returned offset does not repeat what the
+        // reader already has, which is what lets a client poll without
+        // reprocessing everything each time. Asserting on the payload rather
+        // than on an empty chunk, because a terminal may still emit control
+        // sequences of its own after the program has said its piece.
         let first = m.read(&s.id, 0).unwrap();
         let second = m.read(&s.id, first.next_offset).unwrap();
-        assert!(second.bytes.is_empty());
+        assert!(!String::from_utf8_lossy(&second.bytes).contains("hello-from-pty"));
         assert_eq!(second.dropped, 0);
     }
 
     #[test]
     fn a_finished_process_reports_its_exit_code() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "exit 3"]);
-        assert!(wait_for(|| m
-            .info(&s.id)
-            .map(|i| !i.alive)
-            .unwrap_or(false)));
+        let s = spawn(&m, "exit 3", "exit 3");
+        assert!(
+            wait_for(|| m.info(&s.id).map(|i| !i.alive).unwrap_or(false)),
+            "a process that ended is not still reported as running"
+        );
         assert_eq!(m.info(&s.id).unwrap().exit_code, Some(3));
     }
 
@@ -474,7 +507,7 @@ mod tests {
         // None while running is not the same as exiting with 0, and a UI that
         // conflates them reports "finished" for a live session.
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "sleep 5"]);
+        let s = stay_busy(&m);
         let info = m.info(&s.id).unwrap();
         assert!(info.alive);
         assert_eq!(info.exit_code, None);
@@ -484,7 +517,11 @@ mod tests {
     #[test]
     fn input_reaches_the_program() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "read line; echo got:$line"]);
+        let s = spawn(
+            &m,
+            "read line; echo got:$line",
+            "set /p line= & echo got:!line!",
+        );
         std::thread::sleep(std::time::Duration::from_millis(250));
         m.write(&s.id, b"ping\n").unwrap();
 
@@ -498,7 +535,7 @@ mod tests {
     #[test]
     fn killing_stops_a_long_running_process() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "sleep 60"]);
+        let s = stay_busy(&m);
         assert!(m.info(&s.id).unwrap().alive);
         m.kill(&s.id).unwrap();
         assert!(wait_for(|| m
@@ -513,7 +550,7 @@ mod tests {
     #[test]
     fn closing_forgets_the_session() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "sleep 60"]);
+        let s = stay_busy(&m);
         assert_eq!(m.list().len(), 1);
         m.close(&s.id).unwrap();
         assert!(m.list().is_empty());
@@ -535,7 +572,7 @@ mod tests {
     #[test]
     fn resize_is_accepted_and_remembered() {
         let m = Manager::new();
-        let s = spawn(&m, &["-c", "sleep 5"]);
+        let s = stay_busy(&m);
         m.resize(&s.id, 40, 120).unwrap();
         let info = m.info(&s.id).unwrap();
         assert_eq!((info.rows, info.cols), (40, 120));

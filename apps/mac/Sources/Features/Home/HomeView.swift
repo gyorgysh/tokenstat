@@ -54,7 +54,7 @@ struct HomeView: View {
         }
         .overlay {
             if model.isLoading && model.calendar == nil {
-                ProgressView()
+                HomeWarmupView()
             }
         }
     }
@@ -283,6 +283,43 @@ struct HomeView: View {
                 EmptyHint(text: "Nothing scanned yet. Run a scan from Insights to fill this in.")
             }
         }
+    }
+}
+
+private struct HomeWarmupView: View {
+    @State private var animate = false
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            HStack(alignment: .bottom, spacing: 5) {
+                ForEach(0..<3, id: \.self) { index in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Theme.accent.opacity(0.55 + Double(index) * 0.15))
+                        .frame(width: 9, height: CGFloat(18 + index * 10))
+                        .scaleEffect(y: animate ? 1 : 0.55, anchor: .bottom)
+                        .animation(
+                            .easeInOut(duration: 0.7)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(index) * 0.12),
+                            value: animate
+                        )
+                }
+            }
+            Text("Warming up tokenstat")
+                .font(.headline)
+            Text("Opening your local archive…")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, Theme.Space.xl)
+        .padding(.vertical, Theme.Space.l)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .onAppear { animate = true }
+        .transition(.opacity)
     }
 }
 

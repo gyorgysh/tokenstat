@@ -28,6 +28,12 @@ const TICK: Duration = Duration::from_secs(5);
 /// How fast the transcript drain polls the pty buffer.
 const DRAIN_POLL: Duration = Duration::from_millis(20);
 
+/// How long to wait for a finished process to report its exit code.
+///
+/// Output can end a moment before the process is reaped, and a run that exited
+/// cleanly must not be filed as an error because the code had not landed yet.
+const EXIT_SETTLE: Duration = Duration::from_secs(2);
+
 // MARK: - Schedule
 
 /// The kinds a schedule can take.
@@ -623,7 +629,7 @@ impl Store {
             std::thread::sleep(DRAIN_POLL);
         }
 
-        let exit_code = manager.info(pty_id).ok().and_then(|i| i.exit_code);
+        let exit_code = Self::settle_exit_code(pty_id);
         let status = if stopped_by_budget {
             "stopped"
         } else if exit_code == Some(0) {
@@ -633,6 +639,25 @@ impl Store {
         };
         let _ = manager.close(pty_id);
         self.finish_run(run_id, exit_code, status);
+    }
+
+    /// Wait, briefly, for a process that has stopped producing output to report
+    /// how it ended. `None` once the wait is up, which is the honest answer:
+    /// the run ended, but with no status anyone can quote.
+    fn settle_exit_code(pty_id: &str) -> Option<i32> {
+        let manager = tokenstat_pty::manager();
+        let deadline = Instant::now() + EXIT_SETTLE;
+        loop {
+            match manager.info(pty_id) {
+                Ok(info) if info.exit_code.is_some() => return info.exit_code,
+                Ok(_) => {}
+                Err(_) => return None,
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(DRAIN_POLL);
+        }
     }
 
     pub fn run_due(self: &Arc<Store>, session: &Session) {
@@ -808,14 +833,20 @@ mod tests {
         (session, ws.id)
     }
 
-    fn test_shell_command(script: &str) -> (String, Vec<String>) {
+    /// The same script in whichever shell the platform has. Kept next to the
+    /// tests rather than reusing `shell_argv`, so a fixture cannot pass by
+    /// agreeing with the code it is checking.
+    fn test_shell_command(unix: &str, windows: &str) -> (String, Vec<String>) {
+        // Both are always passed, only one of them ever runs.
+        let _ = (unix, windows);
         #[cfg(unix)]
         {
-            ("/bin/sh".into(), vec!["-c".into(), script.into()])
+            let _ = windows;
+            ("/bin/sh".into(), vec!["-c".into(), unix.into()])
         }
         #[cfg(windows)]
         {
-            ("cmd.exe".into(), vec!["/C".into(), script.into()])
+            ("cmd.exe".into(), vec!["/C".into(), windows.into()])
         }
     }
 
@@ -841,11 +872,7 @@ mod tests {
         };
         store.push_run(run).unwrap();
 
-        let (command, args) = test_shell_command(if cfg!(windows) {
-            "echo hello & exit /b 0"
-        } else {
-            "printf hello"
-        });
+        let (command, args) = test_shell_command("printf hello", "echo hello");
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command,
@@ -857,7 +884,10 @@ mod tests {
             })
             .unwrap();
         let pty_id = info.id.clone();
-        store.drain(&pty_id, &transcript_path, 30, run_id);
+        // A budget long enough for a shell to start and print, short enough
+        // that a run which never ends fails the test quickly instead of
+        // holding the suite for the whole allowance.
+        store.drain(&pty_id, &transcript_path, 10, run_id);
 
         let record = store
             .runs()
@@ -865,8 +895,16 @@ mod tests {
             .find(|r| r.id == run_id)
             .unwrap()
             .clone();
-        assert_eq!(record.status, "ok");
         let (text, _) = store.transcript(run_id, 0).unwrap();
+        // The transcript is quoted on failure: a run recorded as stopped or
+        // failed is far easier to explain when the terminal's own words are in
+        // the message, and this test has only ever failed where nobody can
+        // attach a debugger.
+        assert_eq!(
+            record.status, "ok",
+            "exit code {:?}, transcript {text:?}",
+            record.exit_code
+        );
         assert!(text.contains("hello"), "transcript holds the output");
         assert!(transcript_path.exists());
         let _ = std::fs::remove_dir_all(dir);
@@ -921,11 +959,7 @@ mod tests {
         };
         store.push_run(run).unwrap();
 
-        let (command, args) = test_shell_command(if cfg!(windows) {
-            "ping -n 31 127.0.0.1 > nul"
-        } else {
-            "sleep 30"
-        });
+        let (command, args) = test_shell_command("sleep 30", "ping -n 31 127.0.0.1 > nul");
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command,
