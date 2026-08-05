@@ -449,18 +449,26 @@ impl Manager {
 /// A GUI app or launch agent does not inherit the interactive shell's PATH.
 /// Ask the user's login shell for it so direct CLI launches work just like
 /// they do from Terminal.app. The inherited PATH remains the fallback.
+///
+/// Asked once per process, not once per session. A login shell reads the
+/// user's whole startup file set, which is tens to hundreds of milliseconds
+/// spent before a terminal can open, and it answers the same thing every time.
 #[cfg(unix)]
-fn login_shell_path() -> Option<String> {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let output = Command::new(shell)
-        .args(["-ilc", "printf %s \"$PATH\""])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    (!path.trim().is_empty()).then_some(path.trim().to_string())
+fn login_shell_path() -> Option<&'static str> {
+    static PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    PATH.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let output = Command::new(shell)
+            .args(["-ilc", "printf %s \"$PATH\""])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let path = String::from_utf8(output.stdout).ok()?;
+        (!path.trim().is_empty()).then_some(path.trim().to_string())
+    })
+    .as_deref()
 }
 
 #[cfg(test)]

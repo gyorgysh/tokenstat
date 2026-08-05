@@ -65,6 +65,42 @@ enum HostAgentInstaller {
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
     }
 
+    /// Reinstall the helper when this build carries a different one.
+    ///
+    /// The daemon outlives the app: launchd keeps it running, so a copy
+    /// installed weeks ago answers a window opened today, and a fix shipped in
+    /// the app never reaches the process that needed it. That failure is
+    /// silent, which is the worst part of it. Called on launch, and it does
+    /// nothing at all in the ordinary case where the two already match.
+    static func refreshIfStale() {
+        guard let bundled = bundledHelper, let installed = installedHelper else { return }
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: installed.path) else { return }
+        // Size and modification date, not a hash: reading two attributes on
+        // every launch is free, and the two files are either the same copy or
+        // they are not.
+        let attributes: (URL) -> (Int, Date)? = { url in
+            guard let values = try? manager.attributesOfItem(atPath: url.path),
+                  let size = values[.size] as? Int,
+                  let modified = values[.modificationDate] as? Date
+            else { return nil }
+            return (size, modified)
+        }
+        guard let new = attributes(bundled), let old = attributes(installed) else { return }
+        guard new.0 != old.0 || new.1 != old.1 else { return }
+        try? installAndStart()
+    }
+
+    private static var installedHelper: URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        .appendingPathComponent("tokenstat/bin/tokenstat-hostd")
+    }
+
     private static var bundledHelper: URL? {
         let candidates = [
             Bundle.main.url(forResource: "tokenstat-hostd", withExtension: nil),

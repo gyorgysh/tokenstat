@@ -111,6 +111,17 @@ struct RootView: View {
         .task { await workspaces.load() }
         #if os(macOS)
         .task { await terminals.load() }
+        // The daemon outlives the app, so a helper installed by an older build
+        // keeps answering until something replaces it. Off the main actor and
+        // after the first frame: it usually finds nothing to do, and when it
+        // does, copying a file and asking launchctl to reload is not work the
+        // window should wait on.
+        .task {
+            await Task.detached(priority: .background) {
+                HostAgentInstaller.refreshIfStale()
+            }.value
+            Bridge.reconnect()
+        }
         #endif
         .toolbar {
             if destinationHasInspector {
