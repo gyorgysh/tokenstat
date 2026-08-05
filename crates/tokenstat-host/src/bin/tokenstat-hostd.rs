@@ -18,6 +18,7 @@
 
 use std::process::ExitCode;
 
+#[cfg(unix)]
 use tokenstat_host::{Session, server};
 
 fn main() -> ExitCode {
@@ -72,6 +73,7 @@ fn run() -> Result<(), String> {
     Err("tokenstat-hostd's local socket transport is not available on Windows".into())
 }
 
+#[cfg(unix)]
 const USAGE: &str = "\
 tokenstat host daemon. Serves the local archive over a unix socket.
 
