@@ -18,9 +18,9 @@ struct TodoView: View {
     /// The tallest stack of cards on the board, measured.
     @State private var tallestColumn: CGFloat = 0
 
-    /// Whether the new-card form is open. Held here, not in the form, because
-    /// two rows open it: one above the backlog's cards and one below them.
-    @State private var addingCard = false
+    /// Which column's new-card form is open. Held here, not in the form, so a
+    /// column's trigger and its form drive the same flag.
+    @State private var addingIn: String?
 
     /// How much of the window an empty board takes.
     ///
@@ -38,6 +38,16 @@ struct TodoView: View {
             }
             GeometryReader { proxy in
                 let available = proxy.size.height - Theme.Space.m * 2
+                // Three columns side by side where the window allows it,
+                // shrinking together on a narrow window instead of one fixed
+                // 300pt column overflowing the pane.
+                let columnWidth = max(
+                    DisplayFit.scale(240),
+                    min(
+                        DisplayFit.scale(300),
+                        (proxy.size.width - Theme.Space.m * 4) / 3
+                    )
+                )
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: Theme.Space.m) {
                         ForEach(Self.columns, id: \.0) { id, label in
@@ -45,7 +55,7 @@ struct TodoView: View {
                             // so the board is three columns rather than three
                             // unrelated boxes, and drop targets stay the same
                             // size whichever column a card is dragged from.
-                            column(id, label)
+                            column(id, label, width: columnWidth)
                                 .frame(height: boardHeight(available: available))
                         }
                     }
@@ -55,7 +65,7 @@ struct TodoView: View {
             }
         }
         .background(Theme.background)
-        .navigationTitle("Todo")
+        .navigationTitle("Tasks")
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
@@ -70,13 +80,13 @@ struct TodoView: View {
         !model.hasLoaded && model.errorMessage == nil
     }
 
-    private func column(_ id: String, _ label: String) -> some View {
+    private func column(_ id: String, _ label: String, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 FeatureMark(name: id == "doing" ? "mark_automation" : (id == "done" ? "mark_note" : "mark_todo"), tint: tint(for: id))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(label)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: DisplayFit.dp(13), weight: .semibold))
                     Text("\(model.cards(in: id).count) card\(model.cards(in: id).count == 1 ? "" : "s")")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -86,9 +96,14 @@ struct TodoView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.xs)
 
-            if id == "backlog" {
-                AddCardTrigger(expanded: $addingCard)
-            }
+            AddCardTrigger(
+                expanded: Binding(
+                    get: { addingIn == id },
+                    set: { open in
+                        if open { addingIn = id } else if addingIn == id { addingIn = nil }
+                    }
+                )
+            )
 
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
@@ -125,11 +140,19 @@ struct TodoView: View {
             }
             .frame(maxWidth: .infinity)
 
-            if id == "backlog" {
-                NewCardForm(model: model, folders: folders, expanded: $addingCard)
-            }
+            NewCardForm(
+                model: model,
+                folders: folders,
+                column: id,
+                expanded: Binding(
+                    get: { addingIn == id },
+                    set: { open in
+                        if open { addingIn = id } else if addingIn == id { addingIn = nil }
+                    }
+                )
+            )
         }
-        .frame(width: 300)
+        .frame(width: width)
         .padding(Theme.Space.s)
         .background(
             Theme.panel.opacity(dropTarget == id ? 0.82 : 1),
@@ -235,7 +258,9 @@ private struct CardView: View {
                 }
             }
             if editingNotes {
-                TextField("Note", text: $notesDraft, axis: .vertical)
+                // A task's notes are the prompt the agent gets; only a plain
+                // note card calls them notes.
+                TextField(card.isNote ? "Note" : "Prompt", text: $notesDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.caption)
                     .lineLimit(2...4)
@@ -251,7 +276,7 @@ private struct CardView: View {
                         editingNotes = true
                     }
             } else {
-                Text(card.isNote ? "Click to add a note" : "Click to add a note")
+                Text(card.isNote ? "Click to add a note" : "Click to add a prompt")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .onTapGesture {
@@ -273,6 +298,10 @@ private struct CardView: View {
                             Text(folder.name)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                        }
+                        if card.budgetSeconds > 0 {
+                            Label(Self.budgetLabel(card.budgetSeconds), systemImage: "timer")
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
@@ -296,6 +325,12 @@ private struct CardView: View {
             notesDraft = card.notes
         }
         .draggable(card.id)
+    }
+
+    private static func budgetLabel(_ seconds: UInt64) -> String {
+        seconds % 60 == 0
+            ? "\(seconds / 60)m budget"
+            : "\(seconds)s budget"
     }
 
     private func saveTitle() {
@@ -400,6 +435,9 @@ private struct AddCardTrigger: View {
 private struct NewCardForm: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
+    /// Which column the card lands in. Passed in so each column's form creates
+    /// straight into that column instead of everything going to backlog.
+    var column: String
     /// Shared with the trigger above the card list, so only one form is ever
     /// open and either row closes it.
     @Binding var expanded: Bool
@@ -408,7 +446,9 @@ private struct NewCardForm: View {
     @State private var notes = ""
     @State private var backendID = ""
     @State private var workspaceID = ""
-    @State private var budget = "900"
+    /// Minutes, because that is the unit people think in. Converted to seconds
+    /// for the daemon, which stores the raw number.
+    @State private var budgetMinutes = "15"
     @State private var kind: TodoKind = .task
 
     var body: some View {
@@ -422,7 +462,7 @@ private struct NewCardForm: View {
                 }
                 .pickerStyle(.segmented)
                 TextField(kind == .note ? "What do you want to remember?" : "Task title", text: $title)
-                TextField("Note", text: $notes, axis: .vertical)
+                TextField(kind == .note ? "Note" : "Prompt", text: $notes, axis: .vertical)
                     .lineLimit(2...4)
                 if kind == .task {
                     HStack(spacing: Theme.Space.xs) {
@@ -440,9 +480,17 @@ private struct NewCardForm: View {
                         }
                         .frame(maxWidth: .infinity)
                     }
-                    HStack {
-                        TextField("Budget seconds", text: $budget)
-                            .frame(width: 110)
+                    HStack(spacing: Theme.Space.xs) {
+                        Text("Budget")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("15", text: $budgetMinutes)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 56)
+                            .multilineTextAlignment(.trailing)
+                        Text("minutes")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Spacer()
                     }
                 }
@@ -472,13 +520,15 @@ private struct NewCardForm: View {
     }
 
     private func save() async {
+        let minutes = UInt64(budgetMinutes) ?? 15
         await model.create(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind,
             notes: notes,
             backend: backendID,
             workspaceID: kind == .note ? "" : workspaceID,
-            budgetSeconds: UInt64(budget) ?? 900
+            budgetSeconds: minutes * 60,
+            column: kind == .note ? "backlog" : column
         )
         if model.errorMessage == nil { cancel() }
     }
@@ -487,6 +537,7 @@ private struct NewCardForm: View {
         title = ""
         notes = ""
         workspaceID = ""
+        budgetMinutes = "15"
         expanded = false
         kind = .task
     }

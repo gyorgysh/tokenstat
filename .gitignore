@@ -23,6 +23,8 @@ credentials.json
 # Not published: these reference local paths and machine specifics.
 /roadmap.md
 /WORKLOG.md
+# Task tracking with local machine details. Same rule as WORKLOG.md: internal.
+/TODO.md
 # Licensing rationale is internal too. What the public needs is LICENSE and
 # TRADEMARK.md, which say the terms. The reasoning, the rejected options and
 # the history behind them are ours.

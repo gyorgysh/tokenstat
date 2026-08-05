@@ -46,15 +46,24 @@ struct WorkspacesView: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(folder.name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: DisplayFit.dp(13), weight: .semibold))
                 Text(folder.isRemote
                      ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)"
                      : folder.path)
                     .font(Theme.mono(11))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
-                    .truncationMode(.head)
+                    // Head truncation hid the start of the path, which is the
+                    // part that identifies the project. Middle keeps both ends
+                    // visible, and the full path is one hover away.
+                    .truncationMode(.middle)
+                    .minimumScaleFactor(0.75)
+                    .help(folder.path)
             }
+            // The path is the identifying line; the branch chip must never
+            // squeeze it out of existence.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
             Spacer()
             if let git = folder.git, git.isRepo {
                 BranchChip(git: git)
@@ -138,7 +147,7 @@ struct WorkspacesView: View {
             .frame(maxWidth: 360)
             #if os(macOS)
             Button {
-                Task { await model.addFolder() }
+                model.requestAdd()
             } label: {
                 Label("Add Workspace", systemImage: "plus")
             }

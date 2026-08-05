@@ -15,6 +15,10 @@ import Observation
 @MainActor
 @Observable
 final class AppUpdateModel {
+    /// What a manual check says when there is nothing newer. Shared with the
+    /// sidebar so the card can own the "up to date" state instead of a caption.
+    static let upToDateMessage = "You are on the latest version."
+
     /// Where an update has got to. The interface shows something only in the
     /// last two, because the ones before it are not the user's business.
     enum Stage: Equatable {
@@ -75,7 +79,7 @@ final class AppUpdateModel {
         } else if isAvailable, release?.latest != before {
             checkNotice = "Version \(latest) found."
         } else {
-            checkNotice = "You are on the latest version."
+            checkNotice = Self.upToDateMessage
         }
 
         try? await Task.sleep(for: .seconds(6))

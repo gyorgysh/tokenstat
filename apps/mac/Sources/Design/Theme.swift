@@ -153,17 +153,19 @@ enum Theme {
     /// Numbers that sit in columns must not jitter as they update, so anything
     /// numeric uses tabular figures with a monospaced digit face.
     static func numeric(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded).monospacedDigit()
+        .system(size: DisplayFit.dp(size), weight: weight, design: .rounded).monospacedDigit()
     }
 
     /// Identifiers read character by character: model ids, machine ids, paths.
     /// Monospaced so strings that look alike do not read alike.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        .system(size: DisplayFit.dp(size), weight: weight, design: .monospaced)
     }
 
     /// Small uppercase label above a group.
-    static let sectionHeader = Font.system(size: 12, weight: .semibold)
+    static var sectionHeader: Font {
+        .system(size: DisplayFit.dp(12), weight: .semibold)
+    }
 
     /// Material for the window's edges: the sidebar and the inspector.
     ///
@@ -232,7 +234,7 @@ struct Card<Content: View>: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: DisplayFit.dp(13), weight: .semibold))
                     if let subtitle {
                         Text(subtitle)
                             .font(.caption)
@@ -793,5 +795,21 @@ enum DisplayFit {
     /// Scale a fixed width by the display fit.
     static func scale(_ value: CGFloat) -> CGFloat {
         value * factor
+    }
+
+    /// The smallest the *text* factor goes.
+    ///
+    /// Layout can shrink to 0.6 so the window always fits, but text that
+    /// shrinks as far becomes unreadable. Fonts stop at this floor while the
+    /// chrome around them keeps compressing, which is the difference between a
+    /// small but legible window and a squashed one.
+    private static let textFloor: CGFloat = 0.85
+
+    /// Design points → points for text.
+    ///
+    /// Use for every fixed font size in UI chrome. Terminal and editor glyphs
+    /// stay at 1:1 — they are content, not chrome.
+    static func dp(_ points: CGFloat) -> CGFloat {
+        points * max(factor, textFloor)
     }
 }

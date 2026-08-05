@@ -65,14 +65,14 @@ final class TodoModel {
 
     func create(
         title: String, kind: TodoKind, notes: String, backend: String,
-        workspaceID: String, budgetSeconds: UInt64
+        workspaceID: String, budgetSeconds: UInt64, column: String = "backlog"
     ) async {
         do {
             _ = try await Bridge.todoCreate(
-                title: title, kind: kind, notes: notes, column: "backlog",
+                title: title, kind: kind, notes: notes, column: column,
                 backend: backend, workspaceID: workspaceID, budgetSeconds: budgetSeconds
             )
-            showNotice(kind == .note ? "Note added." : "Added to To Do.")
+            showNotice(kind == .note ? "Note added." : "Card added.")
             errorMessage = nil
             await load()
         } catch {

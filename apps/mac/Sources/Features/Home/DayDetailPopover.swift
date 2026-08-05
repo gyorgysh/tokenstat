@@ -51,7 +51,14 @@ struct DayDetailPopover: View {
     /// to the other side when the preferred one is too narrow.
     private var preferredLeft: Bool {
         guard let anchor else { return false }
-        return anchor.frame.midX > windowSize.width * 0.5
+        return anchorPoint.x > windowSize.width * 0.5
+    }
+
+    /// The point the card anchors to: the pointer when we have it, the hovered
+    /// cell's centre as a fallback.
+    private var anchorPoint: CGPoint {
+        guard let anchor else { return .zero }
+        return anchor.pointer ?? CGPoint(x: anchor.frame.midX, y: anchor.frame.midY)
     }
 
     private var cardWidth: CGFloat {
@@ -66,11 +73,11 @@ struct DayDetailPopover: View {
         guard let anchor else { return windowSize.width / 2 }
         let width = cardWidth
         let candidate = preferredLeft
-            ? anchor.frame.minX - margin - width   // card sits to the left
-            : anchor.frame.maxX + margin           // card sits to the right
+            ? anchorPoint.x - margin - width   // card sits to the left
+            : anchorPoint.x + margin           // card sits to the right
         let flipped = preferredLeft
-            ? anchor.frame.maxX + margin
-            : anchor.frame.minX - margin - width
+            ? anchorPoint.x + margin
+            : anchorPoint.x - margin - width
         let x = (candidate >= edgeInset && candidate + width <= windowSize.width - edgeInset)
             ? candidate
             : flipped
@@ -81,8 +88,8 @@ struct DayDetailPopover: View {
 
     private var clampedY: CGFloat {
         guard let anchor else { return windowSize.height / 2 }
-        // Vertically centred on the hovered row, kept fully inside the window.
-        let y = anchor.frame.midY
+        // Vertically centred on the pointer, kept fully inside the window.
+        let y = anchorPoint.y
         return min(
             max(y, edgeInset + cardHeight / 2),
             max(edgeInset + cardHeight / 2, windowSize.height - edgeInset - cardHeight / 2)

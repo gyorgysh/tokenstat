@@ -12,6 +12,21 @@ import Observation
 import AppKit
 #endif
 
+/// Per-workspace settings, remembered on this machine.
+///
+/// Keyed by workspace id so the same folder keeps its choices across launches.
+enum WorkspacePreference {
+    private static let bypassKey = "workspace.bypassPermissions"
+
+    static func bypassPermissions(for workspaceID: String) -> Bool {
+        UserDefaults.standard.bool(forKey: "\(bypassKey).\(workspaceID)")
+    }
+
+    static func setBypassPermissions(_ on: Bool, for workspaceID: String) {
+        UserDefaults.standard.set(on, forKey: "\(bypassKey).\(workspaceID)")
+    }
+}
+
 /// The tabs of the workspace inspector.
 enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     case files = "Files"
@@ -105,6 +120,9 @@ final class WorkspacesModel {
     private(set) var activeFile: [String: String] = [:]
     private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
     private(set) var activeBrowserID: [String: String] = [:]
+    /// Folders whose centre pane is showing the launch surface, even though
+    /// sessions may already be running underneath it.
+    private(set) var showingLauncher: Set<String> = []
     private(set) var filesShown: Set<String> = []
     private(set) var diffs: [String: FileDiff] = [:]
     /// One document per open file, keyed the same way as the diffs.
@@ -154,6 +172,7 @@ final class WorkspacesModel {
     }
 
     func reviewWorkingTree(in workspaceID: String) {
+        exitLauncher(in: workspaceID)
         activeFile[workspaceID] = nil
         activeBrowserID[workspaceID] = nil
         filesShown.remove(workspaceID)
@@ -169,6 +188,7 @@ final class WorkspacesModel {
     func openFile(_ path: String, in workspaceID: String) async {
         // A file and a commit are both "what the pane is showing", so opening
         // one puts the other away.
+        exitLauncher(in: workspaceID)
         closeCommit(in: workspaceID)
         reviewingWorkingTree.remove(workspaceID)
         var files = openFiles[workspaceID] ?? []
@@ -235,6 +255,7 @@ final class WorkspacesModel {
 
     /// Put the terminal back in front without closing any open file.
     func showTerminal(in workspaceID: String) {
+        exitLauncher(in: workspaceID)
         activeFile[workspaceID] = nil
         activeBrowserID[workspaceID] = nil
         filesShown.remove(workspaceID)
@@ -249,6 +270,7 @@ final class WorkspacesModel {
     /// Open a new browser tab, or select an existing one when an id is given.
     @discardableResult
     func showBrowser(in workspaceID: String, id: String? = nil) -> WorkspaceBrowserTab {
+        exitLauncher(in: workspaceID)
         activeFile[workspaceID] = nil
         filesShown.remove(workspaceID)
         closeCommit(in: workspaceID)
@@ -280,6 +302,7 @@ final class WorkspacesModel {
     }
 
     func showFiles(in workspaceID: String) {
+        exitLauncher(in: workspaceID)
         activeFile[workspaceID] = nil
         activeBrowserID[workspaceID] = nil
         filesShown.insert(workspaceID)
@@ -288,6 +311,24 @@ final class WorkspacesModel {
 
     func closeFiles(in workspaceID: String) {
         filesShown.remove(workspaceID)
+    }
+
+    /// Leave the launch surface. Called by every surface switch; kept separate
+    /// so the flag cannot silently survive a navigation that put something
+    /// else in front of it.
+    func exitLauncher(in workspaceID: String) {
+        showingLauncher.remove(workspaceID)
+    }
+
+    /// Second click on a folder: swap between the running surface and the
+    /// launcher, so a new agent can be started without hiding the sessions
+    /// that are already there.
+    func toggleLauncher(in workspaceID: String) {
+        if showingLauncher.contains(workspaceID) {
+            showTerminal(in: workspaceID)
+        } else {
+            showingLauncher.insert(workspaceID)
+        }
     }
 
     /// True when the pane is showing a terminal rather than a file or a commit.
@@ -699,6 +740,18 @@ final class WorkspacesModel {
     }
 
     #if os(macOS)
+    /// Whether the onboarding sheet that explains workspaces is up.
+    ///
+    /// The sheet, not the folder panel, is the entry point: a raw `NSOpenPanel`
+    /// gives a new user no idea what they are being asked to pick or why.
+    var isAddSheetPresented = false
+
+    /// Open the onboarding sheet. Every "Add workspace" affordance funnels
+    /// through here so the explanation is never skipped.
+    func requestAdd() {
+        isAddSheetPresented = true
+    }
+
     /// Ask for a folder and register it.
     ///
     /// `NSOpenPanel` rather than a text field: the user is picking something

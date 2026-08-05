@@ -6,6 +6,9 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The activity grid: a year of days, a column per week.
 ///
@@ -26,6 +29,10 @@ struct HeatmapView: View {
     var onHover: ((HeatCell?) -> Void)?
 
     @State private var hovered: HeatCell?
+    /// Where the pointer was when the cell was hovered, in window space.
+    /// The popover opens beside the cursor rather than the cell centre, which
+    /// is what makes it feel attached to the mouse.
+    @State private var hoverPoint: CGPoint?
 
     /// The named coordinate space the popover reads cell frames in. Set on the
     /// window's root view so a frame here is a window-space frame no matter
@@ -160,9 +167,11 @@ struct HeatmapView: View {
                 .onHover { over in
                     if over {
                         hovered = day
+                        hoverPoint = Self.pointerInWindowSpace()
                         onHover?(day)
                     } else if hovered == day {
                         hovered = nil
+                        hoverPoint = nil
                         onHover?(nil)
                     }
                 }
@@ -179,7 +188,8 @@ struct HeatmapView: View {
                             value: hovered == day
                                 ? HoveredCellFrame(
                                     date: day.date,
-                                    frame: geo.frame(in: .named(Self.coordinateSpace))
+                                    frame: geo.frame(in: .named(Self.coordinateSpace)),
+                                    pointer: hoverPoint
                                 )
                                 : nil
                         )
@@ -191,6 +201,26 @@ struct HeatmapView: View {
             Color.clear.frame(width: cell, height: cell)
         }
     }
+
+    /// The pointer's position in `coordinateSpace`'s coordinates.
+    ///
+    /// `onHover` does not carry the location, so it is read from the system
+    /// cursor and converted screen → window → content (flipping y, since
+    /// AppKit grows up and SwiftUI grows down). The named space sits on the
+    /// window's root view, so content coordinates are close enough for a
+    /// tooltip anchor even with the toolbar.
+    #if os(macOS)
+    private static func pointerInWindowSpace() -> CGPoint? {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+              let content = window.contentView else { return nil }
+        let screen = NSEvent.mouseLocation
+        let inWindow = window.convertPoint(fromScreen: screen)
+        let inContent = content.convert(inWindow, from: nil)
+        return CGPoint(x: inContent.x, y: content.bounds.height - inContent.y)
+    }
+    #else
+    private static func pointerInWindowSpace() -> CGPoint? { nil }
+    #endif
 
     private var footer: some View {
         HStack(spacing: Theme.Space.s) {
@@ -241,6 +271,8 @@ struct HeatmapView: View {
 struct HoveredCellFrame: Equatable {
     var date: String
     var frame: CGRect
+    /// Where the pointer was when the cell was hovered, or nil when unknown.
+    var pointer: CGPoint?
 }
 
 struct HoveredCellFrameKey: PreferenceKey {

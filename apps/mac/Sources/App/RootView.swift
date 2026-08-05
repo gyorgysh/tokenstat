@@ -43,7 +43,7 @@ enum Destination: String, CaseIterable, Identifiable {
     var label: String {
         switch self {
         case .home: return "Home"
-        case .todo: return "Todo"
+        case .todo: return "Tasks"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
         case .machines: return "Machines"
@@ -112,7 +112,11 @@ struct RootView: View {
                     .inspectorColumnWidth(
                         min: DisplayFit.scale(370),
                         ideal: DisplayFit.scale(400),
-                        max: DisplayFit.scale(520)
+                        // Space-aware, never a fixed cap: the inspector is
+                        // bounded by what is left after the sidebar and the
+                        // detail pane, so dragging it wider can never push the
+                        // sidebar out of the window.
+                        max: inspectorMaxWidth
                     )
                 }
         }
@@ -138,6 +142,11 @@ struct RootView: View {
                 windowSize: windowSize
             )
         }
+        #if os(macOS)
+        .sheet(isPresented: $workspaces.isAddSheetPresented) {
+            AddWorkspaceSheet(model: workspaces)
+        }
+        #endif
         // Watch the width of the whole split view, not the detail pane: the
         // detail's own width already reflects the inspector being open, so
         // driving the decision from it oscillates.
@@ -188,7 +197,7 @@ struct RootView: View {
         // this acts.
         .task {
             for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
-                await workspaces.addFolder()
+                workspaces.requestAdd()
             }
         }
         // The daemon outlives the app, so a helper installed by an older build
@@ -243,6 +252,16 @@ struct RootView: View {
 
     /// What the inspector asks for, matching `inspectorColumnWidth(min:)`.
     private static var inspectorMinimumWidth: CGFloat { DisplayFit.scale(370) }
+
+    /// The widest the inspector may ask for without crowding the other two
+    /// columns out of the window.
+    ///
+    /// `minimumContentWidth` is what the window needs with no inspector:
+    /// sidebar plus detail. The inspector gets the remaining width, with a
+    /// little margin, and never more than the pane itself finds useful.
+    private var inspectorMaxWidth: CGFloat {
+        max(DisplayFit.scale(370), windowSize.width - Self.minimumContentWidth - 24)
+    }
 
     /// The narrowest window that can hold all three columns.
     ///
@@ -352,7 +371,7 @@ struct RootView: View {
                     Spacer()
                     #if os(macOS)
                     Button {
-                        Task { await workspaces.addFolder() }
+                        workspaces.requestAdd()
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 9, weight: .semibold))
@@ -478,7 +497,7 @@ struct RootView: View {
                 // That left one 9pt `+` in a section header as the only way to
                 // add a second folder, which is not somewhere anyone looks.
                 Button {
-                    Task { await workspaces.addFolder() }
+                    workspaces.requestAdd()
                 } label: {
                     HStack(spacing: Theme.Space.xs) {
                         Image(systemName: "plus.circle")
@@ -500,7 +519,11 @@ struct RootView: View {
             .padding(.bottom, Theme.Space.m)
         }
         .background(Theme.sidebarMaterial)
-        .navigationSplitViewColumnWidth(min: 200, ideal: 228, max: 300)
+        .navigationSplitViewColumnWidth(
+            min: DisplayFit.scale(200),
+            ideal: DisplayFit.scale(228),
+            max: DisplayFit.scale(300)
+        )
         .safeAreaInset(edge: .bottom) { accountFooter }
     }
 
@@ -527,7 +550,10 @@ struct RootView: View {
             }
             UpdateCard(update: appUpdate)
             Rectangle().fill(Theme.border).frame(height: 1)
-            if let notice = appUpdate.checkNotice {
+            // The up-to-date confirmation is a card in `UpdateCard`; only the
+            // other check results are captions.
+            if let notice = appUpdate.checkNotice,
+               notice != AppUpdateModel.upToDateMessage {
                 Text(notice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -669,7 +695,17 @@ struct RootView: View {
     /// animate the two state changes separately makes it visibly trail the row.
     private func selectWorkspace(_ id: String) {
         selectDestination(.workspaces) {
-            workspaces.selectedID = id
+            if workspaces.selectedID == id {
+                // Second click on the same folder: swap between the running
+                // surface and the launcher, so a new agent can be started
+                // without hunting for the + menu.
+                workspaces.toggleLauncher(in: id)
+            } else {
+                workspaces.selectedID = id
+                // A first selection shows the folder as it was, not the
+                // launcher it might have been left on.
+                workspaces.exitLauncher(in: id)
+            }
             isInspectorPresented = true
         }
     }
@@ -703,11 +739,11 @@ private struct SidebarRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: symbol)
-                    .font(.system(size: symbolSize))
+                    .font(.system(size: DisplayFit.dp(symbolSize)))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(label)
-                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .font(.system(size: DisplayFit.dp(13), weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)

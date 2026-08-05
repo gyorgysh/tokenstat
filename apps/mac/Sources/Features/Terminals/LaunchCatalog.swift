@@ -19,6 +19,10 @@ struct LaunchProfile: Identifiable, Sendable {
     let name: String
     let command: String
     let args: [String]
+    /// The CLI's own "do not ask" flags, appended only when the workspace has
+    /// bypass permissions switched on. Empty when the CLI has no such flag
+    /// (verified against `--help` per command).
+    let bypassArgs: [String]
     /// Source id for the brand mark, or nil for a plain SF symbol.
     let harnessID: String?
     let symbol: String?
@@ -29,20 +33,60 @@ struct LaunchProfile: Identifiable, Sendable {
             name: "Shell",
             command: shellCommand,
             args: shellArguments,
+            bypassArgs: [],
             harnessID: nil,
             symbol: "terminal"
         ),
-        LaunchProfile(id: "claude_code", name: "Claude Code", command: "claude", args: [], harnessID: "claude_code", symbol: nil),
-        LaunchProfile(id: "codex", name: "Codex", command: "codex", args: [], harnessID: "codex", symbol: nil),
-        LaunchProfile(id: "opencode", name: "OpenCode", command: "opencode", args: [], harnessID: "opencode", symbol: nil),
-        LaunchProfile(id: "grok", name: "Grok Build", command: "grok", args: [], harnessID: "grok", symbol: nil),
-        LaunchProfile(id: "copilot", name: "Copilot CLI", command: "copilot", args: [], harnessID: "copilot", symbol: nil),
-        LaunchProfile(id: "cline", name: "Cline", command: "cline", args: [], harnessID: "cline", symbol: nil),
-        LaunchProfile(id: "openclaw", name: "OpenClaw", command: "openclaw", args: [], harnessID: "openclaw", symbol: nil),
-        LaunchProfile(id: "zed", name: "Zed", command: "zed", args: [], harnessID: "zed", symbol: nil),
-        LaunchProfile(id: "antigravity", name: "Antigravity", command: "agy", args: [], harnessID: "antigravity", symbol: nil),
-        LaunchProfile(id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [], harnessID: "cursor", symbol: nil),
-        LaunchProfile(id: "cursor", name: "Cursor CLI", command: "cursor", args: [], harnessID: "cursor", symbol: nil),
+        LaunchProfile(
+            id: "claude_code", name: "Claude Code", command: "claude", args: [],
+            bypassArgs: ["--dangerously-skip-permissions"],
+            harnessID: "claude_code", symbol: nil
+        ),
+        LaunchProfile(
+            id: "codex", name: "Codex", command: "codex", args: [],
+            bypassArgs: ["--dangerously-bypass-approvals-and-sandbox"],
+            harnessID: "codex", symbol: nil
+        ),
+        LaunchProfile(
+            id: "opencode", name: "OpenCode", command: "opencode", args: [],
+            bypassArgs: ["--auto"],
+            harnessID: "opencode", symbol: nil
+        ),
+        LaunchProfile(
+            id: "grok", name: "Grok Build", command: "grok", args: [],
+            bypassArgs: ["--permission-mode", "bypassPermissions"],
+            harnessID: "grok", symbol: nil
+        ),
+        LaunchProfile(
+            id: "copilot", name: "Copilot CLI", command: "copilot", args: [],
+            bypassArgs: ["--allow-all"],
+            harnessID: "copilot", symbol: nil
+        ),
+        LaunchProfile(
+            id: "cline", name: "Cline", command: "cline", args: [],
+            bypassArgs: [], harnessID: "cline", symbol: nil
+        ),
+        LaunchProfile(
+            id: "openclaw", name: "OpenClaw", command: "openclaw", args: [],
+            bypassArgs: [], harnessID: "openclaw", symbol: nil
+        ),
+        LaunchProfile(
+            id: "zed", name: "Zed", command: "zed", args: [],
+            bypassArgs: [], harnessID: "zed", symbol: nil
+        ),
+        LaunchProfile(
+            id: "antigravity", name: "Antigravity", command: "agy", args: [],
+            bypassArgs: ["--dangerously-skip-permissions"],
+            harnessID: "antigravity", symbol: nil
+        ),
+        LaunchProfile(
+            id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [],
+            bypassArgs: [], harnessID: "cursor", symbol: nil
+        ),
+        LaunchProfile(
+            id: "cursor", name: "Cursor CLI", command: "cursor", args: [],
+            bypassArgs: [], harnessID: "cursor", symbol: nil
+        ),
     ]
 
     static var shellCommand: String {

@@ -165,7 +165,14 @@ struct TerminalPane: View {
                 )
                 .frame(width: size.width, height: size.height)
 
-                if reviewingWorkingTree {
+                // The launcher wins over every other surface when toggled on:
+                // that is its whole point, to put a new launch in front even
+                // while sessions are running underneath. Any real navigation
+                // (opening a file, browser, terminal) clears the flag.
+                if workspaces.showingLauncher.contains(folder.id) {
+                    LaunchSurface(folder: folder, terminals: terminals, workspaces: workspaces, grid: spawnGrid)
+                        .frame(width: size.width, height: size.height)
+                } else if reviewingWorkingTree {
                     WorkingTreeReviewView(folder: folder, model: workspaces)
                         .frame(width: size.width, height: size.height)
                 } else if let commit = openCommit {
@@ -359,11 +366,14 @@ struct TerminalPane: View {
         // file out of the way.
         workspaces.showTerminal(in: folder.id)
         let grid = spawnGrid
+        let args = WorkspacePreference.bypassPermissions(for: folder.id)
+            ? profile.args + profile.bypassArgs
+            : profile.args
         Task {
             await terminals.start(
                 workspace: folder,
                 command: profile.command,
-                args: profile.args,
+                args: args,
                 rows: grid.rows,
                 cols: grid.cols
             )
@@ -590,6 +600,28 @@ private struct LaunchSurface: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.l) {
+            if !terminals.sessions(in: folder.id).isEmpty {
+                HStack(spacing: Theme.Space.s) {
+                    Label(
+                        "Sessions are still running — launch another tool or go back",
+                        systemImage: "terminal.fill"
+                    )
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.s)
+                    Button("Back to session") {
+                        workspaces.showTerminal(in: folder.id)
+                    }
+                    .controlSize(.small)
+                }
+                .font(.caption)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.cardRadius)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            }
             Spacer()
             Image(systemName: "terminal")
                 .font(.system(size: 34, weight: .light))
@@ -618,6 +650,28 @@ private struct LaunchSurface: View {
             }
             .frame(maxWidth: 620)
 
+            Toggle(isOn: Binding(
+                get: { WorkspacePreference.bypassPermissions(for: folder.id) },
+                set: { WorkspacePreference.setBypassPermissions($0, for: folder.id) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Bypass permission prompts")
+                        .font(.callout.weight(.medium))
+                    Text("Agents run without asking for permission. Remembered for this workspace; only agents with a bypass flag are affected.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.checkbox)
+            .frame(maxWidth: 420, alignment: .leading)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+
             if let error = terminals.errorMessage {
                 Text(error)
                     .font(.caption)
@@ -635,11 +689,14 @@ private struct LaunchSurface: View {
         return Button {
             guard launching == nil else { return }
             launching = profile.id
+            let args = WorkspacePreference.bypassPermissions(for: folder.id)
+                ? profile.args + profile.bypassArgs
+                : profile.args
             Task {
                 await terminals.start(
                     workspace: folder,
                     command: profile.command,
-                    args: profile.args,
+                    args: args,
                     rows: grid.rows,
                     cols: grid.cols
                 )

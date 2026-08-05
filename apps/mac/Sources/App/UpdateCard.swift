@@ -41,7 +41,51 @@ struct UpdateCard: View {
             ) {
                 if let url = update.downloadURL { openURL(url) }
             }
+        } else if update.checkNotice == AppUpdateModel.upToDateMessage {
+            // A manual check that found nothing is a confirmation, not a
+            // non-event, so it gets the same card treatment as the other
+            // update states rather than a flat caption.
+            status(
+                title: "Up to date",
+                subtitle: "v\(update.current)",
+                symbol: "checkmark.seal.fill",
+                tint: Theme.success
+            )
         }
+    }
+
+    /// A non-interactive confirmation row, for states that have no action.
+    private func status(
+        title: String,
+        subtitle: String,
+        symbol: String,
+        tint: Color
+    ) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: Theme.Space.s)
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+        )
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
     }
 
     private func row(
