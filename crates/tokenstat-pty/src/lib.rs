@@ -568,7 +568,11 @@ mod tests {
             "set /p line= & echo got:!line!",
         );
         std::thread::sleep(std::time::Duration::from_millis(250));
-        m.write(&s.id, b"ping\n").unwrap();
+        // Carriage return, because that is what Return sends. A line feed is
+        // not a line ending to a Windows console, so `set /p` waits for a key
+        // that never comes, and a Unix terminal maps the return to a newline
+        // for the program on the other side anyway.
+        m.write(&s.id, b"ping\r").unwrap();
 
         assert!(wait_for(|| {
             m.read(&s.id, 0)
