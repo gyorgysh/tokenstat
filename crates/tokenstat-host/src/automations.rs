@@ -28,6 +28,12 @@ const TICK: Duration = Duration::from_secs(5);
 /// How fast the transcript drain polls the pty buffer.
 const DRAIN_POLL: Duration = Duration::from_millis(20);
 
+/// How long to keep reading after the process has gone.
+///
+/// Short enough that nobody waits on it, long enough for the terminal's own
+/// reader to hand over what the process wrote on its way out.
+const DRAIN_TAIL: Duration = Duration::from_millis(300);
+
 /// How long to wait for a finished process to report its exit code.
 ///
 /// Output can end a moment before the process is reaped, and a run that exited
@@ -609,10 +615,22 @@ impl Store {
         loop {
             let alive = manager.info(pty_id).map(|i| i.alive).unwrap_or(false);
             if !alive {
-                if let Ok(chunk) = manager.read(pty_id, offset) {
-                    if let Some(f) = &mut file {
-                        let _ = f.write_all(&chunk.bytes);
+                // The last of the output arrives after the process that wrote
+                // it has gone: the thread reading the terminal is a moment
+                // behind the process being reaped. Reading once here lost the
+                // entire transcript of a command that exited as fast as it
+                // printed, which is most of them.
+                let tail = Instant::now() + DRAIN_TAIL;
+                while Instant::now() < tail {
+                    if let Ok(chunk) = manager.read(pty_id, offset)
+                        && !chunk.bytes.is_empty()
+                    {
+                        offset = chunk.next_offset;
+                        if let Some(f) = &mut file {
+                            let _ = f.write_all(&chunk.bytes);
+                        }
                     }
+                    std::thread::sleep(DRAIN_POLL);
                 }
                 break;
             }
