@@ -75,28 +75,46 @@ struct HomeView: View {
 
     // MARK: - Panels
 
-    /// One panel per thing this machine can report, packed into columns.
+    /// One panel per thing this machine can report, in rows.
     ///
-    /// Columns rather than a grid. A grid gives every panel in a row the height
-    /// of the tallest one in it, so a vendor with a single quota window sat in a
-    /// box sized for the one beside it with three, and the screen was mostly
-    /// empty card. Packed into columns each panel is exactly as tall as what it
-    /// has to say, and the next panel starts where the last one ended.
+    /// Every panel in a row is the height of the tallest one in it. Packing
+    /// them into columns instead let each be exactly as tall as its contents,
+    /// which is the honest use of the space and reads as broken: cards on one
+    /// line ending at four different heights look like a layout that failed
+    /// rather than one that fitted. A row of equal boxes is worth the empty
+    /// half of a card with one quota window in it.
+    ///
+    /// A row that does not fill up divides the full width between what it has,
+    /// so a single panel left over spans the window rather than sitting in the
+    /// first third with a hole beside it.
     ///
     /// How many panels appear at all depends on what is installed. A vendor
     /// with nothing to report has no panel.
     @ViewBuilder
     private func panels(width: CGFloat) -> some View {
-        let columns = packed(panels, into: columnCount(for: width))
-        HStack(alignment: .top, spacing: Theme.Space.s) {
-            ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    ForEach(column) { panel in
-                        view(for: panel).modifier(SteppedHeight())
+        VStack(spacing: Theme.Space.s) {
+            ForEach(Array(rows(for: width).enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    ForEach(row) { panel in
+                        view(for: panel)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .top)
+                // The row takes the tallest panel's own height, and the panels
+                // in it fill that. Without this the row would grow to whatever
+                // height was going spare and every card with it.
+                .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    /// The panels dealt into rows of as many as the width fits.
+    private func rows(for width: CGFloat) -> [[HomePanel]] {
+        let all = panels
+        let count = columnCount(for: width)
+        guard count > 0 else { return [all] }
+        return stride(from: 0, to: all.count, by: count).map {
+            Array(all[$0..<min($0 + count, all.count)])
         }
     }
 
@@ -126,23 +144,6 @@ struct HomeView: View {
     private func columnCount(for width: CGFloat) -> Int {
         let fits = Int((width + Theme.Space.s) / (.panelWidth + Theme.Space.s))
         return max(1, min(panels.count, fits))
-    }
-
-    /// Deal the panels out to the column that has the least in it so far.
-    ///
-    /// Rough by design: the weight is how many rows a panel draws, not its
-    /// measured height, because measuring would mean laying the panels out
-    /// twice. Filling left to right instead leaves one very long column beside
-    /// three short ones whenever the biggest panel comes last.
-    private func packed(_ panels: [HomePanel], into count: Int) -> [[HomePanel]] {
-        var columns = Array(repeating: [HomePanel](), count: max(1, count))
-        var filled = Array(repeating: 0, count: columns.count)
-        for panel in panels {
-            let target = filled.indices.min { filled[$0] < filled[$1] } ?? 0
-            columns[target].append(panel)
-            filled[target] += panel.weight
-        }
-        return columns.filter { !$0.isEmpty }
     }
 
     /// Whether to say the vendors are still being asked.
@@ -361,41 +362,6 @@ struct HomeView: View {
     }
 }
 
-/// Round a panel's height up to the next hundred points, to a ceiling of four.
-///
-/// Packed columns put panels of wildly different heights beside each other: a
-/// vendor with one quota window next to one with three left a card barely
-/// taller than its own title. Snapping to a ladder makes them read as a set
-/// without stretching a short card the full height of the tallest.
-///
-/// The measurement is of the panel as laid out, and the floor only ever grows
-/// it, so a panel measured at 130 settles at 200 and stays there. A panel
-/// taller than the ceiling keeps its own height: the ladder is a floor, never
-/// a limit on what a card may say.
-private struct SteppedHeight: ViewModifier {
-    @State private var measured: CGFloat = 0
-
-    private static let step: CGFloat = 100
-    private static let ceiling: CGFloat = 400
-
-    private var floor: CGFloat {
-        guard measured > 0 else { return Self.step }
-        return min(Self.ceiling, (measured / Self.step).rounded(.up) * Self.step)
-    }
-
-    func body(content: Content) -> some View {
-        content
-            .frame(minHeight: floor, alignment: .top)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { measured = proxy.size.height }
-                        .onChange(of: proxy.size.height) { _, height in measured = height }
-                }
-            )
-    }
-}
-
 /// Hold a card's own shape while it waits for its first answer.
 ///
 /// Blurred and dimmed rather than replaced by something that spins. The screen
@@ -423,11 +389,7 @@ extension View {
     }
 }
 
-/// One panel in the Home grid, and roughly how much room it wants.
-///
-/// The weight is a row count, not a height. It only has to be good enough to
-/// decide which column the next panel should go in, and a row count is
-/// something the data already knows without laying anything out.
+/// One panel in the Home grid.
 private struct HomePanel: Identifiable {
     enum Kind {
         case limits(ProviderLimits)
@@ -440,15 +402,6 @@ private struct HomePanel: Identifiable {
         switch kind {
         case let .limits(provider): return "limits.\(provider.source)"
         case .planUsage: return "planUsage"
-        }
-    }
-
-    var weight: Int {
-        switch kind {
-        // A header, then a bar per window, or a sentence where the bars would
-        // have been.
-        case let .limits(provider): return 1 + max(1, provider.windows.count)
-        case let .planUsage(rows): return 1 + rows.count
         }
     }
 }
