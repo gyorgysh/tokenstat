@@ -117,11 +117,19 @@ struct AutomationsView: View {
             await model.appeared()
             // A delegated task navigated here asking for its transcript.
             guard let id = pendingRunID else { return }
-            pendingRunID = nil
-            if let run = model.runs.first(where: { $0.id == id }) {
-                viewingRun = run
-                model.watch(run)
+            // The run usually arrives with the list, but a run that finished
+            // moments ago can land a tick later; give it a beat before giving
+            // up rather than dropping the request silently.
+            for _ in 0..<6 {
+                if let run = model.runs.first(where: { $0.id == id }) {
+                    pendingRunID = nil
+                    viewingRun = run
+                    model.watch(run)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(250))
             }
+            pendingRunID = nil
         }
         // The model outlives this view, and the transcript tail must not.
         .onDisappear { model.disappeared() }
@@ -383,7 +391,6 @@ struct AutomationsView: View {
         .contentShape(.rect)
         .onTapGesture {
             viewingRun = run
-            model.watch(run)
         }
     }
 
@@ -397,7 +404,7 @@ struct AutomationsView: View {
                     model.transcriptText.isEmpty
                         ? "Waiting for output…"
                         : (run.backend == "claude"
-                            ? TranscriptSheet.readableTranscript(model.transcriptText)
+                            ? model.readableTranscript
                             : model.transcriptText)
                 )
                     .font(Theme.mono(11))
@@ -502,7 +509,7 @@ private struct TranscriptSheet: View {
                 Text(
                     showRaw || !canSummarize
                         ? model.transcriptText
-                        : Self.readableTranscript(model.transcriptText)
+                        : model.readableTranscript
                 )
                     .font(Theme.mono(11))
                     .foregroundStyle(.primary)
@@ -531,87 +538,6 @@ private struct TranscriptSheet: View {
         return line
     }
 
-    /// Turns a raw transcript into readable text.
-    ///
-    /// Claude's `--output-format stream-json` writes one JSON object per line:
-    /// system hooks (startup, metrics), tool calls, assistant messages, and a
-    /// final result. The assistant text and the result are the conversation;
-    /// everything else is machinery, so it is dropped. Lines that are not
-    /// JSON (shell output) pass through whole.
-    static func readableTranscript(_ raw: String) -> String {
-        guard !raw.isEmpty else { return "Waiting for output…" }
-        var out: [String] = []
-        // Split on the *string* separator, not the Character one: the pty
-        // writes CRLF, and Swift treats CRLF as one grapheme cluster, so
-        // splitting on Character("\n") finds nothing and the whole file is one
-        // "line" that then fails to parse and passes through raw.
-        for line in raw.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            // The pty writes CRLF, so lines end in `\r`; `.whitespaces` alone
-            // does not strip it, and Foundation then rejects every JSON line.
-            // ANSI show/hide-cursor escapes can also prefix a line.
-            let cleaned = Self.stripANSI(trimmed)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard cleaned.hasPrefix("{"),
-                  let data = cleaned.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                // An occasional truncated or escape-polluted JSON line should
-                // not dump raw machine JSON into the readable view.
-                if !cleaned.contains("\"type\":") {
-                    out.append(cleaned)
-                }
-                continue
-            }
-
-            let type = object["type"] as? String
-            switch type {
-            case "assistant":
-                // `message.content` on newer SDKs, top-level `content` on
-                // older ones. Text blocks are the words; tool blocks are not.
-                let content = (object["message"] as? [String: Any])?["content"]
-                    ?? object["content"]
-            let texts = (content as? [[String: Any]])?
-                .compactMap { $0["text"] as? String } ?? []
-            if !texts.isEmpty {
-                let block = texts.joined(separator: "\n")
-                // Claude re-emits the same final message across turns; the
-                // user and tool lines between the copies are filtered out, so
-                // without this the conclusion prints once per turn.
-                if out.last != block {
-                    out.append(block)
-                }
-            }
-            case "result":
-                if let result = object["result"] as? String, !result.isEmpty {
-                    // Claude's final result repeats the last assistant
-                    // message; do not print the conclusion twice.
-                    if out.last != result {
-                        out.append(result)
-                    }
-                }
-            default:
-                // System hooks, tool uses, and the prompt echo are the
-                // machinery around the answer, not the answer.
-                break
-            }
-        }
-        let joined = out.joined(separator: "\n\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return joined.isEmpty ? "(No readable output)" : joined
-    }
-
-    /// Removes ANSI escape sequences (e.g. `\u{1B}[?25h`) that the pty can
-    /// interleave with the JSON stream.
-    static func stripANSI(_ text: String) -> String {
-        text.replacingOccurrences(
-            // Not a raw string: `\u{1B}` must become the ESC character in the
-            // pattern, and `\\[` the regex's literal-bracket.
-            of: "\u{1B}\\[[0-9;?]*[A-Za-z]",
-            with: "",
-            options: .regularExpression
-        )
-    }
 }
 
 // MARK: - One automation

@@ -160,6 +160,9 @@ struct RootView: View {
                 }
             }
         }
+        // A pending auto-hide outlives the window it was scheduled for; drop it
+        // when the view goes away.
+        .onDisappear { hideOverlayTask?.cancel() }
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
         .background {

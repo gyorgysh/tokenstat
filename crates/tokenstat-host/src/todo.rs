@@ -301,8 +301,8 @@ impl Board {
     /// Hand a card to an agent. The run is a one-shot automation whose
     /// transcript lands in the runs history.
     pub fn delegate(self: &std::sync::Arc<Board>, id: &str) -> Result<Card, String> {
-        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
-        let (job, title) = {
+        let job = {
+            let cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
             let card = cards
                 .iter()
                 .find(|c| c.id == id)
@@ -317,29 +317,48 @@ impl Board {
             if card.kind == CardKind::Note {
                 return Err("notes cannot be delegated to an agent".into());
             }
-            (
-                crate::automations::Automation {
-                    id: format!("todo-{}", card.id),
-                    name: card.title.clone(),
-                    backend: card.backend.clone(),
-                    model: card.model.clone(),
-                    effort: card.effort.clone(),
-                    workspace_id: card.workspace_id.clone(),
-                    prompt: format!("{}\n\n{}", card.title, card.notes),
-                    schedule: crate::automations::ScheduleSpec::default(),
-                    budget_seconds: card.budget_seconds,
-                    enabled: false,
-                    last_run_at_ms: None,
-                    next_run_at_ms: None,
-                    last_run_id: None,
-                },
-                card.title.clone(),
-            )
+            crate::automations::Automation {
+                id: format!("todo-{}", card.id),
+                name: card.title.clone(),
+                backend: card.backend.clone(),
+                model: card.model.clone(),
+                effort: card.effort.clone(),
+                workspace_id: card.workspace_id.clone(),
+                prompt: format!("{}\n\n{}", card.title, card.notes),
+                schedule: crate::automations::ScheduleSpec::default(),
+                budget_seconds: card.budget_seconds,
+                enabled: false,
+                last_run_at_ms: None,
+                next_run_at_ms: None,
+                last_run_id: None,
+            }
         };
-        // The run starts while the board is locked, but it touches only the
-        // automation store, so nothing here can deadlock.
+        // The spawn happens with no board lock held: `run_adhoc` starts a
+        // process and writes the runs store, and every other board operation
+        // (list, move, update) must not queue behind a fork. The lock comes
+        // back only to attach the result.
         let run = crate::automations::shared().run_adhoc(job)?;
-        let idx = cards.iter().position(|c| c.id == id).unwrap();
+
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(idx) = cards.iter().position(|c| c.id == id) else {
+            // The card vanished while the process was spawning; the run has
+            // nothing to attach to, so stop it rather than orphan it.
+            drop(cards);
+            let _ = crate::automations::shared().kill_run(&run.id);
+            return Err(format!("no card with id {id}"));
+        };
+        if cards[idx]
+            .delegate
+            .as_ref()
+            .is_some_and(|d| d.status == "running")
+        {
+            // Another delegate claimed the card while the process spawned;
+            // keep the original run, not this duplicate.
+            let title = cards[idx].title.clone();
+            drop(cards);
+            let _ = crate::automations::shared().kill_run(&run.id);
+            return Err(format!("{title} is already running"));
+        }
         cards[idx].delegate = Some(Delegate {
             run_id: run.id.clone(),
             status: "running".into(),
@@ -356,7 +375,6 @@ impl Board {
         let result = cards[idx].clone();
         drop(cards);
         self.save()?;
-        let _ = title;
         Ok(result)
     }
 
