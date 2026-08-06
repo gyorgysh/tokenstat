@@ -20,7 +20,7 @@ struct DayDetailPopover: View {
     /// The window's content size, to keep the card inside it.
     var windowSize: CGSize
 
-    private let margin: CGFloat = 10
+    private let margin: CGFloat = 6
     /// Side clearance, so the card never touches the window edge.
     private let edgeInset: CGFloat = 8
 
@@ -51,14 +51,7 @@ struct DayDetailPopover: View {
     /// to the other side when the preferred one is too narrow.
     private var preferredLeft: Bool {
         guard let anchor else { return false }
-        return anchorPoint.x > windowSize.width * 0.5
-    }
-
-    /// The point the card anchors to: the pointer when we have it, the hovered
-    /// cell's centre as a fallback.
-    private var anchorPoint: CGPoint {
-        guard let anchor else { return .zero }
-        return anchor.pointer ?? CGPoint(x: anchor.frame.midX, y: anchor.frame.midY)
+        return anchor.frame.midX > windowSize.width * 0.5
     }
 
     private var cardWidth: CGFloat {
@@ -72,12 +65,16 @@ struct DayDetailPopover: View {
     private var clampedX: CGFloat {
         guard let anchor else { return windowSize.width / 2 }
         let width = cardWidth
+        // `.position` centres the card, so the candidate is the card's centre
+        // for a card that sits fully beside the cell: half the card's width
+        // beyond the margin, not the margin itself. Treating the margin as the
+        // centre is what made the card straddle the cell.
         let candidate = preferredLeft
-            ? anchorPoint.x - margin - width   // card sits to the left
-            : anchorPoint.x + margin           // card sits to the right
+            ? anchor.frame.minX - margin - width / 2   // card sits to the left
+            : anchor.frame.maxX + margin + width / 2   // card sits to the right
         let flipped = preferredLeft
-            ? anchorPoint.x + margin
-            : anchorPoint.x - margin - width
+            ? anchor.frame.maxX + margin + width / 2
+            : anchor.frame.minX - margin - width / 2
         let x = (candidate >= edgeInset && candidate + width <= windowSize.width - edgeInset)
             ? candidate
             : flipped
@@ -88,10 +85,14 @@ struct DayDetailPopover: View {
 
     private var clampedY: CGFloat {
         guard let anchor else { return windowSize.height / 2 }
-        // Vertically centred on the pointer, kept fully inside the window.
-        let y = anchorPoint.y
+        // Vertically centred on the hovered row, so the card reads as
+        // belonging to the day under the pointer whatever its height. This is
+        // the placement that felt closest; earlier "edge below the cell"
+        // versions drifted hundreds of points down because the loading card
+        // is much shorter than the full one.
+        let desired = anchor.frame.midY
         return min(
-            max(y, edgeInset + cardHeight / 2),
+            max(desired, edgeInset + cardHeight / 2),
             max(edgeInset + cardHeight / 2, windowSize.height - edgeInset - cardHeight / 2)
         )
     }

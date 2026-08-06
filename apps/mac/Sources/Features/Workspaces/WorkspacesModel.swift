@@ -51,6 +51,13 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
 @Observable
 @MainActor
 final class WorkspacesModel {
+    /// Bypass-permission preference per workspace, mirrored from UserDefaults.
+    ///
+    /// Kept as observable state so the checkbox reflects a click immediately:
+    /// a binding straight into `UserDefaults` has no way to tell the view the
+    /// value changed. Persistence still happens on every write.
+    private(set) var bypassPermissions: [String: Bool] = [:]
+
     var folders: [WorkspaceFolder] = []
     var selectedID: String?
     var isLoading = false
@@ -750,6 +757,15 @@ final class WorkspacesModel {
     /// through here so the explanation is never skipped.
     func requestAdd() {
         isAddSheetPresented = true
+    }
+
+    func bypassPermissions(for workspaceID: String) -> Bool {
+        bypassPermissions[workspaceID] ?? WorkspacePreference.bypassPermissions(for: workspaceID)
+    }
+
+    func setBypassPermissions(_ on: Bool, for workspaceID: String) {
+        bypassPermissions[workspaceID] = on
+        WorkspacePreference.setBypassPermissions(on, for: workspaceID)
     }
 
     /// Ask for a folder and register it.

@@ -159,7 +159,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         } catch {
             release(fresh, reusable: false)
             // A connection that was alive long enough to be opened and then
-            // died before answering is a daemon that went away mid-call — the
+            // died before answering is a daemon that went away mid-call. The
             // same situation as a refused connect, and the bridge repairs it
             // the same way. A raw transport error must never reach a screen
             // as "The operation couldn't be completed".
@@ -179,7 +179,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// The host is gone: connection refused, or a fresh connection died before
     /// answering. The bridge treats this as repairable and retries after
     /// restarting the launch agent, so the words say what happened and that
-    /// the app is on it — not what the user should do. They only surface when
+    /// the app is on it, not what the user should do. They only surface when
     /// the repair also failed.
     private static func unreachable(path: String) -> BridgeError {
         BridgeError.core(
@@ -396,7 +396,7 @@ private final class Connection {
 ///
 /// It still conforms to `LocalizedError`, so even a leaked instance reads as
 /// a sentence rather than "The operation couldn't be completed.
-/// (Tokenstat.TransportFailure …)" — that raw default is what made a host
+/// (Tokenstat.TransportFailure …)". That raw default is what made a host
 /// going away look like an internal crash instead of a daemon that was down.
 private enum TransportFailure: LocalizedError {
     case path(String)

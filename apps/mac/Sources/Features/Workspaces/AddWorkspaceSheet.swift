@@ -11,8 +11,8 @@ import SwiftUI
 ///
 /// A bare folder picker does not say what a workspace is, so a first-time user
 /// guesses and usually guesses wrong (home directory, a system folder, a file
-/// manager they cannot open). This explains the three things that matter —
-/// what it is, what to pick, what happens next — and only then offers the
+/// manager they cannot open). This explains the three things that matter
+/// (what it is, what to pick, what happens next) and only then offers the
 /// folder panel.
 struct AddWorkspaceSheet: View {
     @Bindable var model: WorkspacesModel
@@ -39,12 +39,12 @@ struct AddWorkspaceSheet: View {
             step(
                 number: 1,
                 title: "What it is",
-                text: "A workspace is a project folder on this Mac. tokenstat runs agents there — Claude Code, Codex, OpenCode, Grok Build and the rest — and reads the folder's git state so it can show changes, diffs and history."
+                text: "A workspace is a project folder on this Mac. tokenstat runs agents there (Claude Code, Codex, OpenCode, Grok Build and the rest) and reads the folder's git state so it can show changes, diffs and history."
             )
             step(
                 number: 2,
                 title: "What to pick",
-                text: "Choose a repository you actually work in — the folder an agent should open when it does work for you. Not your home directory, and not a system folder."
+                text: "Choose a repository you actually work in. It is the folder an agent opens when it does work for you. Not your home directory, and not a system folder."
             )
             step(
                 number: 3,

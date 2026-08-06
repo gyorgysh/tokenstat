@@ -137,7 +137,7 @@ detect_target() {
       esac
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      die "Windows: use PowerShell — irm https://tokenstat.ai/install.ps1 | iex"
+      die "Windows: use PowerShell. Run irm https://tokenstat.ai/install.ps1 | iex"
       ;;
     *)
       die "unsupported OS: $os (macOS and Linux only for this script)"

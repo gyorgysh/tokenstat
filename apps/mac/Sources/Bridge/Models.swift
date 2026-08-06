@@ -607,7 +607,7 @@ struct SyncScheduleStatus: Codable, Sendable {
 /// "3 minutes ago", for a timestamp whose exact minute nobody reads.
 ///
 /// The absolute date stays available as a tooltip. "Last synced 4 Aug 2026 at
-/// 18:41" makes you work out whether that was recent; "12 minutes ago" is the
+/// 18:41" makes you work out whether that was recent. "12 minutes ago" is the
 /// answer to the question actually being asked.
 func formatRelativeDate(_ raw: String?) -> String? {
     guard let date = parseServerDate(raw) else { return nil }

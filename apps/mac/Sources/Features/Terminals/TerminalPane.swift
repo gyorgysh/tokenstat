@@ -366,7 +366,7 @@ struct TerminalPane: View {
         // file out of the way.
         workspaces.showTerminal(in: folder.id)
         let grid = spawnGrid
-        let args = WorkspacePreference.bypassPermissions(for: folder.id)
+        let args = workspaces.bypassPermissions(for: folder.id)
             ? profile.args + profile.bypassArgs
             : profile.args
         Task {
@@ -599,89 +599,103 @@ private struct LaunchSurface: View {
     @State private var launching: String?
 
     var body: some View {
-        VStack(spacing: Theme.Space.l) {
-            if !terminals.sessions(in: folder.id).isEmpty {
-                HStack(spacing: Theme.Space.s) {
-                    Label(
-                        "Sessions are still running — launch another tool or go back",
-                        systemImage: "terminal.fill"
-                    )
+        ScrollView {
+            VStack(spacing: Theme.Space.m) {
+                if !terminals.sessions(in: folder.id).isEmpty {
+                    runningSessionsBanner
+                }
+
+                Image(systemName: "terminal")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Theme.accent.opacity(0.65))
+                    .padding(.top, Theme.Space.m)
+                Text("Run something in \(folder.name)")
+                    .font(.title3.weight(.medium))
+                Text("A session runs as its own process, owned by the host, so it keeps going whether or not the window is here to watch it.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    Spacer(minLength: Theme.Space.s)
-                    Button("Back to session") {
-                        workspaces.showTerminal(in: folder.id)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
+
+                // In the default view, not buried under the grid: a setting
+                // nobody can see is a setting that does not exist. The
+                // dividers keep it from blending into the intro and the grid.
+                VStack(spacing: Theme.Space.s) {
+                    Divider()
+                    bypassToggle
+                    Divider()
+                }
+                .frame(maxWidth: 460, alignment: .leading)
+
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
+                    spacing: Theme.Space.m
+                ) {
+                    utilityButton("Browser", subtitle: "Enter a URL", symbol: "globe") {
+                        _ = workspaces.showBrowser(in: folder.id)
                     }
-                    .controlSize(.small)
+                    utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
+                        workspaces.showFiles(in: folder.id)
+                    }
+                    ForEach(launcher.available) { profile in
+                        launchButton(profile)
+                    }
                 }
-                .font(.caption)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.s)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cardRadius)
-                        .strokeBorder(Theme.border, lineWidth: 1)
-                )
-            }
-            Spacer()
-            Image(systemName: "terminal")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Theme.accent.opacity(0.65))
-            Text("Run something in \(folder.name)")
-                .font(.title3.weight(.medium))
-            Text("A session runs as its own process, owned by the host, so it keeps going whether or not the window is here to watch it.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: 620)
 
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
-                spacing: Theme.Space.m
-            ) {
-                utilityButton("Browser", subtitle: "Enter a URL", symbol: "globe") {
-                    _ = workspaces.showBrowser(in: folder.id)
-                }
-                utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
-                    workspaces.showFiles(in: folder.id)
-                }
-                ForEach(launcher.available) { profile in
-                    launchButton(profile)
-                }
-            }
-            .frame(maxWidth: 620)
-
-            Toggle(isOn: Binding(
-                get: { WorkspacePreference.bypassPermissions(for: folder.id) },
-                set: { WorkspacePreference.setBypassPermissions($0, for: folder.id) }
-            )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Bypass permission prompts")
-                        .font(.callout.weight(.medium))
-                    Text("Agents run without asking for permission. Remembered for this workspace; only agents with a bypass flag are affected.")
+                if let error = terminals.errorMessage {
+                    Text(error)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.danger)
                 }
             }
-            .toggleStyle(.checkbox)
-            .frame(maxWidth: 420, alignment: .leading)
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.s)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-
-            if let error = terminals.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Theme.danger)
-            }
-            Spacer()
+            .padding(Theme.Space.l)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(Theme.Space.xl)
         .background(Theme.background)
+    }
+
+    /// A slim line instead of a full card, so the launcher content below stays
+    /// within the default view.
+    private var runningSessionsBanner: some View {
+        HStack(spacing: Theme.Space.s) {
+            Label(
+                "Sessions are still running. Launch another tool or go back.",
+                systemImage: "terminal.fill"
+            )
+            .foregroundStyle(.secondary)
+            Spacer(minLength: Theme.Space.s)
+            Button("Back to session") {
+                workspaces.showTerminal(in: folder.id)
+            }
+            .controlSize(.small)
+        }
+        .font(.caption)
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, 6)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private var bypassToggle: some View {
+        Toggle(isOn: Binding(
+            get: { workspaces.bypassPermissions(for: folder.id) },
+            set: { workspaces.setBypassPermissions($0, for: folder.id) }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Bypass permission prompts")
+                    .font(.callout.weight(.medium))
+                Text("Agents run without asking for permission. Remembered for this workspace. Only agents with a bypass flag are affected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .frame(maxWidth: 460, alignment: .leading)
     }
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
@@ -689,17 +703,23 @@ private struct LaunchSurface: View {
         return Button {
             guard launching == nil else { return }
             launching = profile.id
-            let args = WorkspacePreference.bypassPermissions(for: folder.id)
+            let args = workspaces.bypassPermissions(for: folder.id)
                 ? profile.args + profile.bypassArgs
                 : profile.args
             Task {
-                await terminals.start(
+                let session = await terminals.start(
                     workspace: folder,
                     command: profile.command,
                     args: args,
                     rows: grid.rows,
                     cols: grid.cols
                 )
+                // A successful launch hands the pane to the new session so the
+                // launcher never stays in front of something running. A failed
+                // spawn keeps the launcher so the user can retry.
+                if session != nil {
+                    workspaces.showTerminal(in: folder.id)
+                }
                 launching = nil
             }
         } label: {

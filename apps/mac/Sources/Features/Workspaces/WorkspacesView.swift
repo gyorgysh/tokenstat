@@ -67,6 +67,11 @@ struct WorkspacesView: View {
             Spacer()
             if let git = folder.git, git.isRepo {
                 BranchChip(git: git)
+                    // The chip keeps its whole shape whatever the path does:
+                    // without this, a long path with layout priority squeezes
+                    // the branch text and the chip starts to look broken.
+                    .fixedSize()
+                    .layoutPriority(2)
             }
         }
         .padding(.horizontal, Theme.Space.m)
@@ -560,7 +565,7 @@ private struct ChangeRow: View {
             if file.added == nil {
                 // A dash, not a zero. The difference matters here as much as it
                 // does for token counters.
-                Text("—").font(Theme.numeric(11)).foregroundStyle(.tertiary)
+                Text("n/a").font(Theme.numeric(11)).foregroundStyle(.tertiary)
             }
         }
         .help(file.path)

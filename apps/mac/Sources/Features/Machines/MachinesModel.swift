@@ -158,7 +158,7 @@ final class MachinesModel {
             try HostAgentInstaller.installAndStart()
             Bridge.reconnect()
             await load()
-            showNotice(Bridge.isHosted ? "Background helper is running." : "Helper installed. It is still starting; try again in a moment.")
+            showNotice(Bridge.isHosted ? "Background helper is running." : "Helper installed. It is still starting. Try again in a moment.")
         } catch {
             errorMessage = error.localizedDescription
         }

@@ -278,7 +278,7 @@ private struct CounterRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            Text(value.map { formatTokens($0) } ?? "—")
+            Text(value.map { formatTokens($0) } ?? "n/a")
                 .font(Theme.numeric(11))
                 .foregroundStyle(value == nil ? .tertiary : .primary)
         }

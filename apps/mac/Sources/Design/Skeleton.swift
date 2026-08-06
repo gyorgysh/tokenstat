@@ -12,7 +12,7 @@ import SwiftUI
 /// The rule for every screen in this app: draw the layout immediately, with
 /// grey shapes where the numbers will be, and swap the shapes for the numbers
 /// when they arrive. Never a spinner in the middle of an empty pane. A spinner
-/// says "wait" and nothing else; a wireframe says how much is coming, where it
+/// says "wait" and nothing else. A wireframe says how much is coming, where it
 /// will be, and how long the screen will end up. The window also stops jumping,
 /// because the space is already claimed.
 ///

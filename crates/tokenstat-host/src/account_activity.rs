@@ -212,7 +212,7 @@ pub fn day_detail(
         }
     }
 
-    parts.sort_by(|a, b| b.tokens().cmp(&a.tokens()));
+    parts.sort_by_key(|b| std::cmp::Reverse(b.tokens()));
     Ok(parts)
 }
 

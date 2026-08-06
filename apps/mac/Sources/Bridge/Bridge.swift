@@ -194,7 +194,7 @@ enum Bridge {
     /// A daemon that dies under the app is not something the user should fix
     /// by hand: the bridge reinstalls and restarts the launch agent, waits for
     /// the socket, and retries the call once before anything is reported. The
-    /// repair only runs for `host_unreachable` — a timeout means the daemon is
+    /// repair only runs for `host_unreachable`. A timeout means the daemon is
     /// alive and busy, which is not the same situation at all.
     private static func call(
         method: String,
@@ -254,8 +254,8 @@ enum Bridge {
     /// Bring the local daemon back after it stopped answering.
     ///
     /// Runs on the calls queue, so it can afford to block. Reinstalling the
-    /// launch agent is idempotent — it replaces a missing or stale helper and
-    /// reloads launchd — and needs no password, because the agent is this
+    /// launch agent is idempotent: it replaces a missing or stale helper and
+    /// reloads launchd, and needs no password, because the agent is this
     /// user's own. The reinstall is gated by a cooldown so a burst of failing
     /// calls does not boot the daemon repeatedly; the socket probe itself is
     /// cheap and runs on every failure.

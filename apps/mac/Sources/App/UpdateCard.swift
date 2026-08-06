@@ -49,7 +49,9 @@ struct UpdateCard: View {
                 title: "Up to date",
                 subtitle: "v\(update.current)",
                 symbol: "checkmark.seal.fill",
-                tint: Theme.success
+                // Brand purple, not a generic success green: this is a
+                // tokenstat confirmation, not a system-level one.
+                tint: Theme.accent
             )
         }
     }

@@ -112,11 +112,10 @@ struct RootView: View {
                     .inspectorColumnWidth(
                         min: DisplayFit.scale(370),
                         ideal: DisplayFit.scale(400),
-                        // Space-aware, never a fixed cap: the inspector is
-                        // bounded by what is left after the sidebar and the
-                        // detail pane, so dragging it wider can never push the
-                        // sidebar out of the window.
-                        max: inspectorMaxWidth
+                        // The pane may only shrink or close from its ideal
+                        // width. Growing it squeezes the other two columns,
+                        // which is how the sidebar used to get pushed out.
+                        max: DisplayFit.scale(400)
                     )
                 }
         }
@@ -252,16 +251,6 @@ struct RootView: View {
 
     /// What the inspector asks for, matching `inspectorColumnWidth(min:)`.
     private static var inspectorMinimumWidth: CGFloat { DisplayFit.scale(370) }
-
-    /// The widest the inspector may ask for without crowding the other two
-    /// columns out of the window.
-    ///
-    /// `minimumContentWidth` is what the window needs with no inspector:
-    /// sidebar plus detail. The inspector gets the remaining width, with a
-    /// little margin, and never more than the pane itself finds useful.
-    private var inspectorMaxWidth: CGFloat {
-        max(DisplayFit.scale(370), windowSize.width - Self.minimumContentWidth - 24)
-    }
 
     /// The narrowest window that can hold all three columns.
     ///

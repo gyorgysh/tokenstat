@@ -157,5 +157,5 @@ if ($Purge) {
 
 Write-Host ""
 Ok "local install removed"
-Write-Host "  hosted profile untouched — export or delete from /settings/data if needed"
+Write-Host "  hosted profile untouched. Export or delete from /settings/data if needed"
 Write-Host ""

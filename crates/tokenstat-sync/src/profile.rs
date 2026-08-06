@@ -130,8 +130,8 @@ struct ApiErrorBody {
 /// Turn a non-401 refusal into an error that names the server's own reason.
 ///
 /// A `401` means the token itself was rejected and becomes the revoked-token
-/// message. Other refusals — most often a `403` when the account's plan does
-/// not cover the route — are facts about the account, not about the token, and
+/// message. Other refusals (most often a `403` when the account's plan does
+/// not cover the route) are facts about the account, not about the token, and
 /// telling somebody whose token is fine to sign in again sends them through a
 /// login for nothing. The server's message says which fact it is, so surface
 /// it. A refusal with no reason at all is indistinguishable from a revoked

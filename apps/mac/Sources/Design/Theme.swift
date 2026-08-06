@@ -808,7 +808,7 @@ enum DisplayFit {
     /// Design points → points for text.
     ///
     /// Use for every fixed font size in UI chrome. Terminal and editor glyphs
-    /// stay at 1:1 — they are content, not chrome.
+    /// stay at 1:1. They are content, not chrome.
     static func dp(_ points: CGFloat) -> CGFloat {
         points * max(factor, textFloor)
     }

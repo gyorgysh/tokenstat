@@ -142,7 +142,7 @@ remove_one_schedule() {
       fi
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      die "Windows: use PowerShell — irm https://tokenstat.ai/uninstall.ps1 | iex"
+      die "Windows: use PowerShell. Run irm https://tokenstat.ai/uninstall.ps1 | iex"
       ;;
   esac
 }
@@ -222,7 +222,7 @@ main() {
 
   echo
   ok "local install removed"
-  echo "  ${DIM}hosted profile untouched — export or delete from /settings/data if needed${R}"
+  echo "  ${DIM}hosted profile untouched. Export or delete from /settings/data if needed${R}"
   echo "  ${DIM}PATH lines in shell profiles are harmless; remove by hand if you want${R}"
   echo
 }

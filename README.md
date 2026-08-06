@@ -28,13 +28,13 @@ machine by default. Sync to a public profile is opt in.
 
 ## Highlights
 
-- **Local first** — counters stay on your machine; conversation text never reaches the archive
-- **Many sources** — Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, plus Cursor fetch
-- **One schema** — daily, weekly, monthly, and per-model views across every tool
-- **Activity heatmap** — rolling calendar ramped on daily list-rate value, with streaks, busiest day, and a purple-to-cyan ramp
-- **Model catalog** — context window, capabilities, and public benchmark scores per model
-- **Optional sync** — sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
-- **Self-update** — verified GitHub Releases with rollback if the new binary cannot run
+- **Local first**: counters stay on your machine. Conversation text never reaches the archive
+- **Many sources**: Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, plus Cursor fetch
+- **One schema**: daily, weekly, monthly, and per-model views across every tool
+- **Activity heatmap**: rolling calendar ramped on daily list-rate value, with streaks, busiest day, and a purple-to-cyan ramp
+- **Model catalog**: context window, capabilities, and public benchmark scores per model
+- **Optional sync**: sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
+- **Self-update**: verified GitHub Releases with rollback if the new binary cannot run
 
 ## Supported sources
 
