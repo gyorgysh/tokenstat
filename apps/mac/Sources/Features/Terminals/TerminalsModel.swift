@@ -121,7 +121,8 @@ final class TerminalsModel {
                 command: command,
                 args: args,
                 rows: rows,
-                cols: cols
+                cols: cols,
+                noColor: TerminalPreferences.disablesColor
             )
             let session = TerminalSession(info: info)
             sessions.append(session)

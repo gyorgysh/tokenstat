@@ -385,7 +385,6 @@ fn write_keychain(blob: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     if let Some(stdin) = child.stdin.as_mut() {
         writeln!(stdin, "{blob}").map_err(|e| e.to_string())?;
-        writeln!(stdin, "{blob}").map_err(|e| e.to_string())?;
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     status

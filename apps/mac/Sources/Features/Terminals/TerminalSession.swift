@@ -12,6 +12,25 @@ import Observation
 import SwiftTerm
 import SwiftUI
 
+/// Terminal preferences, stored as user defaults and read by the terminal
+/// strip and by the spawn path (which sends the colour choice to the daemon).
+enum TerminalPreferences {
+    private static let voiceOverKey = "terminal.accessibility.enabled"
+    private static let noColorKey = "terminal.noColor.enabled"
+
+    /// Expose the terminal's visible screen to VoiceOver as a text area.
+    static var exposesToVoiceOver: Bool {
+        get { UserDefaults.standard.bool(forKey: voiceOverKey) }
+        set { UserDefaults.standard.set(newValue, forKey: voiceOverKey) }
+    }
+
+    /// The user does not want colour: new terminals start with NO_COLOR=1.
+    static var disablesColor: Bool {
+        get { UserDefaults.standard.bool(forKey: noColorKey) }
+        set { UserDefaults.standard.set(newValue, forKey: noColorKey) }
+    }
+}
+
 /// One live terminal session: a host-owned pty and the SwiftTerm view that
 /// renders it.
 ///
@@ -273,6 +292,36 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// until an unrelated click or resize happens to invalidate the view.
     private func feed(_ bytes: Data) {
         view.feed(byteArray: ArraySlice(bytes))
+        if TerminalPreferences.exposesToVoiceOver {
+            publishAccessibilityValue()
+        }
+    }
+
+    /// The terminal's visible screen as plain text, for VoiceOver.
+    var visibleTerminalText: String {
+        guard TerminalPreferences.exposesToVoiceOver else { return "" }
+        let terminal = view.getTerminal()
+        let dims = terminal.getDims()
+        let top = terminal.getTopVisibleRow()
+        let start = Position(col: 0, row: top)
+        let end = Position(col: max(0, dims.cols), row: top + max(0, dims.rows))
+        return terminal.getText(start: start, end: end)
+    }
+
+    private var lastAccessibilityValueAt: Date?
+
+    /// Refresh the screen reader's copy of the screen, at most every quarter
+    /// second: per-packet updates would rebuild the whole visible text for
+    /// every byte.
+    private func publishAccessibilityValue() {
+        let now = Date()
+        if let last = lastAccessibilityValueAt,
+           now.timeIntervalSince(last) < 0.25
+        {
+            return
+        }
+        lastAccessibilityValueAt = now
+        view.setAccessibilityValue(visibleTerminalText)
     }
 
     /// Drop back to the fast poll. Called when the user does something that
@@ -333,7 +382,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         }
     }
 
-    nonisolated func scrolled(source: TerminalView, position: Double) {}
+    nonisolated func scrolled(source: TerminalView, position: Double) {
+        Task { @MainActor [weak self] in
+            self?.lastAccessibilityValueAt = nil
+            self?.publishAccessibilityValue()
+        }
+    }
 
     nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 

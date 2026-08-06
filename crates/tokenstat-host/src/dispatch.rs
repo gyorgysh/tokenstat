@@ -152,6 +152,9 @@ struct PtySpawnParams {
     rows: u16,
     #[serde(default = "default_cols")]
     cols: u16,
+    /// The user opted out of colour in settings.
+    #[serde(default)]
+    no_color: bool,
 }
 
 fn default_rows() -> u16 {
@@ -1161,6 +1164,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     workspace_id: Some(ws.id.clone()),
                     rows: p.rows,
                     cols: p.cols,
+                    no_color: p.no_color,
                 })
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(info).map_err(|e| e.to_string())

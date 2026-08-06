@@ -675,6 +675,7 @@ impl Store {
                 workspace_id: Some(workspace.id.clone()),
                 rows: 24,
                 cols: 120,
+                no_color: false,
             })
             .map_err(|e| e.to_string())?;
 
@@ -1058,6 +1059,7 @@ mod tests {
                 workspace_id: None,
                 rows: 24,
                 cols: 80,
+                no_color: false,
             })
             .unwrap();
         let pty_id = info.id.clone();
@@ -1145,6 +1147,7 @@ mod tests {
                 workspace_id: None,
                 rows: 24,
                 cols: 80,
+                no_color: false,
             })
             .unwrap();
         let pty_id = info.id.clone();

@@ -148,12 +148,14 @@ detect_target() {
 api_get() {
   local url="$1"
   if [ -n "${GITHUB_TOKEN:-}" ]; then
-    curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+    curl -fsSL --proto '=https' --tlsv1.2 \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" \
       -H "Accept: application/vnd.github+json" \
       -H "User-Agent: tokenstat-install" \
       "$url"
   else
-    curl -fsSL -H "Accept: application/vnd.github+json" \
+    curl -fsSL --proto '=https' --tlsv1.2 \
+      -H "Accept: application/vnd.github+json" \
       -H "User-Agent: tokenstat-install" \
       "$url"
   fi
@@ -186,7 +188,11 @@ expected_sha() {
       hash=$1
       name=$2
       sub(/^\*/, "", name)
-      if (name == want || name ~ "/" want "$") { print tolower(hash); exit }
+      if (name == want || name ~ "/" want "$") {
+        # Only an exact 64-hex digest is a checksum; anything else is a line
+        # to refuse, not a value to trust.
+        if (hash ~ /^[0-9a-fA-F]{64}$/) { print tolower(hash); exit }
+      }
     }
   ' "$sums_file"
 }
@@ -249,9 +255,11 @@ main() {
   trap cleanup_install_tmp EXIT
 
   say "downloading ${asset}"
-  curl -fsSL -o "${TOKENSTAT_INSTALL_TMP}/${asset}" "$archive_url" \
+  curl -fsSL --proto '=https' --tlsv1.2 \
+    -o "${TOKENSTAT_INSTALL_TMP}/${asset}" "$archive_url" \
     || die "download failed: $archive_url"
-  curl -fsSL -o "${TOKENSTAT_INSTALL_TMP}/SHA256SUMS" "$sums_url" \
+  curl -fsSL --proto '=https' --tlsv1.2 \
+    -o "${TOKENSTAT_INSTALL_TMP}/SHA256SUMS" "$sums_url" \
     || die "download failed: $sums_url"
 
   local want got

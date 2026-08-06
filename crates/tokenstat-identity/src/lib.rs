@@ -145,10 +145,10 @@ pub fn fingerprint(public: &PublicKey) -> String {
         .join("-")
 }
 
-/// The same key as two words, for a person to compare at a glance.
+/// The same key as three words, for a person to compare at a glance.
 ///
 /// Nobody compares `a41f-88c2-...` carefully. They compare the first group, the
-/// last group, and assume. Two words out of a fixed list are read whole, said
+/// last group, and assume. Three words out of fixed lists are read whole, said
 /// aloud over a phone, and noticed when they differ, which is the entire job
 /// this string has: two people, two screens, one question.
 ///
@@ -157,23 +157,27 @@ pub fn fingerprint(public: &PublicKey) -> String {
 /// the human check, and this one is the version a human will actually do. The
 /// full fingerprint stays available for anyone who wants it.
 ///
-/// 16 bits of adjective and 16 bits of noun is not collision resistant and is
-/// not meant to be. It catches the realistic case, which is a machine that is
-/// not the one you think, not an adversary grinding keys for a colour.
+/// 32 × 32 × 32 combinations is ~15 bits: not collision resistant, and not
+/// meant to be — an adversary never sees these words, they see the key. The
+/// words catch the realistic case, which is a machine that is not the one you
+/// think, and three words keep a fleet of a few hundred machines free of
+/// accidental lookalikes where two did not.
 pub fn key_words(public: &PublicKey) -> String {
     let mut hasher = blake3::Hasher::new();
     // Separate domain from `fingerprint`, so the two displays of one key cannot
     // be turned into each other.
-    hasher.update(b"tokenstat machine words v1\0");
+    hasher.update(b"tokenstat machine words v2\0");
     hasher.update(public);
     let digest = hasher.finalize();
     let bytes = digest.as_bytes();
     let first = u16::from_be_bytes([bytes[0], bytes[1]]) as usize;
     let second = u16::from_be_bytes([bytes[2], bytes[3]]) as usize;
+    let third = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
     format!(
-        "{}-{}",
+        "{}-{}-{}",
         ADJECTIVES[first % ADJECTIVES.len()],
-        NOUNS[second % NOUNS.len()]
+        NOUNS[second % NOUNS.len()],
+        PLACES[third % PLACES.len()]
     )
 }
 
@@ -193,6 +197,14 @@ const NOUNS: [&str; 32] = [
     "jaguar", "kestrel", "lynx", "marten", "newt", "osprey", "puffin", "quail", "raven", "seal",
     "tapir", "urchin", "viper", "walrus", "yak", "zebra", "bison", "crane", "dingo", "egret",
     "finch", "gull",
+];
+
+/// Landmarks, kept in the same voice: short, concrete, no shared prefixes.
+const PLACES: [&str; 32] = [
+    "acorn", "beacon", "birch", "cinder", "coast", "delta", "dune", "elm", "estuary", "fern",
+    "fjord", "grain", "grove", "harbor", "heath", "islet", "juniper", "kelp", "larch", "moor",
+    "nimbus", "oak", "palm", "quarry", "reef", "sedge", "tide", "upland", "vale", "weir", "yarrow",
+    "zinnia",
 ];
 
 /// Parse a public key written as hex.
@@ -412,12 +424,12 @@ mod tests {
     }
 
     #[test]
-    fn a_key_reads_as_two_words_and_keeps_reading_as_them() {
+    fn a_key_reads_as_three_words_and_keeps_reading_as_them() {
         let key = [7u8; 32];
         let words = key_words(&key);
         assert_eq!(words, key_words(&key), "the same key must read the same");
         let parts: Vec<&str> = words.split('-').collect();
-        assert_eq!(parts.len(), 2, "{words}");
+        assert_eq!(parts.len(), 3, "{words}");
         assert!(parts.iter().all(|p| !p.is_empty()));
         assert!(
             words.chars().all(|c| c.is_ascii_lowercase() || c == '-'),

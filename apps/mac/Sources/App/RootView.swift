@@ -66,6 +66,8 @@ enum Destination: String, CaseIterable, Identifiable {
 }
 
 struct RootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var destination: Destination = .home
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
@@ -476,7 +478,10 @@ struct RootView: View {
             .overlay(alignment: .trailing) { inspectorDismissScrim }
             .overlay(alignment: .trailing) { inspectorHoverStrip }
             .overlay(alignment: .trailing) { inspectorOverlayPanel }
-            .animation(.easeOut(duration: 0.18), value: showsOverlayInspector)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.18),
+                value: showsOverlayInspector
+            )
     }
 
     @ViewBuilder
@@ -591,6 +596,7 @@ struct RootView: View {
                     }
                     .buttonStyle(.plain)
                     .help("Add a project folder")
+                    .accessibilityLabel("Add a project folder")
                     #endif
                 }
                 .padding(.horizontal, Theme.Space.m)

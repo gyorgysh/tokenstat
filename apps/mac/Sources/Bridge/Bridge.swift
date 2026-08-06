@@ -776,7 +776,8 @@ extension Bridge {
         command: String,
         args: [String],
         rows: Int,
-        cols: Int
+        cols: Int,
+        noColor: Bool = false
     ) async throws -> PtySessionInfo {
         try await background("pty.spawn", [
             "workspaceId": workspaceID,
@@ -784,6 +785,7 @@ extension Bridge {
             "args": args,
             "rows": rows,
             "cols": cols,
+            "noColor": noColor,
         ], as: PtySessionInfo.self)
     }
 

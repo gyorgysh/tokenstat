@@ -32,6 +32,12 @@ struct AddWorkspaceSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                Spacer()
+                InspectorCloseButton(
+                    action: { dismiss() },
+                    help: "Close",
+                    label: "Close add workspace"
+                )
             }
 
             Divider()

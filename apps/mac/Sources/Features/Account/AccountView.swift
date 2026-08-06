@@ -28,6 +28,7 @@ struct AccountView: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
 
+                terminalCard
                 privacyNote
             }
             .padding(Theme.Space.m)
@@ -267,6 +268,55 @@ struct AccountView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    }
+
+    private var terminalCard: some View {
+        Card(
+            title: "Terminal",
+            subtitle: "How terminal sessions behave"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                toggleRow(
+                    "Expose terminal output to VoiceOver",
+                    detail: "Lets VoiceOver read the terminal as a text area. Applies when a terminal appears.",
+                    isOn: Binding(
+                        get: { TerminalPreferences.exposesToVoiceOver },
+                        set: { TerminalPreferences.exposesToVoiceOver = $0 }
+                    )
+                )
+                Divider()
+                toggleRow(
+                    "Disable colours",
+                    detail: "New terminals start with NO_COLOR, for apps that switch to monochrome when it is set.",
+                    isOn: Binding(
+                        get: { TerminalPreferences.disablesColor },
+                        set: { TerminalPreferences.disablesColor = $0 }
+                    )
+                )
+            }
+        }
+    }
+
+    /// Label on the left, the switch pinned to the row's trailing edge, so
+    /// every switch in the list sits in the same column whatever the label
+    /// length. The switch is the state; no redundant word beside it.
+    private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .tint(Theme.accent)
+                .labelsHidden()
+                .accessibilityLabel(title)
+                .fixedSize()
+        }
     }
 }
 

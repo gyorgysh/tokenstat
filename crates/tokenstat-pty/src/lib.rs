@@ -200,6 +200,8 @@ pub struct Spawn {
     pub workspace_id: Option<String>,
     pub rows: u16,
     pub cols: u16,
+    /// The user asked for no colour: NO_COLOR=1 and nothing that overrides it.
+    pub no_color: bool,
 }
 
 /// The process-wide manager.
@@ -248,6 +250,28 @@ impl Manager {
         // Agent CLIs draw boxes and colour. Without this they fall back to
         // something far uglier, and some refuse interactive mode entirely.
         cmd.env("TERM", "xterm-256color");
+        if req.no_color {
+            // The user opted out of colour in settings. Honour it exactly:
+            // NO_COLOR=1 and no COLORTERM or FORCE_COLOR to override it.
+            cmd.env("NO_COLOR", "1");
+            cmd.env_remove("COLORTERM");
+            cmd.env_remove("FORCE_COLOR");
+        } else {
+            // macOS Terminal also advertises truecolor; TUIs like Claude Code
+            // and the Antigravity CLI consult COLORTERM and switch to a
+            // monochrome fallback when it is absent, even though the emulator
+            // handles 24-bit sequences. Say what the terminal can do.
+            cmd.env("COLORTERM", "truecolor");
+            // The app's own launch environment can carry NO_COLOR (a sandbox
+            // or CI shell sets it), and every session would inherit it:
+            // Claude Code and Antigravity quietly render monochrome when
+            // NO_COLOR is present. This terminal supports colour, so the
+            // launcher's claim is dropped here. FORCE_COLOR is the Node-TUI
+            // sledgehammer that wins even against a leftover NO_COLOR some
+            // future launcher might smuggle in.
+            cmd.env_remove("NO_COLOR");
+            cmd.env("FORCE_COLOR", "3");
+        }
         #[cfg(unix)]
         if let Some(path) = login_shell_path() {
             cmd.env("PATH", path);
@@ -540,6 +564,7 @@ mod tests {
             workspace_id: None,
             rows: 24,
             cols: 80,
+            no_color: false,
         })
         .expect("spawn")
     }

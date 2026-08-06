@@ -1272,7 +1272,7 @@ struct MachineIdentity: Codable, Sendable {
     let key: String
     /// The short form somebody reads aloud to check two ends match.
     let fingerprint: String
-    /// The same key as two words. What the screen leads with, because it is
+    /// The same key as three words. What the screen leads with, because it is
     /// the comparison a person performs rather than skims.
     let words: String?
     let label: String

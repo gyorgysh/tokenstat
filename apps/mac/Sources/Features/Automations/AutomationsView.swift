@@ -154,7 +154,7 @@ struct AutomationsView: View {
             Button { creating = true } label: {
                 Label("Create", systemImage: "plus")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AccentButtonStyle())
         }
     }
 
@@ -295,7 +295,7 @@ struct AutomationsView: View {
                     } label: {
                         Label("New automation", systemImage: "plus")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AccentButtonStyle())
                 }
             }
         }
@@ -311,7 +311,7 @@ struct AutomationsView: View {
                 Button { creating = true } label: {
                     Label("New", systemImage: "plus")
                 }
-                .controlSize(.small)
+                .buttonStyle(AccentButtonStyle(small: true))
             )
         ) {
             VStack(spacing: Theme.Space.s) {
@@ -647,8 +647,7 @@ private struct AutomationRow: View {
             }
             Spacer()
             Button("Run now") { Task { await model.run(job) } }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(AccentButtonStyle(small: true))
             Button("History") { showingHistory = true }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
@@ -660,6 +659,7 @@ private struct AutomationRow: View {
             }
             .buttonStyle(.borderless)
             .help("Delete this automation")
+            .accessibilityLabel("Delete \(job.name)")
         }
         .sheet(isPresented: $showingHistory) {
             AutomationHistorySheet(job: job, model: model, onView: onViewRun)
@@ -699,6 +699,11 @@ private struct AutomationHistorySheet: View {
                     Text("Run history").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
+                InspectorCloseButton(
+                    action: { dismiss() },
+                    help: "Close",
+                    label: "Close run history"
+                )
                 Button("Done") { dismiss() }
             }
             if model.runs(of: job).isEmpty {
@@ -788,12 +793,20 @@ private struct NewAutomationSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(existing == nil ? "New automation" : "Edit automation")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("An agent run headless in a folder, like a person launching it.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(existing == nil ? "New automation" : "Edit automation")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("An agent run headless in a folder, like a person launching it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                InspectorCloseButton(
+                    action: { dismiss() },
+                    help: "Close",
+                    label: "Close"
+                )
             }
 
             stepHeader
@@ -820,7 +833,7 @@ private struct NewAutomationSheet: View {
                 } label: {
                     Label(step < 2 ? "Continue" : (existing == nil ? "Create" : "Save"), systemImage: step < 2 ? "arrow.right" : "checkmark")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canContinue || working)
             }

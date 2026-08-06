@@ -651,18 +651,27 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
 struct RevealOnHover<Content: View>: View {
     @ViewBuilder var content: Content
 
-    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
+    @FocusState private var isFocused: Bool
+
+    /// Hover or keyboard focus reveals the words. The old hover-only version
+    /// locked a full-keyboard or screen-reader user out of the one line that
+    /// identifies the machine.
+    private var revealed: Bool { isHovering || isFocused }
 
     var body: some View {
         content
-            .blur(radius: hovering ? 0 : 4)
-            .opacity(hovering ? 1 : 0.85)
-            .animation(.easeOut(duration: 0.12), value: hovering)
-            .onHover { hovering = $0 }
+            .blur(radius: revealed ? 0 : 4)
+            .opacity(revealed ? 1 : 0.85)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: revealed)
+            .onHover { isHovering = $0 }
+            .focusable()
+            .focused($isFocused)
             // Without this the hover only registers over the glyphs
             // themselves, so moving between two words un-blurs and re-blurs.
             .contentShape(.rect)
-            .help(hovering ? "" : "Hover to reveal")
+            .help(revealed ? "" : "Tab to reveal")
             .accessibilityHidden(false)
     }
 }
@@ -674,6 +683,10 @@ struct RevealOnHover<Content: View>: View {
 /// inspectors carry one so the two panes behave the same way.
 struct InspectorCloseButton: View {
     let action: () -> Void
+    /// Tooltip and VoiceOver label. Defaults to the inspector copy; a sheet
+    /// passes its own so "Close" never announces as "close the inspector".
+    var help: String = "Close the inspector"
+    var label: String = "Close the inspector"
 
     @State private var isHovering = false
 
@@ -697,8 +710,8 @@ struct InspectorCloseButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help("Close the inspector")
-        .accessibilityLabel("Close the inspector")
+        .help(help)
+        .accessibilityLabel(label)
     }
 }
 
@@ -731,6 +744,39 @@ struct SegmentedCapsulePicker<Option: Hashable>: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
+    }
+}
+
+/// The app's primary action: a soft accent capsule with accent text and a
+/// hairline, the same language as a selected segment in the capsule picker.
+///
+/// Replaces the system blue pill everywhere a primary action sits in content
+/// (forms, cards, empty states). Toolbar items stay system-styled, because a
+/// toolbar is the one place the platform chrome is the design.
+struct AccentButtonStyle: ButtonStyle {
+    /// Dense variant for rows and card accessories.
+    var small = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: small ? 12 : 13, weight: .medium))
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, small ? 10 : 14)
+            .padding(.vertical, small ? 4 : 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(
+                        configuration.isPressed
+                            ? Theme.accent.opacity(0.18)
+                            : Theme.accentSoft
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
+            )
+            .contentShape(.rect)
+            .opacity(configuration.isPressed ? 0.85 : 1)
     }
 }
 

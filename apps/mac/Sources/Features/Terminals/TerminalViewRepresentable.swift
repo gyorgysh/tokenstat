@@ -36,6 +36,14 @@ struct TerminalViewRepresentable: NSViewRepresentable {
 
     func updateNSView(_ nsView: TerminalView, context: Context) {
         session.applyColors(scheme: colorScheme, to: nsView)
+        // The emulator is a plain NSView with no accessibility content; when
+        // the user opts in on the Account screen, expose the visible screen
+        // as a read-only text area so VoiceOver can read the output.
+        let exposeToVoiceOver = TerminalPreferences.exposesToVoiceOver
+        nsView.setAccessibilityElement(exposeToVoiceOver)
+        nsView.setAccessibilityRole(exposeToVoiceOver ? .textArea : .none)
+        nsView.setAccessibilityLabel(exposeToVoiceOver ? "Terminal output" : nil)
+        nsView.setAccessibilityValue(exposeToVoiceOver ? session.visibleTerminalText : nil)
     }
 
     /// SwiftUI removes the view from the hierarchy when the pane goes away. The

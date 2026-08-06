@@ -421,6 +421,7 @@ private struct TabCloseButton: View {
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }
 

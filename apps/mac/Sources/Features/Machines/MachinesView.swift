@@ -71,11 +71,23 @@ struct MachinesView: View {
             }
         }
         .sheet(isPresented: $addingDevice) {
-            PairingForm { key, label, address in
-                await model.pair(key: key, label: label, address: address)
-                addingDevice = false
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    InspectorCloseButton(
+                        action: { addingDevice = false },
+                        help: "Close",
+                        label: "Close add device"
+                    )
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.top, Theme.Space.s)
+                PairingForm { key, label, address in
+                    await model.pair(key: key, label: label, address: address)
+                    addingDevice = false
+                }
+                .padding(Theme.Space.l)
             }
-            .padding(Theme.Space.l)
             .frame(width: 500)
         }
     }
@@ -91,7 +103,7 @@ struct MachinesView: View {
             }
             Spacer()
             Button("Add device") { addingDevice = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle())
         }
         .padding(Theme.Space.m)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -115,7 +127,7 @@ struct MachinesView: View {
                         Text("Set up helper")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle())
                 .disabled(model.settingUpHelper)
             }
         }
@@ -211,31 +223,43 @@ struct MachinesView: View {
     private var serving: some View {
         if let status = model.status {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Toggle(isOn: Binding(
-                    get: { status.serving },
-                    set: { enabled in Task { await model.setServing(enabled) } }
-                )) {
+                HStack(alignment: .center, spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Link devices")
+                        Text("Link devices").font(.callout)
                         Text("Only approved devices can open sessions or change files here.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: Theme.Space.m)
+                    Toggle("", isOn: Binding(
+                        get: { status.serving },
+                        set: { enabled in Task { await model.setServing(enabled) } }
+                    ))
+                    .toggleStyle(.switch)
+                    .tint(Theme.accent)
+                    .labelsHidden()
+                    .accessibilityLabel("Link devices")
+                    .fixedSize()
                 }
-                .toggleStyle(.switch)
 
-                Toggle(isOn: Binding(
-                    get: { status.tunnel },
-                    set: { enabled in Task { await model.setTunnel(enabled) } }
-                )) {
+                HStack(alignment: .center, spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Reach machines from anywhere")
+                        Text("Reach machines from anywhere").font(.callout)
                         Text("Uses end-to-end encryption. The service can see which machines talked, when, and how much, but not what they said.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: Theme.Space.m)
+                    Toggle("", isOn: Binding(
+                        get: { status.tunnel },
+                        set: { enabled in Task { await model.setTunnel(enabled) } }
+                    ))
+                    .toggleStyle(.switch)
+                    .tint(Theme.accent)
+                    .labelsHidden()
+                    .accessibilityLabel("Reach machines from anywhere")
+                    .fixedSize()
                 }
-                .toggleStyle(.switch)
 
                 // The setting and the truth are different facts. A port already
                 // in use leaves the first on and the second off, and a screen
@@ -279,7 +303,7 @@ struct MachinesView: View {
                         }
                         Spacer()
                         Button("Connect") { Task { await model.pair(daemon) } }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(AccentButtonStyle())
                             .disabled(daemon.address == nil)
                     }
                     .padding(Theme.Space.s)
@@ -307,7 +331,7 @@ struct MachinesView: View {
                     PeerRow(peer: peer) {
                         HStack(spacing: Theme.Space.s) {
                             Button("Approve") { Task { await model.approve(peer) } }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(AccentButtonStyle())
                             Button("Forget") { Task { await model.forget(peer) } }
                         }
                     }
@@ -403,11 +427,11 @@ struct MachinesView: View {
         switch peer.trust {
         case .pending:
             Button("Approve") { Task { await model.approve(peer) } }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AccentButtonStyle())
         case .approved:
             if peer.address?.isEmpty == false {
                 Button("Connect") { Task { await model.connect(peer) } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AccentButtonStyle())
             }
             Button("Revoke") { Task { await model.revoke(peer) } }
                 .buttonStyle(.bordered)
@@ -620,7 +644,7 @@ private struct PairingForm: View {
                     } label: {
                         Label("Connect", systemImage: "link")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AccentButtonStyle())
                     .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
 
