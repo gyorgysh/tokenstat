@@ -34,6 +34,14 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// The glyph beside the label in the scope selector.
+    var symbol: String {
+        switch self {
+        case .thisMachine: return "laptopcomputer"
+        case .allMachines: return "network"
+        }
+    }
+
     /// What the host calls it.
     var wire: String {
         switch self {

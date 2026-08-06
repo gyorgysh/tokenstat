@@ -897,12 +897,15 @@ extension Bridge {
 
     static func todoCreate(
         title: String, kind: TodoKind, notes: String, column: String, backend: String,
-        workspaceID: String, budgetSeconds: UInt64
+        workspaceID: String, budgetSeconds: UInt64, model: String? = nil, effort: String? = nil
     ) async throws -> TodoCard {
-        try await background("todo.create", [
+        var params: [String: Any] = [
             "title": title, "kind": kind.rawValue, "notes": notes, "column": column, "backend": backend,
             "workspaceId": workspaceID, "budgetSeconds": budgetSeconds,
-        ], as: TodoCard.self)
+        ]
+        if let model { params["model"] = model }
+        if let effort { params["effort"] = effort }
+        return try await background("todo.create", params, as: TodoCard.self)
     }
 
     static func todoUpdate(
@@ -936,7 +939,8 @@ extension Bridge {
 private extension Automation {
     var payload: [String: Any] {
         [
-            "id": id, "name": name, "backend": backend, "workspaceId": workspaceID,
+            "id": id, "name": name, "backend": backend,
+            "model": model as Any, "effort": effort as Any, "workspaceId": workspaceID,
             "prompt": prompt,
             "schedule": [
                 "kind": schedule.kind.rawValue,

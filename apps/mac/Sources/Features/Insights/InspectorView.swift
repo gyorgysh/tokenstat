@@ -82,7 +82,10 @@ struct InspectorView: View {
                 value: model.periodValue.formatted,
                 note: "not billed",
                 tint: Theme.accent,
-                size: 26
+                // 26pt reads at full size; below the display fit it stops
+                // shrinking the value and drops a step instead, which keeps
+                // the headline figure legible in a 960×600 window.
+                size: DisplayFit.factor < 1 ? 22 : 26
             )
 
             if let caveat = model.periodValue.caveat {
@@ -225,14 +228,21 @@ struct InspectorView: View {
         _ label1: String, _ value1: String,
         _ label2: String, _ value2: String
     ) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.m) {
-                Stat(label: label1, value: value1, size: 15)
-                Stat(label: label2, value: value2, size: 15)
-            }
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Stat(label: label1, value: value1, size: 15, expands: false)
-                Stat(label: label2, value: value2, size: 15, expands: false)
+        // A measured threshold rather than `ViewThatFits`: inside a ScrollView
+        // a ViewThatFits can be offered the scroll view's full width and always
+        // take the side-by-side branch, which is the overflow it exists to
+        // prevent. `WidthReader` hands the pair its actual width.
+        WidthReader { width in
+            if width >= 260 {
+                HStack(spacing: Theme.Space.m) {
+                    Stat(label: label1, value: value1, size: 15)
+                    Stat(label: label2, value: value2, size: 15)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Stat(label: label1, value: value1, size: 15, expands: false)
+                    Stat(label: label2, value: value2, size: 15, expands: false)
+                }
             }
         }
     }

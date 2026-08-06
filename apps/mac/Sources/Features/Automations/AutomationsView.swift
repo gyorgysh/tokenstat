@@ -21,9 +21,15 @@ struct AutomationsView: View {
     /// this screen never runs a second `workspace.list`.
     var folders: [WorkspaceFolder]
     var onNavigate: ((Destination) -> Void)? = nil
+    /// A run to open on arrival, requested from Tasks. Cleared once opened.
+    @Binding var pendingRunID: String?
 
     @State private var creating = false
+    @State private var template: AutomationTemplate?
+    /// The run whose transcript sheet is open.
+    @State private var viewingRun: RunRecord?
     @State private var search = ""
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -32,14 +38,32 @@ struct AutomationsView: View {
                     Banner(text: error, severity: .warning)
                 }
                 intro
-                TextField("Search automations", text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .overlay(alignment: .leading) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.tertiary)
-                            .padding(.leading, 8)
-                    }
-                    .padding(.leading, 4)
+                templatesRow
+                // A search box, not a rounded text field with the icon glued
+                // on top: the overlay sat on the field's leading edge and
+                // overlapped the placeholder and the first typed characters.
+                // The icon lives inside the box now, so the text can never
+                // collide with it.
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                    TextField("Search automations", text: $search)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .focused($searchFocused)
+                }
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, 6)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Space.s)
+                        .strokeBorder(
+                            searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
+                            lineWidth: searchFocused ? 1.5 : 1
+                        )
+                )
+                .padding(.leading, 4)
                 if isWarming {
                     // "Nothing yet" is an answer, and it must not be given
                     // before the question has been asked. Grey job rows say
@@ -74,11 +98,31 @@ struct AutomationsView: View {
         .sheet(isPresented: $creating) {
             NewAutomationSheet(model: model, folders: folders, onNavigate: onNavigate)
         }
+        .sheet(item: $template) { suggestion in
+            NewAutomationSheet(
+                model: model,
+                folders: folders,
+                onNavigate: onNavigate,
+                template: suggestion
+            )
+        }
+        .sheet(item: $viewingRun) { run in
+            TranscriptSheet(model: model, run: run)
+        }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .task { await model.appeared() }
+        .task {
+            await model.appeared()
+            // A delegated task navigated here asking for its transcript.
+            guard let id = pendingRunID else { return }
+            pendingRunID = nil
+            if let run = model.runs.first(where: { $0.id == id }) {
+                viewingRun = run
+                model.watch(run)
+            }
+        }
         // The model outlives this view, and the transcript tail must not.
         .onDisappear { model.disappeared() }
     }
@@ -106,6 +150,75 @@ struct AutomationsView: View {
         }
     }
 
+    /// Three suggested setups, so a blank Automations screen shows what the
+    /// screen is for instead of only an empty card.
+    private var templatesRow: some View {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            ForEach(Self.suggestedTemplates) { suggestion in
+                Button {
+                    template = suggestion
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Image(systemName: suggestion.symbol)
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                        Text(suggestion.title)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(suggestion.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(Theme.Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.cardRadius)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    )
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private static let suggestedTemplates: [AutomationTemplate] = [
+        AutomationTemplate(
+            title: "Daily brief",
+            subtitle: "Every morning at 8:00",
+            symbol: "sunrise",
+            name: "Daily brief",
+            prompt: "Summarise yesterday's usage and flag anything that needs attention.",
+            backendID: "claude",
+            schedule: AutomationSchedule(kind: .daily, everySeconds: 0, hour: 8, minute: 0, weekday: 0),
+            budgetSeconds: 600
+        ),
+        AutomationTemplate(
+            title: "System health check",
+            subtitle: "Every hour",
+            symbol: "heart.text.square",
+            name: "System health check",
+            prompt: "Check disk, memory and CPU, and confirm the tokenstat daemon is running. Report anything abnormal.",
+            backendID: "sh",
+            schedule: AutomationSchedule(kind: .interval, everySeconds: 3600, hour: 0, minute: 0, weekday: 0),
+            budgetSeconds: 120
+        ),
+        AutomationTemplate(
+            title: "Dependency check",
+            subtitle: "Every week",
+            symbol: "shippingbox",
+            name: "Dependency check",
+            prompt: "Check for outdated or vulnerable dependencies (npm audit and the package managers this project uses) and summarise what needs a bump.",
+            backendID: "sh",
+            schedule: AutomationSchedule(kind: .weekly, everySeconds: 0, hour: 9, minute: 0, weekday: 0),
+            budgetSeconds: 900
+        ),
+    ]
+
     private var filteredJobs: [Automation] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return model.jobs }
@@ -126,7 +239,8 @@ struct AutomationsView: View {
             VStack(spacing: 0) {
                 ForEach(jobs) { job in
                     AutomationRow(job: job, model: model,
-                                  folder: folders.first { $0.id == job.workspaceID })
+                                  folder: folders.first { $0.id == job.workspaceID },
+                                  onViewRun: { viewingRun = $0 })
                     if job.id != jobs.last?.id { Divider() }
                 }
             }
@@ -206,7 +320,8 @@ struct AutomationsView: View {
                         AutomationRow(
                             job: job,
                             model: model,
-                            folder: folders.first { $0.id == job.workspaceID }
+                            folder: folders.first { $0.id == job.workspaceID },
+                            onViewRun: { viewingRun = $0 }
                         )
                     }
                 }
@@ -266,7 +381,10 @@ struct AutomationsView: View {
         .background(model.selectedRunID == run.id ? Theme.accentSoft : .clear,
                     in: RoundedRectangle(cornerRadius: Theme.Space.xs))
         .contentShape(.rect)
-        .onTapGesture { model.watch(run) }
+        .onTapGesture {
+            viewingRun = run
+            model.watch(run)
+        }
     }
 
     private func liveTranscript(_ run: RunRecord) -> some View {
@@ -275,7 +393,13 @@ struct AutomationsView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             ScrollView {
-                Text(model.transcriptText.isEmpty ? "Waiting for output…" : model.transcriptText)
+                Text(
+                    model.transcriptText.isEmpty
+                        ? "Waiting for output…"
+                        : (run.backend == "claude"
+                            ? TranscriptSheet.readableTranscript(model.transcriptText)
+                            : model.transcriptText)
+                )
                     .font(Theme.mono(11))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -318,6 +442,178 @@ struct AutomationsView: View {
     }
 }
 
+/// The full transcript of one run, rendered as something a person reads.
+///
+/// The raw transcript is the CLI's own stream — for Claude that is a JSON
+/// line stream whose system hooks drown out the actual answer. This sheet
+/// extracts the assistant messages and the final result, and passes plain
+/// text through untouched for shell runs. Readable parsing exists for
+/// Claude's stream-json today; every other backend stays raw until its
+/// output shape is handled the same way.
+private struct TranscriptSheet: View {
+    @Bindable var model: AutomationsModel
+    var run: RunRecord
+
+    @Environment(\.dismiss) private var dismiss
+    /// Raw shows the CLI's exact stream; off (the default) shows the parsed,
+    /// human-readable version.
+    @State private var showRaw = false
+
+    /// Only Claude's stream-json has a readable form yet.
+    private var canSummarize: Bool { run.backend == "claude" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(run.name)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(headerLine)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if canSummarize {
+                    Button {
+                        showRaw.toggle()
+                    } label: {
+                        Label(showRaw ? "Readable" : "Raw", systemImage: showRaw ? "text.alignleft" : "terminal")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(showRaw ? "Show the readable summary" : "Show the raw machine output")
+                }
+                StatusPill(status: run.status, text: run.endedLabel)
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.controlGlyph)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Theme.controlSeat))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Close")
+            }
+
+            ScrollView {
+                Text(
+                    showRaw || !canSummarize
+                        ? model.transcriptText
+                        : Self.readableTranscript(model.transcriptText)
+                )
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(Theme.Space.s)
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+        }
+        .padding(Theme.Space.l)
+        .frame(width: 680)
+        .frame(minHeight: 420, maxHeight: 560)
+        .background(Theme.panel)
+        .task { model.watch(run) }
+    }
+
+    private var headerLine: String {
+        var line = run.startedAt.formatted(date: .abbreviated, time: .shortened)
+        if let code = run.exitCode {
+            line += " · exit \(code)"
+        }
+        return line
+    }
+
+    /// Turns a raw transcript into readable text.
+    ///
+    /// Claude's `--output-format stream-json` writes one JSON object per line:
+    /// system hooks (startup, metrics), tool calls, assistant messages, and a
+    /// final result. The assistant text and the result are the conversation;
+    /// everything else is machinery, so it is dropped. Lines that are not
+    /// JSON (shell output) pass through whole.
+    static func readableTranscript(_ raw: String) -> String {
+        guard !raw.isEmpty else { return "Waiting for output…" }
+        var out: [String] = []
+        // Split on the *string* separator, not the Character one: the pty
+        // writes CRLF, and Swift treats CRLF as one grapheme cluster, so
+        // splitting on Character("\n") finds nothing and the whole file is one
+        // "line" that then fails to parse and passes through raw.
+        for line in raw.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            // The pty writes CRLF, so lines end in `\r`; `.whitespaces` alone
+            // does not strip it, and Foundation then rejects every JSON line.
+            // ANSI show/hide-cursor escapes can also prefix a line.
+            let cleaned = Self.stripANSI(trimmed)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleaned.hasPrefix("{"),
+                  let data = cleaned.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                // An occasional truncated or escape-polluted JSON line should
+                // not dump raw machine JSON into the readable view.
+                if !cleaned.contains("\"type\":") {
+                    out.append(cleaned)
+                }
+                continue
+            }
+
+            let type = object["type"] as? String
+            switch type {
+            case "assistant":
+                // `message.content` on newer SDKs, top-level `content` on
+                // older ones. Text blocks are the words; tool blocks are not.
+                let content = (object["message"] as? [String: Any])?["content"]
+                    ?? object["content"]
+            let texts = (content as? [[String: Any]])?
+                .compactMap { $0["text"] as? String } ?? []
+            if !texts.isEmpty {
+                let block = texts.joined(separator: "\n")
+                // Claude re-emits the same final message across turns; the
+                // user and tool lines between the copies are filtered out, so
+                // without this the conclusion prints once per turn.
+                if out.last != block {
+                    out.append(block)
+                }
+            }
+            case "result":
+                if let result = object["result"] as? String, !result.isEmpty {
+                    // Claude's final result repeats the last assistant
+                    // message; do not print the conclusion twice.
+                    if out.last != result {
+                        out.append(result)
+                    }
+                }
+            default:
+                // System hooks, tool uses, and the prompt echo are the
+                // machinery around the answer, not the answer.
+                break
+            }
+        }
+        let joined = out.joined(separator: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? "(No readable output)" : joined
+    }
+
+    /// Removes ANSI escape sequences (e.g. `\u{1B}[?25h`) that the pty can
+    /// interleave with the JSON stream.
+    static func stripANSI(_ text: String) -> String {
+        text.replacingOccurrences(
+            // Not a raw string: `\u{1B}` must become the ESC character in the
+            // pattern, and `\\[` the regex's literal-bracket.
+            of: "\u{1B}\\[[0-9;?]*[A-Za-z]",
+            with: "",
+            options: .regularExpression
+        )
+    }
+}
+
 // MARK: - One automation
 
 /// A row that answers the two questions somebody has about a job: when does it
@@ -330,6 +626,8 @@ private struct AutomationRow: View {
     var job: Automation
     @Bindable var model: AutomationsModel
     var folder: WorkspaceFolder?
+    /// Opens the transcript sheet for a run, owned by the screen.
+    var onViewRun: (RunRecord) -> Void
 
     @State private var confirmingDelete = false
     @State private var showingHistory = false
@@ -341,7 +639,9 @@ private struct AutomationRow: View {
             Text(job.prompt)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                // Reserved space keeps every row the same height whatever the
+                // prompt length, the same matched-rows rule the cards use.
+                .lineLimit(2, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             facts
         }
@@ -364,6 +664,8 @@ private struct AutomationRow: View {
             FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
             Text(job.name)
                 .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
             Text(model.backends.first { $0.id == job.backend }?.label ?? job.backend)
                 .font(.caption2.weight(.medium))
                 .padding(.horizontal, 6)
@@ -391,10 +693,12 @@ private struct AutomationRow: View {
             Label(model.scheduleSummary(job.schedule), systemImage: "clock")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .lineLimit(1)
             if job.enabled, let next = job.nextRun {
                 Text("Next \(next.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
             if let last = model.lastRun(for: job) {
                 // The time is the useful half. The outcome is already a pill up
@@ -402,10 +706,12 @@ private struct AutomationRow: View {
                 Text("Last ran \(last.startedAt.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             } else {
                 Text("Never run")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
             if let folder {
                 Label(folder.name, systemImage: "folder")
@@ -430,7 +736,7 @@ private struct AutomationRow: View {
             .help("Delete this automation")
         }
         .sheet(isPresented: $showingHistory) {
-            AutomationHistorySheet(job: job, model: model)
+            AutomationHistorySheet(job: job, model: model, onView: onViewRun)
         }
         .sheet(isPresented: $editing) {
             NewAutomationSheet(model: model, folders: folder.map { [$0] } ?? [], existing: job)
@@ -456,6 +762,7 @@ private struct StatusPill: View {
 private struct AutomationHistorySheet: View {
     let job: Automation
     @Bindable var model: AutomationsModel
+    var onView: (RunRecord) -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -480,7 +787,10 @@ private struct AutomationHistorySheet: View {
                                     .font(.callout)
                                 Spacer()
                                 StatusPill(status: run.status, text: run.endedLabel)
-                                Button("View") { model.watch(run); dismiss() }
+                                Button("View") {
+                                    onView(run)
+                                    dismiss()
+                                }
                                     .buttonStyle(.borderless)
                             }
                             .padding(.vertical, Theme.Space.s)
@@ -497,6 +807,19 @@ private struct AutomationHistorySheet: View {
 
 // MARK: - Creating one
 
+/// A suggested setup on the Automations screen, pre-filling the sheet.
+private struct AutomationTemplate: Identifiable {
+    var id: String { title }
+    var title: String
+    var subtitle: String
+    var symbol: String
+    var name: String
+    var prompt: String
+    var backendID: String
+    var schedule: AutomationSchedule
+    var budgetSeconds: UInt64
+}
+
 /// Setting up an automation, in a sheet.
 ///
 /// A sheet rather than a card at the bottom of the screen: this is a form with
@@ -508,6 +831,8 @@ private struct NewAutomationSheet: View {
     var folders: [WorkspaceFolder]
     var onNavigate: ((Destination) -> Void)?
     var existing: Automation? = nil
+    /// Pre-fills the form when the sheet was opened from a suggestion.
+    var template: AutomationTemplate? = nil
 
     @Environment(\.dismiss) private var dismiss
 
@@ -515,6 +840,10 @@ private struct NewAutomationSheet: View {
     @State private var backendID = ""
     @State private var workspaceID = ""
     @State private var prompt = ""
+    /// The selected backend's model alias and effort level. Empty means the
+    /// backend's default, which is also what the pickers start on.
+    @State private var modelChoice = ""
+    @State private var effortChoice = ""
     @State private var scheduleKind: ScheduleKind = .once
     @State private var intervalMinutes = "60"
     @State private var scheduleTime = Date()
@@ -582,12 +911,35 @@ private struct NewAutomationSheet: View {
                 scheduleKind = existing.schedule.kind
                 budget = String(existing.budgetSeconds)
             }
+            if let template {
+                name = template.name
+                prompt = template.prompt
+                scheduleKind = template.schedule.kind
+                intervalMinutes = String(max(1, template.schedule.everySeconds / 60))
+                scheduleTime = Calendar.current.date(
+                    bySettingHour: template.schedule.hour,
+                    minute: template.schedule.minute,
+                    second: 0,
+                    of: Date()
+                ) ?? Date()
+                scheduleWeekday = template.schedule.weekday
+                budget = String(template.budgetSeconds)
+                if model.backends.contains(where: { $0.id == template.backendID }) {
+                    backendID = template.backendID
+                }
+            }
             if backendID.isEmpty, let first = model.backends.first {
                 backendID = first.id
             }
             if workspaceID.isEmpty, let first = folders.first {
                 workspaceID = first.id
             }
+        }
+        .onChange(of: backendID) { _, _ in
+            // A model that meant something to one backend means nothing to
+            // the next; go back to defaults when the agent changes.
+            modelChoice = ""
+            effortChoice = ""
         }
     }
 
@@ -624,15 +976,36 @@ private struct NewAutomationSheet: View {
                         onNavigate?(.workspaces)
                     }
                 }
-                Picker("Agent", selection: $backendID) {
-                    ForEach(model.backends) { backend in
-                        Text(backend.label).tag(backend.id)
-                    }
-                }
-                Picker("Workspace", selection: $workspaceID) {
-                    Text("Choose a workspace").tag("")
-                    ForEach(folders) { folder in
-                        Text(folder.name).tag(folder.id)
+                AppMenuPicker(
+                    title: "Agent",
+                    options: model.backends.map { (value: $0.id, label: $0.label) },
+                    selection: $backendID
+                )
+                AppMenuPicker(
+                    title: "Workspace",
+                    options: [(value: "", label: "Choose a workspace")]
+                        + folders.map { (value: $0.id, label: $0.name) },
+                    selection: $workspaceID
+                )
+                if let backend = model.backends.first(where: { $0.id == backendID }),
+                   !backend.models.isEmpty || !backend.efforts.isEmpty {
+                    HStack(spacing: Theme.Space.s) {
+                        if !backend.models.isEmpty {
+                            AppMenuPicker(
+                                title: "Model",
+                                options: [(value: "", label: "Default")]
+                                    + backend.models.map { (value: $0, label: $0) },
+                                selection: $modelChoice
+                            )
+                        }
+                        if !backend.efforts.isEmpty {
+                            AppMenuPicker(
+                                title: "Effort",
+                                options: [(value: "", label: "Default")]
+                                    + backend.efforts.map { (value: $0, label: $0) },
+                                selection: $effortChoice
+                            )
+                        }
                     }
                 }
                 Text("The agent runs on this machine, in the selected workspace.")
@@ -641,10 +1014,10 @@ private struct NewAutomationSheet: View {
             default:
                 scheduleControls
                 HStack(spacing: 4) {
-                    Text("Stop after")
+                    Text("Time limit")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("Budget", text: $budget)
+                    TextField("900", text: $budget)
                         .frame(width: 70)
                     Text("seconds")
                         .font(.caption)
@@ -699,13 +1072,15 @@ private struct NewAutomationSheet: View {
 
     @ViewBuilder
     private var scheduleControls: some View {
-        Picker("Schedule", selection: $scheduleKind) {
-            Text("Only when I run it").tag(ScheduleKind.once)
-            Text("Every so often").tag(ScheduleKind.interval)
-            Text("Daily").tag(ScheduleKind.daily)
-            Text("Weekly").tag(ScheduleKind.weekly)
-        }
-        .pickerStyle(.segmented)
+        SegmentedCapsulePicker(
+            options: [
+                (ScheduleKind.once, "Once", "cursorarrow.click"),
+                (ScheduleKind.interval, "Interval", "repeat"),
+                (ScheduleKind.daily, "Daily", "sun.max"),
+                (ScheduleKind.weekly, "Weekly", "calendar"),
+            ],
+            selection: $scheduleKind
+        )
 
         switch scheduleKind {
         case .interval:
@@ -729,11 +1104,11 @@ private struct NewAutomationSheet: View {
             }
         case .weekly:
             HStack(spacing: Theme.Space.s) {
-                Picker("Day", selection: $scheduleWeekday) {
-                    ForEach(weekdays, id: \.0) { day in
-                        Text(day.1).tag(day.0)
-                    }
-                }
+                AppMenuPicker(
+                    title: "Day",
+                    options: weekdays.map { (value: $0.0, label: $0.1) },
+                    selection: $scheduleWeekday
+                )
                 .frame(maxWidth: 160, alignment: .leading)
                 Text("at")
                     .font(.caption)
@@ -781,6 +1156,8 @@ private struct NewAutomationSheet: View {
                 id: existing.id,
                 name: name.trimmingCharacters(in: .whitespaces),
                 backend: backendID,
+                model: modelChoice.isEmpty ? nil : modelChoice,
+                effort: effortChoice.isEmpty ? nil : effortChoice,
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 schedule: spec,
@@ -794,6 +1171,8 @@ private struct NewAutomationSheet: View {
             await model.create(
                 name: name.trimmingCharacters(in: .whitespaces),
                 backend: backendID,
+                model: modelChoice.isEmpty ? nil : modelChoice,
+                effort: effortChoice.isEmpty ? nil : effortChoice,
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 schedule: spec,

@@ -45,6 +45,27 @@ enum Theme {
     static let border = Color.adaptive(light: hex(0xE7E7EE), dark: hex(0x211D33))
     /// A row the pointer is over.
     static let rowHighlight = Color.adaptive(light: hex(0xF0ECFF), dark: hex(0x1B1430))
+    /// The quiet circular seat behind a small chrome glyph, such as a close
+    /// button.
+    ///
+    /// Explicitly adaptive rather than `Color.primary` at low opacity: the
+    /// hierarchical primary resolves against whatever material sits behind
+    /// it, and on a floating panel at a scaled resolution that read as a
+    /// wrong tint. An explicit light/dark pair cannot drift.
+    static let controlSeat = Color.adaptive(
+        light: Color.black.opacity(0.06),
+        dark: Color.white.opacity(0.09)
+    )
+    /// A small chrome glyph, such as a close button's xmark.
+    ///
+    /// Explicitly adaptive rather than `.secondary` or `Color.primary`: the
+    /// hierarchical styles resolve through whatever sits behind the glyph,
+    /// and on a dark tab strip at a scaled resolution the xmark came out the
+    /// wrong colour. A plain adaptive pair cannot pick up its background.
+    static let controlGlyph = Color.adaptive(light: hex(0x6B6876), dark: hex(0xA8A5B5))
+
+    /// The same glyph while the pointer is over it.
+    static let controlGlyphHover = Color.adaptive(light: hex(0x2A2831), dark: hex(0xE9E7F0))
     /// The row that is actually selected.
     ///
     /// Tinted with the accent rather than being a lighter grey. With a hover
@@ -68,7 +89,13 @@ enum Theme {
     // Semantic colours. Before these existed, a live session was `.green` and
     // an unsaved file was `.orange`, written at the call site, so the app had
     // no single answer to what "good" looks like.
-    static let success = Color.adaptive(light: hex(0x2F7D4B), dark: hex(0x79D69C))
+    //
+    // Success is the accent, deliberately: a green "good" sat outside the
+    // purple design everywhere it appeared (toasts, status pills, live dots),
+    // so the app's own active colour is what "good" means now. Warning and
+    // danger stay distinct, because amber and red carry meaning the accent
+    // does not.
+    static let success = accent
     static let warning = Color(red: 0xE0 / 255, green: 0xA9 / 255, blue: 0x3B / 255)
     static let danger = Color(red: 0xD6 / 255, green: 0x45 / 255, blue: 0x3F / 255)
 
@@ -301,6 +328,11 @@ struct Stat: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        // The note is a qualifier, not the data. When the pair
+                        // is squeezed it gives way first, shrinking before it
+                        // ever truncates, instead of pushing the value around.
+                        .layoutPriority(-1)
+                        .minimumScaleFactor(0.8)
                 }
             }
         }
@@ -649,14 +681,14 @@ struct InspectorCloseButton: View {
         Button(action: action) {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isHovering ? Color.primary : .secondary)
+                .foregroundStyle(isHovering ? Theme.controlGlyphHover : Theme.controlGlyph)
                 .frame(width: 22, height: 22)
                 // A bare grey glyph floats on the dark sidebar material and
                 // reads as a smudge. A quiet circular seat makes it a control
                 // on any background, and the hover fills it like the tab close
                 // buttons already do.
                 .background(
-                    Circle().fill(isHovering ? Theme.rowHighlight : Color.primary.opacity(0.07))
+                    Circle().fill(isHovering ? Theme.rowHighlight : Theme.controlSeat)
                 )
                 .overlay(
                     Circle().strokeBorder(Theme.border.opacity(isHovering ? 0.9 : 0.55), lineWidth: 1)
@@ -667,6 +699,126 @@ struct InspectorCloseButton: View {
         .onHover { isHovering = $0 }
         .help("Close the inspector")
         .accessibilityLabel("Close the inspector")
+    }
+}
+
+/// A capsule selector in the app's own language: equal segments inside a
+/// bordered panel, the selected one filled with the accent's soft tint and
+/// accent text, hover in the same grey the sidebar rows use.
+///
+/// Deliberately not the system's liquid glass styles: at this size the glass
+/// capsules squeezed their labels and the segments sat almost touching, so
+/// this is drawn from `Theme` instead.
+struct SegmentedCapsulePicker<Option: Hashable>: View {
+    var options: [(value: Option, label: String, symbol: String)]
+    @Binding var selection: Option
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(options, id: \.value) { option in
+                SegmentButton(
+                    label: option.label,
+                    symbol: option.symbol,
+                    isSelected: option.value == selection
+                ) {
+                    selection = option.value
+                }
+            }
+        }
+        .padding(3)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+}
+
+/// One segment of `SegmentedCapsulePicker`.
+private struct SegmentButton: View {
+    var label: String
+    var symbol: String
+    var isSelected: Bool
+    var action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(label, systemImage: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(
+                            isSelected
+                                ? Theme.accentSoft
+                                : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear)
+                        )
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+    }
+}
+
+/// A form field whose control is a menu in the app's own language: caption
+/// above, a bordered panel below with the selected value and a chevron, the
+/// same shapes the capsules and search box use.
+///
+/// Replaces the system grey pop-up menus so every selector in a form reads as
+/// the same control family.
+struct AppMenuPicker<Option: Hashable>: View {
+    var title: String
+    var options: [(value: Option, label: String)]
+    @Binding var selection: Option
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Menu {
+                ForEach(options, id: \.value) { option in
+                    Button(option.label) {
+                        selection = option.value
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+                .contentShape(.rect)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var selectedLabel: String {
+        options.first { $0.value == selection }?.label ?? ""
     }
 }
 
@@ -718,7 +870,18 @@ extension CGFloat {
     /// fixed columns add up to more than the window can hold and the inspector
     /// runs past the edge. This factor shrinks those numbers with the screen,
     /// so the same window fits a 1080p panel and a compact laptop.
-    static var twoColumnWidth: CGFloat { DisplayFit.scale(1_000) }
+
+    /// 950 rather than 1000 so the 1260-wide default window still gets the
+    /// two-across layout: with the sidebar at its ideal width the detail keeps
+    /// ~1030 points, and asking for 1000 put the overview one step further
+    /// down than it needed to be.
+    static var twoColumnWidth: CGFloat { DisplayFit.box(950) }
+
+    /// Width at which three cards sit side by side in the Overview.
+    ///
+    /// The third card must not vanish below this; the overview reflows it
+    /// underneath instead (see `InsightsView`).
+    static var threeAcrossWidth: CGFloat { DisplayFit.box(1200) }
 
     /// How wide a self-contained panel wants to be in a flowing grid.
     ///
@@ -726,7 +889,7 @@ extension CGFloat {
     /// avoid wrapping its header and no more. The grid fits as many of these as
     /// the window allows, which is why the count of columns follows the window
     /// rather than a hard breakpoint.
-    static var panelWidth: CGFloat { DisplayFit.scale(330) }
+    static var panelWidth: CGFloat { DisplayFit.box(330) }
 }
 
 /// The display the window opens on, in points.
@@ -792,11 +955,6 @@ enum DisplayFit {
         return min(max(min(byWidth, byHeight), floor), 1)
     }
 
-    /// Scale a fixed width by the display fit.
-    static func scale(_ value: CGFloat) -> CGFloat {
-        value * factor
-    }
-
     /// The smallest the *text* factor goes.
     ///
     /// Layout can shrink to 0.6 so the window always fits, but text that
@@ -804,6 +962,20 @@ enum DisplayFit {
     /// chrome around them keeps compressing, which is the difference between a
     /// small but legible window and a squashed one.
     private static let textFloor: CGFloat = 0.85
+
+    /// Scale a fixed width by the display fit.
+    static func scale(_ value: CGFloat) -> CGFloat {
+        value * factor
+    }
+
+    /// Scale a fixed width that has to hold text.
+    ///
+    /// Fonts stop shrinking at `textFloor`, so a container that keeps shrinking
+    /// past it is guaranteed to clip. Chrome with no text in it can still use
+    /// `scale`.
+    static func box(_ value: CGFloat) -> CGFloat {
+        value * max(factor, textFloor)
+    }
 
     /// Design points → points for text.
     ///

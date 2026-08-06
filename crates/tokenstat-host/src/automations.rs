@@ -151,55 +151,138 @@ fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, weekday: Option<u8>) -> O
 /// prints to stdout. That is the whole contract: if the CLI has a print mode,
 /// the automation uses it. `--` before the prompt stops a prompt that starts
 /// with `-` from being parsed as a flag.
-pub fn agent_command(backend: &str, prompt: &str) -> Result<Vec<String>, String> {
+///
+/// `model` and `effort` are passed through only where the CLI advertises the
+/// flags; the flags were verified against each CLI's `--help`. A backend whose
+/// list is empty never receives them.
+pub fn agent_command(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<Vec<String>, String> {
     let p = prompt.trim();
     if p.is_empty() {
         return Err("an automation needs a prompt".into());
     }
-    let args: Vec<&str> = match backend {
-        "sh" => shell_argv(p),
-        "claude" => vec![
-            "claude",
-            "-p",
-            p,
-            "--output-format",
-            "stream-json",
-            "--dangerously-skip-permissions",
-        ],
-        "codex" => vec![
-            "codex",
-            "exec",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "workspace-write",
-            "--json",
-            "--",
-            p,
-        ],
-        "grok" => vec![
-            "grok",
-            "-p",
-            p,
-            "--output-format",
-            "streaming-json",
-            "--permission-mode",
-            "bypassPermissions",
-        ],
-        "cursor" => vec![
-            "cursor-agent",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--stream-partial-output",
-            "--trust",
-            "--",
-            p,
-        ],
-        "agy" => vec!["agy", "--print", p, "--print-timeout", "30m"],
-        "opencode" => vec!["opencode", "run", p],
+
+    let mut args: Vec<String> = Vec::new();
+    match backend {
+        "sh" => {
+            args = shell_argv(p).into_iter().map(str::to_string).collect();
+        }
+        "claude" => {
+            args.push("claude".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--effort".into());
+                args.push(e.into());
+            }
+            args.extend(
+                [
+                    "-p",
+                    p,
+                    "--output-format",
+                    "stream-json",
+                    // Claude refuses `--print --output-format=stream-json`
+                    // without this ("requires --verbose"); every run failed at
+                    // launch until it was added.
+                    "--verbose",
+                    "--dangerously-skip-permissions",
+                ]
+                .map(str::to_string),
+            );
+        }
+        "codex" => {
+            args.push("codex".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            args.extend(
+                [
+                    "exec",
+                    "--skip-git-repo-check",
+                    "--sandbox",
+                    "workspace-write",
+                    "--json",
+                    "--",
+                    p,
+                ]
+                .map(str::to_string),
+            );
+        }
+        "grok" => {
+            args.push("grok".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--reasoning-effort".into());
+                args.push(e.into());
+            }
+            args.extend(
+                [
+                    "-p",
+                    p,
+                    "--output-format",
+                    "streaming-json",
+                    "--permission-mode",
+                    "bypassPermissions",
+                ]
+                .map(str::to_string),
+            );
+        }
+        "cursor" => {
+            args.push("cursor-agent".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            args.extend(
+                [
+                    "-p",
+                    "--output-format",
+                    "stream-json",
+                    "--stream-partial-output",
+                    "--trust",
+                    "--",
+                    p,
+                ]
+                .map(str::to_string),
+            );
+        }
+        "agy" => {
+            args.push("agy".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--effort".into());
+                args.push(e.into());
+            }
+            args.extend(["--print", p, "--print-timeout", "30m"].map(str::to_string));
+        }
+        "opencode" => {
+            args.push("opencode".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--variant".into());
+                args.push(e.into());
+            }
+            args.extend(["run", p].map(str::to_string));
+        }
         other => return Err(format!("unknown backend {other}")),
-    };
-    Ok(args.into_iter().map(str::to_string).collect())
+    }
+    Ok(args)
 }
 
 #[cfg(unix)]
@@ -213,18 +296,78 @@ fn shell_argv(prompt: &str) -> Vec<&str> {
 }
 
 /// The backends a client can choose from, in picker order.
+///
+/// `models` and `efforts` are the values the CLI accepts on its `--model` /
+/// effort flags, curated per backend from the CLI's own model listing
+/// (`grok models`, `cursor-agent --list-models`, `agy models`) or, where the
+/// list needs an account, from the aliases the CLI documents in `--help`. A
+/// backend with an empty list gets no picker at all in the client; the flags
+/// were verified against each CLI's `--help`. Keep these in sync with what
+/// the installed CLIs actually advertise — a stale id is a run that fails at
+/// launch, which is why the lists are deliberately small.
 pub fn backends() -> Vec<serde_json::Value> {
     [
-        ("sh", "Shell", "sh -c \"…\""),
-        ("claude", "Claude", "claude -p \"…\""),
-        ("codex", "Codex", "codex exec … -- \"…\""),
-        ("grok", "Grok", "grok -p \"…\""),
-        ("cursor", "Cursor", "cursor-agent -p …"),
-        ("agy", "Antigravity", "agy --print \"…\""),
-        ("opencode", "OpenCode", "opencode run \"…\""),
+        ("sh", "Shell", "sh -c \"…\"", serde_json::json!([]), serde_json::json!([])),
+        (
+            "claude",
+            "Claude",
+            "claude -p \"…\"",
+            // Claude Code resolves these aliases itself ("fable", "opus", or
+            // "sonnet" per its `--help`); haiku is the long-standing third
+            // tier. Full ids change with every release and need an account to
+            // enumerate, so the aliases are the stable contract.
+            serde_json::json!(["fable", "opus", "sonnet", "haiku"]),
+            serde_json::json!(["low", "medium", "high"]),
+        ),
+        ("codex", "Codex", "codex exec … -- \"…\"", serde_json::json!([]), serde_json::json!([])),
+        (
+            "grok",
+            "Grok",
+            "grok -p \"…\"",
+            serde_json::json!(["grok-4.5"]),
+            serde_json::json!(["low", "medium", "high"]),
+        ),
+        (
+            "cursor",
+            "Cursor",
+            "cursor-agent -p …",
+            serde_json::json!([
+                "gpt-5.4-nano-medium",
+                "gpt-5.1",
+                "gpt-5.1-high",
+                "claude-4.5-sonnet",
+                "claude-4.5-sonnet-thinking",
+                "gemini-3-flash",
+                "gpt-5-mini",
+                "glm-5.2-high",
+            ]),
+            serde_json::json!([]),
+        ),
+        (
+            "agy",
+            "Antigravity",
+            "agy --print \"…\"",
+            serde_json::json!([
+                "gemini-3.6-flash-high",
+                "gemini-3.5-flash-high",
+                "gemini-3.1-pro-high",
+                "claude-sonnet-4-6",
+                "gpt-oss-120b-medium",
+            ]),
+            serde_json::json!(["low", "medium", "high"]),
+        ),
+        (
+            "opencode",
+            "OpenCode",
+            "opencode run \"…\"",
+            serde_json::json!([]),
+            serde_json::json!(["minimal", "medium", "high", "max"]),
+        ),
     ]
     .into_iter()
-    .map(|(id, label, command)| serde_json::json!({"id": id, "label": label, "command": command}))
+    .map(|(id, label, command, models, efforts)| {
+        serde_json::json!({"id": id, "label": label, "command": command, "models": models, "efforts": efforts})
+    })
     .collect()
 }
 
@@ -236,6 +379,12 @@ pub struct Automation {
     pub id: String,
     pub name: String,
     pub backend: String,
+    /// The CLI's model alias, when the backend advertises a model list.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The CLI's reasoning effort, when the backend advertises effort levels.
+    #[serde(default)]
+    pub effort: Option<String>,
     pub workspace_id: String,
     pub prompt: String,
     #[serde(default)]
@@ -512,7 +661,12 @@ impl Store {
     /// delegate path. Returns the run so the caller can link it to its card.
     pub fn run_adhoc(self: &Arc<Store>, job: Automation) -> Result<RunRecord, String> {
         let workspace = crate::workspaces::folder(&job.workspace_id)?;
-        let argv = agent_command(&job.backend, &job.prompt)?;
+        let argv = agent_command(
+            &job.backend,
+            &job.prompt,
+            job.model.as_deref(),
+            job.effort.as_deref(),
+        )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: argv[0].clone(),
@@ -748,6 +902,8 @@ mod tests {
             id: id.into(),
             name: "test".into(),
             backend: "claude".into(),
+            model: None,
+            effort: None,
             workspace_id: "w".into(),
             prompt: "do the thing".into(),
             schedule,
@@ -820,12 +976,29 @@ mod tests {
     #[test]
     fn every_backend_builds_a_command() {
         for backend in ["claude", "codex", "grok", "cursor", "agy", "opencode"] {
-            let argv = agent_command(backend, "do it").unwrap();
+            let argv = agent_command(backend, "do it", None, None).unwrap();
             assert!(!argv.is_empty(), "{backend} produced no command");
             assert!(argv.iter().any(|a| a == "do it"));
         }
-        assert!(agent_command("nope", "do it").is_err());
-        assert!(agent_command("claude", "   ").is_err());
+        // Regression: claude rejects stream-json print output without this.
+        let claude = agent_command("claude", "do it", None, None).unwrap();
+        assert!(claude.iter().any(|a| a == "--verbose"));
+        assert!(agent_command("nope", "do it", None, None).is_err());
+        assert!(agent_command("claude", "   ", None, None).is_err());
+    }
+
+    #[test]
+    fn model_and_effort_flags_land_for_backends_that_advertise_them() {
+        let claude = agent_command("claude", "do it", Some("sonnet"), Some("high")).unwrap();
+        let at_model = claude.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(claude[at_model + 1], "sonnet");
+        let at_effort = claude.iter().position(|a| a == "--effort").unwrap();
+        assert_eq!(claude[at_effort + 1], "high");
+
+        // A backend without the flags must not silently swallow them; the
+        // shell ignores both because the client never offers a picker for it.
+        let shell = agent_command("sh", "ls", Some("sonnet"), Some("high")).unwrap();
+        assert!(!shell.iter().any(|a| a == "--model" || a == "--effort"));
     }
 
     /// Register `dir` in the shared registry and return its id.

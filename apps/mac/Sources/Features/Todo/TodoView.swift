@@ -10,6 +10,8 @@ import SwiftUI
 struct TodoView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
+    /// Open a delegated run's transcript on the Automations screen.
+    var onViewRun: ((String) -> Void)? = nil
 
     private static let columns: [(String, String)] = [
         ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
@@ -42,9 +44,9 @@ struct TodoView: View {
                 // shrinking together on a narrow window instead of one fixed
                 // 300pt column overflowing the pane.
                 let columnWidth = max(
-                    DisplayFit.scale(240),
+                    DisplayFit.box(240),
                     min(
-                        DisplayFit.scale(300),
+                        DisplayFit.box(300),
                         (proxy.size.width - Theme.Space.m * 4) / 3
                     )
                 )
@@ -108,7 +110,12 @@ struct TodoView: View {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
                     ForEach(model.cards(in: id)) { card in
-                        CardView(model: model, card: card, folders: folders)
+                        CardView(
+                            model: model,
+                            card: card,
+                            folders: folders,
+                            onViewRun: onViewRun
+                        )
                     }
                     if isWarming {
                         // Card-shaped grey, so the columns are already the
@@ -214,6 +221,8 @@ private struct CardView: View {
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
+    /// Opens the run's transcript on the Automations screen.
+    var onViewRun: ((String) -> Void)?
 
     @State private var editingTitle = false
     @State private var editingNotes = false
@@ -260,7 +269,11 @@ private struct CardView: View {
             if editingNotes {
                 // A task's notes are the prompt the agent gets; only a plain
                 // note card calls them notes.
-                TextField(card.isNote ? "Note" : "Prompt", text: $notesDraft, axis: .vertical)
+                TextField(
+                    card.isNote ? "Note" : (card.backend == "sh" ? "Command" : "Prompt"),
+                    text: $notesDraft,
+                    axis: .vertical
+                )
                     .textFieldStyle(.plain)
                     .font(.caption)
                     .lineLimit(2...4)
@@ -276,7 +289,11 @@ private struct CardView: View {
                         editingNotes = true
                     }
             } else {
-                Text(card.isNote ? "Click to add a note" : "Click to add a prompt")
+                Text(
+                    card.isNote
+                        ? "Click to add a note"
+                        : (card.backend == "sh" ? "Click to add a command" : "Click to add a prompt")
+                )
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .onTapGesture {
@@ -329,8 +346,8 @@ private struct CardView: View {
 
     private static func budgetLabel(_ seconds: UInt64) -> String {
         seconds % 60 == 0
-            ? "\(seconds / 60)m budget"
-            : "\(seconds)s budget"
+            ? "\(seconds / 60)m time limit"
+            : "\(seconds)s time limit"
     }
 
     private func saveTitle() {
@@ -363,6 +380,15 @@ private struct CardView: View {
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
             }
+            // The result lives on the Automations screen; this is the door to
+            // it, so a delegated card is never a dead end that only says
+            // "Done" with nowhere to look.
+            Button("View result") {
+                onViewRun?(delegate.runId)
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.mini)
+            .help("Open this run's transcript on the Automations screen")
         }
     }
 
@@ -446,6 +472,10 @@ private struct NewCardForm: View {
     @State private var notes = ""
     @State private var backendID = ""
     @State private var workspaceID = ""
+    /// The selected backend's model alias and effort level. Empty means the
+    /// backend's default, which is also what the pickers start on.
+    @State private var modelChoice = ""
+    @State private var effortChoice = ""
     /// Minutes, because that is the unit people think in. Converted to seconds
     /// for the daemon, which stores the raw number.
     @State private var budgetMinutes = "15"
@@ -456,32 +486,69 @@ private struct NewCardForm: View {
             AddCardTrigger(expanded: $expanded)
 
             if expanded {
-                Picker("Type", selection: $kind) {
-                    Label("Task", systemImage: "checkmark.square").tag(TodoKind.task)
-                    Label("Note", systemImage: "note.text").tag(TodoKind.note)
-                }
-                .pickerStyle(.segmented)
+                SegmentedCapsulePicker(
+                    options: [
+                        (TodoKind.task, "Task", "checkmark.square"),
+                        (TodoKind.note, "Note", "note.text"),
+                    ],
+                    selection: $kind
+                )
                 TextField(kind == .note ? "What do you want to remember?" : "Task title", text: $title)
-                TextField(kind == .note ? "Note" : "Prompt", text: $notes, axis: .vertical)
-                    .lineLimit(2...4)
+                // A task's notes are what the agent gets. For the Shell
+                // backend that is a command, not a prompt, so the field says
+                // so and its placeholder answers the only question a shell
+                // has: what do I run?
+                TextField(
+                    kind == .note ? "Note" : (isShellBackend ? "Command" : "Prompt"),
+                    text: $notes,
+                    prompt: Text(
+                        isShellBackend
+                            ? "Command to run, e.g. npm test"
+                            : "What should the agent do?"
+                    ),
+                    axis: .vertical
+                )
+                .lineLimit(2...4)
                 if kind == .task {
-                    HStack(spacing: Theme.Space.xs) {
-                        Picker("Agent", selection: $backendID) {
-                            ForEach(model.backends) { backend in
-                                Text(backend.label).tag(backend.id)
+                    HStack(spacing: Theme.Space.s) {
+                        AppMenuPicker(
+                            title: "Agent",
+                            options: model.backends.map { (value: $0.id, label: $0.label) },
+                            selection: $backendID
+                        )
+                        AppMenuPicker(
+                            title: "Workspace",
+                            options: [(value: "", label: "Choose workspace")]
+                                + folders.map { (value: $0.id, label: $0.name) },
+                            selection: $workspaceID
+                        )
+                    }
+                    // Model and effort exist only for backends that advertise
+                    // them, so the pair appears for Claude and never for
+                    // Shell. Both start on the backend's default.
+                    if let backend = selectedBackend,
+                       !backend.models.isEmpty || !backend.efforts.isEmpty {
+                        HStack(spacing: Theme.Space.s) {
+                            if !backend.models.isEmpty {
+                                AppMenuPicker(
+                                    title: "Model",
+                                    options: [(value: "", label: "Default")]
+                                        + backend.models.map { (value: $0, label: $0) },
+                                    selection: $modelChoice
+                                )
+                            }
+                            if !backend.efforts.isEmpty {
+                                AppMenuPicker(
+                                    title: "Effort",
+                                    options: [(value: "", label: "Default")]
+                                        + backend.efforts.map { (value: $0, label: $0) },
+                                    selection: $effortChoice
+                                )
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        Picker("Workspace", selection: $workspaceID) {
-                            Text("Choose workspace").tag("")
-                            ForEach(folders) { folder in
-                                Text(folder.name).tag(folder.id)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
                     }
                     HStack(spacing: Theme.Space.xs) {
-                        Text("Budget")
+                        Text("Time limit")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         TextField("15", text: $budgetMinutes)
@@ -512,6 +579,20 @@ private struct NewCardForm: View {
                 backendID = first.id
             }
         }
+        .onChange(of: backendID) { _, _ in
+            // A model that meant something to one backend means nothing to
+            // the next; go back to defaults when the agent changes.
+            modelChoice = ""
+            effortChoice = ""
+        }
+    }
+
+    private var selectedBackend: AgentBackend? {
+        model.backends.first { $0.id == backendID }
+    }
+
+    private var isShellBackend: Bool {
+        selectedBackend?.id == "sh"
     }
 
     private var canSave: Bool {
@@ -528,7 +609,9 @@ private struct NewCardForm: View {
             backend: backendID,
             workspaceID: kind == .note ? "" : workspaceID,
             budgetSeconds: minutes * 60,
-            column: kind == .note ? "backlog" : column
+            column: kind == .note ? "backlog" : column,
+            model: modelChoice.isEmpty ? nil : modelChoice,
+            effort: effortChoice.isEmpty ? nil : effortChoice
         )
         if model.errorMessage == nil { cancel() }
     }

@@ -20,31 +20,72 @@ import SwiftUI
 /// and clamps the window back inside the visible frame when the display
 /// changes or its resolution does.
 struct WindowScreenObserver: NSViewRepresentable {
+    /// The window's content width, published from resize notifications.
+    ///
+    /// The inspector fit decision lives on this. A width read inside the split
+    /// view re-enters AppKit's constraints pass (a hosted column changing its
+    /// minimum size while that pass is running is exactly what threw); a
+    /// resize notification is delivered outside any layout pass, so writing
+    /// state from it cannot re-enter one.
+    @Binding var contentWidth: CGFloat
+
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        // The view has no window during `makeNSView`; attach once it lands.
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { context.coordinator.attach(to: view) }
+        let view = WindowReportingView()
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            Task { @MainActor in
+                coordinator?.attach(to: window, contentWidth: $contentWidth)
+            }
         }
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // A rebuilt representable must not leave the coordinator writing
+        // through a stale binding.
+        MainActor.assumeIsolated {
+            context.coordinator.contentWidth = $contentWidth
+        }
+    }
 
     @MainActor
     final class Coordinator {
         private var window: NSWindow?
         private var observers: [NSObjectProtocol] = []
+        /// Where the measured width goes. Refreshed from `updateNSView` so a
+        /// rebuilt representable never writes through a stale binding.
+        var contentWidth: Binding<CGFloat>?
 
-        func attach(to view: NSView) {
-            guard window == nil, let window = view.window else { return }
+        /// Attaches to whatever window the view reports, detaching from any
+        /// previous one first.
+        ///
+        /// Called from `WindowReportingView.viewDidMoveToWindow`, which fires
+        /// on every window transition, so a view that lands in a window a
+        /// frame late still attaches and a re-parented view re-attaches
+        /// instead of observing a dead window. The old one-shot
+        /// `DispatchQueue.main.async` gave up silently when the view had no
+        /// window on that turn, which froze the inspector fit at its initial
+        /// value for the whole session.
+        func attach(to window: NSWindow?, contentWidth: Binding<CGFloat>) {
+            guard let window else { return }
+            detach()
             self.window = window
+            self.contentWidth = contentWidth
+            observe(window)
             apply(window)
+            publishWidth(from: window)
+        }
 
+        private func detach() {
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers.removeAll()
+            window = nil
+        }
+
+        private func observe(_ window: NSWindow) {
             let center = NotificationCenter.default
             // Moving the window to another display.
             observers.append(
@@ -53,7 +94,12 @@ struct WindowScreenObserver: NSViewRepresentable {
                     object: window,
                     queue: .main
                 ) { [weak self] _ in
-                    Task { @MainActor in self?.apply(window) }
+                    Task { @MainActor in
+                        self?.apply(window)
+                        // The fit threshold is display-scaled, so a screen
+                        // change can move the edge without the width moving.
+                        self?.publishWidth(from: window)
+                    }
                 }
             )
             // Resolution or arrangement changes (e.g. "More Space" toggled, a
@@ -64,9 +110,61 @@ struct WindowScreenObserver: NSViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    Task { @MainActor in self?.apply(window) }
+                    Task { @MainActor in
+                        self?.apply(window)
+                        self?.publishWidth(from: window)
+                    }
                 }
             )
+            // The width the inspector fit is decided on. Published live, during
+            // a drag as well as after: the live-resize gate was written for the
+            // inspector *divider* drag, whose constraint pass re-entered AppKit
+            // and crashed. That divider no longer exists (the column is a
+            // single fixed width), and a window resize is a different pass,
+            // with the state write deferred off it in `applyWidth`. Waiting
+            // until the drag ended is what left the inspector open and the
+            // sidebar pushed out for the whole gesture.
+            observers.append(
+                center.addObserver(
+                    forName: NSWindow.didResizeNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.windowResized(window) }
+                }
+            )
+            observers.append(
+                center.addObserver(
+                    forName: NSWindow.didEndLiveResizeNotification,
+                    object: window,
+                    queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor in self?.liveResizeEnded(window) }
+                }
+            )
+        }
+
+        private func windowResized(_ window: NSWindow) {
+            publish(quantised(window.contentLayoutRect.width, step: 4))
+        }
+
+        private func liveResizeEnded(_ window: NSWindow) {
+            // Final settle, so the last width always lands even if a live
+            // resize notification was dropped.
+            publish(quantised(window.contentLayoutRect.width, step: 4))
+        }
+
+        /// Writes the width out to the binding. Only ever called from resize or
+        /// end-of-resize notifications, never from inside a layout pass. Writes
+        /// only when the value moved, so a drag that crosses no 4pt step is a
+        /// no-op.
+        private func publish(_ width: CGFloat) {
+            guard let contentWidth, contentWidth.wrappedValue != width else { return }
+            contentWidth.wrappedValue = width
+        }
+
+        private func publishWidth(from window: NSWindow) {
+            publish(quantised(window.contentLayoutRect.width, step: 4))
         }
 
         private func apply(_ window: NSWindow) {
@@ -120,6 +218,23 @@ struct WindowScreenObserver: NSViewRepresentable {
         deinit {
             observers.forEach(NotificationCenter.default.removeObserver)
         }
+    }
+}
+
+/// Reports its own window transitions.
+///
+/// The previous version attached from a `DispatchQueue.main.async` one-shot. If
+/// the view had no window on that turn it gave up silently and never retried,
+/// and the inspector fit, which reads its width from here, was then frozen at
+/// its initial value for the whole session. `viewDidMoveToWindow` fires every
+/// time the view gains, loses, or changes a window, which is what makes the
+/// attach retryable.
+final class WindowReportingView: NSView {
+    var onWindowChange: ((NSWindow?) -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?(window)
     }
 }
 #endif

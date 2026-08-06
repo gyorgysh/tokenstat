@@ -991,6 +991,10 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     /// One of the ids `automation.backends` reports. The daemon owns the argv
     /// for each backend, so a client never builds a command line.
     var backend: String
+    /// Model alias passed to the CLI, when the backend advertises models.
+    var model: String?
+    /// Reasoning effort passed to the CLI, when the backend advertises levels.
+    var effort: String?
     var workspaceID: String
     var prompt: String
     var schedule: AutomationSchedule
@@ -1001,7 +1005,7 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
     var lastRunID: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, backend, workspaceID = "workspaceId", prompt, schedule
+        case id, name, backend, model, effort, workspaceID = "workspaceId", prompt, schedule
         case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID
     }
 
@@ -1077,6 +1081,30 @@ struct AgentBackend: Codable, Sendable, Identifiable {
     var id: String
     var label: String
     var command: String
+    /// Model aliases the CLI accepts on its `--model` flag. Empty means the
+    /// client offers no model picker for this backend.
+    var models: [String]
+    /// Effort levels the CLI accepts. Empty means no effort picker.
+    var efforts: [String]
+
+    init(id: String, label: String, command: String, models: [String] = [], efforts: [String] = []) {
+        self.id = id
+        self.label = label
+        self.command = command
+        self.models = models
+        self.efforts = efforts
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        command = try c.decode(String.self, forKey: .command)
+        // An older daemon does not advertise the lists yet; both default to
+        // empty so the pickers simply do not appear.
+        models = try c.decodeIfPresent([String].self, forKey: .models) ?? []
+        efforts = try c.decodeIfPresent([String].self, forKey: .efforts) ?? []
+    }
 }
 
 // MARK: - Todo
@@ -1096,6 +1124,8 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var order: Int64
     var priority: String
     var backend: String
+    var model: String?
+    var effort: String?
     var workspaceID: String
     var budgetSeconds: UInt64
     var createdAtMs: Int64
@@ -1103,7 +1133,7 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var delegate: TodoDelegate?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, notes, column, order, priority, backend
+        case id, title, notes, column, order, priority, backend, model, effort
         case kind
         case workspaceID = "workspaceId", budgetSeconds, createdAtMs, updatedAtMs, delegate
     }
@@ -1118,6 +1148,8 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         order = try values.decode(Int64.self, forKey: .order)
         priority = try values.decode(String.self, forKey: .priority)
         backend = try values.decode(String.self, forKey: .backend)
+        model = try values.decodeIfPresent(String.self, forKey: .model)
+        effort = try values.decodeIfPresent(String.self, forKey: .effort)
         workspaceID = try values.decode(String.self, forKey: .workspaceID)
         budgetSeconds = try values.decode(UInt64.self, forKey: .budgetSeconds)
         createdAtMs = try values.decode(Int64.self, forKey: .createdAtMs)

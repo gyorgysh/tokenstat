@@ -56,6 +56,12 @@ pub struct Card {
     pub priority: Priority,
     /// Where a delegated run happens. Chosen once at create.
     pub backend: String,
+    /// The backend's model alias, when the backend advertises one.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// The backend's reasoning effort, when the backend advertises levels.
+    #[serde(default)]
+    pub effort: Option<String>,
     pub workspace_id: String,
     pub budget_seconds: u64,
     pub created_at_ms: i64,
@@ -79,6 +85,8 @@ pub struct CardUpdate {
     pub kind: Option<CardKind>,
     pub notes: Option<String>,
     pub backend: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
     pub workspace_id: Option<String>,
     pub budget_seconds: Option<u64>,
 }
@@ -239,6 +247,12 @@ impl Board {
         if let Some(backend) = changes.backend.as_deref() {
             card.backend = backend.to_string();
         }
+        if let Some(model) = changes.model.as_deref() {
+            card.model = Some(model.to_string());
+        }
+        if let Some(effort) = changes.effort.as_deref() {
+            card.effort = Some(effort.to_string());
+        }
         if let Some(workspace_id) = changes.workspace_id.as_deref() {
             card.workspace_id = workspace_id.to_string();
         }
@@ -308,6 +322,8 @@ impl Board {
                     id: format!("todo-{}", card.id),
                     name: card.title.clone(),
                     backend: card.backend.clone(),
+                    model: card.model.clone(),
+                    effort: card.effort.clone(),
                     workspace_id: card.workspace_id.clone(),
                     prompt: format!("{}\n\n{}", card.title, card.notes),
                     schedule: crate::automations::ScheduleSpec::default(),
@@ -377,6 +393,8 @@ mod tests {
             order: 0,
             priority: Priority::Normal,
             backend: "claude".into(),
+            model: None,
+            effort: None,
             workspace_id: "w".into(),
             budget_seconds: 900,
             created_at_ms: 0,

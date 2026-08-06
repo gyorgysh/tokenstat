@@ -102,13 +102,16 @@ final class AutomationsModel {
     func create(
         name: String,
         backend: String,
+        model: String? = nil,
+        effort: String? = nil,
         workspaceID: String,
         prompt: String,
         schedule: AutomationSchedule,
         budget: UInt64
     ) async {
         let job = Automation(
-            id: "", name: name, backend: backend, workspaceID: workspaceID, prompt: prompt,
+            id: "", name: name, backend: backend, model: model, effort: effort,
+            workspaceID: workspaceID, prompt: prompt,
             schedule: schedule, budgetSeconds: budget, enabled: true,
             lastRunAtMs: nil, nextRunAtMs: nil, lastRunID: nil
         )

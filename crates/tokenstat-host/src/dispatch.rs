@@ -200,6 +200,8 @@ struct TodoParams {
     order: Option<i64>,
     priority: Option<crate::todo::Priority>,
     backend: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
     workspace_id: Option<String>,
     budget_seconds: Option<u64>,
 }
@@ -837,6 +839,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 order: p.order.unwrap_or(0),
                 priority: p.priority.unwrap_or_default(),
                 backend: p.backend.unwrap_or_else(|| "claude".into()),
+                model: p.model,
+                effort: p.effort,
                 workspace_id: p.workspace_id.ok_or("todo.create needs a workspace")?,
                 budget_seconds: p.budget_seconds.unwrap_or(900),
                 created_at_ms: 0,
@@ -854,6 +858,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 kind: p.kind,
                 notes: p.notes,
                 backend: p.backend,
+                model: p.model,
+                effort: p.effort,
                 workspace_id: p.workspace_id,
                 budget_seconds: p.budget_seconds,
             };

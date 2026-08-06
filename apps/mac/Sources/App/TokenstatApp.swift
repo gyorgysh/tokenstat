@@ -85,15 +85,19 @@ struct TokenstatApp: App {
     #if os(macOS)
     /// The window's opening size, clamped to the display it opens on.
     ///
-    /// A fixed 1180×720 is wider than the whole screen on a compact display
-    /// set to a low effective resolution, and a window that is born wider than
-    /// its display reads as a window that does not fit. Start inside the
-    /// screen's visible frame and let the user make it bigger.
+    /// 1260×825, a slightly wider-than-4:3 window in the shape of the other
+    /// agentic desktop apps, clamped to the display it opens on: a window born
+    /// wider or taller than its screen reads as one that does not fit. Start
+    /// inside the visible frame and let the user make it bigger.
+    ///
+    /// At 1260 the fixed inspector column does not fit (its edge is 1450), so
+    /// the default state is overlay mode: the pane floats in on hover rather
+    /// than taking a column.
     private static var initialWindowSize: CGSize {
         let frame = NSScreen.main?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
         return CGSize(
-            width: min(1180, frame.width * 0.94),
-            height: min(720, frame.height * 0.90)
+            width: min(1260, frame.width * 0.94),
+            height: min(825, frame.height * 0.90)
         )
     }
     #endif

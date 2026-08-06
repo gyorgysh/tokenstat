@@ -100,13 +100,7 @@ struct InsightsView: View {
                 Skeleton.Bar(width: nil, height: 160)
             }
             WidthReader { width in
-                HStack(alignment: .top, spacing: Theme.Space.s) {
-                    Skeleton.CardPlaceholder(rows: 5)
-                    Skeleton.CardPlaceholder(rows: 5)
-                    if width >= .twoColumnWidth {
-                        Skeleton.CardPlaceholder(rows: 5)
-                    }
-                }
+                skeletonTriple(width: width)
             }
         }
         .warming(true)
@@ -121,29 +115,102 @@ struct InsightsView: View {
                 DailyChart(rows: model.daily)
             }
 
-            // Three across once there is room for it. Two cards on a
-            // full-screen window are two wide boxes of short rows with a page
-            // of nothing under them, and the projects breakdown was already
-            // loaded and only reachable through a tab.
+            // Three across once there is room, and never fewer cards than
+            // there are lists: below the three-across width the project list
+            // moves underneath the pair instead of vanishing, and below the
+            // two-across width all three stack.
             WidthReader { width in
+                layoutTriple(width: width)
+            }
+        }
+    }
+
+    /// The three breakdown lists, reflowing by width instead of dropping one.
+    @ViewBuilder
+    private func layoutTriple(width: CGFloat) -> some View {
+        if width >= .threeAcrossWidth {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                topModelsCard
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                byHarnessCard
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                byProjectCard
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+            // The row takes the tallest card's height, and the cards in it
+            // fill that, exactly like the quota panels on Home. Without the
+            // fixed size the row would grow to whatever height was going
+            // spare and every card with it.
+            .fixedSize(horizontal: false, vertical: true)
+        } else if width >= .twoColumnWidth {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
-                    Card(title: "Top models", subtitle: "List-rate value") {
-                        MiniList(rows: model.byModel, showsValue: true, monospaced: true)
-                    }
-                    Card(title: "By harness", subtitle: "Which agent produced the tokens") {
-                        MiniList(
-                            rows: model.bySource,
-                            showsValue: false,
-                            monospaced: false,
-                            isHarness: true
-                        )
-                    }
-                    if width >= .twoColumnWidth, !model.byProject.isEmpty {
-                        Card(title: "By project", subtitle: "Where the work happened") {
-                            MiniList(rows: model.byProject, showsValue: false, monospaced: true)
-                        }
-                    }
+                    topModelsCard
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    byHarnessCard
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                byProjectCard
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                topModelsCard
+                byHarnessCard
+                byProjectCard
+            }
+        }
+    }
+
+    private var topModelsCard: some View {
+        Card(title: "Top models", subtitle: "List-rate value", fillsHeight: true) {
+            MiniList(rows: model.byModel, showsValue: true, monospaced: true)
+        }
+    }
+
+    private var byHarnessCard: some View {
+        Card(title: "By harness", subtitle: "Which agent produced the tokens", fillsHeight: true) {
+            MiniList(
+                rows: model.bySource,
+                showsValue: false,
+                monospaced: false,
+                isHarness: true
+            )
+        }
+    }
+
+    /// The project list, or nothing when the archive has no projects yet.
+    @ViewBuilder
+    private var byProjectCard: some View {
+        if !model.byProject.isEmpty {
+            Card(title: "By project", subtitle: "Where the work happened", fillsHeight: true) {
+                MiniList(rows: model.byProject, showsValue: false, monospaced: true)
+            }
+        }
+    }
+
+    /// The grey loading version of the same reflow.
+    @ViewBuilder
+    private func skeletonTriple(width: CGFloat) -> some View {
+        if width >= .threeAcrossWidth {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Skeleton.CardPlaceholder(rows: 5)
+                Skeleton.CardPlaceholder(rows: 5)
+                Skeleton.CardPlaceholder(rows: 5)
+            }
+        } else if width >= .twoColumnWidth {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack(alignment: .top, spacing: Theme.Space.s) {
+                    Skeleton.CardPlaceholder(rows: 5)
+                    Skeleton.CardPlaceholder(rows: 5)
+                }
+                Skeleton.CardPlaceholder(rows: 5)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Skeleton.CardPlaceholder(rows: 5)
+                Skeleton.CardPlaceholder(rows: 5)
+                Skeleton.CardPlaceholder(rows: 5)
             }
         }
     }
@@ -383,6 +450,12 @@ private struct DailyChart: View {
         raw.count > 5 ? String(raw.suffix(5)) : raw
     }
 
+    /// The row under the pointer, if any.
+    private var hoveredRow: Bucket? {
+        guard let selectedDay else { return nil }
+        return rows.first { $0.key == selectedDay }
+    }
+
     var body: some View {
         if rows.isEmpty {
             EmptyHint(text: "No usage in this period.")
@@ -403,37 +476,6 @@ private struct DailyChart: View {
                     RuleMark(x: .value("Selected day", row.key))
                         .foregroundStyle(Theme.secondary)
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3]))
-                        // Resolved against the chart's own bounds, never by
-                        // padding the scale. The default makes room for an
-                        // annotation by growing the y domain, so hovering a bar
-                        // rescaled the axis and squashed every bar on the
-                        // screen: the chart moved under the pointer that was
-                        // only asking what one day was worth.
-                        .annotation(
-                            position: .top,
-                            alignment: .leading,
-                            overflowResolution: AnnotationOverflowResolution(
-                                x: .fit(to: .chart),
-                                y: .fit(to: .chart)
-                            )
-                        ) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(shortDay(row.key))
-                                    .font(.caption.weight(.semibold))
-                                Text("\(formatTokens(row.counters.total)) tokens")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                Text(row.value.formatted)
-                                    .font(Theme.numeric(10, weight: .medium))
-                                    .foregroundStyle(Theme.accent)
-                            }
-                            .padding(Theme.Space.s)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: Theme.Space.s)
-                                    .strokeBorder(Theme.border, lineWidth: 1)
-                            )
-                        }
                 }
             }
             .chartXAxis {
@@ -463,8 +505,56 @@ private struct DailyChart: View {
                 }
             }
             .chartXSelection(value: $selectedDay)
+            // The hovered day's summary, drawn in the chart's topmost layer.
+            // It used to be an annotation on the RuleMark, which rendered
+            // behind the bars: the label's material sat under the marks and
+            // the text was unreadable. The overlay is composited above
+            // everything, and being outside the chart's layout it also cannot
+            // rescale the axis the way an annotation could.
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    if let row = hoveredRow,
+                       let plotFrame = proxy.plotFrame,
+                       let x = proxy.position(forX: row.key) {
+                        let plot = geo[plotFrame]
+                        // `position(forX:)` is relative to the plot area, so
+                        // the plot's origin has to come back on. The label is
+                        // centred on the bar near the plot's top and clamped
+                        // to the chart's edges so it never hangs off.
+                        let halfWidth: CGFloat = 58
+                        let centerX = min(
+                            max(plot.minX + x, plot.minX + halfWidth + 4),
+                            max(plot.minX + halfWidth + 4, plot.maxX - halfWidth - 4)
+                        )
+                        hoverSummary(for: row)
+                            .position(x: centerX, y: plot.minY + 30)
+                            .allowsHitTesting(false)
+                    }
+                }
+            }
             .frame(height: 170)
         }
+    }
+
+    /// The data for the day under the pointer, as a floating chip.
+    private func hoverSummary(for row: Bucket) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(shortDay(row.key))
+                .font(.caption.weight(.semibold))
+            Text("\(formatTokens(row.counters.total)) tokens")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(row.value.formatted)
+                .font(Theme.numeric(10, weight: .medium))
+                .foregroundStyle(Theme.accent)
+        }
+        .padding(Theme.Space.s)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Space.s)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .fixedSize()
     }
 }
 

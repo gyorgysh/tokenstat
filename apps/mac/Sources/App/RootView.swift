@@ -76,59 +76,95 @@ struct RootView: View {
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
     @State private var isInspectorPresented = true
+    /// What the user chose for the sidebar, kept separate from the fit.
+    ///
+    /// The split view is handed `sidebarVisibility`, which forces `.detailOnly`
+    /// below the width where the sidebar cannot hold a column and restores this
+    /// value above it. Written only by an explicit toggle above the fit edge,
+    /// or an explicit reopen below it: the split view writes its collapsed
+    /// state back to the binding itself when the window narrows, and that
+    /// write must not be recorded as the user's choice, or the sidebar would
+    /// stay shut after the window widened again.
+    @State private var columnVisibilityChoice: NavigationSplitViewVisibility = .all
     /// Whether the window is wide enough to carry the inspector at all.
     ///
     /// Separate from `isInspectorPresented`, which is what the user asked for.
     /// Conflating them would spend the user's choice on a window resize: narrow
     /// the window once and the pane would stay shut after widening it again.
     @State private var inspectorFits = true
+    /// Whether the floating inspector overlay is on screen.
+    ///
+    /// Only meaningful in overlay mode (window below the fit edge); the
+    /// column mode ignores it. Hovering the detail's trailing edge shows it,
+    /// leaving starts the auto-hide, and the toolbar toggle pins it.
+    @State private var isOverlayVisible = false
+    /// The user pinned the overlay open, so leaving the pointer does not
+    /// dismiss it. Cleared by the close button, the toggle, or a mode change.
+    @State private var isOverlayPinned = false
+    /// Cancelled whenever the pointer comes back, so a short trip out cannot
+    /// dismiss the pane.
+    @State private var hideOverlayTask: Task<Void, Never>?
+    @State private var isOverlayEdgeHovered = false
+    @State private var isOverlayPanelHovered = false
+    /// The user explicitly reopened the sidebar below the sidebar fit edge.
+    /// Honored until they close it; without the pin the fit would override
+    /// the reopen on the next read.
+    @State private var isSidebarPinned = false
+    /// The window's content width, published by `WindowScreenObserver` from
+    /// resize notifications rather than measured inside the split view.
+    @State private var windowContentWidth: CGFloat = 0
+    /// A run a delegated task asked to show: set when navigating from Tasks,
+    /// consumed by the Automations screen once its runs have loaded.
+    @State private var pendingRunID: String?
     /// The hovered heatmap cell's window-space frame, fed up from the grid by
     /// preference. Nil means nothing is hovered and the popover hides.
     @State private var hoveredCell: HoveredCellFrame?
-    /// The window's content size, for popover placement and display fitting.
+    /// The window's content size, for popover placement.
     @State private var windowSize: CGSize = .zero
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var collapsedWorkspaces: Set<String> = []
     #endif
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: sidebarVisibility) {
             sidebar
         } detail: {
-            detail
-                .inspector(isPresented: showsInspector) {
-                    Group {
-                        switch destination {
-                        case .workspaces:
-                            WorkspaceInspector(model: workspaces) { closeInspector() }
-                        default:
-                            InspectorView(model: model) { closeInspector() }
-                        }
-                    }
-                    // Wider than it was. At 300 the Changes list wrapped every
-                    // path onto two lines and a commit subject onto three,
-                    // which is a column of text pretending to be a panel. The
-                    // minimum went up with it: nothing here reads at 240.
-                    .inspectorColumnWidth(
-                        min: DisplayFit.scale(370),
-                        ideal: DisplayFit.scale(400),
-                        // The pane may only shrink or close from its ideal
-                        // width. Growing it squeezes the other two columns,
-                        // which is how the sidebar used to get pushed out.
-                        max: DisplayFit.scale(400)
-                    )
-                }
+            detailColumn
         }
+        .navigationSplitViewStyle(.balanced)
         // Cell frames are reported in this space, and the popover overlay is
         // positioned in the same space, so a frame and its card agree wherever
         // the window is.
         .coordinateSpace(name: HeatmapView.coordinateSpace)
         .onPreferenceChange(HoveredCellFrameKey.self) { hoveredCell = $0 }
+        // The inspector decision follows the window's width, published by the
+        // observer from resize notifications. That source is outside any layout
+        // pass; a GeometryReader inside the split view is not, and a width
+        // driven from it re-entered AppKit's constraint cycle while dragging.
+        .onChange(of: windowContentWidth) { _, width in
+            applyWidth(for: width)
+        }
+        // Hover near the trailing edge shows the floating pane; leaving hides
+        // it after a beat, so a trip across to the scrollbar does not dismiss
+        // it. A pinned pane ignores both.
+        .onChange(of: isOverlayHovered) { _, inside in
+            if inside {
+                hideOverlayTask?.cancel()
+                isOverlayVisible = true
+            } else if !isOverlayPinned {
+                hideOverlayTask?.cancel()
+                hideOverlayTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled else { return }
+                    isOverlayVisible = false
+                }
+            }
+        }
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
         .background {
             #if os(macOS)
-            WindowScreenObserver()
+            WindowScreenObserver(contentWidth: $windowContentWidth)
             #else
             Color.clear
             #endif
@@ -146,22 +182,15 @@ struct RootView: View {
             AddWorkspaceSheet(model: workspaces)
         }
         #endif
-        // Watch the width of the whole split view, not the detail pane: the
-        // detail's own width already reflects the inspector being open, so
-        // driving the decision from it oscillates.
+        // The window size for the hover popover, which needs to be placed
+        // against the window rather than the pane it floats over.
         //
         // `onGeometryChange` would be the tidy way to write this and needs
         // macOS 15. This app targets 14.
         .background {
             GeometryReader { proxy in
                 Color.clear
-                    .onAppear {
-                        inspectorFits = Self.fits(proxy.size.width, open: inspectorFits)
-                        windowSize = proxy.size
-                    }
-                    .onChange(of: quantised(proxy.size.width, step: 4)) { _, width in
-                        updateInspectorFit(for: width)
-                    }
+                    .onAppear { windowSize = proxy.size }
                     .onChange(of: quantised(proxy.size.height, step: 4)) { _, height in
                         let next = CGSize(
                             width: quantised(proxy.size.width, step: 4),
@@ -216,79 +245,150 @@ struct RootView: View {
                 ToolbarItem {
                     Button {
                         isInspectorPresented.toggle()
+                        if isInspectorPresented {
+                            // Below the fit edge a press means "show me the
+                            // pane": pin the overlay so it stays past the
+                            // hover. Above the edge the column simply opens.
+                            isOverlayPinned = true
+                            isOverlayVisible = true
+                        } else {
+                            isOverlayPinned = false
+                            isOverlayVisible = false
+                        }
                     } label: {
                         Image(systemName: "sidebar.right")
                     }
-                    // Disabled rather than hidden when there is no room. A
-                    // control that vanishes on resize reads as a bug, and one
-                    // that stays but does nothing is worse: this says why.
-                    .disabled(!inspectorFits)
                     .keyboardShortcut("i", modifiers: [.command, .option])
                     .help(
                         inspectorFits
                             ? (isInspectorPresented ? "Hide inspector" : "Show inspector")
-                            : "The window is too narrow for the inspector"
+                            : (isInspectorPresented ? "Hide inspector" : "Peek inspector")
                     )
                 }
             }
         }
     }
 
-    /// The narrowest the window may get: sidebar at its 200 floor, detail at
-    /// the 560 where the Overview's cards still sit side by side.
+    /// The narrowest the detail column may be. `minimumContentWidth` is this
+    /// plus the sidebar, and the two must be defined from one number so they
+    /// cannot drift.
+    static var detailMinimumWidth: CGFloat { DisplayFit.box(560) }
+
+    /// The narrowest the sidebar column may be, matching
+    /// `navigationSplitViewColumnWidth(min:)` on the sidebar.
+    static var sidebarMinimumWidth: CGFloat { DisplayFit.box(200) }
+
+    /// The narrowest the window may get: the sidebar and detail minimums
+    /// together.
     ///
     /// This is the window's minimum size, set from here so it cannot drift from
-    /// the number below. It must stay **smaller** than a window a user can
+    /// the numbers above. It must stay **smaller** than a window a user can
     /// actually make. A content minimum larger than the window does not shrink
     /// the window, it overflows it: the layout is built at the minimum and the
     /// right hand side is simply cut off by the window edge. That was the
     /// clipped inspector, and it also blinded the measurement below, which sits
     /// inside the clamp and so could only ever read the clamped width back.
-    static var minimumContentWidth: CGFloat { DisplayFit.scale(760) }
+    static var minimumContentWidth: CGFloat { sidebarMinimumWidth + detailMinimumWidth }
 
     /// The narrowest the window may get vertically.
-    static var minimumContentHeight: CGFloat { DisplayFit.scale(620) }
-
-    /// What the inspector asks for, matching `inspectorColumnWidth(min:)`.
-    private static var inspectorMinimumWidth: CGFloat { DisplayFit.scale(370) }
+    static var minimumContentHeight: CGFloat { DisplayFit.box(620) }
 
     /// The narrowest window that can hold all three columns.
     ///
-    /// `.inspector` does not enforce this itself: given less room it keeps its
-    /// width and lets the trailing edge run off the window.
-    private static var widthForThreeColumns: CGFloat {
-        minimumContentWidth + inspectorMinimumWidth
-    }
+    /// Deliberately more than the columns' bare minimums (which sum to 1160 at
+    /// full factor): the Overview only stops looking cramped when the detail
+    /// column keeps about 800 points, and below that the inspector is not
+    /// worth the room it costs the sidebar. So the fit edge is 1450 — below
+    /// it the pane stops being a column and floats instead (see the overlay
+    /// below), with no band where the sidebar gets pushed for its sake.
+    /// `.inspector` does not enforce any of this itself: given less room it
+    /// keeps its width and lets the trailing edge run off the window.
+    private static var widthForThreeColumns: CGFloat { DisplayFit.box(1450) }
 
-    /// How much wider than the threshold the window must get before the pane
-    /// comes back.
+    /// Below this the sidebar collapses instead of being squeezed. Above it,
+    /// the user's choice stands; below it the collapse is the default, but an
+    /// explicit reopen is honored (`isSidebarPinned`). Same separation as
+    /// `inspectorFits` and `isInspectorPresented`: a resize must not be
+    /// recorded as a decision. 1000 is where a full sidebar plus the detail
+    /// minimum stops being comfortable, so the menu gets out of the way below
+    /// it rather than being pushed.
+    private static var widthForSidebar: CGFloat { DisplayFit.box(1000) }
+
+    /// Whether the inspector fits.
     ///
-    /// Without it the decision is a single edge, and a drag that lands on that
-    /// edge adds and removes a whole split view column on alternating frames.
-    /// That is what threw inside AppKit's constraints pass: a hosted column
-    /// changing its minimum size while the pass was already running. The gap
-    /// means a drag has to mean it.
-    private static let inspectorFitHysteresis: CGFloat = 60
-
-    /// Whether the inspector fits, given whether it is currently showing.
-    private static func fits(_ width: CGFloat, open: Bool) -> Bool {
-        open
-            ? width >= widthForThreeColumns
-            : width >= widthForThreeColumns + inspectorFitHysteresis
+    /// A single edge, no hysteresis: the width arrives quantised to 4 points,
+    /// which is the dead band that stops a drag parked on the boundary from
+    /// adding and removing the column on alternating frames. The old explicit
+    /// gap existed to keep the inspector open a little past the edge; that is
+    /// exactly the band in which the sidebar lost its column, so it is gone.
+    private static func fits(_ width: CGFloat) -> Bool {
+        width >= widthForThreeColumns
     }
 
-    /// Applies a measured width to `inspectorFits`, out of the layout pass that
-    /// produced it.
+    /// Applies a measured width to the decisions that depend on it: the
+    /// inspector fit below, and (through `sidebarVisibility`, which reads the
+    /// same width) whether the sidebar keeps its column. Out of the layout pass
+    /// that produced it; the width itself arrives from a resize notification,
+    /// so the hop below is belt and braces rather than the whole fix.
     ///
     /// The hop is the point. Adding or removing the inspector column from
     /// inside layout is what AppKit refuses to do, and `.inspector`'s presence
     /// is driven straight off this value.
-    private func updateInspectorFit(for width: CGFloat) {
-        let next = Self.fits(width, open: inspectorFits)
+    private func applyWidth(for width: CGFloat) {
+        // Above the sidebar fit edge the pin is moot — the choice stands on
+        // its own — so clear it, and the next narrowing auto-closes again.
+        if width >= Self.widthForSidebar {
+            isSidebarPinned = false
+        }
+        let next = Self.fits(width)
         guard next != inspectorFits else { return }
         Task { @MainActor in
-            if inspectorFits != next { inspectorFits = next }
+            if inspectorFits != next {
+                inspectorFits = next
+                if next {
+                    // Column mode is back; the floating pane has nothing to
+                    // float over any more.
+                    isOverlayPinned = false
+                    isOverlayVisible = false
+                }
+            }
         }
+    }
+
+    /// The sidebar visibility handed to the split view.
+    ///
+    /// The user's choice, forced to `.detailOnly` below the width where the
+    /// sidebar cannot hold a column. Same guarded-write shape as
+    /// `showsInspector`: a resize must not be recorded as a decision, so the
+    /// user's value lives in its own state and the fit only overrides the
+    /// getter.
+    private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: {
+                // Until the observer has reported a real width, treat the
+                // window as wide enough: a fresh launch must not start with
+                // the sidebar shut.
+                guard windowContentWidth > 0 else { return columnVisibilityChoice }
+                if windowContentWidth < Self.widthForSidebar, !isSidebarPinned {
+                    return .detailOnly
+                }
+                return columnVisibilityChoice
+            },
+            set: { requested in
+                if windowContentWidth < Self.widthForSidebar {
+                    // Below the edge the split view writes its own collapsed
+                    // state back; only an explicit reopen is a user decision.
+                    // Hiding is a no-op here, so the sidebar comes back the
+                    // moment the window widens instead of staying shut.
+                    isSidebarPinned = requested == .all
+                    if requested == .all {
+                        columnVisibilityChoice = .all
+                    }
+                } else {
+                    columnVisibilityChoice = requested
+                }
+            },
+        )
     }
 
     /// Whether the right pane is on screen, and the only place that is decided.
@@ -317,6 +417,119 @@ struct RootView: View {
         destination == .insights || destination == .workspaces
     }
 
+    /// The pane itself, shared by the fixed column and the floating overlay.
+    @ViewBuilder
+    private var inspectorContent: some View {
+        Group {
+            switch destination {
+            case .workspaces:
+                WorkspaceInspector(model: workspaces) { closeInspector() }
+            default:
+                InspectorView(model: model) { closeInspector() }
+            }
+        }
+    }
+
+    /// Whether the inspector is a floating overlay rather than a column.
+    private var usesOverlayInspector: Bool {
+        destinationHasInspector && isInspectorPresented && !inspectorFits
+    }
+
+    /// The pointer is near the pane: on the edge strip or on the pane itself.
+    private var isOverlayHovered: Bool {
+        isOverlayEdgeHovered || isOverlayPanelHovered
+    }
+
+    /// The floating pane is on screen.
+    private var showsOverlayInspector: Bool {
+        usesOverlayInspector && (isOverlayPinned || isOverlayVisible)
+    }
+
+    /// The detail column: the destination, its fixed inspector column, and the
+    /// floating overlay that replaces the column below the fit edge.
+    private var detailColumn: some View {
+        detail
+            // The detail column has a declared minimum, so an overflow is
+            // never absorbed by the sidebar: the split view cannot take
+            // the difference from the leading column to satisfy the
+            // detail's demand.
+            .frame(minWidth: Self.detailMinimumWidth)
+            .inspector(isPresented: showsInspector) {
+                inspectorContent
+                    // Fixed, on purpose. A min/ideal/max triplet left 30 points
+                    // of drag travel, and dragging that divider ran the hosted
+                    // column's constraint update inside NSSplitView's own
+                    // constraint pass, which AppKit throws on. A single value
+                    // installs no divider drag at all: the pane opens and
+                    // closes, and is never dragged.
+                    .inspectorColumnWidth(DisplayFit.box(400))
+            }
+            // Below the fit edge the inspector stops being a column and floats
+            // instead: a thin hover strip at the trailing edge, the pane
+            // sliding in over the detail. It pushes nothing, so the sidebar
+            // can never be squeezed for its sake. The scrim underneath means a
+            // click on the content beside the floating pane dismisses it, the
+            // way clicking beside a popover does.
+            .overlay(alignment: .trailing) { inspectorDismissScrim }
+            .overlay(alignment: .trailing) { inspectorHoverStrip }
+            .overlay(alignment: .trailing) { inspectorOverlayPanel }
+            .animation(.easeOut(duration: 0.18), value: showsOverlayInspector)
+    }
+
+    @ViewBuilder
+    private var inspectorHoverStrip: some View {
+        if usesOverlayInspector {
+            Color.clear
+                .frame(width: 14)
+                .contentShape(Rectangle())
+                .onHover { isOverlayEdgeHovered = $0 }
+        }
+    }
+
+    /// A click outside the floating pane closes it.
+    ///
+    /// The strip and the pane sit above this, so the pane itself stays fully
+    /// interactive; anywhere else in the detail column is "outside", and the
+    /// natural instinct to click beside a floating window dismisses it.
+    @ViewBuilder
+    private var inspectorDismissScrim: some View {
+        if showsOverlayInspector {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { dismissOverlay() }
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorOverlayPanel: some View {
+        if showsOverlayInspector {
+            inspectorContent
+                .frame(width: DisplayFit.box(400))
+                .frame(maxHeight: .infinity)
+                .background(Theme.sidebarMaterial)
+                .overlay(alignment: .leading) {
+                    Rectangle()
+                        .fill(Theme.border)
+                        .frame(width: 1)
+                }
+                // A real drop shadow, applied to the panel as one flattened
+                // layer. Flattened first so the shadow is cast by the panel's
+                // silhouette, full height and at its leading edge; without the
+                // group, the shadow sampled the translucent material and the
+                // individual controls inside it.
+                .compositingGroup()
+                .shadow(color: .black.opacity(0.20), radius: 12, x: -5, y: 0)
+                .onHover { isOverlayPanelHovered = $0 }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+    }
+
+    /// Hides the floating pane, whether it was hover-revealed or pinned.
+    private func dismissOverlay() {
+        isOverlayPinned = false
+        isOverlayVisible = false
+    }
+
     /// Shuts the pane on the user's behalf.
     ///
     /// Not `showsInspector.wrappedValue = false`: that setter refuses to run
@@ -324,6 +537,8 @@ struct RootView: View {
     /// for closing. Closing is always allowed.
     private func closeInspector() {
         isInspectorPresented = false
+        isOverlayPinned = false
+        isOverlayVisible = false
     }
 
     // MARK: - Sidebar
@@ -509,9 +724,9 @@ struct RootView: View {
         }
         .background(Theme.sidebarMaterial)
         .navigationSplitViewColumnWidth(
-            min: DisplayFit.scale(200),
-            ideal: DisplayFit.scale(228),
-            max: DisplayFit.scale(300)
+            min: Self.sidebarMinimumWidth,
+            ideal: DisplayFit.box(228),
+            max: DisplayFit.box(300)
         )
         .safeAreaInset(edge: .bottom) { accountFooter }
     }
@@ -661,9 +876,17 @@ struct RootView: View {
                 onShowAccount: { selectDestination(.account) }
             )
         case .automations:
-            AutomationsView(model: automations, folders: workspaces.folders) { destination = $0 }
+            AutomationsView(
+                model: automations,
+                folders: workspaces.folders,
+                onNavigate: { destination = $0 },
+                pendingRunID: $pendingRunID
+            )
         case .todo:
-            TodoView(model: todo, folders: workspaces.folders)
+            TodoView(model: todo, folders: workspaces.folders) { runID in
+                selectDestination(.automations)
+                pendingRunID = runID
+            }
         case .machines:
             MachinesView(model: machines)
         case .account:

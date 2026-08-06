@@ -318,18 +318,19 @@ struct HomeView: View {
     /// nothing else. Today and Last 7 days beside the grid stay local: they are
     /// "what have I spent here", which is the question Home opens with.
     private var scopePicker: some View {
-        Picker("", selection: Binding(
+        let binding = Binding<ActivityScope>(
             get: { model.scope },
-            set: { new in Task { await model.setScope(new) } }
-        )) {
-            ForEach(ActivityScope.allCases) { scope in
-                Text(scope.label).tag(scope)
+            set: { new in
+                Task { await model.setScope(new) }
             }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
-        .frame(width: 220)
+        )
+        return SegmentedCapsulePicker(
+            options: ActivityScope.allCases.map { (value: $0, label: $0.label, symbol: $0.symbol) },
+            selection: binding
+        )
+        // Comfortable for the two labels, not the whole header: 220 squeezed
+        // them, and the full width was more than a two-option switch needs.
+        .frame(width: 280, alignment: .trailing)
     }
 
     /// What the figures under the title are counting, said plainly.
