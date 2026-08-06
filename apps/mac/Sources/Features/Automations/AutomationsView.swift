@@ -705,6 +705,7 @@ private struct AutomationHistorySheet: View {
                     label: "Close run history"
                 )
                 Button("Done") { dismiss() }
+                    .buttonStyle(.borderless)
             }
             if model.runs(of: job).isEmpty {
                 EmptyState(symbol: "clock", title: "No runs yet", message: "The first run will appear here with its result and output.")
@@ -814,10 +815,12 @@ private struct NewAutomationSheet: View {
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
+                    .buttonStyle(.borderless)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if step > 0 {
                     Button("Back") { step -= 1 }
+                        .buttonStyle(.borderless)
                 }
                 Button {
                     if step < 2 {

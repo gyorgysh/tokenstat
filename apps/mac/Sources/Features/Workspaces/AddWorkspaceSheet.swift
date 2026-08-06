@@ -81,8 +81,7 @@ struct AddWorkspaceSheet: View {
                         Label("Choose folder…", systemImage: "folder")
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
+                .buttonStyle(AccentButtonStyle())
                 .disabled(picking)
                 .keyboardShortcut(.defaultAction)
             }
