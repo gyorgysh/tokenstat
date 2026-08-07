@@ -356,16 +356,8 @@ struct AccountView: View {
 private struct LicensesSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// The generated notices file, or a fallback line when a development
-    /// build ran without the generating build phase.
-    private var text: String {
-        guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"),
-              let contents = try? String(contentsOf: url, encoding: .utf8)
-        else {
-            return "The third-party notices are generated at build time and were not found in this build."
-        }
-        return contents
-    }
+    @State private var text: String?
+    @State private var loadFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -392,21 +384,119 @@ private struct LicensesSheet: View {
                 .help("Close")
             }
 
-            ScrollView {
-                Text(text)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if let text {
+                    #if os(macOS)
+                    NoticesTextPane(text: text)
+                    #else
+                    ScrollView {
+                        Text(text)
+                            .font(Theme.mono(11))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    #endif
+                } else if loadFailed {
+                    // A development build that ran without the generating
+                    // build phase, or a bundle that lost the file.
+                    Text("The third-party notices are generated at build time and were not found in this build.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
             .padding(Theme.Space.s)
             .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(Theme.Space.m)
         .frame(width: 620, height: 520)
         .background(Theme.panel)
+        .task {
+            text = await Self.loadNotices()
+            loadFailed = text == nil
+        }
+    }
+
+    /// Read the generated notices file away from the main thread. The read
+    /// itself is small, but the file is assembled by a build phase and this
+    /// keeps the first open instant regardless of its size.
+    private static func loadNotices() async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md") else {
+                return nil
+            }
+            return try? String(contentsOf: url, encoding: .utf8)
+        }.value
     }
 }
+
+#if os(macOS)
+/// The notices sheet's text surface.
+///
+/// A single SwiftUI `Text` measuring 578 KB of notices on the main thread is
+/// what froze the app on the first open: `Text` lays out the entire string
+/// up front, so the sheet appeared seconds later and stayed blank while the
+/// layout pass ground on. `NSTextView` sizes its lines lazily inside the
+/// scroll view, so the same file appears immediately and scrolls smoothly.
+private struct NoticesTextPane: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        // A 565 KB document is searched, not reread.
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+        textView.font = .monospacedSystemFont(ofSize: DisplayFit.dp(11), weight: .regular)
+        textView.textColor = .labelColor
+        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.drawsBackground = false
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: 0, height: CGFloat.greatestFiniteMagnitude
+        )
+        textView.maxSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude
+        )
+
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+}
+#endif
 
 /// The device code, shown while waiting for the browser half of sign-in.
 private struct SignInCode: View {
