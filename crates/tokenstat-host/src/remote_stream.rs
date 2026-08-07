@@ -25,7 +25,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokenstat_remote::Connection;
@@ -390,6 +390,57 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
         "nextOffset": len,
         "dropped": dropped,
     }))
+}
+
+// MARK: - Remote pty list
+
+/// How long a peer's pty list is reused before the peer is dialled again.
+///
+/// The app reconciles `pty.list` every few seconds (session parity), and
+/// dialling a peer on every one of those calls is what the relay log shows as
+/// a new channel every few seconds. Sessions do not appear and vanish that
+/// fast, so a short cache absorbs the polling.
+const PTY_LIST_TTL: Duration = Duration::from_secs(30);
+
+/// Per-peer cached pty lists: when they were fetched and the sessions.
+type PtyListCache = HashMap<String, (Instant, Vec<Value>)>;
+
+/// The pty sessions of every reachable peer, renamespaced, cached per peer.
+pub(crate) fn remote_pty_lists() -> Vec<Value> {
+    static CACHE: OnceLock<Mutex<PtyListCache>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut out = Vec::new();
+    for peer in crate::remote::reachable_peers() {
+        let cached = {
+            let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            guard
+                .get(&peer)
+                .filter(|(at, _)| at.elapsed() < PTY_LIST_TTL)
+                .map(|(_, items)| items.clone())
+        };
+        let items = match cached {
+            Some(items) => items,
+            None => match crate::remote::call_peer_result(
+                &peer,
+                "pty.list",
+                r#"{"includeRemote":false}"#,
+            ) {
+                Ok(Value::Array(items)) => {
+                    cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(peer.clone(), (Instant::now(), items.clone()));
+                    items
+                }
+                _ => continue,
+            },
+        };
+        for mut item in items {
+            crate::dispatch::renamespace_session(&mut item, &peer);
+            out.push(item);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

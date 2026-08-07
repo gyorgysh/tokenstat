@@ -58,7 +58,20 @@ pub struct TunnelSession {
     channels: Mutex<HashMap<u32, Arc<ChannelState>>>,
     /// The current socket, so shutdown can interrupt a parked supervisor.
     socket: Mutex<Option<Socket>>,
+    /// What the relay connection is doing right now, for the screen that
+    /// reports it. The supervisor owns this; the host reads it.
+    status: Mutex<TunnelStatus>,
     stopped: AtomicBool,
+}
+
+/// What the tunnel connection is doing right now.
+#[derive(Debug, Clone, Default)]
+pub struct TunnelStatus {
+    /// The socket is up and READY: this machine is registered and diallable.
+    pub connected: bool,
+    /// Why the last attempt failed, when it did. None for an ordinary drop
+    /// (the supervisor reconnects silently).
+    pub error: Option<String>,
 }
 
 /// One multiplexed channel's state, shared by the reader thread and the
@@ -107,6 +120,7 @@ impl TunnelSession {
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),
             socket: Mutex::new(None),
+            status: Mutex::new(TunnelStatus::default()),
             stopped: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&session);
@@ -180,6 +194,14 @@ impl TunnelSession {
         if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = socket.close(None);
         }
+    }
+
+    /// What the connection is doing right now.
+    pub fn status(&self) -> TunnelStatus {
+        self.status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
@@ -337,11 +359,20 @@ fn supervisor(session: Weak<TunnelSession>) {
             return;
         }
         match connect_once(&session) {
-            Ok(()) => backoff = RECONNECT_FLOOR,
+            Ok(()) => {
+                // The socket died; that is the ordinary end of a connection,
+                // not an error to show.
+                *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus::default();
+                backoff = RECONNECT_FLOOR;
+            }
             Err(error) => {
                 if !session.stopped.load(Ordering::Relaxed) {
                     eprintln!("tunnel: connection failed: {error}");
                 }
+                *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus {
+                    connected: false,
+                    error: Some(error.to_string()),
+                };
             }
         }
         if session.stopped.load(Ordering::Relaxed) {
@@ -362,7 +393,12 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         ))
         .map_err(tunnel_error)?;
     match socket.read().map_err(tunnel_error)? {
-        Message::Text(text) if text == "READY" => {}
+        Message::Text(text) if text == "READY" => {
+            *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus {
+                connected: true,
+                error: None,
+            };
+        }
         Message::Text(text) => return Err(RemoteError::Tunnel(text.to_string())),
         Message::Close(_) => return Err(RemoteError::Closed),
         other => {
@@ -371,59 +407,51 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             )));
         }
     }
-    // The reader and the writer share one socket. A short read timeout is what
-    // lets the reader give the lock back when the relay is quiet, so the
-    // writer never waits behind an idle read.
+    // One IO thread owns the socket. Outgoing frames are queued to it and it
+    // reads with a short timeout, so a writer can never be starved by a
+    // blocking read and the reader can never miss a frame behind a writer.
     set_relay_read_timeout(&mut socket, Duration::from_millis(50))?;
 
     let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(writer_tx);
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket);
 
-    let reader = {
-        let session = Arc::clone(session);
-        std::thread::spawn(move || {
-            loop {
+    // The IO loop, inline: drain queued outgoing frames, then read one frame
+    // (or idle-wait), and repeat. The read timeout bounds every iteration.
+    loop {
+        while let Ok(frame) = writer_rx.try_recv() {
+            let failed = {
                 let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(socket) = guard.as_mut() else { break };
-                match socket.read() {
-                    Ok(Message::Binary(frame)) => {
-                        drop(guard);
-                        dispatch_frame(&session, &frame);
-                    }
-                    Ok(Message::Close(_)) => break,
-                    Ok(_) => {}
-                    Err(tungstenite::Error::Io(error))
-                        if error.kind() == io::ErrorKind::TimedOut
-                            || error.kind() == io::ErrorKind::WouldBlock => {}
-                    Err(_) => break,
-                }
-            }
-            if let Some(socket) = session
-                .socket
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .as_mut()
-            {
-                let _ = socket.close(None);
-            }
-        })
-    };
-
-    let writer_session = Arc::clone(session);
-    let writer = std::thread::spawn(move || {
-        let session = writer_session;
-        while let Ok(frame) = writer_rx.recv() {
-            let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(socket) = guard.as_mut() else { break };
-            if socket.send(Message::Binary(frame.into())).is_err() || socket.flush().is_err() {
+                socket.send(Message::Binary(frame.into())).is_err() || socket.flush().is_err()
+            };
+            if failed {
                 break;
             }
         }
-    });
-
-    let _ = reader.join();
-    let _ = writer.join();
+        let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(socket) = guard.as_mut() else { break };
+        match socket.read() {
+            Ok(Message::Binary(frame)) => {
+                drop(guard);
+                dispatch_frame(session, &frame);
+            }
+            Ok(Message::Close(_)) => break,
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(error))
+                if error.kind() == io::ErrorKind::TimedOut
+                    || error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(_) => break,
+        }
+    }
+    if let Some(socket) = session
+        .socket
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_mut()
+    {
+        let _ = socket.close(None);
+    }
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = None;
     // A dead socket is the ordinary end of a connection, not a failure to

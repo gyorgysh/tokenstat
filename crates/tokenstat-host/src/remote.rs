@@ -646,7 +646,18 @@ struct ForwardParams {
 fn status() -> Result<Value, String> {
     let settings = load_settings();
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let tunnel_state = tunnel_state().lock().map_err(|e| e.to_string())?.clone();
+    let mut tunnel_state = tunnel_state().lock().map_err(|e| e.to_string())?.clone();
+    // The session knows the truth about the socket: `tunnel_state` is only
+    // updated on inbound traffic, so a machine nobody has dialled yet would
+    // otherwise report "not connected" while its socket is up. Merge the
+    // live status over it.
+    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
+        let live = session.status();
+        tunnel_state.connected = live.connected;
+        if let Some(error) = live.error {
+            tunnel_state.error = Some(error);
+        }
+    }
     Ok(json!({
         // What the user chose, and what is actually true. They differ while
         // the tunnel is being refused, and a screen that showed only the

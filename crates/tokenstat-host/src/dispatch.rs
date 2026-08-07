@@ -1294,19 +1294,10 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             };
             if include_remote {
                 // One level deep on purpose: each peer is asked with
-                // includeRemote=false, so the account cannot recurse A→B→A.
-                for peer in crate::remote::reachable_peers() {
-                    if let Ok(Value::Array(remote)) = crate::remote::call_peer_result(
-                        &peer,
-                        "pty.list",
-                        r#"{"includeRemote":false}"#,
-                    ) {
-                        for mut item in remote {
-                            renamespace_session(&mut item, &peer);
-                            items.push(item);
-                        }
-                    }
-                }
+                // includeRemote=false, so the account cannot recurse A→B→A,
+                // and cached so the app's parity poll does not dial every
+                // peer on every tick.
+                items.extend(crate::remote_stream::remote_pty_lists());
             }
             Ok(Value::Array(items))
         }
@@ -1581,7 +1572,7 @@ fn remote_id(peer: &str, inner: &str) -> String {
 /// Rewrite a peer's session info so it reads as one of this machine's: the id
 /// gains the peer namespace and the workspace id becomes the same
 /// `remote:<peer>:<id>` the app's folder list uses.
-fn renamespace_session(value: &mut Value, peer: &str) {
+pub(crate) fn renamespace_session(value: &mut Value, peer: &str) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };
