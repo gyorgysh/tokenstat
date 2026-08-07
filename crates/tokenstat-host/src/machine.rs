@@ -81,14 +81,6 @@ fn rename(params: &str) -> Result<Value, String> {
     }
     let p: NameParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     tokenstat_identity::set_machine_label(&p.name).map_err(|e| e.to_string())?;
-    // The nearby-machines list on every other screen is a Bonjour record that
-    // carried the old name, so a rename that stopped at the file would leave
-    // this machine introducing itself as somebody it no longer is. A failure to
-    // re-advertise does not fail the rename: the name is saved either way, and
-    // the worst case is a stale line until serving restarts.
-    if let Err(e) = crate::remote::readvertise() {
-        eprintln!("remote: renamed, but could not advertise the new name: {e}");
-    }
     // The whole identity back, not just the name. One shape for "who am I"
     // means the caller replaces what it holds instead of patching a field.
     // With remote reach on, the account directory shows this name on the

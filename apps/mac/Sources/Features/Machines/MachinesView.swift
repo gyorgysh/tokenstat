@@ -28,9 +28,6 @@ struct MachinesView: View {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
-                if let message = model.discoveryError {
-                    Banner(text: message, severity: .warning)
-                }
                 if !Bridge.isHosted {
                     hostSetup
                 }
@@ -41,7 +38,6 @@ struct MachinesView: View {
                 }
 
                 thisMachine
-                discoveredMachines
                 if !model.accountMachines.isEmpty {
                     accountDevices
                 }
@@ -98,7 +94,7 @@ struct MachinesView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add a device")
                     .font(.callout.weight(.medium))
-                Text("Use nearby discovery or paste a connection invite for a device elsewhere.")
+                Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -190,7 +186,7 @@ struct MachinesView: View {
                 }
                 Divider()
                 serving
-                Text("Nearby Macs appear automatically. For a machine elsewhere, use Add device once and approve the connection on both sides.")
+                Text("Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             }
@@ -203,27 +199,8 @@ struct MachinesView: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center, spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Link devices").font(.callout)
-                        Text("Only approved devices can open sessions or change files here.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: Theme.Space.m)
-                    Toggle("", isOn: Binding(
-                        get: { status.serving },
-                        set: { enabled in Task { await model.setServing(enabled) } }
-                    ))
-                    .toggleStyle(.switch)
-                    .tint(Theme.accent)
-                    .labelsHidden()
-                    .accessibilityLabel("Link devices")
-                    .fixedSize()
-                }
-
-                HStack(alignment: .center, spacing: Theme.Space.m) {
-                    VStack(alignment: .leading, spacing: 2) {
                         Text("Reach machines from anywhere").font(.callout)
-                        Text("Uses end-to-end encryption. The service can see which machines talked, when, and how much, but not what they said.")
+                        Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -239,18 +216,6 @@ struct MachinesView: View {
                     .fixedSize()
                 }
 
-                // The setting and the truth are different facts. A port already
-                // in use leaves the first on and the second off, and a screen
-                // that showed only the setting would be lying. Which port is
-                // under Connection details, where somebody debugging will look.
-                if status.serving && !status.listening {
-                    // Rare now that a taken port falls back to a free one, so
-                    // this means the machine would not let us listen at all.
-                    Banner(
-                        text: "The helper is not listening yet. Set up the background helper, then try again.",
-                        severity: .warning
-                    )
-                }
                 if status.tunnel && status.tunnelOnline == false {
                     // The toggle is on but the daemon is not holding a socket.
                     // The plan gate, a revoked token and a dead endpoint all
@@ -267,71 +232,6 @@ struct MachinesView: View {
                         text: "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically.",
                         severity: .warning
                     )
-                }
-            }
-        }
-    }
-
-    // MARK: - Peers
-
-    private var discoveredMachines: some View {
-        Card(
-            title: "Nearby devices",
-            subtitle: "Connect with one click, then approve the pairing."
-        ) {
-            if model.discovered.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    HStack(spacing: Theme.Space.s) {
-                        ProgressView().controlSize(.small)
-                    Text("Looking for nearby devices…")
-                        .font(.callout)
-                    }
-                    Text("A device shows up here when its background helper is running. A machine that is not accepting connections is still listed, so you can see what is on the network.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                VStack(spacing: Theme.Space.s) {
-                    ForEach(model.discovered) { daemon in
-                        HStack(spacing: Theme.Space.m) {
-                            Image(systemName: "dot.radiowaves.left.and.right")
-                                .foregroundStyle(Theme.accent)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(daemon.label)
-                                    .font(.callout.weight(.medium))
-                                Text(daemon.words ?? "Nearby device")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                if !daemon.serving {
-                                    Text("Not accepting connections")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                } else if daemon.address == nil {
-                                    Text("Still finding it…")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                            Spacer()
-                            Button("Connect") { Task { await model.pair(daemon) } }
-                                .buttonStyle(AccentButtonStyle())
-                                .disabled(!daemon.serving || daemon.address == nil)
-                                .help(daemon.serving
-                                    ? "Connect to this machine"
-                                    : "This machine is not accepting connections yet")
-                        }
-                        .padding(Theme.Space.s)
-                        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: Theme.cardRadius)
-                                .strokeBorder(Theme.border, lineWidth: 1)
-                        )
-                    }
-                    Text("Check the matching device name before approving access.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -472,9 +372,9 @@ struct MachinesView: View {
     private var privacyNote: some View {
         Text("""
         A connection between two machines carries terminal output, file \
-        contents and diffs. It is encrypted end to end and goes straight to \
-        the other machine, so nothing passes through tokenstat.ai. Only \
-        aggregate counters are ever eligible for sync.
+        contents and diffs. It is encrypted end to end; the tunnel relays the \
+        encrypted bytes and cannot read them, and only aggregate counters are \
+        ever eligible for sync.
         """)
         .font(.caption)
         .foregroundStyle(.tertiary)

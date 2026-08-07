@@ -31,8 +31,6 @@ final class MachinesModel {
     private(set) var peers: [Peer] = []
     private(set) var accountMachines: [Machine] = []
     private(set) var account: Account?
-    private var rawDiscovered: [DiscoveredDaemon] = []
-    private(set) var discoveryError: String?
     private(set) var loading = false
     private(set) var settingUpHelper = false
     var errorMessage: String?
@@ -41,30 +39,10 @@ final class MachinesModel {
     var noticeMessage: String?
     private var noticeGeneration = 0
 
-    private let discovery = BonjourDiscovery()
-
     /// Peers waiting on a decision, which is the thing somebody opened this
     /// screen to do.
     var pending: [Peer] { peers.filter { $0.trust == .pending && $0.key != identity?.key } }
     var known: [Peer] { peers.filter { $0.trust != .pending && $0.key != identity?.key } }
-
-    /// Nearby machines, never this one.
-    ///
-    /// Bonjour finds a machine's own advertisement too — a Mac that is serving
-    /// is registered with the same mDNS responder it browses with. Adding
-    /// yourself as a peer is not an error anyone intended, so the row is
-    /// filtered out before it can be clicked.
-    var discovered: [DiscoveredDaemon] {
-        guard let ownKey = identity?.key else { return rawDiscovered }
-        return rawDiscovered.filter { $0.key != ownKey }
-    }
-
-    /// A peer this machine can actually call: approved, and with an address to
-    /// dial. Approved without an address is a machine that may connect *to*
-    /// this one, which is a real and different state.
-    var reachable: [Peer] {
-        peers.filter { $0.trust == .approved && $0.address?.isEmpty == false }
-    }
 
     /// Whether the tunnel is holding a live socket, when the daemon has said.
     var tunnelConnected: Bool { status?.tunnelOnline == true }
@@ -81,7 +59,7 @@ final class MachinesModel {
         if let peer = peer(for: machine) {
             switch peer.trust {
             case .pending: return .waitingApproval
-            case .approved: return peer.address?.isEmpty == false ? .connected : .unavailable
+            case .approved: return .ready
             case .revoked: return .unavailable
             }
         }
@@ -89,25 +67,15 @@ final class MachinesModel {
         return .unavailable
     }
 
-    /// The one string to move to the other machine.
-    ///
-    /// It carries the key always and the address when this machine is
-    /// listening, so the far end can dial without anybody reading an address
-    /// aloud. Deliberately not called a key on screen: it is the thing you
-    /// paste, and what is inside it is our problem rather than the user's.
-    var pairingCode: String? {
-        guard let identity else { return nil }
-        if let address = status?.address, status?.listening == true {
-            return "\(identity.key)@\(address)"
-        }
-        return identity.key
-    }
+    /// The one string to move to the other machine: the key. Everything rides
+    /// the tunnel now, so there is no address to carry; the far end's Add
+    /// device box accepts the key as pasted.
+    var pairingCode: String? { identity?.key }
 
     /// Copy this machine's connection invite to the pasteboard.
     ///
-    /// The invite is a pairing code: the key, plus the address when this
-    /// machine is listening. Nobody has to read it — Copy is the whole action,
-    /// and the other machine's Add device box accepts it as pasted.
+    /// The invite is the key. Nobody has to read it — Copy is the whole
+    /// action, and the other machine's Add device box accepts it as pasted.
     func copyInvite() {
         guard let code = pairingCode else { return }
         let pasteboard = NSPasteboard.general
@@ -121,13 +89,6 @@ final class MachinesModel {
     var words: String? { identity?.words ?? status?.words }
 
     func load() async {
-        discovery.changed = { [weak self] daemons in
-            self?.rawDiscovered = daemons
-        }
-        discovery.errorChanged = { [weak self] message in
-            self?.discoveryError = message
-        }
-        discovery.start()
         loading = true
         defer { loading = false }
         do {
@@ -217,18 +178,6 @@ final class MachinesModel {
         }
     }
 
-    func pair(_ daemon: DiscoveredDaemon) async {
-        guard daemon.serving else {
-            errorMessage = "\(daemon.label) is not accepting connections yet. Turn on Link devices on that machine, then try again."
-            return
-        }
-        guard let address = daemon.address else {
-            errorMessage = "Still resolving \(daemon.label)'s address. Try again in a moment."
-            return
-        }
-        await pair(key: daemon.key, label: daemon.label, address: address)
-    }
-
     /// Refresh the peer list alone.
     ///
     /// Separate from `load` because a machine that just connected appears here
@@ -242,28 +191,11 @@ final class MachinesModel {
         }
     }
 
-    func setServing(_ enabled: Bool) async {
-        guard let status else { return }
-        do {
-            let outcome = try await Bridge.setServing(enabled, tunnel: status.tunnel, port: status.port)
-            showNotice(outcome.serving
-                ? "Other machines can now reach this one."
-                : "This machine no longer accepts connections.")
-            errorMessage = nil
-            await load()
-        } catch {
-            // The likeliest failure is the port already being in use, and the
-            // Rust side already names it. Do not rewrite that.
-            errorMessage = error.localizedDescription
-        }
-    }
-
     func setTunnel(_ enabled: Bool) async {
-        guard let status else { return }
         do {
-            _ = try await Bridge.setServing(status.serving, tunnel: enabled, port: status.port)
+            _ = try await Bridge.setTunnel(enabled)
             showNotice(enabled
-                ? "Remote reach is on. Direct connections are still preferred."
+                ? "Remote reach is on. Everything between machines goes through the tunnel."
                 : "Remote reach is off.")
             errorMessage = nil
             await load()
@@ -311,16 +243,10 @@ final class MachinesModel {
     }
 
     func connect(_ peer: Peer) async {
-        // A peer without an address is dialled through the tunnel when that is
-        // on: the daemon tries direct first and falls back. Same-account
-        // machines never carry an address on the record, so this is the path
-        // that makes "connect to my other machines" work anywhere.
-        if peer.address?.isEmpty == false {
-            await dial(peer)
-            return
-        }
+        // One transport: the tunnel. It works from any network, which is the
+        // point; there is no direct path to prefer.
         guard status?.tunnel == true else {
-            errorMessage = "\(peer.label) has no address on this network. Turn on Reach machines from anywhere to connect to it through the tunnel."
+            errorMessage = "\(peer.label) is reachable through the tunnel. Turn on Reach machines from anywhere first."
             return
         }
         await dial(peer)

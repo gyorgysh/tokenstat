@@ -1023,17 +1023,10 @@ extension Bridge {
         )
     }
 
-    /// Start or stop serving other machines.
-    ///
-    /// Slow enough to await: it binds or unbinds a port. Never called on a
-    /// timer, and never on launch: whether this machine serves is the user's
-    /// standing decision, stored by the daemon.
-    static func setServing(_ enabled: Bool, tunnel: Bool, port: Int) async throws -> ServingOutcome {
-        try await background(
-            "remote.serve",
-            ["enable": enabled, "tunnel": tunnel, "port": port],
-            as: ServingOutcome.self
-        )
+    /// Turn remote reach on or off. The one switch: everything between
+    /// machines rides the tunnel, so there is nothing else to configure.
+    static func setTunnel(_ enabled: Bool) async throws -> TunnelOutcome {
+        try await background("remote.serve", ["tunnel": enabled], as: TunnelOutcome.self)
     }
 
     /// Ask a peer a question, through this machine's daemon.

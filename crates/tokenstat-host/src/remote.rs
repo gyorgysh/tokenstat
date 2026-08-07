@@ -24,14 +24,13 @@
 //! approved. See `docs/remote-transport.md`.
 
 use std::collections::HashMap;
-use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokenstat_identity::{MachineIdentity, PeerStore, Trust, public_key_from_hex};
-use tokenstat_remote::{DEFAULT_PORT, Refused, Server, authorize};
+use tokenstat_remote::{Refused, authorize};
 
 use crate::session::Session;
 
@@ -42,25 +41,16 @@ const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 
 // MARK: - Settings
 
-/// What the user chose about serving. Persisted, because a daemon under
+/// What the user chose about remote reach. Persisted, because a daemon under
 /// launchd restarts and must come back the way they left it, not the way it
 /// ships.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSettings {
-    /// Off by default. The whole design rests on this being a decision.
-    #[serde(default)]
-    pub serving: bool,
-    #[serde(default = "default_port")]
-    pub port: u16,
-    /// Off by default because a tunnel carries terminal output and file data.
+    /// Off by default: remote reach is the one switch, and it is a decision.
     #[serde(default)]
     pub tunnel: bool,
     #[serde(default = "default_tunnel_endpoint")]
     pub tunnel_endpoint: String,
-}
-
-fn default_port() -> u16 {
-    DEFAULT_PORT
 }
 
 fn default_tunnel_endpoint() -> String {
@@ -70,8 +60,6 @@ fn default_tunnel_endpoint() -> String {
 impl Default for RemoteSettings {
     fn default() -> Self {
         Self {
-            serving: false,
-            port: DEFAULT_PORT,
             tunnel: false,
             tunnel_endpoint: default_tunnel_endpoint(),
         }
@@ -104,248 +92,6 @@ fn save_settings(settings: &RemoteSettings) -> Result<(), String> {
     let path = settings_path()?;
     let text = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
-}
-
-// MARK: - The listener
-
-struct Listening {
-    address: String,
-    stop: Arc<AtomicBool>,
-}
-
-#[cfg(target_os = "macos")]
-mod bonjour {
-    use std::ffi::c_void;
-    use std::os::fd::RawFd;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    type DNSServiceRef = *mut c_void;
-    type DNSServiceErrorType = i32;
-    type DNSServiceFlags = u32;
-
-    const K_DNS_SERVICE_ERR_NO_ERROR: DNSServiceErrorType = 0;
-    const K_DNS_SERVICE_FLAGS_NONE: DNSServiceFlags = 0;
-    const K_DNS_SERVICE_INTERFACE_INDEX_ANY: u32 = 0;
-    const POLLIN: i16 = 0x0001;
-
-    #[repr(C)]
-    struct PollFd {
-        fd: RawFd,
-        events: i16,
-        revents: i16,
-    }
-
-    type RegisterCallback = unsafe extern "C" fn(
-        DNSServiceRef,
-        DNSServiceFlags,
-        DNSServiceErrorType,
-        *const i8,
-        *const i8,
-        *const i8,
-        *mut c_void,
-    );
-
-    unsafe extern "C" {
-        fn DNSServiceRegister(
-            service_ref: *mut DNSServiceRef,
-            flags: DNSServiceFlags,
-            interface_index: u32,
-            name: *const i8,
-            reg_type: *const i8,
-            domain: *const i8,
-            host: *const i8,
-            port: u16,
-            txt_len: u16,
-            txt_record: *const u8,
-            callback: Option<RegisterCallback>,
-            context: *mut c_void,
-        ) -> DNSServiceErrorType;
-        fn DNSServiceRefSockFD(service_ref: DNSServiceRef) -> RawFd;
-        fn DNSServiceProcessResult(service_ref: DNSServiceRef) -> DNSServiceErrorType;
-        fn DNSServiceRefDeallocate(service_ref: DNSServiceRef);
-        fn poll(fds: *mut PollFd, count: usize, timeout: i32) -> i32;
-    }
-
-    /// Owns the DNS-SD connection and removes the service when dropped.
-    pub(super) struct Advertisement {
-        stop: Arc<AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
-    }
-
-    // Registration errors are handled by the daemon's DNS-SD connection thread.
-    unsafe extern "C" fn registered(
-        _service: DNSServiceRef,
-        _flags: DNSServiceFlags,
-        _error: DNSServiceErrorType,
-        _name: *const i8,
-        _reg_type: *const i8,
-        _domain: *const i8,
-        _context: *mut c_void,
-    ) {
-    }
-
-    pub(super) fn advertise(
-        port: u16,
-        key: &str,
-        fingerprint: &str,
-        words: &str,
-        label: &str,
-        serving: bool,
-    ) -> Result<Advertisement, String> {
-        let txt = txt_record(key, fingerprint, words, label, serving)?;
-        let service_type = b"_tokenstat._tcp\0";
-        let mut service = std::ptr::null_mut();
-        let error = unsafe {
-            DNSServiceRegister(
-                &mut service,
-                K_DNS_SERVICE_FLAGS_NONE,
-                K_DNS_SERVICE_INTERFACE_INDEX_ANY,
-                std::ptr::null(),
-                service_type.as_ptr().cast(),
-                std::ptr::null(),
-                std::ptr::null(),
-                port.to_be(),
-                txt.len() as u16,
-                txt.as_ptr(),
-                Some(registered),
-                std::ptr::null_mut(),
-            )
-        };
-        if error != K_DNS_SERVICE_ERR_NO_ERROR || service.is_null() {
-            return Err(format!("DNSServiceRegister failed with error {error}"));
-        }
-
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        // Raw pointers do not carry a useful Rust ownership story across the
-        // thread boundary. The DNS-SD reference remains owned by that thread.
-        let service = service as usize;
-        let thread = std::thread::spawn(move || {
-            let service = service as DNSServiceRef;
-            let fd = unsafe { DNSServiceRefSockFD(service) };
-            while !thread_stop.load(Ordering::Relaxed) {
-                if fd < 0 {
-                    break;
-                }
-                let mut poll_fd = PollFd {
-                    fd,
-                    events: POLLIN,
-                    revents: 0,
-                };
-                // The timeout gives Drop a bounded path to DNSServiceRefDeallocate.
-                let ready = unsafe { poll(&mut poll_fd, 1, 100) };
-                if thread_stop.load(Ordering::Relaxed) {
-                    break;
-                }
-                if ready <= 0 || poll_fd.revents & POLLIN == 0 {
-                    continue;
-                }
-                let result = unsafe { DNSServiceProcessResult(service) };
-                if result != K_DNS_SERVICE_ERR_NO_ERROR {
-                    break;
-                }
-            }
-            unsafe { DNSServiceRefDeallocate(service) };
-        });
-
-        Ok(Advertisement {
-            stop,
-            thread: Some(thread),
-        })
-    }
-
-    fn txt_record(
-        key: &str,
-        fingerprint: &str,
-        words: &str,
-        label: &str,
-        serving: bool,
-    ) -> Result<Vec<u8>, String> {
-        let mut record = Vec::new();
-        // The words travel with the advertisement so a machine found nearby can
-        // be named the same way on both screens without the finder having to
-        // hash anything.
-        for (name, value) in [
-            ("key", key),
-            ("fingerprint", fingerprint),
-            ("words", words),
-            ("label", label),
-            ("serving", if serving { "1" } else { "0" }),
-        ] {
-            let entry = format!("{name}={value}");
-            if entry.len() > u8::MAX as usize {
-                return Err(format!("Bonjour TXT entry {name} is too long"));
-            }
-            record.push(entry.len() as u8);
-            record.extend_from_slice(entry.as_bytes());
-        }
-        Ok(record)
-    }
-
-    impl Drop for Advertisement {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Relaxed);
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn txt_record_contains_the_identity_fields() {
-            let record = txt_record("key", "fingerprint", "words", "label", true).unwrap();
-            assert_eq!(
-                record,
-                b"\x07key=key\x17fingerprint=fingerprint\x0bwords=words\x0blabel=label\x09serving=1"
-            );
-        }
-
-        #[test]
-        fn dns_service_port_is_encoded_in_network_order() {
-            assert_eq!(1234u16.to_be_bytes(), [4, 210]);
-        }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod bonjour {
-    pub(super) struct Advertisement;
-
-    pub(super) fn advertise(
-        _port: u16,
-        _key: &str,
-        _fingerprint: &str,
-        _words: &str,
-        _label: &str,
-        _serving: bool,
-    ) -> Result<Advertisement, String> {
-        Ok(Advertisement)
-    }
-}
-
-fn listening() -> &'static Mutex<Option<Listening>> {
-    static LISTENING: OnceLock<Mutex<Option<Listening>>> = OnceLock::new();
-    LISTENING.get_or_init(|| Mutex::new(None))
-}
-
-/// The currently registered Bonjour advertisement, whether or not the daemon
-/// is serving. The daemon advertises whenever it runs so machines show up on
-/// nearby screens immediately; the `serving` flag in the record is what tells
-/// the other side whether Connect can work yet.
-fn advertisement_slot() -> &'static Mutex<Option<bonjour::Advertisement>> {
-    static SLOT: OnceLock<Mutex<Option<bonjour::Advertisement>>> = OnceLock::new();
-    SLOT.get_or_init(|| Mutex::new(None))
-}
-
-fn set_advertisement(advertisement: Option<bonjour::Advertisement>) {
-    if let Ok(mut slot) = advertisement_slot().lock() {
-        *slot = advertisement;
-    }
 }
 
 fn tunnel_running() -> &'static AtomicBool {
@@ -424,31 +170,8 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
 pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     register_session(Arc::clone(&session));
     let settings = load_settings();
-    if settings.serving {
-        if let Err(e) = start(Arc::clone(&session), settings.port) {
-            // Not fatal. A machine whose port is taken still has to serve its own
-            // window, and the Machines screen will show that serving is off.
-            eprintln!("remote: could not listen on port {}: {e}", settings.port);
-        }
-    } else {
-        // Advertise anyway, marked as not serving. Finding machines is the
-        // point of the screen, and a list that stays empty until every other
-        // machine happens to be linking reads as broken. The flag stops a
-        // Connect from being offered against a daemon that would refuse it.
-        if let Ok(identity) = MachineIdentity::load_or_create() {
-            match bonjour::advertise(
-                0,
-                &identity.public_key_hex(),
-                &identity.fingerprint(),
-                &tokenstat_identity::key_words(&identity.public_key()),
-                &tokenstat_identity::machine_label(),
-                false,
-            ) {
-                Ok(advertisement) => set_advertisement(Some(advertisement)),
-                Err(e) => eprintln!("remote: could not advertise over Bonjour: {e}"),
-            }
-        }
-    }
+    // Remote reach is one switch and one transport: the tunnel. Everything
+    // between machines rides it, so there is nothing to bind or advertise.
     start_tunnel_if_enabled(session, &settings);
 }
 
@@ -600,155 +323,6 @@ pub(crate) fn register_if_tunnel_enabled() {
         return;
     }
     std::thread::spawn(move || register_with_account(&settings));
-}
-
-/// Bind the preferred port, or any free one.
-///
-/// A port in use is not a reason to stop serving. Nothing about this protocol
-/// needs a fixed number: machines on the network learn the port from the
-/// advertisement, and a machine reached from elsewhere learns it from the
-/// pairing code, so the port is a detail the software carries rather than a
-/// setting a person maintains. Refusing to start because 7878 was taken made
-/// somebody debug a port conflict to use their own two computers.
-///
-/// The preference is still tried first, so a person who did open a port in
-/// their router keeps getting the one they opened.
-fn bind_any(preferred: u16, identity: &MachineIdentity) -> Result<Server, String> {
-    match Server::bind(&format!("0.0.0.0:{preferred}"), identity) {
-        Ok(server) => Ok(server),
-        Err(first) => {
-            // Port 0 asks the operating system for whatever is free, which is
-            // what every peer-to-peer application does and the reason they do
-            // not have port settings.
-            Server::bind("0.0.0.0:0", identity).map_err(|any| {
-                format!(
-                    "could not listen on port {preferred} ({first}), nor on any free port: {any}"
-                )
-            })
-        }
-    }
-}
-
-/// Bind and accept in a background thread.
-pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> {
-    let mut guard = listening().lock().map_err(|e| e.to_string())?;
-    if let Some(existing) = guard.as_ref() {
-        return Ok(existing.address.clone());
-    }
-
-    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    // All interfaces, because the point is another machine. Which machines may
-    // then be served is the peer store's question, not the bind address's: an
-    // address is not an authorization and treating it as one is how "it is only
-    // on the LAN" becomes a security model.
-    let server = bind_any(port, &identity)?;
-    let address = server.local_address().map_err(|e| e.to_string())?;
-    let advertised_port = address
-        .rsplit(':')
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-        .ok_or_else(|| format!("could not determine the listener port from {address}"))?;
-    let advertisement = bonjour::advertise(
-        advertised_port,
-        &identity.public_key_hex(),
-        &identity.fingerprint(),
-        &tokenstat_identity::key_words(&identity.public_key()),
-        &tokenstat_identity::machine_label(),
-        true,
-    )
-    .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
-    set_advertisement(Some(advertisement));
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&stop);
-    std::thread::spawn(move || {
-        loop {
-            match server.accept() {
-                Ok(Ok(connection)) => {
-                    if flag.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let session = Arc::clone(&session);
-                    // One thread per peer, for the same reason the unix socket
-                    // uses one: a peer running a scan must not stop another
-                    // peer connecting.
-                    std::thread::spawn(move || serve_peer(connection, &session));
-                }
-                Ok(Err(refused)) => {
-                    if flag.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    report(&refused);
-                }
-                Err(e) => {
-                    if flag.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    eprintln!("remote: accept failed: {e}");
-                }
-            }
-        }
-    });
-
-    *guard = Some(Listening {
-        address: address.clone(),
-        stop,
-    });
-    Ok(address)
-}
-
-/// Advertise this machine again, under whatever it is now called.
-///
-/// The name goes into the Bonjour record at the moment serving starts, so a
-/// machine renamed while it is serving would keep introducing itself as the old
-/// one on every nearby screen. Only the advertisement is replaced: the listener,
-/// the port and the key are untouched, so nothing that is connected notices.
-///
-/// A no-op when not serving, because there is then nothing advertising a stale
-/// name.
-pub(crate) fn readvertise() -> Result<(), String> {
-    let mut guard = listening().lock().map_err(|e| e.to_string())?;
-    let Some(current) = guard.as_mut() else {
-        return Ok(());
-    };
-    let Some(port) = current
-        .address
-        .rsplit(':')
-        .next()
-        .and_then(|value| value.parse::<u16>().ok())
-    else {
-        return Ok(());
-    };
-    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let fresh = bonjour::advertise(
-        port,
-        &identity.public_key_hex(),
-        &identity.fingerprint(),
-        &tokenstat_identity::key_words(&identity.public_key()),
-        &tokenstat_identity::machine_label(),
-        true,
-    )
-    .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
-    set_advertisement(Some(fresh));
-    Ok(())
-}
-
-/// Stop serving. The accept loop is blocked in `accept`, so it is woken by a
-/// connection from this process rather than by a signal: there is no portable
-/// way to interrupt a blocking accept, and a listener dropped underneath a
-/// thread is worse than one that is asked to leave.
-pub fn stop() -> Result<(), String> {
-    let mut guard = listening().lock().map_err(|e| e.to_string())?;
-    let Some(current) = guard.take() else {
-        return Ok(());
-    };
-    set_advertisement(None);
-    current.stop.store(true, Ordering::Relaxed);
-    // The bind address is 0.0.0.0; connect to the loopback on the same port.
-    if let Some(port) = current.address.rsplit(':').next() {
-        let _ = TcpStream::connect(format!("127.0.0.1:{port}"));
-    }
-    Ok(())
 }
 
 fn report(refused: &Refused) {
@@ -925,40 +499,32 @@ pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, 
             peer.label
         ));
     }
-    let address = peer.address.clone();
     let label = peer.label.clone();
     drop(store);
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    match address.as_deref() {
-        Some(address) => match tokenstat_remote::dial(address, &identity, Some(key), &label) {
-            Ok(connection) => Ok(connection),
-            Err(direct_error) => tunnel_dial(&settings(), key, &identity, &label, direct_error),
-        },
-        None => tunnel_dial(&settings(), key, &identity, &label, "no direct address"),
-    }
+    // One transport: the tunnel. Direct dialing depended on the other
+    // machine's network, ports and NAT, which is exactly the class of failure
+    // this product stopped trying to solve. The address on the peer record is
+    // ignored.
+    tunnel_dial(&settings(), key, &identity, &label, "no direct address")
 }
 
 fn settings() -> RemoteSettings {
     load_settings()
 }
 
-/// Peers this machine may dial right now: approved, and reachable either
-/// directly (an address on the record) or through the tunnel when remote reach
-/// is on. The same rule the app's sidebar applies, so sweeps like `pty.list`
-/// that want "all the machines" see exactly the machines they can reach.
+/// Peers this machine may dial right now: approved, with remote reach on. The
+/// same rule the app's sidebar applies, so sweeps like `pty.list` that want
+/// "all the machines" see exactly the machines they can reach.
 pub(crate) fn reachable_peers() -> Vec<String> {
     let Ok(store) = PeerStore::load() else {
         return Vec::new();
     };
-    let tunnel = load_settings().tunnel;
     store
         .list()
         .into_iter()
-        .filter(|peer| {
-            peer.trust == Trust::Approved
-                && (!peer.address.as_deref().unwrap_or_default().is_empty() || tunnel)
-        })
+        .filter(|peer| peer.trust == Trust::Approved && load_settings().tunnel)
         .map(|peer| peer.key)
         .collect()
 }
@@ -1079,17 +645,12 @@ struct ForwardParams {
 
 fn status() -> Result<Value, String> {
     let settings = load_settings();
-    let address = listening()
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(|l| l.address.clone()));
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let tunnel_state = tunnel_state().lock().map_err(|e| e.to_string())?.clone();
     Ok(json!({
-        // What the user chose, and what is actually true. They differ when a
-        // port is taken, and a screen that showed only the setting would say
-        // "serving" about a daemon that is not.
-        "serving": settings.serving,
+        // What the user chose, and what is actually true. They differ while
+        // the tunnel is being refused, and a screen that showed only the
+        // toggle would invite a Connect that can never work.
         "tunnel": settings.tunnel,
         // What the tunnel is actually doing: the toggle can be on while the
         // daemon is being refused (plan gate, revoked token, endpoint down),
@@ -1098,17 +659,6 @@ fn status() -> Result<Value, String> {
         "tunnelOnline": tunnel_state.connected,
         "tunnelRegistered": tunnel_state.registered,
         "tunnelError": tunnel_state.error,
-        "listening": address.is_some(),
-        // The port actually bound, which is not always the one asked for: a
-        // taken port falls back to any free one rather than refusing to serve.
-        // Reporting the preference here would have the details panel name a
-        // port nothing is listening on.
-        "port": address
-            .as_ref()
-            .and_then(|a| a.rsplit(':').next())
-            .and_then(|p| p.parse::<u16>().ok())
-            .unwrap_or(settings.port),
-        "address": address,
         "key": identity.public_key_hex(),
         "fingerprint": identity.fingerprint(),
         // The check a person will actually perform. See
@@ -1122,37 +672,20 @@ fn status() -> Result<Value, String> {
 fn serve(params: &str) -> Result<Value, String> {
     let p: ServeParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let mut settings = load_settings();
-    if let Some(port) = p.port {
-        settings.port = port;
-    }
     if let Some(tunnel) = p.tunnel {
         settings.tunnel = tunnel;
     }
     if let Some(endpoint) = p.tunnel_endpoint {
         settings.tunnel_endpoint = endpoint;
     }
-    settings.serving = p.enable;
     save_settings(&settings)?;
     if p.tunnel == Some(false) {
         stop_tunnel();
     }
-
-    if p.enable {
-        // Restart rather than ignore, so changing the port takes effect now
-        // instead of at the next daemon start.
-        stop()?;
-        let address = start(session_for_serving()?, settings.port)?;
-        if settings.tunnel {
-            start_tunnel_if_enabled(session_for_serving()?, &settings);
-        }
-        Ok(json!({"serving": true, "tunnel": settings.tunnel, "address": address}))
-    } else {
-        stop()?;
-        if p.tunnel == Some(true) {
-            start_tunnel_if_enabled(session_for_serving()?, &settings);
-        }
-        Ok(json!({"serving": false, "tunnel": settings.tunnel, "address": Value::Null}))
+    if settings.tunnel {
+        start_tunnel_if_enabled(session_for_serving()?, &settings);
     }
+    Ok(json!({"tunnel": settings.tunnel}))
 }
 
 fn forward(params: &str) -> Result<Value, String> {
@@ -1175,54 +708,8 @@ fn forward(params: &str) -> Result<Value, String> {
 mod tests {
     use super::*;
 
-    /// A port conflict is somebody else's software, not a reason to stop
-    /// somebody using their own two computers.
     #[test]
-    fn a_taken_port_falls_back_to_a_free_one() {
-        let identity = MachineIdentity::from_secret([9u8; 32]);
-        let squatter = std::net::TcpListener::bind("0.0.0.0:0").expect("a port to squat on");
-        let taken = squatter.local_addr().expect("its address").port();
-
-        let server = bind_any(taken, &identity).expect("bound somewhere");
-        let bound: u16 = server
-            .local_address()
-            .expect("an address")
-            .rsplit(':')
-            .next()
-            .and_then(|p| p.parse().ok())
-            .expect("a port");
-        assert_ne!(bound, taken, "the taken port cannot be the one bound");
-        assert_ne!(bound, 0, "a real port, not the ask-for-any placeholder");
-    }
-
-    #[test]
-    fn the_preferred_port_is_still_preferred_when_it_is_free() {
-        let identity = MachineIdentity::from_secret([9u8; 32]);
-        // A port is only known to be free for as long as nobody else takes it,
-        // and the other tests in this binary are asking the operating system
-        // for free ports at the same time. Losing that race says nothing about
-        // `bind_any`, so it is retried rather than reported as a failure.
-        for attempt in 1..=8 {
-            let free = {
-                let probe = std::net::TcpListener::bind("0.0.0.0:0").expect("a probe");
-                probe.local_addr().expect("its address").port()
-            };
-            let server = bind_any(free, &identity).expect("bound");
-            let address = server.local_address().expect("address");
-            if address.ends_with(&format!(":{free}")) {
-                return;
-            }
-            assert!(
-                attempt < 8,
-                "never got the preferred port, last was {address}"
-            );
-        }
-    }
-
-    #[test]
-    fn serving_is_off_unless_a_file_says_otherwise() {
-        assert!(!RemoteSettings::default().serving);
-        assert_eq!(RemoteSettings::default().port, DEFAULT_PORT);
+    fn remote_reach_is_off_unless_a_file_says_otherwise() {
         assert!(!RemoteSettings::default().tunnel);
         assert_eq!(
             RemoteSettings::default().tunnel_endpoint,
