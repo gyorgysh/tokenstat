@@ -26,6 +26,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -421,6 +422,21 @@ fn pool() -> &'static Mutex<HashMap<String, Vec<tokenstat_remote::Connection>>> 
 
 const MAX_IDLE_PER_PEER: usize = 4;
 
+/// How long a peer that answered a dial with `no_such_peer` is remembered.
+const UNREACHABLE_TTL: Duration = Duration::from_secs(15);
+
+/// Peers the relay has told us are not on the tunnel, remembered briefly.
+///
+/// The app reconciles remote workspaces every few seconds, and every poll
+/// used to dial the peer again; for a machine whose tunnel was off or whose
+/// daemon was down, that meant a fresh `no_such_peer` channel open per poll
+/// on the relay. During the TTL the dial fails fast instead, with the same
+/// words, without another round trip.
+fn unreachable_peers() -> &'static Mutex<HashMap<String, Instant>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Call a peer and return its answer's result, unwrapped from the peer's
 /// envelope. The shared form of `remote.call` and the pty forwarding in
 /// dispatch: a failure on the far machine is a failure here, not a success
@@ -539,6 +555,21 @@ fn tunnel_dial(
     if !settings.tunnel {
         return Err(format!("could not reach {label} directly: {direct_error}"));
     }
+    let peer_hex = tokenstat_identity::hex(&peer);
+    if unreachable_peers()
+        .lock()
+        .ok()
+        .and_then(|mut cache| {
+            cache.retain(|_, seen| seen.elapsed() < UNREACHABLE_TTL);
+            cache.get(&peer_hex).map(|seen| seen.elapsed())
+        })
+        .is_some()
+    {
+        return Err(format!(
+            "could not reach {label} directly ({direct_error}) or through the tunnel: \
+             the relay says it is not on the tunnel right now"
+        ));
+    }
     // Signed in is a precondition for the session's HELLO; the multiplexed
     // session itself was started when remote reach turned on.
     let _ = account_token()?;
@@ -560,6 +591,11 @@ fn tunnel_dial(
             Ok(connection) => return Ok(connection),
             Err(error) => {
                 last = error.to_string();
+                if last.contains("no_such_peer") {
+                    if let Ok(mut cache) = unreachable_peers().lock() {
+                        cache.insert(peer_hex.clone(), Instant::now());
+                    }
+                }
                 let retryable = last.contains("no_such_peer")
                     || last.contains("not connected")
                     || last.contains("closed")

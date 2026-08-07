@@ -43,6 +43,17 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// without bound. Streams are drained continuously, so real use never gets
 /// near this.
 const MAX_CHANNEL_BUFFER: usize = 32 * 1024 * 1024;
+/// Where this machine's dial ids start. Channel ids are local to each socket,
+/// and the two sides choose them independently: the relay numbers the
+/// channels it opens to a socket from its own per-socket counter (which grows
+/// from 1), while a client numbers its dials from its own counter. If a dial
+/// id collided with a live inbound id, one of the two channels would silently
+/// stop being routed: an inbound OPENED would be mistaken for the dial's own
+/// OPENED (or vice versa) and the channel would be lost, which shows up as a
+/// stream that opens but never answers ("no channel data"). Dial ids start
+/// near the top of the space, which a counter growing from 1 cannot reach in
+/// a socket's lifetime.
+const DIAL_ID_BASE: u32 = 1 << 30;
 /// Reconnect backoff bounds. The relay is usually reachable; a short floor
 /// keeps the retry honest and a low ceiling stops a dead endpoint from
 /// hammering.
@@ -154,7 +165,7 @@ impl TunnelSession {
         if self.stopped.load(Ordering::Relaxed) {
             return Err(RemoteError::Tunnel("tunnel is stopped".into()));
         }
-        let id = self.next_channel.fetch_add(1, Ordering::Relaxed);
+        let id = DIAL_ID_BASE + self.next_channel.fetch_add(1, Ordering::Relaxed);
         let state = Arc::new(ChannelState::new(id));
         self.channels
             .lock()
@@ -413,42 +424,66 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             )));
         }
     }
-    // One IO thread owns the socket. Outgoing frames are queued to it and it
-    // reads with a short timeout, so a writer can never be starved by a
-    // blocking read and the reader can never miss a frame behind a writer.
-    set_relay_read_timeout(&mut socket, Duration::from_millis(50))?;
+    // One IO thread owns the socket. It must never block inside a read or a
+    // flush: a read that waits is a read that cannot drain the writer queue,
+    // and a flush that waits is a write the relay is not draining, either of
+    // which stalls every channel on this socket. The socket is nonblocking
+    // and the loop parks briefly when there is nothing to do.
+    set_relay_nonblocking(&mut socket)?;
 
     let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
     *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(writer_tx);
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket);
 
     // The IO loop, inline: drain queued outgoing frames, then read one frame
-    // (or idle-wait), and repeat. The read timeout bounds every iteration.
+    // (or idle-wait), and repeat. The socket is nonblocking, so neither the
+    // read nor the flush can stall the loop.
     loop {
         while let Ok(frame) = writer_rx.try_recv() {
-            let failed = {
+            let send_failed = {
                 let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(socket) = guard.as_mut() else { break };
-                socket.send(Message::Binary(frame.into())).is_err() || socket.flush().is_err()
+                // A WouldBlock here just means the frame is buffered and the
+                // next send or read flushes it; only a real error is fatal.
+                match socket.send(Message::Binary(frame.into())) {
+                    Ok(()) => false,
+                    Err(tungstenite::Error::Io(error))
+                        if error.kind() == io::ErrorKind::WouldBlock
+                            || error.kind() == io::ErrorKind::TimedOut =>
+                    {
+                        false
+                    }
+                    Err(_) => true,
+                }
             };
-            if failed {
+            if send_failed {
+                eprintln!("tunnel: io loop writer send failed");
                 break;
+            }
+        }
+        // A WouldBlock during the drain left a frame in tungstenite's write
+        // buffer; give it another chance to reach the wire before reading.
+        if let Ok(mut guard) = session.socket.lock() {
+            if let Some(socket) = guard.as_mut() {
+                let _ = socket.flush();
             }
         }
         let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
         let Some(socket) = guard.as_mut() else { break };
-        match socket.read() {
-            Ok(Message::Binary(frame)) => {
-                drop(guard);
-                dispatch_frame(session, &frame);
-            }
+        let frame = match socket.read() {
+            Ok(Message::Binary(frame)) => Some(frame),
             Ok(Message::Close(_)) => break,
-            Ok(_) => {}
+            Ok(_) => None,
             Err(tungstenite::Error::Io(error))
                 if error.kind() == io::ErrorKind::TimedOut
-                    || error.kind() == io::ErrorKind::WouldBlock => {}
+                    || error.kind() == io::ErrorKind::WouldBlock => None,
             Err(_) => break,
+        };
+        drop(guard);
+        if let Some(frame) = frame {
+            dispatch_frame(session, &frame);
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     if let Some(socket) = session
         .socket
@@ -465,12 +500,13 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     Ok(())
 }
 
-/// The read timeout lives on the raw socket, below the WebSocket framing and
-/// TLS, so a timeout surfaces through tungstenite as an Io error.
-fn set_relay_read_timeout(socket: &mut Socket, timeout: Duration) -> Result<(), RemoteError> {
+/// The socket is owned by one IO thread that must never block. Nonblocking
+/// mode lives on the raw socket, below the WebSocket framing and TLS, so
+/// tungstenite surfaces it as `WouldBlock` and the loop parks instead.
+fn set_relay_nonblocking(socket: &mut Socket) -> Result<(), RemoteError> {
     match socket.get_ref() {
-        MaybeTlsStream::Plain(tcp) => tcp.set_read_timeout(Some(timeout)),
-        MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(Some(timeout)),
+        MaybeTlsStream::Plain(tcp) => tcp.set_nonblocking(true),
+        MaybeTlsStream::Rustls(owned) => owned.sock.set_nonblocking(true),
         _ => Ok(()),
     }
     .map_err(RemoteError::Io)

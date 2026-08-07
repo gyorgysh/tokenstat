@@ -206,7 +206,7 @@ impl Connection {
     /// a large frame. An approved peer is trusted, not unlimited: a bug on the
     /// other side should not be able to exhaust this machine's memory.
     pub fn receive(&mut self, max: usize) -> Result<Vec<u8>, RemoteError> {
-        read_one(&mut self.noise, &mut *self.stream, max)
+        read_one(&mut self.noise, &mut *self.stream, max, None)
     }
 
     /// Close the socket. Idempotent, and a failure is not worth reporting: the
@@ -279,7 +279,7 @@ impl StreamReader {
             if closed.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(RemoteError::Closed);
             }
-            match read_one(noise, &mut **stream, max) {
+            match read_one(noise, &mut **stream, max, Some(STREAM_READ_TIMEOUT)) {
                 Err(RemoteError::Io(e))
                     if e.kind() == std::io::ErrorKind::TimedOut
                         || e.kind() == std::io::ErrorKind::WouldBlock => {}
@@ -369,8 +369,9 @@ fn read_one(
     noise: &mut snow::TransportState,
     stream: &mut dyn Transport,
     max: usize,
+    idle_timeout: Option<Duration>,
 ) -> Result<Vec<u8>, RemoteError> {
-    let header = read_noise_frame(noise, stream)?;
+    let header = read_noise_frame(noise, stream, idle_timeout)?;
     if header.len() != 4 {
         return Err(RemoteError::Noise(format!(
             "expected a 4 byte length header, got {}",
@@ -384,7 +385,9 @@ fn read_one(
 
     let mut payload = Vec::with_capacity(total.min(MAX_NOISE_MESSAGE));
     while payload.len() < total {
-        let chunk = read_noise_frame(noise, stream)?;
+        // The message has started; the remaining frames must complete without
+        // an idle timeout or the stream would be left mid-message.
+        let chunk = read_noise_frame(noise, stream, None)?;
         if chunk.is_empty() {
             return Err(RemoteError::Closed);
         }
@@ -397,12 +400,90 @@ fn read_one(
 fn read_noise_frame(
     noise: &mut snow::TransportState,
     stream: &mut dyn Transport,
+    idle_timeout: Option<Duration>,
 ) -> Result<Vec<u8>, RemoteError> {
-    let ciphertext = read_framed(stream, MAX_NOISE_MESSAGE)?;
+    let ciphertext = read_framed(stream, MAX_NOISE_MESSAGE, idle_timeout)?;
     let mut plaintext = vec![0u8; ciphertext.len()];
     let n = noise.read_message(&ciphertext, &mut plaintext)?;
     plaintext.truncate(n);
     Ok(plaintext)
+}
+
+/// Read one length-prefixed frame.
+///
+/// `idle_timeout` bounds the wait before the first byte of the frame. Once a
+/// byte has arrived the frame is read to completion with the timeout
+/// suspended, then the timeout is restored. This is what keeps a split stream
+/// honest: the read half uses a short timeout so an idle reader hands the
+/// write half the shared lock, but a timeout in the *middle* of a frame would
+/// leave the stream misaligned and every later read corrupt — which a browser
+/// sees as a connection that opens and then dies ("the network connection was
+/// lost").
+fn read_framed(
+    stream: &mut dyn Transport,
+    max: usize,
+    idle_timeout: Option<Duration>,
+) -> Result<Vec<u8>, RemoteError> {
+    let mut header = [0u8; 4];
+    match idle_timeout {
+        Some(timeout) => {
+            // The split-stream path: bound only the wait before the first
+            // byte. Once a byte has arrived the frame must complete, or the
+            // retry would re-read from the middle of it and corrupt the
+            // stream. The timeout is restored afterwards.
+            let mut filled = 0;
+            let header_result = loop {
+                match stream.read(&mut header[filled..]) {
+                    Ok(0) => break Err(RemoteError::Closed),
+                    Ok(n) => {
+                        filled += n;
+                        if filled == 4 {
+                            break Ok(());
+                        }
+                        stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+                    }
+                    Err(e)
+                        if e.kind() == std::io::ErrorKind::TimedOut
+                            || e.kind() == std::io::ErrorKind::WouldBlock =>
+                    {
+                        if filled == 0 {
+                            break Err(RemoteError::Io(e));
+                        }
+                        stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+                    }
+                    Err(e) => break Err(RemoteError::Io(e)),
+                }
+            };
+            stream.set_read_timeout(Some(timeout)).map_err(RemoteError::Io)?;
+            header_result?;
+        }
+        None => {
+            // The handshake and request/response paths: a deadline, if any,
+            // is owned by the caller and the whole frame must finish under
+            // it.
+            stream.read_exact(&mut header)?;
+        }
+    }
+
+    let len = u32::from_be_bytes(header) as usize;
+    if len > max {
+        return Err(RemoteError::FrameTooLarge(len as u64, max));
+    }
+    let mut bytes = vec![0u8; len];
+    match idle_timeout {
+        Some(timeout) => {
+            // The header is in; the payload must complete without an idle
+            // timeout, then the timeout is restored for the next message.
+            stream.set_read_timeout(None).map_err(RemoteError::Io)?;
+            let payload_result = stream.read_exact(&mut bytes);
+            stream.set_read_timeout(Some(timeout)).map_err(RemoteError::Io)?;
+            payload_result.map_err(RemoteError::Io)?;
+        }
+        None => {
+            stream.read_exact(&mut bytes)?;
+        }
+    }
+    Ok(bytes)
 }
 
 // MARK: - Dialling out
@@ -451,7 +532,7 @@ pub fn handshake_initiator(
     write_framed(&mut stream, &buffer[..n])?;
     stream.flush()?;
 
-    let response = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
+    let response = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
     handshake.read_message(&response, &mut buffer)?;
 
     let n = handshake.write_message(&[], &mut buffer)?;
@@ -609,12 +690,12 @@ pub fn handshake_responder(
         .local_private_key(&secret)?
         .build_responder()?;
     let mut buffer = vec![0u8; MAX_NOISE_MESSAGE];
-    let first = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
+    let first = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
     handshake.read_message(&first, &mut buffer)?;
     let n = handshake.write_message(&[], &mut buffer)?;
     write_framed(&mut stream, &buffer[..n])?;
     stream.flush()?;
-    let third = read_framed(&mut stream, MAX_NOISE_MESSAGE)?;
+    let third = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
     handshake.read_message(&third, &mut buffer)?;
     let peer = remote_static(&handshake)?;
     stream.set_deadline(None)?;
@@ -692,20 +773,6 @@ fn write_framed(stream: &mut dyn Transport, bytes: &[u8]) -> Result<(), RemoteEr
     stream.write_all(&len.to_be_bytes())?;
     stream.write_all(bytes)?;
     Ok(())
-}
-
-fn read_framed(stream: &mut dyn Transport, max: usize) -> Result<Vec<u8>, RemoteError> {
-    let mut header = [0u8; 4];
-    stream.read_exact(&mut header)?;
-    let len = u32::from_be_bytes(header) as usize;
-    // Checked before allocating. A peer that has not yet been authenticated
-    // can otherwise ask this end for four gigabytes by sending four bytes.
-    if len > max {
-        return Err(RemoteError::FrameTooLarge(len as u64, max));
-    }
-    let mut bytes = vec![0u8; len];
-    stream.read_exact(&mut bytes)?;
-    Ok(bytes)
 }
 
 #[cfg(test)]
