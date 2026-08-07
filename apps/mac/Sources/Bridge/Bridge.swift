@@ -920,6 +920,14 @@ extension Bridge {
     static func ptyClose(id: String) async throws {
         _ = try await background("pty.close", ["id": id], as: Ack.self)
     }
+
+    /// What this machine can launch in a workspace, answered by the host that
+    /// would run the session. The same method a remote folder asks its owner;
+    /// using it locally keeps one source of truth and stops the app running a
+    /// login shell of its own to find the PATH.
+    static func launcherCatalog() async throws -> [RemoteLaunchProfile] {
+        try await background("launcher.catalog", as: [RemoteLaunchProfile].self)
+    }
 }
 
 // MARK: - Automations

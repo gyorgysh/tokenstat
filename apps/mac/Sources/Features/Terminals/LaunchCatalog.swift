@@ -109,19 +109,19 @@ struct LaunchProfile: Identifiable, Sendable {
 /// Which harnesses this Mac can actually launch.
 ///
 /// The list is a view model rather than a constant, and that is the whole
-/// point. Finding the user's real PATH means running their login shell, which
-/// sources a profile and can easily take a second: version managers, Homebrew
-/// shellenv, completions. That work cannot happen while a view is drawing.
+/// point. The accurate answer — what the user's login shell actually puts on
+/// the PATH — used to mean running a second login shell in this process, on
+/// top of the one the host runs, and that work cannot happen while a view is
+/// drawing. It used to: `LaunchProfile.available` was a `static let` filtered
+/// through a login shell, the session strip read it from its `body`, and the
+/// first read ran the shell on the main thread, re-entered layout, and
+/// libdispatch trapped the process for locking recursively.
 ///
-/// It used to. `LaunchProfile.available` was a `static let` filtered through a
-/// login shell, and the session strip read it from its `body`. The first read
-/// ran the shell on the main thread inside the static's one-time
-/// initialization, `waitUntilExit` let AppKit re-enter layout, layout drew the
-/// strip again, the strip read the static again, and libdispatch trapped the
-/// process for locking recursively. The crash looked like a SwiftUI bug and was
-/// a blocking subprocess in a getter.
-///
-/// So: a cheap answer immediately, the accurate one when it arrives.
+/// So the app starts with a cheap answer (PATH the process was launched with,
+/// plus the conventional install directories, no subprocess) and asks the host
+/// for the real catalog once — the same `launcher.catalog` a remote folder
+/// asks its owner, answered by the machine the session would actually run on.
+/// One source of truth, and one login shell per process instead of two.
 @MainActor
 @Observable
 final class LaunchCatalog {
@@ -139,9 +139,9 @@ final class LaunchCatalog {
     /// workspace), fetched from its daemon once per peer.
     private(set) var remoteAvailable: [LaunchProfile] = []
 
-    /// Set once the login shell has been asked. The strip calls `resolve()`
-    /// every time it appears, and it must run once per launch, not once per
-    /// workspace switch.
+    /// Set once the host has answered. The strip calls `resolve()` every time
+    /// it appears, and it must run once per launch, not once per workspace
+    /// switch. A failure stays unresolved so the next visit retries.
     private var resolving = false
     private var resolved = false
     private var remoteFetched = Set<String>()
@@ -150,19 +150,21 @@ final class LaunchCatalog {
         available = Self.filter(LaunchProfile.all, onPathIn: Self.launchTimeSearchPath())
     }
 
-    /// Ask the login shell what the real PATH is, then re-filter.
+    /// Ask the machine that will run the sessions what it can launch.
     ///
-    /// Safe to call from any number of `.task` modifiers: the work happens
-    /// once, off the main actor, and publishes when it is done.
+    /// The host resolves its login environment once per process and filters
+    /// the same catalog a remote folder gets, so the tile list and the spawn
+    /// agree even about CLIs that only a profile puts on the PATH.
     func resolve() async {
         guard !resolved, !resolving else { return }
         resolving = true
-        let profiles = LaunchProfile.all
-        let found = await Task.detached(priority: .utility) {
-            Self.filter(profiles, onPathIn: Self.loginSearchPath())
-        }.value
-        available = found
-        resolved = true
+        do {
+            let dtos = try await Bridge.launcherCatalog()
+            available = dtos.map(Self.profile(from:))
+            resolved = true
+        } catch {
+            // The launch-time list stays; the next appearance retries.
+        }
         resolving = false
     }
 
@@ -177,20 +179,22 @@ final class LaunchCatalog {
                 "launcher.catalog",
                 as: [RemoteLaunchProfile].self
             )
-            remoteAvailable = dtos.map { profile in
-                LaunchProfile(
-                    id: profile.id,
-                    name: profile.name,
-                    command: profile.command,
-                    args: profile.args,
-                    bypassArgs: profile.bypassArgs,
-                    harnessID: profile.harnessId,
-                    symbol: profile.symbol
-                )
-            }
+            remoteAvailable = dtos.map(Self.profile(from:))
         } catch {
             remoteFetched.remove(peer)
         }
+    }
+
+    private nonisolated static func profile(from dto: RemoteLaunchProfile) -> LaunchProfile {
+        LaunchProfile(
+            id: dto.id,
+            name: dto.name,
+            command: dto.command,
+            args: dto.args,
+            bypassArgs: dto.bypassArgs,
+            harnessID: dto.harnessId,
+            symbol: dto.symbol
+        )
     }
 
     private nonisolated static func filter(_ profiles: [LaunchProfile], onPathIn path: [String]) -> [LaunchProfile] {
@@ -210,38 +214,6 @@ final class LaunchCatalog {
         var paths = ProcessInfo.processInfo.environment["PATH"]?
             .split(separator: ":")
             .map(String.init) ?? []
-        paths.append(contentsOf: conventionalDirectories())
-        return deduplicated(paths)
-    }
-
-    /// The login shell's PATH, which is the one the user actually has.
-    ///
-    /// Runs a subprocess. Never call this on the main actor.
-    private nonisolated static func loginSearchPath() -> [String] {
-        var paths = ProcessInfo.processInfo.environment["PATH"]?
-            .split(separator: ":")
-            .map(String.init) ?? []
-
-        let shell = LaunchProfile.shellCommand
-        if FileManager.default.isExecutableFile(atPath: shell) {
-            let output = Pipe()
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: shell)
-            process.arguments = ["-ilc", "printf %s \"$PATH\""]
-            process.standardOutput = output
-            process.standardError = FileHandle.nullDevice
-            if (try? process.run()) != nil {
-                // Read before waiting. A profile that prints more than the pipe
-                // buffer holds would otherwise block on a full pipe while this
-                // side blocks on the exit, and neither would ever move.
-                let data = output.fileHandleForReading.readDataToEndOfFile()
-                process.waitUntilExit()
-                if let loginPath = String(data: data, encoding: .utf8) {
-                    paths.append(contentsOf: loginPath.split(separator: ":").map(String.init))
-                }
-            }
-        }
-
         paths.append(contentsOf: conventionalDirectories())
         return deduplicated(paths)
     }
