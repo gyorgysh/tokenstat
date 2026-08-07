@@ -1170,6 +1170,9 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
                 renamespace_session(&mut value, peer);
+                // A session just appeared on the peer; the cached pty list
+                // must not hide it from the parity watch for another 30s.
+                crate::remote_stream::invalidate_pty_list(peer);
                 return Ok(value);
             }
             let ws = crate::workspaces::folder(&p.workspace_id)?;
@@ -1348,6 +1351,22 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         }
 
         "pty.write" => {
+            // Keystrokes to a subscribed remote session ride the session's
+            // channel instead of a request round trip per key.
+            if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
+                && let Some((peer, session)) = split_remote(&parsed.id)
+                && let Some(data) = parsed.data
+            {
+                match crate::base64::decode(&data) {
+                    Ok(bytes) => match crate::remote_stream::write_pty_input(peer, session, &bytes)
+                    {
+                        Ok(true) => return Some(Ok(json!({"written": bytes.len()}))),
+                        Ok(false) => {}
+                        Err(error) => return Some(Err(error)),
+                    },
+                    Err(error) => return Some(Err(error)),
+                }
+            }
             if let Some(answer) = route_remote_pty("pty.write", params) {
                 return Some(answer);
             }
@@ -1390,6 +1409,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         }
 
         "pty.close" => {
+            if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
+                && let Some((peer, _)) = split_remote(&parsed.id)
+            {
+                crate::remote_stream::invalidate_pty_list(peer);
+            }
             if let Some(answer) = route_remote_pty("pty.close", params) {
                 return Some(answer);
             }
@@ -1406,6 +1430,25 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // machine that owns it through `remote.call`, so the launcher always
         // means the machine the session would actually run on.
         "launcher.catalog" => Ok(crate::launcher::catalog()),
+
+        // Remove a machine from the account directory. The server deletes its
+        // uploaded rows, so this is an explicit action for a machine id that
+        // is stale (a reinstall) or otherwise holding a machine-cap slot.
+        "account.unlinkMachine" => {
+            #[derive(Deserialize)]
+            struct UnlinkParams {
+                id: String,
+            }
+            let p: UnlinkParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Some(Err(e.to_string())),
+            };
+            if let Err(e) = tokenstat_sync::profile::unlink_machine(None, &p.id) {
+                return Some(Err(e.to_string()));
+            }
+            crate::account_activity::invalidate();
+            Ok(json!({"removed": true}))
+        }
 
         // A byte stream between machines. Runs on the machine that owns the
         // resource: it reserves a stream and returns a token; the caller then

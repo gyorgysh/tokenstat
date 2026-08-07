@@ -302,6 +302,7 @@ impl StreamReader {
 }
 
 /// The write half of a split connection.
+#[derive(Clone)]
 pub struct StreamWriter {
     core: Arc<Mutex<Core>>,
 }

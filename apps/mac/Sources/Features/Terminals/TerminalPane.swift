@@ -384,7 +384,7 @@ struct TerminalPane: View {
                     Button {
                         showingPort = true
                     } label: {
-                        Label("Open port…", systemImage: "network")
+                        Label("Browse local port…", systemImage: "network")
                     }
                 }
             } label: {
@@ -864,14 +864,17 @@ private struct RemotePortForm: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Open a port on \(folder.machineLabel ?? "the other machine")")
+            Text("Browse a local port on \(folder.machineLabel ?? "the other machine")")
                 .font(.callout.weight(.medium))
+            Text("View a service running on that machine's own localhost — a webserver, a dev server, a dashboard — right here in the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             TextField("Port", text: $port)
                 .textFieldStyle(.roundedBorder)
                 .frame(width: 120)
             HStack {
                 Spacer()
-                Button("Open") {
+                Button("Browse") {
                     if let value = Int(port.trimmingCharacters(in: .whitespaces)),
                        value > 0, value <= 65_535 {
                         Task { await workspaces.openRemotePort(value, in: folder) }

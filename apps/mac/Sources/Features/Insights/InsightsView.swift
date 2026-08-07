@@ -279,7 +279,11 @@ private struct BreakdownTable: View {
 
     var body: some View {
         if rows.isEmpty {
-            EmptyHint(text: "Nothing recorded in this period.")
+            EmptyHint(
+                symbol: "tray",
+                title: "Nothing recorded",
+                text: "No usage landed in this period. Scan, or widen the time range."
+            )
         } else {
             VStack(spacing: 0) {
                 header
@@ -458,7 +462,11 @@ private struct DailyChart: View {
 
     var body: some View {
         if rows.isEmpty {
-            EmptyHint(text: "No usage in this period.")
+            EmptyHint(
+                symbol: "calendar.badge.exclamationmark",
+                title: "No usage in this period",
+                text: "The days you picked have no events. Try a wider range."
+            )
         } else {
             Chart(rows) { row in
                 BarMark(
@@ -559,13 +567,31 @@ private struct DailyChart: View {
 }
 
 struct EmptyHint: View {
+    /// The symbol in the soft accent seat. The app's empty states are drawn in
+    /// the brand language, never as a bare system placeholder.
+    var symbol: String = "chart.bar.xaxis"
+    var title: String = "Nothing here yet"
     var text: String
 
     var body: some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, Theme.Space.s)
+        VStack(spacing: Theme.Space.s) {
+            ZStack {
+                Circle()
+                    .fill(Theme.accentSoft)
+                    .frame(width: 44, height: 44)
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Theme.accent)
+            }
+            Text(title)
+                .font(.callout.weight(.medium))
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.l)
     }
 }

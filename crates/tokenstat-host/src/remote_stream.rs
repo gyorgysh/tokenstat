@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokenstat_remote::Connection;
+use tokenstat_remote::{Connection, StreamWriter};
 
 /// How long a stream reservation waits for its connection before it is given
 /// up. A dial that fails after `stream.open` would otherwise leave an entry
@@ -218,6 +218,26 @@ struct PtyFrame {
 /// connection's close is observed.
 fn pump_pty_subscribe(connection: Connection, session: &str) {
     let (reader, writer) = connection.split();
+    // The channel is bidirectional: output flows this way (pushed below),
+    // keystrokes flow the other way, straight into the pty. A keystroke is a
+    // single frame over the persistent tunnel socket instead of a request and
+    // a round trip per key, which is what makes typing feel native.
+    let session_id = session.to_string();
+    let input = {
+        let reader = std::sync::Arc::new(reader);
+        let session = session_id.clone();
+        std::thread::spawn(move || {
+            loop {
+                match reader.read(1 << 20) {
+                    Ok(data) if data.is_empty() => break,
+                    Ok(data) => {
+                        let _ = tokenstat_pty::manager().write(&session, &data);
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+    };
     let mut offset = 0u64;
     loop {
         let alive = tokenstat_pty::manager()
@@ -253,10 +273,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
         std::thread::sleep(Duration::from_millis(30));
     }
     writer.close();
-    // Drain whatever the far side sent so its close is consumed; the read
-    // timeout bounds this if it never sends anything.
-    let _ = reader.read(4096);
-    reader.close();
+    let _ = input.join();
 }
 
 // MARK: - The local side of a terminal subscription
@@ -270,6 +287,8 @@ struct PtySubscription {
     /// Bytes evicted from the front because the cache hit its cap.
     trimmed: u64,
     active: bool,
+    /// The channel's write half: keystrokes ride it to the owning machine.
+    writer: Option<StreamWriter>,
 }
 
 fn pty_subscriptions() -> &'static Mutex<HashMap<String, Arc<Mutex<PtySubscription>>>> {
@@ -296,6 +315,7 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
         buffer: Vec::new(),
         trimmed: 0,
         active: true,
+        writer: None,
     }));
     match pty_subscriptions().lock() {
         Ok(mut map) => {
@@ -342,7 +362,10 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             fail(&cache);
             return;
         }
-        let (reader, _writer) = connection.split();
+        let (reader, writer) = connection.split();
+        if let Ok(mut guard) = cache.lock() {
+            guard.writer = Some(writer);
+        }
         loop {
             match reader.read(1 << 20) {
                 Ok(data) if data.is_empty() => break,
@@ -367,6 +390,7 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
         }
         if let Ok(mut guard) = cache.lock() {
             guard.active = false;
+            guard.writer = None;
         }
         reader.close();
     });
@@ -392,6 +416,33 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
     }))
 }
 
+/// Send keystrokes to a subscribed remote session over its channel. Returns
+/// false when there is no live subscription, so the caller falls back to the
+/// forwarded request path.
+pub(crate) fn write_pty_input(peer: &str, session: &str, bytes: &[u8]) -> Result<bool, String> {
+    let key = format!("{peer}:{session}");
+    let cache = pty_subscriptions()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(&key)
+        .cloned()
+        .ok_or_else(|| String::from("no subscription"))?;
+    let writer = {
+        let guard = cache.lock().map_err(|e| e.to_string())?;
+        if !guard.active {
+            return Ok(false);
+        }
+        guard
+            .writer
+            .clone()
+            .ok_or_else(|| String::from("no channel"))?
+    };
+    writer
+        .write(bytes)
+        .map(|_| true)
+        .map_err(|e| format!("the tunnel channel dropped: {e}"))
+}
+
 // MARK: - Remote pty list
 
 /// How long a peer's pty list is reused before the peer is dialled again.
@@ -405,10 +456,11 @@ const PTY_LIST_TTL: Duration = Duration::from_secs(30);
 /// Per-peer cached pty lists: when they were fetched and the sessions.
 type PtyListCache = HashMap<String, (Instant, Vec<Value>)>;
 
+static PTY_LISTS: OnceLock<Mutex<PtyListCache>> = OnceLock::new();
+
 /// The pty sessions of every reachable peer, renamespaced, cached per peer.
 pub(crate) fn remote_pty_lists() -> Vec<Value> {
-    static CACHE: OnceLock<Mutex<PtyListCache>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut out = Vec::new();
     for peer in crate::remote::reachable_peers() {
         let cached = {
@@ -441,6 +493,14 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
         }
     }
     out
+}
+
+/// Drop a peer's cached pty list, so a session that just spawned or closed on
+/// it is seen immediately instead of after the cache TTL.
+pub(crate) fn invalidate_pty_list(peer: &str) {
+    if let Ok(mut cache) = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        cache.remove(peer);
+    }
 }
 
 #[cfg(test)]

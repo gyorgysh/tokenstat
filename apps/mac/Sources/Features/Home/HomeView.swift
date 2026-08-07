@@ -410,7 +410,11 @@ struct HomeView: View {
             } else {
                 // A brand new install, not a failure. Saying so beats an empty
                 // grid that looks like a year of doing nothing.
-                EmptyHint(text: "Nothing scanned yet. Run a scan from Insights to fill this in.")
+                EmptyHint(
+                    symbol: "sparkles",
+                    title: "Nothing scanned yet",
+                    text: "Run a scan from Insights and your first heatmap will fill this grid."
+                )
             }
         }
     }

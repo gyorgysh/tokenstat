@@ -21,6 +21,9 @@ import SwiftUI
 struct MachinesView: View {
     @Bindable var model: MachinesModel
     @State private var addingDevice = false
+    /// The account machine waiting on a Remove confirmation. Destructive on
+    /// the server, so it never happens from a single click.
+    @State private var pendingUnlink: Machine?
 
     var body: some View {
         ScrollView {
@@ -51,6 +54,26 @@ struct MachinesView: View {
         }
         .navigationTitle("Machines")
         .background(Theme.background)
+        .confirmationDialog(
+            "Remove from account?",
+            isPresented: Binding(
+                get: { pendingUnlink != nil },
+                set: { if !$0 { pendingUnlink = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let machine = pendingUnlink {
+                    Task { await model.unlink(machine) }
+                }
+                pendingUnlink = nil
+            }
+            Button("Cancel", role: .cancel) { pendingUnlink = nil }
+        } message: {
+            Text(pendingUnlink.map {
+                "\($0.displayName) will be removed from this account and its uploaded history deleted. Use this for a machine id that no longer exists, for example after a reinstall."
+            } ?? "")
+        }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
@@ -284,7 +307,7 @@ struct MachinesView: View {
     }
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Connect to any machine on this account in one click. Direct when the network allows it, tunnel otherwise.") {
+        Card(title: "Account-linked devices", subtitle: "Connect to any machine on this account in one click, over the tunnel.") {
             VStack(spacing: 0) {
                 ForEach(model.accountMachines) { machine in
                     HStack(spacing: Theme.Space.s) {
@@ -336,13 +359,21 @@ struct MachinesView: View {
                             } else if let key = machine.publicIdentity, !key.isEmpty {
                                 Button("Connect") { Task { await model.connect(machine) } }
                                     .buttonStyle(AccentButtonStyle(small: true))
-                                    .help("Connects directly on one network, or through the tunnel from anywhere")
+                                    .help("Connects through the tunnel from anywhere")
                             } else {
                                 Text("No connection key yet")
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
                                     .help("Open the Machines screen on that machine so it registers its key, then try again")
                             }
+                            Button {
+                                pendingUnlink = machine
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 11))
+                            }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .help("Remove from account (deletes its uploaded history)")
                         }
                     }
                     .padding(.vertical, Theme.Space.s)

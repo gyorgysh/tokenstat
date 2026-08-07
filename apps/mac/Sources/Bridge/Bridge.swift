@@ -1023,6 +1023,13 @@ extension Bridge {
         )
     }
 
+    /// Remove a machine from the account directory. The server deletes that
+    /// machine's uploaded rows, so this is for a stale machine id (a
+    /// reinstall) that is holding a machine-cap slot a live machine needs.
+    static func unlinkMachine(id: String) async throws {
+        _ = try await background("account.unlinkMachine", ["id": id], as: Removed.self)
+    }
+
     /// Turn remote reach on or off. The one switch: everything between
     /// machines rides the tunnel, so there is nothing else to configure.
     static func setTunnel(_ enabled: Bool) async throws -> TunnelOutcome {

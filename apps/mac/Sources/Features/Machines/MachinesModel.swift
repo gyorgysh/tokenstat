@@ -286,6 +286,21 @@ final class MachinesModel {
         }
     }
 
+    /// Remove a machine from the account directory. Destructive on the
+    /// server: the machine's uploaded history is deleted, which is exactly
+    /// what a stale machine id (a reinstall) needs so a live machine can use
+    /// its slot.
+    func unlink(_ machine: Machine) async {
+        guard let id = machine.machineID else { return }
+        do {
+            try await Bridge.unlinkMachine(id: id)
+            showNotice("\(machine.displayName) removed from the account.")
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func dial(_ peer: Peer) async {
         do {
             _ = try await Bridge.remoteWorkspaces(peer: peer)

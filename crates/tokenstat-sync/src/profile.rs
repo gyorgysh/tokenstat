@@ -551,6 +551,33 @@ pub fn register_machine_identity(
     Ok(())
 }
 
+/// Remove a machine from the account directory. The server deletes the
+/// machine's uploaded rows too, which is what makes this an explicit action
+/// rather than something a client does on its own: a stale machine id (a
+/// reinstall, a dead machine) can otherwise hold a machine-cap slot that a
+/// live machine needs.
+pub fn unlink_machine(host_flag: Option<&str>, machine_id: &str) -> Result<(), ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .delete(format!("{host}/api/v1/machines/{machine_id}"))
+        .header("authorization", format!("Bearer {token}"))
+        .send()?;
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        let text = resp.text().unwrap_or_default();
+        return Err(ProfileError::Message(format!(
+            "could not remove the machine from the account ({status}): {text}"
+        )));
+    }
+    Ok(())
+}
+
 /// One day × source × model row of the account's own usage.
 ///
 /// Token counts only. The service has never priced anything and does not start
