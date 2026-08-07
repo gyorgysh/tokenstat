@@ -219,6 +219,9 @@ struct MachinesView: View {
     @ViewBuilder
     private var serving: some View {
         if let status = model.status {
+            let allowed = model.remoteReachAllowed
+            let planExpired = status.tunnel
+                && status.tunnelError?.contains("not_on_this_plan") == true
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack(alignment: .center, spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -229,17 +232,36 @@ struct MachinesView: View {
                     }
                     Spacer(minLength: Theme.Space.m)
                     Toggle("", isOn: Binding(
-                        get: { status.tunnel },
+                        get: { allowed && status.tunnel },
                         set: { enabled in Task { await model.setTunnel(enabled) } }
                     ))
                     .toggleStyle(.switch)
                     .tint(Theme.accent)
                     .labelsHidden()
                     .accessibilityLabel("Reach machines from anywhere")
+                    .disabled(!allowed)
                     .fixedSize()
                 }
 
-                if status.tunnel && status.tunnelOnline == false {
+                if !allowed {
+                    // The relay enforces the plan at every HELLO; this is the
+                    // courtesy copy of the same gate, so nobody is invited to
+                    // flip a switch the relay will refuse. A switch that was
+                    // left on reads as off until the account qualifies again.
+                    Banner(
+                        text: model.account?.signedIn == true
+                            ? "Remote reach needs a Supporter or Patron plan, and this account does not have one."
+                            : "Remote reach needs a Supporter or Patron plan. Sign in with an account that has it.",
+                        severity: .warning
+                    )
+                } else if planExpired {
+                    Banner(
+                        text: "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",
+                        severity: .warning
+                    )
+                }
+
+                if status.tunnel && status.tunnelOnline == false && !planExpired {
                     // The toggle is on but the daemon is not holding a socket.
                     // The plan gate, a revoked token and a dead endpoint all
                     // land here, and each needs different words from "wait".
@@ -310,11 +332,16 @@ struct MachinesView: View {
         Card(title: "Account-linked devices", subtitle: "Connect to any machine on this account in one click, over the tunnel.") {
             VStack(spacing: 0) {
                 ForEach(model.accountMachines) { machine in
+                    // "This machine" can also be matched by its key: a stale
+                    // record whose id no longer equals thisMachineID must not
+                    // suddenly look like a stranger with Connect buttons.
+                    let isSelf = machine.machineID == model.account?.thisMachineID
+                        || machine.publicIdentity == model.identity?.key
                     HStack(spacing: Theme.Space.s) {
-                        Image(systemName: machine.machineID == model.account?.thisMachineID ? "laptopcomputer" : "desktopcomputer")
+                        Image(systemName: isSelf ? "laptopcomputer" : "desktopcomputer")
                             .foregroundStyle(Theme.accent)
                             .frame(width: 24)
-                        if machine.machineID != model.account?.thisMachineID {
+                        if !isSelf {
                             // The industry-standard presence light, before the
                             // name: solid when the machine is reachable right
                             // now, blinking while its state is not confirmed,
@@ -335,14 +362,15 @@ struct MachinesView: View {
                                     .foregroundStyle(.tertiary)
                                     .textSelection(.enabled)
                             }
-                            Text(machine.machineID == model.account?.thisMachineID
-                                ? "This device"
-                                : (formatRelativeDate(machine.lastSyncAt).map { "Last synced \($0)" } ?? "No sync recorded"))
+                            // The detail line sits under the name, on its own
+                            // row: the presence light is the quick read, this
+                            // is the answer to "when did I last hear from it".
+                            Text(statusLine(for: machine, isSelf: isSelf))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if machine.machineID == model.account?.thisMachineID {
+                        if isSelf {
                             // The machine you are sitting at has no Connect,
                             // no state badge and no revoke: there is nothing to
                             // reach or withdraw here, and offering any of it
@@ -351,23 +379,12 @@ struct MachinesView: View {
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.accent)
                         } else {
-                            if let seen = formatRelativeDate(machine.lastSeenAt) {
-                                Text("Seen \(seen)")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            DeviceStateBadge(state: model.state(for: machine))
                             if let peer = model.peer(for: machine) {
                                 accountPeerActions(peer)
                             } else if let key = machine.publicIdentity, !key.isEmpty {
                                 Button("Connect") { Task { await model.connect(machine) } }
                                     .buttonStyle(AccentButtonStyle(small: true))
                                     .help("Connects through the tunnel from anywhere")
-                            } else {
-                                Text("No connection key yet")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                    .help("Open the Machines screen on that machine so it registers its key, then try again")
                             }
                             Button {
                                 pendingUnlink = machine
@@ -384,6 +401,16 @@ struct MachinesView: View {
                 }
             }
         }
+    }
+
+    /// One caption line under a machine's name. The presence light is the
+    /// quick read; this carries the detail, and the two never collide.
+    private func statusLine(for machine: Machine, isSelf: Bool) -> String {
+        if isSelf { return "This device" }
+        if machine.publicIdentity?.isEmpty != false { return "No connection key yet" }
+        if let seen = formatRelativeDate(machine.lastSeenAt) { return "Seen \(seen)" }
+        if let sync = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(sync)" }
+        return "No sync recorded"
     }
 
     @ViewBuilder
@@ -406,35 +433,13 @@ struct MachinesView: View {
     private var privacyNote: some View {
         Text("""
         A connection between two machines carries terminal output, file \
-        contents and diffs. It is encrypted end to end; the tunnel relays the \
+        contents and diffs. It is encrypted end to end. The tunnel relays the \
         encrypted bytes and cannot read them, and only aggregate counters are \
         ever eligible for sync.
         """)
         .font(.caption)
         .foregroundStyle(.tertiary)
         .padding(.top, Theme.Space.xs)
-    }
-}
-
-private struct DeviceStateBadge: View {
-    let state: MachinesModel.DeviceState
-
-    var body: some View {
-        Text(state.rawValue)
-            .font(.caption2.weight(.medium))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14), in: Capsule())
-            .foregroundStyle(color)
-    }
-
-    private var color: Color {
-        switch state {
-        case .connected, .ready: return Theme.success
-        case .settingUp, .waitingApproval: return Theme.warning
-        case .needsPermission, .needsSignIn: return Theme.accent
-        case .unavailable: return .secondary
-        }
     }
 }
 

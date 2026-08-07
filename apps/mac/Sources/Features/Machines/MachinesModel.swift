@@ -17,15 +17,6 @@ import Observation
 @MainActor
 @Observable
 final class MachinesModel {
-    enum DeviceState: String {
-        case ready = "Ready"
-        case settingUp = "Setting up"
-        case needsPermission = "Needs permission"
-        case needsSignIn = "Needs sign-in"
-        case unavailable = "Unavailable"
-        case connected = "Connected"
-        case waitingApproval = "Waiting for approval"
-    }
     private(set) var identity: MachineIdentity?
     private(set) var status: RemoteStatus?
     private(set) var peers: [Peer] = []
@@ -47,24 +38,22 @@ final class MachinesModel {
     /// Whether the tunnel is holding a live socket, when the daemon has said.
     var tunnelConnected: Bool { status?.tunnelOnline == true }
 
+    /// Whether this account may use remote reach. The relay enforces the plan
+    /// at every HELLO, so this is the courtesy copy of the same gate: a free
+    /// or expired account must not be invited to flip a switch the relay will
+    /// refuse.
+    var remoteReachAllowed: Bool {
+        guard account?.signedIn == true, let tier = account?.tier?.lowercased() else {
+            return false
+        }
+        return tier == "supporter" || tier == "patron"
+    }
+
     func peer(for machine: Machine) -> Peer? {
         let identity = machine.publicIdentity ?? machine.machineID
         return peers.first { peer in
             peer.key == identity || peer.fingerprint == identity || peer.label == machine.label
         }
-    }
-
-    func state(for machine: Machine) -> DeviceState {
-        if machine.machineID == account?.thisMachineID { return Bridge.isHosted ? .connected : .settingUp }
-        if let peer = peer(for: machine) {
-            switch peer.trust {
-            case .pending: return .waitingApproval
-            case .approved: return .ready
-            case .revoked: return .unavailable
-            }
-        }
-        if machine.online == true { return .ready }
-        return .unavailable
     }
 
     /// The one string to move to the other machine: the key. Everything rides
@@ -321,7 +310,7 @@ final class MachinesModel {
                 // are both retrying. It resolves itself; naming it as a hard
                 // failure would send somebody down a debugging rabbit hole.
                 if text.contains("closed before the answer arrived") {
-                    showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically; try again in a moment.")
+                    showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically. Try again in a moment.")
                     errorMessage = nil
                 } else {
                     errorMessage = text

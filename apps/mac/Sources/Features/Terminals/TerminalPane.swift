@@ -866,7 +866,7 @@ private struct RemotePortForm: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Browse a local port on \(folder.machineLabel ?? "the other machine")")
                 .font(.callout.weight(.medium))
-            Text("View a service running on that machine's own localhost — a webserver, a dev server, a dashboard — right here in the app.")
+            Text("View a service running on that machine's own localhost, like a webserver, a dev server or a dashboard, right here in the app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             TextField("Port", text: $port)
