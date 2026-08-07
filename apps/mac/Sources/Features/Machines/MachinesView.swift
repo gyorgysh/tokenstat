@@ -314,6 +314,13 @@ struct MachinesView: View {
                         Image(systemName: machine.machineID == model.account?.thisMachineID ? "laptopcomputer" : "desktopcomputer")
                             .foregroundStyle(Theme.accent)
                             .frame(width: 24)
+                        if machine.machineID != model.account?.thisMachineID {
+                            // The industry-standard presence light, before the
+                            // name: solid when the machine is reachable right
+                            // now, blinking while its state is not confirmed,
+                            // grey when it is definitively offline.
+                            StatusDot(online: machine.online)
+                        }
                         VStack(alignment: .leading, spacing: 2) {
                             if let label = machine.label, !label.isEmpty {
                                 Text(label)
@@ -344,11 +351,7 @@ struct MachinesView: View {
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.accent)
                         } else {
-                            if let online = machine.online {
-                                Text(online ? "Online" : "Offline")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(online ? AnyShapeStyle(Theme.success) : AnyShapeStyle(.tertiary))
-                            } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                            if let seen = formatRelativeDate(machine.lastSeenAt) {
                                 Text("Seen \(seen)")
                                     .font(.caption)
                                     .foregroundStyle(.tertiary)
@@ -431,6 +434,57 @@ private struct DeviceStateBadge: View {
         case .settingUp, .waitingApproval: return Theme.warning
         case .needsPermission, .needsSignIn: return Theme.accent
         case .unavailable: return .secondary
+        }
+    }
+}
+
+/// The presence light before a machine's name: solid when reachable, blinking
+/// while its state is not confirmed yet, grey when offline.
+private struct StatusDot: View {
+    /// nil means presence is not known yet (connecting), which is the state
+    /// that blinks.
+    var online: Bool?
+
+    @State private var pulsing = false
+
+    private var ready: Bool { online == true }
+
+    private var color: Color {
+        switch online {
+        case .some(true): return Theme.success
+        case .some(false): return .gray
+        case nil: return Theme.warning
+        }
+    }
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .opacity(ready ? 1 : (pulsing ? 0.3 : 1))
+            .onAppear {
+                guard !ready else { return }
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    pulsing = true
+                }
+            }
+            .accessibilityLabel(accessibilityText)
+            .help(helpText)
+    }
+
+    private var accessibilityText: String {
+        switch online {
+        case .some(true): return "Online"
+        case .some(false): return "Offline"
+        case nil: return "Connecting"
+        }
+    }
+
+    private var helpText: String {
+        switch online {
+        case .some(true): return "Online"
+        case .some(false): return "Offline"
+        case nil: return "Presence not confirmed yet"
         }
     }
 }
