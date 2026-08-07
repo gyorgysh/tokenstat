@@ -37,6 +37,12 @@ const CH_ERROR: u8 = 5;
 
 /// How long an open channel waits for the relay to confirm it.
 const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How much unread data a channel may hold before it is declared dead. A
+/// stream that is not being drained (the far side pushes faster than the
+/// caller reads) must fail loudly rather than grow this process's memory
+/// without bound. Streams are drained continuously, so real use never gets
+/// near this.
+const MAX_CHANNEL_BUFFER: usize = 32 * 1024 * 1024;
 /// Reconnect backoff bounds. The relay is usually reachable; a short floor
 /// keeps the retry honest and a low ceiling stops a dead endpoint from
 /// hammering.
@@ -510,7 +516,13 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
             if let Some(state) = state {
                 let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
                 match op {
-                    CH_DATA => inner.buffer.extend_from_slice(payload),
+                    CH_DATA => {
+                        if inner.buffer.len().saturating_add(payload.len()) > MAX_CHANNEL_BUFFER {
+                            inner.error = Some(String::from("channel buffer overflow"));
+                        } else {
+                            inner.buffer.extend_from_slice(payload);
+                        }
+                    }
                     CH_CLOSE => inner.eof = true,
                     CH_ERROR => {
                         inner.error = Some(String::from_utf8_lossy(payload).trim().to_string())

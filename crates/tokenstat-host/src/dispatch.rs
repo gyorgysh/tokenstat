@@ -1551,6 +1551,12 @@ fn stream_open(params: &str) -> Result<Value, String> {
     let kind = match p.kind.as_str() {
         "proxy" => {
             let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
+            // The proxy bridges to the far machine's own loopback: the point
+            // is "reach the service on that computer", not "use that computer
+            // as a gateway into its network". Anything else is refused.
+            if !matches!(host.as_str(), "127.0.0.1" | "localhost" | "::1" | "[::1]") {
+                return Err("proxy target must be on the far machine's own loopback".into());
+            }
             let port = p.port.ok_or("proxy stream needs a port")?;
             crate::remote_stream::StreamKind::Proxy { host, port }
         }
@@ -1580,19 +1586,64 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
     let peer = p.peer;
     let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
     let target = p.port;
+
+    // Replacing the same target stops the previous bridge, and a cap bounds
+    // how many listeners a session of clicking can accumulate. Without this
+    // every Browse click leaked a listener and a parked thread forever.
+    let key = format!("{peer}:{host}:{target}");
+    let mut registry = proxy_listeners().lock().map_err(|e| e.to_string())?;
+    if let Some(stop) = registry.remove(&key) {
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    if registry.len() >= MAX_PROXY_LISTENERS {
+        return Err(format!(
+            "too many local port bridges (max {MAX_PROXY_LISTENERS}); close some browser tabs"
+        ));
+    }
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    registry.insert(key.clone(), std::sync::Arc::clone(&stop));
+    drop(registry);
+
+    let _ = listener.set_nonblocking(true);
     std::thread::spawn(move || {
-        for incoming in listener.incoming() {
-            let Ok(tcp) = incoming else { break };
-            let _ = tcp.set_nodelay(true);
-            match crate::remote_stream::open_proxy_stream(&peer, &host, target) {
-                Ok(connection) => crate::remote_stream::pump_local(tcp, connection),
-                Err(error) => {
-                    eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
-                }
+        loop {
+            if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
             }
+            match listener.accept() {
+                Ok((tcp, _)) => {
+                    let _ = tcp.set_nodelay(true);
+                    match crate::remote_stream::open_proxy_stream(&peer, &host, target) {
+                        Ok(connection) => crate::remote_stream::pump_local(tcp, connection),
+                        Err(error) => {
+                            eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
+                        }
+                    }
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(_) => break,
+            }
+        }
+        if let Ok(mut registry) = proxy_listeners().lock() {
+            registry.remove(&key);
         }
     });
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
+}
+
+/// How many loopback bridges a daemon will hold at once. Browsed ports are
+/// cheap but not free, and each one parks a thread.
+const MAX_PROXY_LISTENERS: usize = 16;
+
+fn proxy_listeners()
+-> &'static Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>
+{
+    static LISTENERS: std::sync::OnceLock<
+        Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+    > = std::sync::OnceLock::new();
+    LISTENERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
 // MARK: - Remote pty routing
