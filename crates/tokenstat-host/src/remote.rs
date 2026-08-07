@@ -353,6 +353,13 @@ fn tunnel_running() -> &'static AtomicBool {
     &RUNNING
 }
 
+/// The one multiplexed tunnel session the daemon keeps, if remote reach is on.
+fn tunnel_session() -> &'static Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>> {
+    static SESSION: OnceLock<Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>>> =
+        OnceLock::new();
+    SESSION.get_or_init(|| Mutex::new(None))
+}
+
 /// What the tunnel is doing right now, for the screen that reports it.
 ///
 /// `remote.status` reports the user's *setting* and, separately, what is
@@ -483,40 +490,58 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             return;
         }
     };
+    // One persistent, multiplexed socket for the daemon's lifetime. It is
+    // created here and reused by every dial, and the supervisor inside it
+    // reconnects with backoff when the relay drops.
+    let tunnel = {
+        let mut guard = match tunnel_session().lock() {
+            Ok(guard) => guard,
+            Err(e) => {
+                eprintln!("remote: tunnel state unavailable: {e}");
+                tunnel_running().store(false, Ordering::Release);
+                return;
+            }
+        };
+        match guard.as_ref() {
+            Some(existing) => existing.clone(),
+            None => {
+                let session =
+                    tokenstat_remote::tunnel::TunnelSession::spawn(&endpoint, &identity, &token);
+                *guard = Some(session.clone());
+                session
+            }
+        }
+    };
     std::thread::spawn(move || {
         register_with_account(&registered_settings);
+        // Inbound channels: the relay dialled us. Each is a fresh Noise
+        // handshake over the channel, answered exactly like a direct TCP
+        // connection, so the approval rule cannot tell the transports apart.
+        let inbound = tunnel.take_inbound();
         while tunnel_running().load(Ordering::Acquire) {
-            match tokenstat_remote::tunnel::listen(&endpoint, &identity, &token) {
+            let state = match inbound.recv() {
+                Ok(state) => state,
+                Err(_) => break,
+            };
+            let transport = tokenstat_remote::tunnel::ChannelTransport::from_inbound(
+                Arc::clone(&tunnel),
+                state,
+            );
+            match tokenstat_remote::handshake_responder(Box::new(transport), &identity) {
                 Ok(connection) => {
                     set_tunnel_state(|state| {
                         state.connected = true;
                         state.error = None;
                     });
-                    // The account directory may have missed this machine while
-                    // it was away; a reconnect is the moment to make sure the
-                    // other screens see it. Cheap, and a failure only lowers
-                    // the `registered` flag rather than dropping the socket.
-                    register_with_account(&registered_settings);
                     match authorize(connection, "tunnel") {
-                        // Served inline, not on a spawned thread like the TCP
-                        // accept loop. The tunnel gives a machine one socket;
-                        // pairing it with a peer is what that socket *is*, so
-                        // re-listening before the session ends would open a
-                        // second socket for the same key and be denied
-                        // key_already_live by the relay. The loop comes back
-                        // to `listen` only after this session is over.
-                        Ok(connection) => serve_peer(connection, &session),
+                        Ok(connection) => {
+                            let peer_session = Arc::clone(&session);
+                            std::thread::spawn(move || serve_peer(connection, &peer_session));
+                        }
                         Err(refused) => report(&refused),
                     }
                 }
-                Err(error) => {
-                    set_tunnel_state(|state| {
-                        state.connected = false;
-                        state.error = Some(error.to_string());
-                    });
-                    eprintln!("remote: tunnel connection failed: {error}");
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                }
+                Err(error) => eprintln!("remote: inbound tunnel handshake failed: {error}"),
             }
         }
         tunnel_running().store(false, Ordering::Release);
@@ -525,6 +550,13 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
 
 fn stop_tunnel() {
     tunnel_running().store(false, Ordering::Release);
+    if let Some(session) = tunnel_session()
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.take())
+    {
+        session.shutdown();
+    }
     set_tunnel_state(|state| {
         state.connected = false;
         state.error = None;
@@ -941,25 +973,29 @@ fn tunnel_dial(
     if !settings.tunnel {
         return Err(format!("could not reach {label} directly: {direct_error}"));
     }
-    let token = account_token()?;
-    // The target's listener can be mid-reconnect (its daemon restarted, or it
-    // just finished serving another session), which the relay answers with
-    // NOPEER, or the pairing can drop before the answer arrives. All of those
-    // are transient, so a few short retries ride over them instead of showing
-    // a failure that resolved itself a second later.
+    // Signed in is a precondition for the session's HELLO; the multiplexed
+    // session itself was started when remote reach turned on.
+    let _ = account_token()?;
+    let tunnel = tunnel_session()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .ok_or("remote reach is on but the tunnel session is not running")?;
+    // The target's relay socket can be mid-reconnect (its daemon restarted),
+    // which the relay answers with an ERROR channel, or the pairing can drop
+    // before the answer arrives. All of those are transient, so a few short
+    // retries ride over them instead of showing a failure that resolved
+    // itself a second later.
     let mut last = String::new();
     for attempt in 0..3 {
-        match tokenstat_remote::tunnel::dial(
-            &settings.tunnel_endpoint,
-            peer,
-            identity,
-            Some(peer),
-            &token,
-        ) {
+        match tunnel.open_channel(peer).and_then(|channel| {
+            tokenstat_remote::handshake_initiator(Box::new(channel), identity, Some(peer), label)
+        }) {
             Ok(connection) => return Ok(connection),
             Err(error) => {
                 last = error.to_string();
-                let retryable = last.contains("NOPEER")
+                let retryable = last.contains("no_such_peer")
+                    || last.contains("not connected")
                     || last.contains("closed")
                     || last.contains("failed to fill whole buffer");
                 if !retryable || attempt == 2 {

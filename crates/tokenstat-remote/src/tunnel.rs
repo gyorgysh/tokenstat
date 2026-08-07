@@ -1,150 +1,509 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 //
 // Source-available for review, NOT open source. See LICENSE: no rights to
-// redistribute, publish, or ship a build are granted.
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
 
-//! The blind WebSocket pipe used when two machines cannot reach each other.
+//! The persistent, multiplexed WebSocket client to the tokenstat relay.
+//!
+//! One socket per machine. Sessions, terminal streams and the localhost proxy
+//! are channels multiplexed over it, so a machine reconnects once and stays
+//! registered while any number of channels are live, instead of dialling a
+//! fresh socket per session and fighting with its own listener over the key.
+//! The relay sees encrypted channel bytes and nothing more.
 
-use std::io;
+use std::collections::HashMap;
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::time::{Duration, Instant};
 
 use tokenstat_identity::{MachineIdentity, PublicKey, hex};
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket, connect};
 
-use crate::{Connection, RemoteError, Transport, handshake_initiator, handshake_responder};
+use crate::{RemoteError, Transport};
 
-type Socket = WebSocket<tungstenite::stream::MaybeTlsStream<TcpStream>>;
+type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
-struct WsTransport {
-    socket: Socket,
-    pending: Vec<u8>,
+// Channel frame ops: [op: u8][channel: u32 BE][payload].
+const CH_OPEN: u8 = 1;
+const CH_OPENED: u8 = 2;
+const CH_DATA: u8 = 3;
+const CH_CLOSE: u8 = 4;
+const CH_ERROR: u8 = 5;
+
+/// How long an open channel waits for the relay to confirm it.
+const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
+/// Reconnect backoff bounds. The relay is usually reachable; a short floor
+/// keeps the retry honest and a low ceiling stops a dead endpoint from
+/// hammering.
+const RECONNECT_FLOOR: Duration = Duration::from_secs(1);
+const RECONNECT_CEILING: Duration = Duration::from_secs(30);
+
+/// The one long-lived tunnel connection a daemon keeps.
+pub struct TunnelSession {
+    endpoint: String,
+    key_hex: String,
+    token: String,
+    next_channel: AtomicU32,
+    /// The writer thread's inbox. None while disconnected.
+    writer: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    /// The relay-dialled channels, for the host to answer.
+    inbound_tx: Mutex<Option<mpsc::Sender<Arc<ChannelState>>>>,
+    inbound_rx: Mutex<Option<mpsc::Receiver<Arc<ChannelState>>>>,
+    /// Every live channel, by its local id.
+    channels: Mutex<HashMap<u32, Arc<ChannelState>>>,
+    /// The current socket, so shutdown can interrupt a parked supervisor.
+    socket: Mutex<Option<Socket>>,
+    stopped: AtomicBool,
 }
 
-impl WsTransport {
-    fn new(socket: Socket) -> Self {
+/// One multiplexed channel's state, shared by the reader thread and the
+/// transport that reads and writes it. The internals are private; the host
+/// only ever hands a state back to `ChannelTransport::from_inbound`.
+pub struct ChannelState {
+    id: u32,
+    inner: Mutex<ChannelInner>,
+    cond: Condvar,
+}
+
+struct ChannelInner {
+    buffer: Vec<u8>,
+    opened: bool,
+    eof: bool,
+    error: Option<String>,
+}
+
+impl ChannelState {
+    fn new(id: u32) -> Self {
         Self {
-            socket,
-            pending: Vec::new(),
+            id,
+            inner: Mutex::new(ChannelInner {
+                buffer: Vec::new(),
+                opened: false,
+                eof: false,
+                error: None,
+            }),
+            cond: Condvar::new(),
         }
     }
 }
 
-impl io::Read for WsTransport {
+impl TunnelSession {
+    /// Start the session and its supervisor. The supervisor owns the socket,
+    /// reconnects it with backoff, and keeps it registered until `shutdown`.
+    pub fn spawn(endpoint: &str, identity: &MachineIdentity, token: &str) -> Arc<Self> {
+        let (inbound_tx, inbound_rx) = mpsc::channel::<Arc<ChannelState>>();
+        let session = Arc::new(Self {
+            endpoint: endpoint.to_string(),
+            key_hex: identity.public_key_hex(),
+            token: token.to_string(),
+            next_channel: AtomicU32::new(1),
+            writer: Mutex::new(None),
+            inbound_tx: Mutex::new(Some(inbound_tx)),
+            inbound_rx: Mutex::new(Some(inbound_rx)),
+            channels: Mutex::new(HashMap::new()),
+            socket: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+        });
+        let weak = Arc::downgrade(&session);
+        std::thread::spawn(move || supervisor(weak));
+        session
+    }
+
+    /// Channels the relay opened to this machine, for the host to answer.
+    pub fn take_inbound(&self) -> mpsc::Receiver<Arc<ChannelState>> {
+        self.inbound_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .expect("take_inbound is called once")
+    }
+
+    /// Open a channel to a peer and wait for the relay to pair it.
+    ///
+    /// The returned transport is not yet a Noise session: the caller runs
+    /// `handshake_initiator` over it, exactly as it would over a TCP stream.
+    pub fn open_channel(
+        self: &Arc<Self>,
+        peer: PublicKey,
+    ) -> Result<ChannelTransport, RemoteError> {
+        if self.stopped.load(Ordering::Relaxed) {
+            return Err(RemoteError::Tunnel("tunnel is stopped".into()));
+        }
+        let id = self.next_channel.fetch_add(1, Ordering::Relaxed);
+        let state = Arc::new(ChannelState::new(id));
+        self.channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id, Arc::clone(&state));
+        if let Err(error) = self.send_channel_frame(CH_OPEN, id, hex(&peer).as_bytes()) {
+            self.forget_channel(&state);
+            return Err(error);
+        }
+
+        // Wait for OPENED or ERROR. The relay answers in milliseconds when it
+        // is there; the timeout covers the relay being gone or the peer being
+        // unreachable.
+        let deadline = Instant::now() + OPEN_TIMEOUT;
+        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        while !inner.opened && inner.error.is_none() && Instant::now() < deadline {
+            let (guard, _) = state
+                .cond
+                .wait_timeout(inner, Duration::from_millis(20))
+                .unwrap_or_else(|e| e.into_inner());
+            inner = guard;
+        }
+        let error = inner.error.clone();
+        let opened = inner.opened;
+        drop(inner);
+        if let Some(error) = error {
+            self.forget_channel(&state);
+            return Err(RemoteError::Tunnel(error));
+        }
+        if !opened {
+            self.forget_channel(&state);
+            return Err(RemoteError::Tunnel(
+                "the relay did not pair the channel in time".into(),
+            ));
+        }
+        Ok(ChannelTransport::new(Arc::clone(self), state))
+    }
+
+    /// Stop the session and close the socket. The supervisor exits; live
+    /// channels end with an error, which is what a daemon shutdown means.
+    pub fn shutdown(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = socket.close(None);
+        }
+    }
+
+    fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
+        let mut frame = Vec::with_capacity(5 + payload.len());
+        frame.push(op);
+        frame.extend_from_slice(&ch.to_be_bytes());
+        frame.extend_from_slice(payload);
+        let sender = self
+            .writer
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(|| RemoteError::Tunnel("tunnel is not connected".into()))?;
+        sender
+            .send(frame)
+            .map_err(|_| RemoteError::Tunnel("tunnel is not connected".into()))
+    }
+
+    fn forget_channel(&self, state: &Arc<ChannelState>) {
+        self.channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&state.id);
+    }
+}
+
+/// A channel as a `Transport`: bytes in, bytes out, CLOSE on drop.
+///
+/// Reads wait on the channel's condition variable; the handshake and
+/// request/response paths block until data arrives, and `set_read_timeout`
+/// bounds the wait for the split-stream reader.
+pub struct ChannelTransport {
+    session: Arc<TunnelSession>,
+    state: Arc<ChannelState>,
+    read_timeout: Mutex<Option<Duration>>,
+    closed: AtomicBool,
+}
+
+impl ChannelTransport {
+    fn new(session: Arc<TunnelSession>, state: Arc<ChannelState>) -> Self {
+        Self {
+            session,
+            state,
+            read_timeout: Mutex::new(None),
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    /// Wrap a relay-dialled channel for the responder side.
+    pub fn from_inbound(session: Arc<TunnelSession>, state: Arc<ChannelState>) -> Self {
+        Self::new(session, state)
+    }
+
+    /// The channel's local id, for diagnostics.
+    pub fn channel_id(&self) -> u32 {
+        self.state.id
+    }
+}
+
+impl Read for ChannelTransport {
     fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if self.pending.is_empty() {
-            match self.socket.read() {
-                Ok(Message::Binary(bytes)) => self.pending.extend_from_slice(&bytes),
-                Ok(Message::Close(_)) => return Ok(0),
-                Ok(message) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("expected binary tunnel frame, got {message:?}"),
-                    ));
+        if self.closed.load(Ordering::Relaxed) {
+            return Ok(0);
+        }
+        let timeout = *self.read_timeout.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self.state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if !inner.buffer.is_empty() {
+                let count = output.len().min(inner.buffer.len());
+                output[..count].copy_from_slice(&inner.buffer[..count]);
+                inner.buffer.drain(..count);
+                return Ok(count);
+            }
+            if inner.eof {
+                return Ok(0);
+            }
+            if let Some(error) = &inner.error {
+                return Err(io::Error::other(error.clone()));
+            }
+            match timeout {
+                Some(limit) => {
+                    let (guard, result) = self
+                        .state
+                        .cond
+                        .wait_timeout(inner, limit)
+                        .unwrap_or_else(|e| e.into_inner());
+                    inner = guard;
+                    if result.timed_out() {
+                        return Err(io::Error::new(io::ErrorKind::TimedOut, "no channel data"));
+                    }
                 }
-                Err(error) => return Err(io_error(error)),
+                None => {
+                    inner = self
+                        .state
+                        .cond
+                        .wait(inner)
+                        .unwrap_or_else(|e| e.into_inner());
+                }
             }
         }
-        let count = output.len().min(self.pending.len());
-        output[..count].copy_from_slice(&self.pending[..count]);
-        self.pending.drain(..count);
-        Ok(count)
     }
 }
 
-impl io::Write for WsTransport {
+impl Write for ChannelTransport {
     fn write(&mut self, input: &[u8]) -> io::Result<usize> {
-        self.socket
-            .send(Message::Binary(input.to_vec().into()))
-            .map_err(io_error)?;
+        if self.closed.load(Ordering::Relaxed) {
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "channel closed"));
+        }
+        self.session
+            .send_channel_frame(CH_DATA, self.state.id, input)
+            .map_err(io::Error::other)?;
         Ok(input.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.socket.flush().map_err(io_error)
-    }
-}
-
-impl Transport for WsTransport {
-    fn close(&mut self) {
-        let _ = self.socket.close(None);
-    }
-
-    fn set_deadline(&mut self, _timeout: Option<std::time::Duration>) -> std::io::Result<()> {
         Ok(())
     }
+}
 
-    fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) -> std::io::Result<()> {
-        use tungstenite::stream::MaybeTlsStream;
-        // The read timeout lives on the raw socket, below both the WebSocket
-        // framing and TLS. A timeout surfaces through tungstenite as an Io
-        // error, which the split stream treats as "no data yet".
-        match self.socket.get_ref() {
-            MaybeTlsStream::Plain(tcp) => tcp.set_read_timeout(timeout),
-            MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(timeout),
-            _ => Ok(()),
+impl Transport for ChannelTransport {
+    fn close(&mut self) {
+        if self.closed.swap(true, Ordering::Relaxed) {
+            return;
         }
+        let _ = self
+            .session
+            .send_channel_frame(CH_CLOSE, self.state.id, &[]);
+        self.session.forget_channel(&self.state);
+        if let Ok(mut inner) = self.state.inner.lock() {
+            inner.eof = true;
+        }
+        self.state.cond.notify_all();
+    }
+
+    fn set_deadline(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        self.set_read_timeout(timeout)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        *self.read_timeout.lock().unwrap_or_else(|e| e.into_inner()) = timeout;
+        self.state.cond.notify_all();
+        Ok(())
     }
 }
 
-/// Open the registered side of a tunnel and establish an end-to-end session
-/// with the requested machine. The account token authenticates tunnel use only.
-pub fn dial(
-    endpoint: &str,
-    peer_key: PublicKey,
-    identity: &MachineIdentity,
-    expect: Option<PublicKey>,
-    account_token: &str,
-) -> Result<Connection, RemoteError> {
-    let (mut socket, _) = connect(endpoint).map_err(tunnel_error)?;
-    send_text(
-        &mut socket,
-        &format!("HELLO {} {} DIAL", identity.public_key_hex(), account_token),
-    )?;
-    expect_control(&mut socket, "READY")?;
-    send_text(&mut socket, &format!("CONNECT {}", hex(&peer_key)))?;
-    expect_control(&mut socket, "PAIRED")?;
-    handshake_initiator(
-        Box::new(WsTransport::new(socket)),
-        identity,
-        expect,
-        "tunnel peer",
-    )
+// MARK: - The supervisor
+
+fn supervisor(session: Weak<TunnelSession>) {
+    let mut backoff = RECONNECT_FLOOR;
+    loop {
+        let Some(session) = session.upgrade() else {
+            return;
+        };
+        if session.stopped.load(Ordering::Relaxed) {
+            return;
+        }
+        match connect_once(&session) {
+            Ok(()) => backoff = RECONNECT_FLOOR,
+            Err(error) => {
+                if !session.stopped.load(Ordering::Relaxed) {
+                    eprintln!("tunnel: connection failed: {error}");
+                }
+            }
+        }
+        if session.stopped.load(Ordering::Relaxed) {
+            return;
+        }
+        mark_all_channels(&session, "tunnel disconnected");
+        std::thread::sleep(backoff);
+        backoff = (backoff * 2).min(RECONNECT_CEILING);
+    }
 }
 
-/// Register this machine with the tunnel and wait for another machine to pair.
-pub fn listen(
-    endpoint: &str,
-    identity: &MachineIdentity,
-    account_token: &str,
-) -> Result<Connection, RemoteError> {
-    let (mut socket, _) = connect(endpoint).map_err(tunnel_error)?;
-    send_text(
-        &mut socket,
-        &format!(
-            "HELLO {} {} LISTEN",
-            identity.public_key_hex(),
-            account_token
-        ),
-    )?;
-    expect_control(&mut socket, "READY")?;
-    expect_control(&mut socket, "PAIRED")?;
-    handshake_responder(Box::new(WsTransport::new(socket)), identity)
-}
-
-fn send_text(socket: &mut Socket, text: &str) -> Result<(), RemoteError> {
+/// Connect, register, and pump until the socket dies.
+fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
+    let (mut socket, _) = connect(&session.endpoint).map_err(tunnel_error)?;
     socket
-        .send(Message::Text(text.to_owned().into()))
-        .map_err(tunnel_error)
+        .send(Message::Text(
+            format!("HELLO {} {} V2", session.key_hex, session.token).into(),
+        ))
+        .map_err(tunnel_error)?;
+    match socket.read().map_err(tunnel_error)? {
+        Message::Text(text) if text == "READY" => {}
+        Message::Text(text) => return Err(RemoteError::Tunnel(text.to_string())),
+        Message::Close(_) => return Err(RemoteError::Closed),
+        other => {
+            return Err(RemoteError::Tunnel(format!(
+                "expected READY, got {other:?}"
+            )));
+        }
+    }
+    // The reader and the writer share one socket. A short read timeout is what
+    // lets the reader give the lock back when the relay is quiet, so the
+    // writer never waits behind an idle read.
+    set_relay_read_timeout(&mut socket, Duration::from_millis(50))?;
+
+    let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
+    *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(writer_tx);
+    *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket);
+
+    let reader = {
+        let session = Arc::clone(session);
+        std::thread::spawn(move || {
+            loop {
+                let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(socket) = guard.as_mut() else { break };
+                match socket.read() {
+                    Ok(Message::Binary(frame)) => {
+                        drop(guard);
+                        dispatch_frame(&session, &frame);
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Ok(_) => {}
+                    Err(tungstenite::Error::Io(error))
+                        if error.kind() == io::ErrorKind::TimedOut
+                            || error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => break,
+                }
+            }
+            if let Some(socket) = session
+                .socket
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_mut()
+            {
+                let _ = socket.close(None);
+            }
+        })
+    };
+
+    let writer_session = Arc::clone(session);
+    let writer = std::thread::spawn(move || {
+        let session = writer_session;
+        while let Ok(frame) = writer_rx.recv() {
+            let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(socket) = guard.as_mut() else { break };
+            if socket.send(Message::Binary(frame.into())).is_err() || socket.flush().is_err() {
+                break;
+            }
+        }
+    });
+
+    let _ = reader.join();
+    let _ = writer.join();
+    *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    // A dead socket is the ordinary end of a connection, not a failure to
+    // report: the supervisor reconnects silently.
+    Ok(())
 }
 
-fn expect_control(socket: &mut Socket, expected: &str) -> Result<(), RemoteError> {
-    match socket.read().map_err(tunnel_error)? {
-        Message::Text(text) if text == expected => Ok(()),
-        Message::Text(text) => Err(RemoteError::Tunnel(text.to_string())),
-        Message::Close(_) => Err(RemoteError::Closed),
-        other => Err(RemoteError::Tunnel(format!(
-            "expected {expected}, got {other:?}"
-        ))),
+/// The read timeout lives on the raw socket, below the WebSocket framing and
+/// TLS, so a timeout surfaces through tungstenite as an Io error.
+fn set_relay_read_timeout(socket: &mut Socket, timeout: Duration) -> Result<(), RemoteError> {
+    match socket.get_ref() {
+        MaybeTlsStream::Plain(tcp) => tcp.set_read_timeout(Some(timeout)),
+        MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(Some(timeout)),
+        _ => Ok(()),
+    }
+    .map_err(RemoteError::Io)
+}
+
+/// Route one channel frame from the relay.
+fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
+    if frame.len() < 5 {
+        return;
+    }
+    let op = frame[0];
+    let id = u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]);
+    let payload = &frame[5..];
+    let channels = &session.channels;
+
+    match op {
+        CH_OPENED => {
+            // Our own dial: mark it open. An id we do not know is the relay
+            // dialling us: a fresh channel for the host to answer.
+            let mut map = channels.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(state) = map.get(&id) {
+                let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+                inner.opened = true;
+                state.cond.notify_all();
+                return;
+            }
+            let state = Arc::new(ChannelState::new(id));
+            map.insert(id, Arc::clone(&state));
+            if let Some(tx) = session
+                .inbound_tx
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+            {
+                let _ = tx.send(state);
+            }
+        }
+        CH_DATA | CH_CLOSE | CH_ERROR => {
+            let state = {
+                let map = channels.lock().unwrap_or_else(|e| e.into_inner());
+                map.get(&id).cloned()
+            };
+            if let Some(state) = state {
+                let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+                match op {
+                    CH_DATA => inner.buffer.extend_from_slice(payload),
+                    CH_CLOSE => inner.eof = true,
+                    CH_ERROR => {
+                        inner.error = Some(String::from_utf8_lossy(payload).trim().to_string())
+                    }
+                    _ => {}
+                }
+                state.cond.notify_all();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn mark_all_channels(session: &TunnelSession, reason: &str) {
+    let map = session.channels.lock().unwrap_or_else(|e| e.into_inner());
+    for state in map.values() {
+        let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if inner.error.is_none() {
+            inner.error = Some(reason.to_string());
+        }
+        state.cond.notify_all();
     }
 }
 
@@ -155,50 +514,26 @@ fn tunnel_error(error: tungstenite::Error) -> RemoteError {
     }
 }
 
-fn io_error(error: tungstenite::Error) -> io::Error {
-    match error {
-        tungstenite::Error::Io(error) => error,
-        other => io::Error::other(other.to_string()),
-    }
-}
-
-/// Parse a control frame, rejecting payload frames and malformed commands.
-pub fn parse_control(frame: &str) -> Result<Control<'_>, RemoteError> {
-    let mut parts = frame.splitn(3, ' ');
-    let command = parts.next().unwrap_or_default();
-    match command {
-        "READY" if parts.next().is_none() => Ok(Control::Ready),
-        "PAIRED" if parts.next().is_none() => Ok(Control::Paired),
-        "NOPEER" if parts.next().is_none() => Ok(Control::NoPeer),
-        "DENIED" => Ok(Control::Denied(parts.next().unwrap_or_default())),
-        _ => Err(RemoteError::Tunnel(format!(
-            "invalid control frame: {frame}"
-        ))),
-    }
-}
-
-/// Control messages the client may receive before binary forwarding starts.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Control<'a> {
-    Ready,
-    Paired,
-    NoPeer,
-    Denied(&'a str),
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Control, parse_control};
+    use super::*;
 
     #[test]
-    fn parses_control_protocol() {
-        assert!(matches!(parse_control("READY"), Ok(Control::Ready)));
-        assert!(matches!(parse_control("PAIRED"), Ok(Control::Paired)));
-        assert!(matches!(parse_control("NOPEER"), Ok(Control::NoPeer)));
-        assert!(matches!(
-            parse_control("DENIED not_on_this_plan"),
-            Ok(Control::Denied("not_on_this_plan"))
-        ));
-        assert!(parse_control("READY extra").is_err());
+    fn channel_frames_are_big_endian_and_length_prefixed() {
+        // The wire shape is a contract with the relay; pin it so a refactor
+        // cannot silently change bytes on the wire.
+        let frame = {
+            let mut frame = Vec::new();
+            frame.push(CH_OPEN);
+            frame.extend_from_slice(&7u32.to_be_bytes());
+            frame.extend_from_slice(b"peer");
+            frame
+        };
+        assert_eq!(frame[0], 1);
+        assert_eq!(
+            u32::from_be_bytes([frame[1], frame[2], frame[3], frame[4]]),
+            7
+        );
+        assert_eq!(&frame[5..], b"peer");
     }
 }
