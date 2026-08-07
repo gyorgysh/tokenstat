@@ -637,45 +637,6 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
-/// Hides its content behind a blur until the pointer is over it.
-///
-/// For the identity words. They are how a person checks that the machine
-/// knocking is the machine they are looking at, so they have to be readable on
-/// demand, and they are also the one line on the screen that should not be
-/// legible over a shoulder or in a screen recording. Blurred is the honest
-/// middle: the row keeps its size and its place, so nothing moves when it
-/// clears, and it is one hover away.
-///
-/// Blur only, never a substitution. Replacing the text with dots would change
-/// the layout and make the reveal a jump.
-struct RevealOnHover<Content: View>: View {
-    @ViewBuilder var content: Content
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isHovering = false
-    @FocusState private var isFocused: Bool
-
-    /// Hover or keyboard focus reveals the words. The old hover-only version
-    /// locked a full-keyboard or screen-reader user out of the one line that
-    /// identifies the machine.
-    private var revealed: Bool { isHovering || isFocused }
-
-    var body: some View {
-        content
-            .blur(radius: revealed ? 0 : 4)
-            .opacity(revealed ? 1 : 0.85)
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: revealed)
-            .onHover { isHovering = $0 }
-            .focusable()
-            .focused($isFocused)
-            // Without this the hover only registers over the glyphs
-            // themselves, so moving between two words un-blurs and re-blurs.
-            .contentShape(.rect)
-            .help(revealed ? "" : "Tab to reveal")
-            .accessibilityHidden(false)
-    }
-}
-
 /// Closes the right pane, from inside the right pane.
 ///
 /// The toolbar has a toggle, but a toolbar button on the far side of the window

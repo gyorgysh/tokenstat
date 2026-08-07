@@ -208,16 +208,20 @@ struct AccountView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: Theme.Space.xs) {
-                    // A machine the user has never named shows its id, and an
-                    // id is 18 characters nobody reads. Blurred past the part
-                    // that tells two of them apart, legible on hover.
+                    // A machine the user has never named shows its id. The id
+                    // is a public machine key, so it is shown plain and
+                    // selectable rather than blurred.
                     if let label = machine.label, !label.isEmpty {
                         Text(label)
                             .font(.callout)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     } else if let id = machine.machineID {
-                        MaskedID(value: id, size: 12)
+                        Text(id)
+                            .font(Theme.mono(12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
                     } else {
                         Text(machine.displayName)
                             .font(.callout)
@@ -236,8 +240,10 @@ struct AccountView: View {
                 // Only when the machine has a name, so the id is not printed
                 // twice on a row that is already showing it as its title.
                 if let subtitle = machine.subtitle {
-                    MaskedID(value: subtitle, size: 10)
+                    Text(subtitle)
+                        .font(Theme.mono(10))
                         .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
                 }
             }
 

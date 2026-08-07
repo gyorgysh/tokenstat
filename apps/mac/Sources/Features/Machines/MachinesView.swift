@@ -90,6 +90,18 @@ struct MachinesView: View {
                 await model.refresh()
             }
         }
+        // The sidebar sweep is the source of truth for who is actually
+        // connected; keep the Connect/Disconnect buttons in step with it.
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
+            if let key = note.object as? String {
+                model.markConnected(key)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
+            if let key = note.object as? String {
+                model.markDisconnected(key)
+            }
+        }
         .sheet(isPresented: $addingDevice) {
             VStack(spacing: 0) {
                 HStack {
@@ -172,17 +184,13 @@ struct MachinesView: View {
                             // The comparison a person actually performs. The
                             // fingerprint and the key still exist and are one
                             // disclosure away, under Connection details.
-                            //
-                            // Blurred until hovered: this screen is often the
-                            // one on a shared display while two machines are
-                            // being paired, and these two words are the whole
-                            // check.
-                            RevealOnHover {
-                                Text(words)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Theme.accent)
-                                    .textSelection(.enabled)
-                            }
+                            // The words are derived from a public key: there is
+                            // nothing private in them, so they are shown plain
+                            // and selectable.
+                            Text(words)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Theme.accent)
+                                .textSelection(.enabled)
                         }
                     }
                     if model.pairingCode != nil {
@@ -339,9 +347,17 @@ struct MachinesView: View {
                         || machine.publicIdentity == model.identity?.key
                     HStack(spacing: Theme.Space.s) {
                         Image(systemName: isSelf ? "laptopcomputer" : "desktopcomputer")
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(isSelf ? Theme.accent : .secondary)
                             .frame(width: 24)
-                        if !isSelf {
+                        if isSelf {
+                            // This machine's own presence: the accent colour
+                            // when the tunnel is actually up (so the row reads
+                            // as "this device, reachable"), grey when remote
+                            // reach is off or the socket is not connected.
+                            Circle()
+                                .fill(model.status?.tunnelOnline == true ? Theme.accent : .gray)
+                                .frame(width: 8, height: 8)
+                        } else {
                             // The industry-standard presence light, before the
                             // name: solid when the machine is reachable right
                             // now, blinking while its state is not confirmed,
@@ -371,16 +387,21 @@ struct MachinesView: View {
                         }
                         Spacer()
                         if isSelf {
-                            // The machine you are sitting at has no Connect,
-                            // no state badge and no revoke: there is nothing to
-                            // reach or withdraw here, and offering any of it
-                            // made the row read as a stranger.
-                            Text("Here")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(Theme.accent)
+                            // The machine you are sitting at has no Connect and
+                            // no revoke; "This device" under the name is the
+                            // whole mark.
+                            EmptyView()
                         } else {
                             if let peer = model.peer(for: machine) {
-                                accountPeerActions(peer)
+                                if model.isConnected(machine) {
+                                    Button("Disconnect") {
+                                        model.disconnect(peer)
+                                    }
+                                    .buttonStyle(SecondaryButtonStyle(small: true))
+                                    .help("Removes this machine's workspaces from the sidebar")
+                                } else {
+                                    accountPeerActions(peer)
+                                }
                             } else if let key = machine.publicIdentity, !key.isEmpty {
                                 Button("Connect") { Task { await model.connect(machine) } }
                                     .buttonStyle(AccentButtonStyle(small: true))
@@ -561,14 +582,12 @@ private struct PeerRow<Actions: View>: View {
                 }
                 // The words rather than the key or the fingerprint: this line
                 // exists to be compared with another screen by a person, and
-                // that is the form they will read whole. Blurred until hovered,
-                // like this machine's own words above.
-                RevealOnHover {
-                    Text(peer.words ?? "Approved device")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+                // that is the form they will read whole. They derive from a
+                // public key, so there is nothing to hide.
+                Text(peer.words ?? "Approved device")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
             Spacer()
             actions

@@ -31,6 +31,9 @@ extension Notification.Name {
     /// A peer connection succeeded, so its folders can be fetched now instead
     /// of waiting for the 60-second peer sweep.
     static let remotePeerDidConnect = Notification.Name("tokenstat.remotePeerDidConnect")
+    /// A peer's workspaces were explicitly disconnected, so its folders leave
+    /// the sidebar now instead of after the failure sweep notices.
+    static let remotePeerDidDisconnect = Notification.Name("tokenstat.remotePeerDidDisconnect")
 }
 
 /// The tabs of the workspace inspector.
@@ -557,6 +560,7 @@ final class WorkspacesModel {
                     remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                     remotePeerFailures[peer.key] = 0
+                    NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
                 } catch {
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRetrySeconds)
                     let failures = (remotePeerFailures[peer.key] ?? 0) + 1
@@ -594,6 +598,18 @@ final class WorkspacesModel {
     private static let peerRetrySeconds: TimeInterval = 30
     /// Consecutive failures before a peer's folders leave the sidebar.
     private static let maxPeerFailures = 2
+
+    /// Drop one peer's workspaces from the sidebar immediately, on an explicit
+    /// Disconnect. Without this the folders stay until the sweep has failed
+    /// twice, which is seconds to a minute of the machine still looking
+    /// reachable after somebody asked to disconnect.
+    func disconnect(peer key: String) {
+        remoteFolders.removeValue(forKey: key)
+        remotePeerNextDial.removeValue(forKey: key)
+        remotePeerFailures.removeValue(forKey: key)
+        publishFolders()
+        NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: key)
+    }
 
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {

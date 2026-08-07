@@ -35,9 +35,10 @@ enum Destination: String, CaseIterable, Identifiable {
     ///
     /// Account is not among them: it is reached from the footer, where people
     /// look for their account. Workspaces is not among them either, for the
-    /// reason above.
+    /// reason above. The top group is ordered by label length so the rows read
+    /// as one tidy column: HOME, TASKS, INSIGHTS, MACHINES, AUTOMATIONS.
     static var navigable: [Destination] {
-        [.home, .todo, .automations, .machines, .insights]
+        [.home, .todo, .insights, .machines, .automations]
     }
 
     var label: String {
@@ -108,6 +109,13 @@ struct RootView: View {
     @State private var hideOverlayTask: Task<Void, Never>?
     @State private var isOverlayEdgeHovered = false
     @State private var isOverlayPanelHovered = false
+    /// Whether the leading sidebar column is collapsed and its left-edge peek
+    /// is available: hovering the leading edge floats the sidebar over the
+    /// detail, the same way the right inspector floats when it does not fit.
+    @State private var isSidebarOverlayVisible = false
+    @State private var isSidebarEdgeHovered = false
+    @State private var isSidebarPanelHovered = false
+    @State private var hideSidebarOverlayTask: Task<Void, Never>?
     /// The user explicitly reopened the sidebar below the sidebar fit edge.
     /// Honored until they close it; without the pin the fit would override
     /// the reopen on the next read.
@@ -162,9 +170,27 @@ struct RootView: View {
                 }
             }
         }
+        // The same peek on the leading edge: a collapsed sidebar comes back as
+        // a floating pane while the pointer is near the edge, and hides again
+        // once it leaves. Pinning is not offered — the split view's own
+        // sidebar is the pinned form, reachable with one click.
+        .onChange(of: isSidebarOverlayHovered) { _, inside in
+            if inside {
+                hideSidebarOverlayTask?.cancel()
+                isSidebarOverlayVisible = true
+            } else {
+                hideSidebarOverlayTask?.cancel()
+                hideSidebarOverlayTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled else { return }
+                    isSidebarOverlayVisible = false
+                }
+            }
+        }
         // A pending auto-hide outlives the window it was scheduled for; drop it
         // when the view goes away.
         .onDisappear { hideOverlayTask?.cancel() }
+        .onDisappear { hideSidebarOverlayTask?.cancel() }
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
         .background {
@@ -228,6 +254,13 @@ struct RootView: View {
         // sweep to show its folders.
         .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { _ in
             Task { await workspaces.loadRemote() }
+        }
+        // An explicit Disconnect drops the peer's folders now instead of
+        // waiting for the failure sweep to notice.
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
+            if let key = note.object as? String {
+                workspaces.disconnect(peer: key)
+            }
         }
         #if os(macOS)
         .task {
@@ -446,14 +479,40 @@ struct RootView: View {
         }
     }
 
-    /// Whether the inspector is a floating overlay rather than a column.
+    /// Whether the inspector is a floating overlay rather than a column:
+    /// either the window is too narrow for the column, or the user closed the
+    /// column and the pane becomes a peek that opens on hover instead of a
+    /// door that stays shut.
     private var usesOverlayInspector: Bool {
-        destinationHasInspector && isInspectorPresented && !inspectorFits
+        destinationHasInspector && (!isInspectorPresented || !inspectorFits)
     }
 
     /// The pointer is near the pane: on the edge strip or on the pane itself.
     private var isOverlayHovered: Bool {
         isOverlayEdgeHovered || isOverlayPanelHovered
+    }
+
+    /// The pointer is near the left edge: on the edge strip or on the floated
+    /// sidebar panel itself.
+    private var isSidebarOverlayHovered: Bool {
+        isSidebarEdgeHovered || isSidebarPanelHovered
+    }
+
+    /// The leading sidebar column is hidden, so the left-edge peek is
+    /// available. The split view collapses the sidebar below the width where
+    /// it can hold a column, and the user can collapse it above that width;
+    /// in both cases hovering the leading edge floats it back over the detail.
+    private var usesOverlaySidebar: Bool {
+        guard windowContentWidth > 0 else { return false }
+        if windowContentWidth < Self.widthForSidebar {
+            return !isSidebarPinned
+        }
+        return columnVisibilityChoice != .all
+    }
+
+    /// The floated sidebar is on screen.
+    private var showsSidebarOverlay: Bool {
+        usesOverlaySidebar && isSidebarOverlayVisible
     }
 
     /// The floating pane is on screen.
@@ -486,6 +545,9 @@ struct RootView: View {
             // can never be squeezed for its sake. The scrim underneath means a
             // click on the content beside the floating pane dismisses it, the
             // way clicking beside a popover does.
+            .overlay(alignment: .leading) { sidebarDismissScrim }
+            .overlay(alignment: .leading) { sidebarHoverStrip }
+            .overlay(alignment: .leading) { sidebarOverlayPanel }
             .overlay(alignment: .trailing) { inspectorDismissScrim }
             .overlay(alignment: .trailing) { inspectorHoverStrip }
             .overlay(alignment: .trailing) { inspectorOverlayPanel }
@@ -493,6 +555,50 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsOverlayInspector
             )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.18),
+                value: showsSidebarOverlay
+            )
+    }
+
+    @ViewBuilder
+    private var sidebarHoverStrip: some View {
+        if usesOverlaySidebar {
+            Color.clear
+                .frame(width: 14)
+                .contentShape(Rectangle())
+                .onHover { isSidebarEdgeHovered = $0 }
+        }
+    }
+
+    /// A click outside the floated sidebar closes it, mirroring the right
+    /// inspector's scrim.
+    @ViewBuilder
+    private var sidebarDismissScrim: some View {
+        if showsSidebarOverlay {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { isSidebarOverlayVisible = false }
+        }
+    }
+
+    @ViewBuilder
+    private var sidebarOverlayPanel: some View {
+        if showsSidebarOverlay {
+            sidebar
+                .frame(width: DisplayFit.box(240))
+                .frame(maxHeight: .infinity)
+                .background(Theme.sidebarMaterial)
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(Theme.border)
+                        .frame(width: 1)
+                }
+                .compositingGroup()
+                .shadow(color: .black.opacity(0.20), radius: 12, x: 5, y: 0)
+                .onHover { isSidebarPanelHovered = $0 }
+                .transition(.move(edge: .leading).combined(with: .opacity))
+        }
     }
 
     @ViewBuilder

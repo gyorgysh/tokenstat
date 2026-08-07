@@ -30,6 +30,12 @@ final class MachinesModel {
     var noticeMessage: String?
     private var noticeGeneration = 0
 
+    /// Peers whose workspaces are listed in the sidebar right now. Set by the
+    /// explicit Connect and kept in sync when the peer sweep or a Disconnect
+    /// changes the sidebar, so the row can offer Disconnect instead of
+    /// Connect once a machine is actually reachable from here.
+    private(set) var connectedPeerKeys: Set<String> = []
+
     /// Peers waiting on a decision, which is the thing somebody opened this
     /// screen to do.
     var pending: [Peer] { peers.filter { $0.trust == .pending && $0.key != identity?.key } }
@@ -47,6 +53,22 @@ final class MachinesModel {
             return false
         }
         return tier == "supporter" || tier == "patron"
+    }
+
+    /// Whether an account machine's workspaces are in the sidebar, which is
+    /// what "Connected" means on this screen: not just reachable, but dialled
+    /// from here.
+    func isConnected(_ machine: Machine) -> Bool {
+        guard let peer = peer(for: machine) else { return false }
+        return connectedPeerKeys.contains(peer.key)
+    }
+
+    func markConnected(_ peerKey: String) {
+        connectedPeerKeys.insert(peerKey)
+    }
+
+    func markDisconnected(_ peerKey: String) {
+        connectedPeerKeys.remove(peerKey)
     }
 
     func peer(for machine: Machine) -> Peer? {
@@ -291,11 +313,12 @@ final class MachinesModel {
     }
 
     private func dial(_ peer: Peer) async {
-        do {
-            _ = try await Bridge.remoteWorkspaces(peer: peer)
-            errorMessage = nil
-            showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
-            NotificationCenter.default.post(name: .remotePeerDidConnect, object: nil)
+            do {
+                connectedPeerKeys.insert(peer.key)
+                _ = try await Bridge.remoteWorkspaces(peer: peer)
+                errorMessage = nil
+                showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
+                NotificationCenter.default.post(name: .remotePeerDidConnect, object: nil)
         } catch {
             // First contact always ends with the far end being asked to
             // approve this machine. That is the point, not a failure to
@@ -317,6 +340,16 @@ final class MachinesModel {
                 }
             }
         }
+    }
+
+    /// Drop the peer's workspaces from the sidebar and mark the row back to
+    /// Connect. The connection itself is a tunnel channel that ends when its
+    /// last use does; what the user asked for is that the machine stops
+    /// appearing as connected here.
+    func disconnect(_ peer: Peer) {
+        connectedPeerKeys.remove(peer.key)
+        NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
+        showNotice("Disconnected from \(peer.label). Its workspaces are no longer in the sidebar.")
     }
 
     private func change(_ peer: Peer, _ action: () async throws -> Void) async {
