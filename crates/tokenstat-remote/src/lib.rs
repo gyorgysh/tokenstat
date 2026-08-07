@@ -454,7 +454,9 @@ fn read_framed(
                     Err(e) => break Err(RemoteError::Io(e)),
                 }
             };
-            stream.set_read_timeout(Some(timeout)).map_err(RemoteError::Io)?;
+            stream
+                .set_read_timeout(Some(timeout))
+                .map_err(RemoteError::Io)?;
             header_result?;
         }
         None => {
@@ -476,7 +478,9 @@ fn read_framed(
             // timeout, then the timeout is restored for the next message.
             stream.set_read_timeout(None).map_err(RemoteError::Io)?;
             let payload_result = stream.read_exact(&mut bytes);
-            stream.set_read_timeout(Some(timeout)).map_err(RemoteError::Io)?;
+            stream
+                .set_read_timeout(Some(timeout))
+                .map_err(RemoteError::Io)?;
             payload_result.map_err(RemoteError::Io)?;
         }
         None => {

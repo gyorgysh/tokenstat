@@ -476,7 +476,10 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             Ok(_) => None,
             Err(tungstenite::Error::Io(error))
                 if error.kind() == io::ErrorKind::TimedOut
-                    || error.kind() == io::ErrorKind::WouldBlock => None,
+                    || error.kind() == io::ErrorKind::WouldBlock =>
+            {
+                None
+            }
             Err(_) => break,
         };
         drop(guard);
