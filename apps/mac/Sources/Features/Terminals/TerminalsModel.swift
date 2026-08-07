@@ -77,7 +77,9 @@ final class TerminalsModel {
             for info in list { byID[info.id] = info }
 
             // Forget sessions the host no longer has.
-            let gone = sessions.filter { byID[$0.id] == nil }
+            // A pending session is not on the host yet: the spawn is in
+            // flight, so it must not be treated as a session that vanished.
+            let gone = sessions.filter { !$0.isPending && byID[$0.id] == nil }
             for session in gone {
                 session.stop()
                 sessions.removeAll { $0.id == session.id }
@@ -126,6 +128,19 @@ final class TerminalsModel {
         rows: Int = 24,
         cols: Int = 80
     ) async -> TerminalSession? {
+        // The console goes on screen now, before the round trip: a real
+        // terminal shows its window the moment it is asked for. The host's
+        // first spawn of a process's life can take seconds behind a login
+        // shell resolve, and holding the launcher on screen for that was the
+        // "nothing happened" wait.
+        let session = TerminalSession(
+            pendingCommand: command,
+            workspace: workspace,
+            rows: rows,
+            cols: cols
+        )
+        sessions.append(session)
+        select(session)
         do {
             // The caller measures the pane and passes its grid, so the shell
             // prints its first prompt at the size it will keep. Spawning at
@@ -139,21 +154,25 @@ final class TerminalsModel {
                 cols: cols,
                 noColor: TerminalPreferences.disablesColor
             )
-            let session = TerminalSession(info: info)
-            sessions.append(session)
+            session.attach(info: info)
+            // The id changed from pending to real; point selection at it again
+            // so the workspace remembers this session by the id it will keep.
             select(session)
             errorMessage = nil
-            session.start()
             return session
         } catch {
             errorMessage = error.localizedDescription
+            session.stop()
+            sessions.removeAll { $0 === session }
             return nil
         }
     }
 
     /// Kill the process and forget the session. The host's buffer goes with it.
     func close(_ session: TerminalSession) async {
-        try? await Bridge.ptyClose(id: session.id)
+        if !session.isPending {
+            try? await Bridge.ptyClose(id: session.id)
+        }
         session.stop()
         sessions.removeAll { $0.id == session.id }
         if selectedID == session.id {

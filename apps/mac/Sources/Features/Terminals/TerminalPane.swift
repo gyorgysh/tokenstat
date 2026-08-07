@@ -182,7 +182,7 @@ struct TerminalPane: View {
                     // Nothing is shown while a file or a commit is open, so the
                     // terminals stay mounted underneath rather than being torn
                     // down.
-                    activeID: showsTerminal ? active?.id : nil
+                    active: showsTerminal ? active : nil
                 )
                 .frame(width: size.width, height: size.height)
 
@@ -600,7 +600,7 @@ struct TerminalHost: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if session.exitCode != nil || session.droppedOutput {
+            if session.isPending || session.exitCode != nil || session.droppedOutput {
                 statusLine
             }
         }
@@ -608,6 +608,13 @@ struct TerminalHost: View {
 
     private var statusLine: some View {
         HStack(spacing: Theme.Space.s) {
+            if session.isPending {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Starting \(session.command)…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if let code = session.exitCode {
                 Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .font(.system(size: 11))
@@ -761,20 +768,18 @@ private struct LaunchSurface: View {
             let args = workspaces.bypassPermissions(for: folder.id)
                 ? profile.args + profile.bypassArgs
                 : profile.args
+            // Hand the pane to the console before the spawn answers. The
+            // pending session lands in the next frame; the host's answer
+            // attaches to it when it arrives.
+            workspaces.showTerminal(in: folder.id)
             Task {
-                let session = await terminals.start(
+                _ = await terminals.start(
                     workspace: folder,
                     command: profile.command,
                     args: args,
                     rows: grid.rows,
                     cols: grid.cols
                 )
-                // A successful launch hands the pane to the new session so the
-                // launcher never stays in front of something running. A failed
-                // spawn keeps the launcher so the user can retry.
-                if session != nil {
-                    workspaces.showTerminal(in: folder.id)
-                }
                 launching = nil
             }
         } label: {

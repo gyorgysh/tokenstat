@@ -27,7 +27,7 @@ struct TerminalStack: NSViewRepresentable {
     let sessions: [TerminalSession]
     /// The session to show, or nil to show none, which is what happens while a
     /// file is open over the top.
-    let activeID: String?
+    let active: TerminalSession?
 
     func makeNSView(context: Context) -> TerminalStackView {
         TerminalStackView()
@@ -36,7 +36,7 @@ struct TerminalStack: NSViewRepresentable {
     func updateNSView(_ nsView: TerminalStackView, context: Context) {
         nsView.sync(
             views: sessions.map(\.view),
-            active: sessions.first { $0.id == activeID }?.view
+            active: sessions.first { $0 === active }?.view
         )
     }
 }

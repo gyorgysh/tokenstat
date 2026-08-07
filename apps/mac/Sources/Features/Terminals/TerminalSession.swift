@@ -47,7 +47,11 @@ enum TerminalPreferences {
 @MainActor
 @Observable
 final class TerminalSession: TerminalViewDelegate, Identifiable {
-    nonisolated let id: String
+    /// A placeholder until the host answers the spawn, then the host's real
+    /// session id. The console is on screen with the placeholder so a slow
+    /// first spawn reads as a terminal that is starting, not a click that did
+    /// nothing.
+    private(set) var id: String
     nonisolated let workspaceID: String
     /// The command as launched, for a tab label.
     nonisolated let command: String
@@ -181,6 +185,58 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         view.terminalDelegate = self
     }
 
+    /// The console for a session the user just asked for, before the host has
+    /// actually spawned anything.
+    ///
+    /// A real terminal shows its window the moment it is requested; this app
+    /// used to hold the launcher on screen until `pty.spawn` answered, so the
+    /// first spawn of a process's life (a login shell resolve behind it) was
+    /// seconds of "Starting…" with nothing to look at. The view exists here,
+    /// and `attach` hands the session the host's id and starts reading once
+    /// the process is real.
+    init(pendingCommand command: String, workspace: WorkspaceFolder, rows: Int, cols: Int) {
+        id = "pending-\(UUID().uuidString)"
+        workspaceID = workspace.id
+        self.command = command
+        cwd = workspace.path
+        alive = false
+        exitCode = nil
+        self.rows = rows
+        self.cols = cols
+        reportedSize = (rows, cols)
+        isPending = true
+
+        view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        view.font = TerminalMetrics.font
+        view.optionAsMetaKey = true
+        view.terminal.changeHistorySize(Self.scrollbackLines)
+        view.terminalDelegate = self
+    }
+
+    /// True from the click until the host has spawned the process.
+    ///
+    /// The terminal is visible in this state; polling starts on `attach`.
+    var isPending = false
+
+    /// The host answered `pty.spawn`. Adopt the real id and start reading.
+    func attach(info: PtySessionInfo) {
+        // A session closed before the host answered must not come back: the
+        // spawn still succeeded on the host, but nobody is watching it here.
+        guard isPending, !removed else { return }
+        id = info.id
+        alive = info.alive
+        exitCode = info.exitCode
+        rows = info.rows
+        cols = info.cols
+        reportedSize = (info.rows, info.cols)
+        isPending = false
+        start()
+    }
+
+    /// Set once the session is being torn down, so a late `attach` cannot
+    /// restart polling on a session that is no longer in the model.
+    private var removed = false
+
     /// Scrollback kept for the normal buffer. Enough to hold a long build or a
     /// test run, which is what anyone scrolling up is looking for.
     private static let scrollbackLines = 20_000
@@ -210,6 +266,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
     /// Begin polling and the writer. Safe to call more than once.
     func start() {
+        // Pending sessions have no process behind them yet; attach() starts
+        // polling once the host has answered.
+        guard !isPending else { return }
         if writerTask == nil {
             writerTask = Task { [weak self] in
                 guard let self else { return }
@@ -217,32 +276,33 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     switch event {
                     case let .write(bytes):
                         do {
-                            try await Bridge.ptyWrite(id: self.id, bytes: bytes)
+                            try await Bridge.ptyWrite(id: id, bytes: bytes)
                             transportError = nil
                         } catch {
                             transportError = error.localizedDescription
                         }
                     case let .resize(rows, cols):
-                        try? await Bridge.ptyResize(id: self.id, rows: rows, cols: cols)
+                        try? await Bridge.ptyResize(id: id, rows: rows, cols: cols)
                     }
                 }
             }
         }
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
-            await self?.poll()
+            await self?.poll(id: id)
         }
     }
 
     /// Stop polling. Called when the session is closed.
     func stop() {
+        removed = true
         pollTask?.cancel()
         pollTask = nil
         writerTask?.cancel()
         writerTask = nil
     }
 
-    private func poll() async {
+    private func poll(id: String) async {
         while !Task.isCancelled {
             do {
                 let chunk = try await Bridge.ptyRead(id: id, offset: offset)
