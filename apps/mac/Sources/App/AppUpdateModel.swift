@@ -60,6 +60,10 @@ final class AppUpdateModel {
     /// broken button, so this says what happened and then goes away.
     private(set) var checkNotice: String?
 
+    /// True while a failed update is being tried again, so the card can say so
+    /// instead of vanishing under the quiet automatic check.
+    private(set) var isRetrying = false
+
     /// Check because a person asked.
     ///
     /// Separate from `checkAndInstall` only in that it will run again after a
@@ -125,6 +129,19 @@ final class AppUpdateModel {
         // Nothing to install into on iOS. The card offers the release page.
         stage = .failed("Updates on this platform come from the App Store.")
         #endif
+    }
+
+    /// Try the automatic path again after a failure.
+    ///
+    /// The launch check is deliberately silent, but a Retry press is the
+    /// opposite: the card shows progress and the button cannot be pressed
+    /// twice. Failure keeps the card with both actions on it.
+    func retry() async {
+        guard failure != nil, !isChecking, !isRetrying else { return }
+        isRetrying = true
+        defer { isRetrying = false }
+        stage = .idle
+        await checkAndInstall()
     }
 
     func relaunch() {

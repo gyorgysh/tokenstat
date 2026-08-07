@@ -31,16 +31,18 @@ struct UpdateCard: View {
                 update.relaunch()
             }
         } else if update.failure != nil, update.isAvailable {
-            // The automatic path did not work. Rather than say so in an error
-            // somebody has to interpret, offer the version of this that always
-            // works: the download page.
-            row(
-                title: "Update by hand",
-                subtitle: "v\(update.latest) could not install itself",
-                symbol: "arrow.down.circle"
-            ) {
-                if let url = update.downloadURL { openURL(url) }
-            }
+            // The automatic path did not work. Two ways forward, both in front
+            // of the person: retry the install here, or take the download page
+            // that always works.
+            failedCard
+        } else if update.isRetrying {
+            status(
+                title: "Trying again…",
+                subtitle: "Re-downloading v\(update.latest)",
+                symbol: "arrow.triangle.2.circlepath",
+                tint: Theme.accent,
+                spinner: true
+            )
         } else if update.checkNotice == AppUpdateModel.upToDateMessage {
             // A manual check that found nothing is a confirmation, not a
             // non-event, so it gets the same card treatment as the other
@@ -61,12 +63,22 @@ struct UpdateCard: View {
         title: String,
         subtitle: String,
         symbol: String,
-        tint: Color
+        tint: Color,
+        spinner: Bool = false
     ) -> some View {
         HStack(spacing: Theme.Space.s) {
-            Image(systemName: symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(tint)
+            Group {
+                if spinner {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(tint)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15))
+                }
+            }
+            .foregroundStyle(tint)
+            .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
                     .font(.callout.weight(.medium))
@@ -85,6 +97,59 @@ struct UpdateCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(tint.opacity(0.35), lineWidth: 1)
+        )
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.bottom, Theme.Space.s)
+    }
+
+    /// The automatic install failed: retry it here, or go get it by hand.
+    ///
+    /// Two buttons rather than one "Update by hand" row, because a person who
+    /// pressed nothing and still got an update that failed deserves a way to
+    /// try the automatic path again without leaving the app.
+    private var failedCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.warning)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Update didn't finish")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("v\(update.latest) could not install itself")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: Theme.Space.s)
+            }
+            HStack(spacing: Theme.Space.s) {
+                Button {
+                    Task { await update.retry() }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .help("Try the automatic install again")
+
+                Button {
+                    if let url = update.downloadURL { openURL(url) }
+                } label: {
+                    Label("Manual", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .disabled(update.downloadURL == nil)
+                .help("Open the download page and install by hand")
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.warning.opacity(0.35), lineWidth: 1)
         )
         .padding(.horizontal, Theme.Space.s)
         .padding(.bottom, Theme.Space.s)
