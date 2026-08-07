@@ -252,8 +252,14 @@ struct RootView: View {
         }
         // A machine that just connected should not wait for the 60-second peer
         // sweep to show its folders.
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { _ in
-            Task { await workspaces.loadRemote() }
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
+            if let key = note.object as? String {
+                // An explicit Connect undoes a previous Disconnect; the sweep
+                // notification (same object) is simply an extra reload.
+                workspaces.reconnect(peer: key)
+            } else {
+                Task { await workspaces.loadRemote() }
+            }
         }
         // An explicit Disconnect drops the peer's folders now instead of
         // waiting for the failure sweep to notice.

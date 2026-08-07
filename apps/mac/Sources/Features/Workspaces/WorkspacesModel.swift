@@ -500,6 +500,11 @@ final class WorkspacesModel {
     /// last-known folders stay; a machine that keeps failing is gone, and its
     /// folders must not linger in the sidebar pretending to be reachable.
     private var remotePeerFailures: [String: Int] = [:]
+    /// Peers the user explicitly disconnected. Their folders stay out of the
+    /// sidebar until Connect is chosen again; without this the peer sweep
+    /// would re-dial an approved, reachable machine on its next pass and the
+    /// Disconnect would last one refresh.
+    private var suppressedPeers: Set<String> = []
 
     /// Everything: this machine's folders and every reachable peer's.
     ///
@@ -555,6 +560,9 @@ final class WorkspacesModel {
                 remotePeerFailures.removeValue(forKey: key)
             }
             for peer in peers {
+                if suppressedPeers.contains(peer.key) {
+                    continue
+                }
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
@@ -604,11 +612,19 @@ final class WorkspacesModel {
     /// twice, which is seconds to a minute of the machine still looking
     /// reachable after somebody asked to disconnect.
     func disconnect(peer key: String) {
+        suppressedPeers.insert(key)
         remoteFolders.removeValue(forKey: key)
         remotePeerNextDial.removeValue(forKey: key)
         remotePeerFailures.removeValue(forKey: key)
         publishFolders()
         NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: key)
+    }
+
+    /// An explicit Connect undoes a Disconnect: the peer's folders are
+    /// allowed back and fetched immediately rather than after the next sweep.
+    func reconnect(peer key: String) {
+        suppressedPeers.remove(key)
+        Task { await loadRemote() }
     }
 
     /// Put local and remote folders together and keep the selection valid.

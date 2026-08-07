@@ -318,7 +318,7 @@ final class MachinesModel {
                 _ = try await Bridge.remoteWorkspaces(peer: peer)
                 errorMessage = nil
                 showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
-                NotificationCenter.default.post(name: .remotePeerDidConnect, object: nil)
+                NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
         } catch {
             // First contact always ends with the far end being asked to
             // approve this machine. That is the point, not a failure to
