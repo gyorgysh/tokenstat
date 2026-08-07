@@ -30,8 +30,19 @@ protocol Transport: Sendable {
     /// stopped answering is not waited on forever. See `Bridge.Patience`.
     func call(method: String, params: String, patience: TimeInterval) throws -> String
 
+    /// A one-shot call the user is waiting on (opening a terminal, closing
+    /// one). The default is the ordinary pooled path; the socket transport
+    /// overrides it to skip the pool wait.
+    func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String
+
     /// What to call this in the interface, and in a bug report.
     var describedAs: String { get }
+}
+
+extension Transport {
+    func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String {
+        try call(method: method, params: params, patience: patience)
+    }
 }
 
 /// The bridge compiled into this process.
@@ -163,6 +174,33 @@ final class SocketTransport: Transport, @unchecked Sendable {
             // same situation as a refused connect, and the bridge repairs it
             // the same way. A raw transport error must never reach a screen
             // as "The operation couldn't be completed".
+            throw Self.unreachable(path: path)
+        }
+    }
+
+    /// One-shot calls a person is waiting on: opening a terminal is a click,
+    /// and it must not queue behind a dozen sessions polling for output when
+    /// the pool is saturated. A fresh connection is opened for the call and
+    /// closed afterwards, so the daemon's thread count only grows by the
+    /// number of people clicking, never by pollers.
+    func callUrgent(method: String, params: String, patience: TimeInterval) throws -> String {
+        let request = Self.line(method: method, params: params)
+        let fresh: Connection
+        do {
+            fresh = try open()
+        } catch {
+            throw Self.unreachable(path: path)
+        }
+        do {
+            fresh.patience = patience
+            let response = try fresh.roundTrip(request)
+            release(fresh, reusable: false)
+            return response
+        } catch TransportFailure.timedOut {
+            release(fresh, reusable: false)
+            throw Self.silence(path: path, patience: patience)
+        } catch {
+            release(fresh, reusable: false)
             throw Self.unreachable(path: path)
         }
     }

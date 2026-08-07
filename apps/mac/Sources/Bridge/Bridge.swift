@@ -222,6 +222,34 @@ enum Bridge {
         }
     }
 
+    /// The urgent variant of `call`: same repair-and-retry loop, urgent
+    /// transport path.
+    private static func callUrgent(
+        method: String,
+        params: String,
+        patience: TimeInterval
+    ) throws -> String {
+        var attempt = 0
+        while true {
+            do {
+                return try currentRoute.transport.callUrgent(
+                    method: method,
+                    params: params,
+                    patience: patience
+                )
+            } catch {
+                attempt += 1
+                guard currentRoute.isHosted,
+                      Self.isRepairable(error),
+                      attempt < maxHostRepairAttempts,
+                      Self.repairHost()
+                else {
+                    throw error
+                }
+            }
+        }
+    }
+
     /// Whether a transport error means the daemon is gone rather than busy.
     ///
     /// Only connection-level failures are repairable. A timeout means the
@@ -346,6 +374,43 @@ enum Bridge {
     ) async throws -> T {
         try await offMainActor {
             try invoke(method, params, patience: patience, as: type)
+        }
+    }
+
+    /// A one-shot call the user is waiting on. Same decoding as `background`,
+    /// but the transport skips the pool wait: opening a terminal must not
+    /// queue behind the sessions already polling.
+    private static func backgroundUrgent<T: Decodable & Sendable>(
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as type: T.Type
+    ) async throws -> T {
+        try await offMainActor {
+            let paramData = try JSONSerialization.data(withJSONObject: params)
+            let paramString = String(decoding: paramData, as: UTF8.self)
+            let json = try Self.callUrgent(
+                method: method,
+                params: paramString,
+                patience: Patience.interactive
+            )
+            let data = Data(json.utf8)
+            let envelope: Envelope<T>
+            do {
+                envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+            } catch {
+                throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
+            }
+            guard envelope.ok else {
+                throw BridgeError.core(
+                    code: envelope.error?.code ?? "unknown",
+                    message: envelope.error?.message
+                        ?? "The core rejected the call without saying why."
+                )
+            }
+            guard let result = envelope.result else {
+                throw BridgeError.decoding(method: method, underlying: "missing result")
+            }
+            return result
         }
     }
 
@@ -779,7 +844,10 @@ extension Bridge {
         cols: Int,
         noColor: Bool = false
     ) async throws -> PtySessionInfo {
-        try await background("pty.spawn", [
+        // Urgent: a person clicked Shell and is watching this round trip. It
+        // must not queue behind sessions already polling when the pool is
+        // saturated.
+        try await backgroundUrgent("pty.spawn", [
             "workspaceId": workspaceID,
             "command": command,
             "args": args,
