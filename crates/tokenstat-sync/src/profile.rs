@@ -512,6 +512,45 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
     })
 }
 
+/// Register this machine's remote-reach identity on its account record.
+///
+/// Called by the host daemon when "Reach machines from anywhere" is on: the
+/// account's machine directory then carries the public key the tunnel routes
+/// by and the name the other screens should show. Never called from a plain
+/// sync, and never without the user's opt-in toggle, because the name is
+/// identifying and the sync envelope must stay free of it.
+pub fn register_machine_identity(
+    host_flag: Option<&str>,
+    machine_id: &str,
+    public_identity: &str,
+    label: &str,
+) -> Result<(), ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .put(format!("{host}/api/v1/machines/me"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "machine": machine_id,
+            "public_identity": public_identity,
+            "label": label,
+        }))
+        .send()?;
+    let status = resp.status();
+    let text = resp.text()?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "remote reach registration failed ({status}): {text}"
+        )));
+    }
+    Ok(())
+}
+
 /// One day × source × model row of the account's own usage.
 ///
 /// Token counts only. The service has never priced anything and does not start

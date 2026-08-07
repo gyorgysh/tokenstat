@@ -1155,6 +1155,23 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         "pty.spawn" => {
             let p: PtySpawnParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            // A workspace on another machine: spawn there through the peer's
+            // own daemon and hand back the session namespaced to this machine,
+            // so the caller can poll, type and resize it like a local one.
+            if let Some((peer, workspace)) = split_remote(&p.workspace_id) {
+                let forwarded = json!({
+                    "workspaceId": workspace,
+                    "command": p.command,
+                    "args": p.args,
+                    "rows": p.rows,
+                    "cols": p.cols,
+                    "noColor": p.no_color,
+                });
+                let mut value =
+                    crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
+                renamespace_session(&mut value, peer);
+                return Ok(value);
+            }
             let ws = crate::workspaces::folder(&p.workspace_id)?;
             let info = tokenstat_pty::manager()
                 .spawn(&tokenstat_pty::Spawn {
@@ -1265,63 +1282,119 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // of this reads the archive.
         "usage.limits" => Ok(usage_limits()),
 
-        "pty.list" => serde_json::to_value(tokenstat_pty::manager().list())
-            .map_err(|e: serde_json::Error| e.to_string()),
+        "pty.list" => {
+            let include_remote = serde_json::from_str::<PtyListParams>(params.trim())
+                .map(|p| p.include_remote)
+                .unwrap_or(true);
+            let mut items: Vec<Value> = match serde_json::to_value(tokenstat_pty::manager().list())
+            {
+                Ok(Value::Array(items)) => items,
+                Ok(_) => return Some(Err("pty.list returned a non-array".into())),
+                Err(e) => return Some(Err(e.to_string())),
+            };
+            if include_remote {
+                // One level deep on purpose: each peer is asked with
+                // includeRemote=false, so the account cannot recurse A→B→A.
+                for peer in crate::remote::reachable_peers() {
+                    if let Ok(Value::Array(remote)) = crate::remote::call_peer_result(
+                        &peer,
+                        "pty.list",
+                        r#"{"includeRemote":false}"#,
+                    ) {
+                        for mut item in remote {
+                            renamespace_session(&mut item, &peer);
+                            items.push(item);
+                        }
+                    }
+                }
+            }
+            Ok(Value::Array(items))
+        }
 
-        "pty.info" => pty_id(params).and_then(|p| {
-            let info = tokenstat_pty::manager()
-                .info(&p.id)
-                .map_err(|e| e.to_string())?;
-            serde_json::to_value(info).map_err(|e| e.to_string())
-        }),
+        "pty.info" => {
+            if let Some(answer) = route_remote_pty("pty.info", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                let info = tokenstat_pty::manager()
+                    .info(&p.id)
+                    .map_err(|e| e.to_string())?;
+                serde_json::to_value(info).map_err(|e| e.to_string())
+            })
+        }
 
         // Poll for output. Returns immediately, so the caller sets the pace.
         // `dropped` is non-zero when the reader fell behind the buffer, and a
         // terminal should say so rather than pretend the output never existed.
-        "pty.read" => pty_id(params).and_then(|p| {
-            let chunk = tokenstat_pty::manager()
-                .read(&p.id, p.offset)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({
-                "data": crate::base64::encode(&chunk.bytes),
-                "nextOffset": chunk.next_offset,
-                "dropped": chunk.dropped,
-            }))
-        }),
+        "pty.read" => {
+            if let Some(answer) = route_remote_pty("pty.read", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                let chunk = tokenstat_pty::manager()
+                    .read(&p.id, p.offset)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({
+                    "data": crate::base64::encode(&chunk.bytes),
+                    "nextOffset": chunk.next_offset,
+                    "dropped": chunk.dropped,
+                }))
+            })
+        }
 
-        "pty.write" => pty_id(params).and_then(|p| {
-            let data = p.data.ok_or("pty.write needs base64 data")?;
-            let bytes = crate::base64::decode(&data)?;
-            tokenstat_pty::manager()
-                .write(&p.id, &bytes)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({"written": bytes.len()}))
-        }),
+        "pty.write" => {
+            if let Some(answer) = route_remote_pty("pty.write", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                let data = p.data.ok_or("pty.write needs base64 data")?;
+                let bytes = crate::base64::decode(&data)?;
+                tokenstat_pty::manager()
+                    .write(&p.id, &bytes)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"written": bytes.len()}))
+            })
+        }
 
-        "pty.resize" => pty_id(params).and_then(|p| {
-            let (rows, cols) = match (p.rows, p.cols) {
-                (Some(r), Some(c)) => (r, c),
-                _ => return Err("pty.resize needs rows and cols".into()),
-            };
-            tokenstat_pty::manager()
-                .resize(&p.id, rows, cols)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({"rows": rows, "cols": cols}))
-        }),
+        "pty.resize" => {
+            if let Some(answer) = route_remote_pty("pty.resize", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                let (rows, cols) = match (p.rows, p.cols) {
+                    (Some(r), Some(c)) => (r, c),
+                    _ => return Err("pty.resize needs rows and cols".into()),
+                };
+                tokenstat_pty::manager()
+                    .resize(&p.id, rows, cols)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"rows": rows, "cols": cols}))
+            })
+        }
 
-        "pty.kill" => pty_id(params).and_then(|p| {
-            tokenstat_pty::manager()
-                .kill(&p.id)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({"killed": true}))
-        }),
+        "pty.kill" => {
+            if let Some(answer) = route_remote_pty("pty.kill", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                tokenstat_pty::manager()
+                    .kill(&p.id)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"killed": true}))
+            })
+        }
 
-        "pty.close" => pty_id(params).and_then(|p| {
-            tokenstat_pty::manager()
-                .close(&p.id)
-                .map_err(|e| e.to_string())?;
-            Ok(json!({"closed": true}))
-        }),
+        "pty.close" => {
+            if let Some(answer) = route_remote_pty("pty.close", params) {
+                return Some(answer);
+            }
+            pty_id(params).and_then(|p| {
+                tokenstat_pty::manager()
+                    .close(&p.id)
+                    .map_err(|e| e.to_string())?;
+                Ok(json!({"closed": true}))
+            })
+        }
 
         _ => return None,
     })
@@ -1402,6 +1475,70 @@ fn sync_schedule_status() -> Result<Value, String> {
 
 fn pty_id(params: &str) -> Result<PtyIdParams, String> {
     serde_json::from_str(params.trim()).map_err(|e| e.to_string())
+}
+
+// MARK: - Remote pty routing
+
+/// A resource id namespaced to another machine: `remote:<peer hex>:<inner>`.
+///
+/// The same prefix the app uses for remote folder ids, so a terminal spawned
+/// in a remote folder and a session listed from a peer read as one namespace
+/// and group under the remote folder in the sidebar.
+const REMOTE_PREFIX: &str = "remote:";
+
+fn split_remote(value: &str) -> Option<(&str, &str)> {
+    value.strip_prefix(REMOTE_PREFIX)?.split_once(':')
+}
+
+fn remote_id(peer: &str, inner: &str) -> String {
+    format!("{REMOTE_PREFIX}{peer}:{inner}")
+}
+
+/// Rewrite a peer's session info so it reads as one of this machine's: the id
+/// gains the peer namespace and the workspace id becomes the same
+/// `remote:<peer>:<id>` the app's folder list uses.
+fn renamespace_session(value: &mut Value, peer: &str) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    if let Some(id) = obj.get("id").and_then(Value::as_str) {
+        obj.insert("id".into(), json!(remote_id(peer, id)));
+    }
+    if let Some(workspace) = obj.get("workspaceId").and_then(Value::as_str) {
+        obj.insert("workspaceId".into(), json!(remote_id(peer, workspace)));
+    }
+}
+
+/// Forward a pty method whose session id belongs to another machine. Returns
+/// `None` when the id is local or unparseable, so the caller falls through to
+/// the local manager.
+fn route_remote_pty(method: &str, params: &str) -> Option<Result<Value, String>> {
+    let parsed: PtyIdParams = serde_json::from_str(params.trim()).ok()?;
+    let (peer, inner) = split_remote(&parsed.id)?;
+    Some((|| {
+        let mut forwarded: Value =
+            serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+        forwarded["id"] = json!(inner);
+        let mut value = crate::remote::call_peer_result(peer, method, &forwarded.to_string())?;
+        if method == "pty.info" {
+            renamespace_session(&mut value, peer);
+        }
+        Ok(value)
+    })())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct PtyListParams {
+    include_remote: bool,
+}
+
+impl Default for PtyListParams {
+    fn default() -> Self {
+        Self {
+            include_remote: true,
+        }
+    }
 }
 
 /// Colour a buffer.
@@ -1597,12 +1734,15 @@ mod tests {
                 .is_some_and(|f| f.contains('-'))
         );
 
-        // Pairing with itself is the cheapest way to get a real, valid key
-        // into the store. Nothing in the peer list treats it specially.
+        // Any 32 bytes are a valid X25519 public key, so a fixed stranger key
+        // is the cheapest real key to pin. It must not be this machine's own
+        // key: pairing with yourself is now refused, because it is a loop
+        // nobody can click by accident.
+        let stranger = "01".repeat(32);
         let paired: Value = serde_json::from_str(
             &call_sessionless(
                 "machine.pair",
-                &json!({"key": my_key, "label": "desk"}).to_string(),
+                &json!({"key": stranger, "label": "desk"}).to_string(),
             )
             .expect("sessionless"),
         )
@@ -1618,11 +1758,12 @@ mod tests {
             serde_json::from_str(&call_sessionless("machine.peers", "{}").expect("sessionless"))
                 .expect("json");
         assert_eq!(listed["result"].as_array().map(Vec::len), Some(1));
+        assert_eq!(listed["result"][0]["key"], stranger);
 
         // Revoking leaves the record, so the same key coming back is known as
         // one that was turned away rather than arriving as a stranger.
         let revoked: Value = serde_json::from_str(
-            &call_sessionless("machine.revoke", &json!({"key": my_key}).to_string())
+            &call_sessionless("machine.revoke", &json!({"key": stranger}).to_string())
                 .expect("sessionless"),
         )
         .expect("json");
@@ -1633,7 +1774,7 @@ mod tests {
         assert_eq!(listed["result"][0]["trust"], "revoked");
 
         let forgotten: Value = serde_json::from_str(
-            &call_sessionless("machine.forget", &json!({"key": my_key}).to_string())
+            &call_sessionless("machine.forget", &json!({"key": stranger}).to_string())
                 .expect("sessionless"),
         )
         .expect("json");
@@ -1651,6 +1792,47 @@ mod tests {
         )
         .expect("json");
         assert_eq!(bad["ok"], false, "{bad}");
+
+        unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Pinning your own key is a loop somebody can only hit by accident, and
+    /// every path (typed, pasted, account-supplied) answers the same way.
+    #[test]
+    fn pairing_with_your_own_key_is_refused() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-identity-self-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        // SAFETY: single-threaded within this test, and every path it reaches
+        // reads the variable rather than caching it.
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
+
+        let me: Value =
+            serde_json::from_str(&call_sessionless("machine.identity", "{}").expect("sessionless"))
+                .expect("json");
+        let my_key = me["result"]["key"].as_str().expect("key").to_string();
+
+        let paired: Value = serde_json::from_str(
+            &call_sessionless(
+                "machine.pair",
+                &json!({"key": my_key, "label": "desk"}).to_string(),
+            )
+            .expect("sessionless"),
+        )
+        .expect("json");
+        assert_eq!(
+            paired["ok"], false,
+            "self-pairing must be refused: {paired}"
+        );
+        assert!(
+            paired["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("own key")),
+            "{paired}"
+        );
 
         unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
         let _ = std::fs::remove_dir_all(&dir);

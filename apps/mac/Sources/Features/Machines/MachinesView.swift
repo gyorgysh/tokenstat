@@ -28,6 +28,9 @@ struct MachinesView: View {
                 if let message = model.errorMessage {
                     Banner(text: message, severity: .warning)
                 }
+                if let message = model.discoveryError {
+                    Banner(text: message, severity: .warning)
+                }
                 if !Bridge.isHosted {
                     hostSetup
                 }
@@ -38,9 +41,7 @@ struct MachinesView: View {
                 }
 
                 thisMachine
-                if !model.discovered.isEmpty {
-                    discoveredMachines
-                }
+                discoveredMachines
                 if !model.accountMachines.isEmpty {
                     accountDevices
                 }
@@ -165,6 +166,17 @@ struct MachinesView: View {
                             }
                         }
                     }
+                    if model.pairingCode != nil {
+                        LabeledContent("Connection invite") {
+                            Button {
+                                model.copyInvite()
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
+                            .buttonStyle(AccentButtonStyle(small: true))
+                            .help("Paste this in the other machine's Add device box")
+                        }
+                    }
                 } else {
                     // The identity comes from the daemon, so this card is empty
                     // for a moment on a cold launch. Two grey rows keep the card
@@ -181,41 +193,7 @@ struct MachinesView: View {
                 Text("Nearby Macs appear automatically. For a machine elsewhere, use Add device once and approve the connection on both sides.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
-
-                connectionDetails
             }
-        }
-    }
-
-    /// The addresses, ports and keys, for whoever is debugging their own
-    /// network.
-    ///
-    /// Present but closed. Hiding them entirely would mean the honest version of
-    /// this screen is the one we do not show, and somebody whose connection is
-    /// failing needs exactly these three facts.
-    @ViewBuilder
-    private var connectionDetails: some View {
-        if let identity = model.identity {
-            DisclosureGroup("Connection details") {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    LabeledContent("Fingerprint") {
-                        MaskedID(value: identity.fingerprint)
-                    }
-                    if let status = model.status {
-                        LabeledContent("Port") { Text("\(status.port)") }
-                        if let address = status.address, status.listening {
-                            LabeledContent("Address") {
-                                Text(address)
-                                    .font(Theme.mono(11))
-                                    .textSelection(.enabled)
-                            }
-                        }
-                    }
-                }
-                .padding(.top, Theme.Space.xs)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -273,6 +251,23 @@ struct MachinesView: View {
                         severity: .warning
                     )
                 }
+                if status.tunnel && status.tunnelOnline == false {
+                    // The toggle is on but the daemon is not holding a socket.
+                    // The plan gate, a revoked token and a dead endpoint all
+                    // land here, and each needs different words from "wait".
+                    Banner(
+                        text: status.tunnelError.map {
+                            "Remote reach is on, but the tunnel is not connected: \($0)"
+                        } ?? "Remote reach is on, but the tunnel has not connected yet. It retries automatically.",
+                        severity: .warning
+                    )
+                }
+                if status.tunnel, status.tunnelOnline == true, status.tunnelRegistered == false {
+                    Banner(
+                        text: "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically.",
+                        severity: .warning
+                    )
+                }
             }
         }
     }
@@ -284,39 +279,60 @@ struct MachinesView: View {
             title: "Nearby devices",
             subtitle: "Connect with one click, then approve the pairing."
         ) {
-            VStack(spacing: Theme.Space.s) {
-                ForEach(model.discovered) { daemon in
-                    HStack(spacing: Theme.Space.m) {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(daemon.label)
-                                .font(.callout.weight(.medium))
-                            Text(daemon.words ?? daemon.fingerprint)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if daemon.address == nil {
-                                Text("Still finding it…")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        Spacer()
-                        Button("Connect") { Task { await model.pair(daemon) } }
-                            .buttonStyle(AccentButtonStyle())
-                            .disabled(daemon.address == nil)
+            if model.discovered.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack(spacing: Theme.Space.s) {
+                        ProgressView().controlSize(.small)
+                    Text("Looking for nearby devices…")
+                        .font(.callout)
                     }
-                    .padding(Theme.Space.s)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.cardRadius)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    )
+                    Text("A device shows up here when its background helper is running. A machine that is not accepting connections is still listed, so you can see what is on the network.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
-                Text("Check the matching device name before approving access.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(model.discovered) { daemon in
+                        HStack(spacing: Theme.Space.m) {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                                .foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(daemon.label)
+                                    .font(.callout.weight(.medium))
+                                Text(daemon.words ?? "Nearby device")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if !daemon.serving {
+                                    Text("Not accepting connections")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                } else if daemon.address == nil {
+                                    Text("Still finding it…")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer()
+                            Button("Connect") { Task { await model.pair(daemon) } }
+                                .buttonStyle(AccentButtonStyle())
+                                .disabled(!daemon.serving || daemon.address == nil)
+                                .help(daemon.serving
+                                    ? "Connect to this machine"
+                                    : "This machine is not accepting connections yet")
+                        }
+                        .padding(Theme.Space.s)
+                        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                    }
+                    Text("Check the matching device name before approving access.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
@@ -333,6 +349,7 @@ struct MachinesView: View {
                             Button("Approve") { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                             Button("Forget") { Task { await model.forget(peer) } }
+                                .buttonStyle(SecondaryButtonStyle())
                         }
                     }
                 }
@@ -352,10 +369,13 @@ struct MachinesView: View {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
                                 Button("Revoke") { Task { await model.revoke(peer) } }
+                                    .buttonStyle(SecondaryButtonStyle())
                             } else {
                                 Button("Approve") { Task { await model.approve(peer) } }
+                                    .buttonStyle(SecondaryButtonStyle())
                             }
                             Button("Forget") { Task { await model.forget(peer) } }
+                                .buttonStyle(SecondaryButtonStyle())
                         }
                     }
                 }
@@ -364,7 +384,7 @@ struct MachinesView: View {
     }
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Machines linked to this account. Presence and direct connection arrive when the host reports them.") {
+        Card(title: "Account-linked devices", subtitle: "Connect to any machine on this account in one click. Direct when the network allows it, tunnel otherwise.") {
             VStack(spacing: 0) {
                 ForEach(model.accountMachines) { machine in
                     HStack(spacing: Theme.Space.s) {
@@ -375,15 +395,15 @@ struct MachinesView: View {
                             if let label = machine.label, !label.isEmpty {
                                 Text(label)
                                     .font(.callout.weight(.medium))
-                            } else if let id = machine.machineID {
-                                MaskedID(value: id, size: 12)
                             } else {
-                                Text(machine.displayName)
+                                Text(machine.machineID.map { "Machine \($0)" } ?? "Unnamed machine")
                                     .font(.callout.weight(.medium))
                             }
-                            if let subtitle = machine.subtitle {
-                                MaskedID(value: subtitle, size: 10)
+                            if let id = machine.machineID, machine.label?.isEmpty == false {
+                                Text(id)
+                                    .font(Theme.mono(11))
                                     .foregroundStyle(.tertiary)
+                                    .textSelection(.enabled)
                             }
                             Text(machine.machineID == model.account?.thisMachineID
                                 ? "This device"
@@ -393,26 +413,36 @@ struct MachinesView: View {
                         }
                         Spacer()
                         if machine.machineID == model.account?.thisMachineID {
+                            // The machine you are sitting at has no Connect,
+                            // no state badge and no revoke: there is nothing to
+                            // reach or withdraw here, and offering any of it
+                            // made the row read as a stranger.
                             Text("Here")
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(Theme.accent)
-                        } else if let online = machine.online {
-                            Text(online ? "Online" : "Offline")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(online ? AnyShapeStyle(Theme.success) : AnyShapeStyle(.tertiary))
-                        } else if let seen = formatRelativeDate(machine.lastSeenAt) {
-                            Text("Seen \(seen)")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        DeviceStateBadge(state: model.state(for: machine))
-                        if let peer = model.peer(for: machine) {
-                            accountPeerActions(peer)
-                        } else if machine.online == true {
-                            Button("Connect") { }
-                                .buttonStyle(.bordered)
-                                .disabled(true)
-                                .help("Connection details are not available from this account record yet")
+                        } else {
+                            if let online = machine.online {
+                                Text(online ? "Online" : "Offline")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(online ? AnyShapeStyle(Theme.success) : AnyShapeStyle(.tertiary))
+                            } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                                Text("Seen \(seen)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            DeviceStateBadge(state: model.state(for: machine))
+                            if let peer = model.peer(for: machine) {
+                                accountPeerActions(peer)
+                            } else if let key = machine.publicIdentity, !key.isEmpty {
+                                Button("Connect") { Task { await model.connect(machine) } }
+                                    .buttonStyle(AccentButtonStyle(small: true))
+                                    .help("Connects directly on one network, or through the tunnel from anywhere")
+                            } else {
+                                Text("No connection key yet")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                    .help("Open the Machines screen on that machine so it registers its key, then try again")
+                            }
                         }
                     }
                     .padding(.vertical, Theme.Space.s)
@@ -429,15 +459,13 @@ struct MachinesView: View {
             Button("Approve") { Task { await model.approve(peer) } }
                 .buttonStyle(AccentButtonStyle())
         case .approved:
-            if peer.address?.isEmpty == false {
-                Button("Connect") { Task { await model.connect(peer) } }
-                    .buttonStyle(AccentButtonStyle())
-            }
+            Button("Connect") { Task { await model.connect(peer) } }
+                .buttonStyle(AccentButtonStyle())
             Button("Revoke") { Task { await model.revoke(peer) } }
-                .buttonStyle(.bordered)
+                .buttonStyle(SecondaryButtonStyle())
         case .revoked:
             Button("Approve") { Task { await model.approve(peer) } }
-                .buttonStyle(.bordered)
+                .buttonStyle(SecondaryButtonStyle())
         }
     }
 
@@ -537,7 +565,7 @@ private struct PeerRow<Actions: View>: View {
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(peer.label)
+                    Text(peer.label.isEmpty ? "Unnamed machine" : peer.label)
                         .font(.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
@@ -546,7 +574,7 @@ private struct PeerRow<Actions: View>: View {
                 // that is the form they will read whole. Blurred until hovered,
                 // like this machine's own words above.
                 RevealOnHover {
-                    Text(peer.words ?? peer.fingerprint)
+                    Text(peer.words ?? "Approved device")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -628,7 +656,7 @@ private struct PairingForm: View {
                     prompt: Text("Paste the code from the other machine")
                 )
                 .font(Theme.mono(11))
-                TextField("Name", text: $label, prompt: Text("What you call that machine"))
+                TextField("Name", text: $label, prompt: Text("What you call that machine (optional)"))
 
                 HStack {
                     Spacer()

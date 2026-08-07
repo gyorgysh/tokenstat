@@ -1313,6 +1313,14 @@ struct RemoteStatus: Codable, Sendable {
     let serving: Bool
     /// Whether this machine keeps an outbound connection to the blind tunnel.
     let tunnel: Bool
+    /// What the tunnel is actually doing. The toggle can be on while the
+    /// daemon is being refused (plan gate, revoked token, endpoint down), so
+    /// the screen has to read these rather than trust the setting.
+    let tunnelOnline: Bool?
+    /// Whether the account directory carries this machine's key and name.
+    let tunnelRegistered: Bool?
+    /// Why the tunnel is not connected, when it is not.
+    let tunnelError: String?
     /// What is actually true. These differ when the port is taken, and a screen
     /// showing only the first would claim to be serving when it is not.
     let listening: Bool

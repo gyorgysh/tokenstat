@@ -37,6 +37,14 @@ final class AccountModel {
 
     var signedIn: Bool { account?.signedIn == true }
 
+    /// Whether the last sync was refused by the plan's rate gate, which is a
+    /// warning rather than a failure: the sync machinery works, the account
+    /// simply may not upload again yet.
+    var isRateLimited: Bool {
+        if syncCooldownUntil != nil { return true }
+        return syncNotice?.contains("may sync once every") ?? false
+    }
+
     func load() async {
         isLoading = true
         defer { isLoading = false }

@@ -262,6 +262,13 @@ eligible for sync, and the source is open so you can confirm it.
   salted hashes, and the salt never leaves.
 - The sync payload holds dates, counts, model ids, and opaque keys. No paths,
   prompts, or hostnames. `tokenstat sync --dry-run` prints the exact bytes.
+- Remote reach is separate from sync and off unless you turn it on per machine.
+  The tunnel forwards an already-encrypted machine-to-machine stream and cannot
+  read it. What it can see, and what the account directory then shows your own
+  account, is connection metadata: which machines are reachable, when they
+  talked, and how much. The machine's connection key and the name you gave it
+  are registered with your account only while remote reach is on; the sync
+  envelope never carries either.
 
 The core library cannot link a network stack, enforced in CI.
 

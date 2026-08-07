@@ -224,6 +224,11 @@ struct RootView: View {
             // from the file watcher, which must not dial anybody.
             await workspaces.watchPeers()
         }
+        // A machine that just connected should not wait for the 60-second peer
+        // sweep to show its folders.
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { _ in
+            Task { await workspaces.loadRemote() }
+        }
         #if os(macOS)
         .task { await terminals.load() }
         // The File menu's Add Workspace. The menu has no model, so it posts and
@@ -748,19 +753,11 @@ struct RootView: View {
     /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
-            if let status = account.syncNotice {
-                HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: account.syncNoticeIsError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                    Text(status)
-                        .lineLimit(2)
-                        .truncationMode(.tail)
-                }
-                .font(.caption)
-                .foregroundStyle(account.syncNoticeIsError ? Theme.warning : Theme.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.xs)
-            }
+            // Sync feedback is a card in the same slot and the same language
+            // as the update card: success is the accent, rate limiting is
+            // amber, a failure is red. A plain caption made a successful sync
+            // read as a footnote.
+            SyncCard(account: account)
             UpdateCard(update: appUpdate)
             Rectangle().fill(Theme.border).frame(height: 1)
             // The up-to-date confirmation is a card in `UpdateCard`; only the

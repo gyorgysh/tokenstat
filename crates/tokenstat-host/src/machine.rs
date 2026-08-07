@@ -91,6 +91,9 @@ fn rename(params: &str) -> Result<Value, String> {
     }
     // The whole identity back, not just the name. One shape for "who am I"
     // means the caller replaces what it holds instead of patching a field.
+    // With remote reach on, the account directory shows this name on the
+    // other screens, so it is refreshed rather than waiting for a reconnect.
+    crate::remote::register_if_tunnel_enabled();
     identity()
 }
 
@@ -127,9 +130,35 @@ fn pair(params: &str) -> Result<Value, String> {
     let p: KeyParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let key = public_key_from_hex(&p.key).map_err(|e| e.to_string())?;
 
+    // Pinning your own key is never a connection: it is a loop somebody can
+    // only click by accident, and the Machines screen now filters the machine
+    // out of its own discovery list. Refuse here as well so a pasted or
+    // account-supplied self-key gets the same answer from every path.
+    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    if identity.public_key() == key {
+        return Err("that is this machine's own key, not another machine".into());
+    }
+
     let mut store = PeerStore::load().map_err(|e| e.to_string())?;
-    let label = p.label.unwrap_or_else(|| fingerprint(&key));
-    let peer = store.add_approved(&key, &label, p.address.as_deref(), &now());
+    // An empty name is "no name", not a machine called "". The stored fallback
+    // is the fingerprint, so a row added by key alone still identifies the
+    // peer until somebody names it; the screen leads with the word pair anyway.
+    let label = p
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| fingerprint(&key));
+    // An empty address is the same as none: this machine may connect *to* the
+    // peer through the tunnel, but there is nothing to dial directly.
+    let address = p
+        .address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let peer = store.add_approved(&key, &label, address.as_deref(), &now());
     store.save().map_err(|e| e.to_string())?;
     Ok(peer_json(&peer))
 }

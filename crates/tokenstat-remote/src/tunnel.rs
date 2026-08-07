@@ -86,7 +86,7 @@ pub fn dial(
     let (mut socket, _) = connect(endpoint).map_err(tunnel_error)?;
     send_text(
         &mut socket,
-        &format!("HELLO {} {}", identity.public_key_hex(), account_token),
+        &format!("HELLO {} {} DIAL", identity.public_key_hex(), account_token),
     )?;
     expect_control(&mut socket, "READY")?;
     send_text(&mut socket, &format!("CONNECT {}", hex(&peer_key)))?;
@@ -108,7 +108,11 @@ pub fn listen(
     let (mut socket, _) = connect(endpoint).map_err(tunnel_error)?;
     send_text(
         &mut socket,
-        &format!("HELLO {} {}", identity.public_key_hex(), account_token),
+        &format!(
+            "HELLO {} {} LISTEN",
+            identity.public_key_hex(),
+            account_token
+        ),
     )?;
     expect_control(&mut socket, "READY")?;
     expect_control(&mut socket, "PAIRED")?;

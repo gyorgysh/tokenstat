@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
+import AppKit
 import Observation
 
 /// This machine, the machines it knows, and whether it can be reached.
@@ -30,7 +31,8 @@ final class MachinesModel {
     private(set) var peers: [Peer] = []
     private(set) var accountMachines: [Machine] = []
     private(set) var account: Account?
-    private(set) var discovered: [DiscoveredDaemon] = []
+    private var rawDiscovered: [DiscoveredDaemon] = []
+    private(set) var discoveryError: String?
     private(set) var loading = false
     private(set) var settingUpHelper = false
     var errorMessage: String?
@@ -43,8 +45,19 @@ final class MachinesModel {
 
     /// Peers waiting on a decision, which is the thing somebody opened this
     /// screen to do.
-    var pending: [Peer] { peers.filter { $0.trust == .pending } }
-    var known: [Peer] { peers.filter { $0.trust != .pending } }
+    var pending: [Peer] { peers.filter { $0.trust == .pending && $0.key != identity?.key } }
+    var known: [Peer] { peers.filter { $0.trust != .pending && $0.key != identity?.key } }
+
+    /// Nearby machines, never this one.
+    ///
+    /// Bonjour finds a machine's own advertisement too — a Mac that is serving
+    /// is registered with the same mDNS responder it browses with. Adding
+    /// yourself as a peer is not an error anyone intended, so the row is
+    /// filtered out before it can be clicked.
+    var discovered: [DiscoveredDaemon] {
+        guard let ownKey = identity?.key else { return rawDiscovered }
+        return rawDiscovered.filter { $0.key != ownKey }
+    }
 
     /// A peer this machine can actually call: approved, and with an address to
     /// dial. Approved without an address is a machine that may connect *to*
@@ -52,6 +65,9 @@ final class MachinesModel {
     var reachable: [Peer] {
         peers.filter { $0.trust == .approved && $0.address?.isEmpty == false }
     }
+
+    /// Whether the tunnel is holding a live socket, when the daemon has said.
+    var tunnelConnected: Bool { status?.tunnelOnline == true }
 
     func peer(for machine: Machine) -> Peer? {
         let identity = machine.publicIdentity ?? machine.machineID
@@ -87,13 +103,29 @@ final class MachinesModel {
         return identity.key
     }
 
+    /// Copy this machine's connection invite to the pasteboard.
+    ///
+    /// The invite is a pairing code: the key, plus the address when this
+    /// machine is listening. Nobody has to read it — Copy is the whole action,
+    /// and the other machine's Add device box accepts it as pasted.
+    func copyInvite() {
+        guard let code = pairingCode else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(code, forType: .string)
+        showNotice("Invite copied. On the other machine, choose Add device and paste it there.")
+    }
+
     /// The two words for this machine, which is what a person compares against
     /// the other screen.
     var words: String? { identity?.words ?? status?.words }
 
     func load() async {
         discovery.changed = { [weak self] daemons in
-            self?.discovered = daemons
+            self?.rawDiscovered = daemons
+        }
+        discovery.errorChanged = { [weak self] message in
+            self?.discoveryError = message
         }
         discovery.start()
         loading = true
@@ -186,6 +218,10 @@ final class MachinesModel {
     }
 
     func pair(_ daemon: DiscoveredDaemon) async {
+        guard daemon.serving else {
+            errorMessage = "\(daemon.label) is not accepting connections yet. Turn on Link devices on that machine, then try again."
+            return
+        }
         guard let address = daemon.address else {
             errorMessage = "Still resolving \(daemon.label)'s address. Try again in a moment."
             return
@@ -237,9 +273,14 @@ final class MachinesModel {
     }
 
     func pair(key: String, label: String, address: String) async {
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key != identity?.key else {
+            errorMessage = "That is this machine. It is already here and does not need to be added."
+            return
+        }
         do {
             let peer = try await Bridge.pair(
-                key: key.trimmingCharacters(in: .whitespacesAndNewlines),
+                key: key,
                 label: label.trimmingCharacters(in: .whitespacesAndNewlines),
                 address: address.trimmingCharacters(in: .whitespacesAndNewlines)
             )
@@ -270,16 +311,81 @@ final class MachinesModel {
     }
 
     func connect(_ peer: Peer) async {
-        guard peer.address?.isEmpty == false else {
-            errorMessage = "\(peer.label) is approved but has no reachable address yet. Wait for it to appear on the network, then try again."
+        // A peer without an address is dialled through the tunnel when that is
+        // on: the daemon tries direct first and falls back. Same-account
+        // machines never carry an address on the record, so this is the path
+        // that makes "connect to my other machines" work anywhere.
+        if peer.address?.isEmpty == false {
+            await dial(peer)
             return
         }
+        guard status?.tunnel == true else {
+            errorMessage = "\(peer.label) has no address on this network. Turn on Reach machines from anywhere to connect to it through the tunnel."
+            return
+        }
+        await dial(peer)
+    }
+
+    /// Connect to a machine that belongs to this account.
+    ///
+    /// The account record carries the public key, so this is the same exchange
+    /// as nearby discovery — pin the identity, dial, and let the far end
+    /// decide — without anybody copying or comparing anything. Direct when the
+    /// network allows it, tunnel otherwise.
+    func connect(_ machine: Machine) async {
+        guard machine.machineID != account?.thisMachineID else { return }
+        if let peer = peer(for: machine) {
+            await connect(peer)
+            return
+        }
+        guard let key = machine.publicIdentity, !key.isEmpty else {
+            errorMessage = "\(machine.displayName) has no connection key on this account record yet. Open the Machines screen on that machine so it registers one, then try again."
+            return
+        }
+        guard key != identity?.key else { return }
+        do {
+            let name = machine.displayName
+            let peer = try await Bridge.pair(
+                key: key,
+                label: name,
+                address: ""
+            )
+            errorMessage = nil
+            await refreshPeers()
+            if let now = peers.first(where: { $0.key == peer.key }) {
+                await connect(now)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func dial(_ peer: Peer) async {
         do {
             _ = try await Bridge.remoteWorkspaces(peer: peer)
             errorMessage = nil
             showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
+            NotificationCenter.default.post(name: .remotePeerDidConnect, object: nil)
         } catch {
-            errorMessage = error.localizedDescription
+            // First contact always ends with the far end being asked to
+            // approve this machine. That is the point, not a failure to
+            // present as one: the other screen shows this machine waiting.
+            let text = error.localizedDescription
+            if text.contains("has not approved") || text.contains("not approved") {
+                showNotice("\(peer.label) has been asked to let this machine in. Approve it on the other device and its workspaces will appear here.")
+                errorMessage = nil
+            } else {
+                // A drop mid-answer is the peer's daemon swapping its tunnel
+                // listener or a connection that died between two machines that
+                // are both retrying. It resolves itself; naming it as a hard
+                // failure would send somebody down a debugging rabbit hole.
+                if text.contains("closed before the answer arrived") {
+                    showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically; try again in a moment.")
+                    errorMessage = nil
+                } else {
+                    errorMessage = text
+                }
+            }
         }
     }
 

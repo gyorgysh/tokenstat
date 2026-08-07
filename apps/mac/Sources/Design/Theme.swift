@@ -780,6 +780,38 @@ struct AccentButtonStyle: ButtonStyle {
     }
 }
 
+/// The secondary action: the same capsule family as `AccentButtonStyle`, but
+/// neutral — panel fill, hairline border, primary text. For revoke, forget and
+/// every action that is a real operation but not the one being offered.
+/// A system-bordered button next to an accent capsule reads as a different
+/// design language on the same row, which is exactly how the Machines screen
+/// looked with default Revoke/Forget buttons beside accent Approve/Connect.
+struct SecondaryButtonStyle: ButtonStyle {
+    /// Dense variant for rows and card accessories.
+    var small = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: small ? 12 : 13, weight: .medium))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, small ? 10 : 14)
+            .padding(.vertical, small ? 4 : 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed ? Theme.rowHighlight : Theme.panel)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        configuration.isPressed ? Theme.accent.opacity(0.35) : Theme.border,
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(.rect)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
 /// One segment of `SegmentedCapsulePicker`.
 private struct SegmentButton: View {
     var label: String

@@ -15,6 +15,10 @@ struct DiscoveredDaemon: Identifiable, Hashable, Sendable {
     let words: String?
     let label: String
     let address: String?
+    /// Whether the far machine is accepting connections right now. The daemon
+    /// advertises whenever it runs, so a machine with remote linking turned
+    /// off still shows up; the row must not offer a Connect that can only fail.
+    let serving: Bool
 
     var id: String { key }
 }
@@ -29,7 +33,13 @@ final class BonjourDiscovery {
     private var connections: [String: NWConnection] = [:]
     private var resolvedAddresses: [String: String] = [:]
     private(set) var daemons: [DiscoveredDaemon] = []
+    /// Why the browse is not producing results, when it is not. The two cases
+    /// worth naming are the local network permission being denied and the
+    /// system's responder refusing the browse type; both leave the list empty
+    /// and both need a different fix than "wait".
+    private(set) var browseError: String?
     var changed: (([DiscoveredDaemon]) -> Void)?
+    var errorChanged: ((String?) -> Void)?
 
     func start() {
         guard browser == nil else { return }
@@ -42,7 +52,13 @@ final class BonjourDiscovery {
                 self?.update(results)
             }
         }
-        browser.stateUpdateHandler = { state in
+        browser.stateUpdateHandler = { [weak self] state in
+            let message = Self.errorMessage(for: state)
+            Task { @MainActor in
+                guard let self else { return }
+                self.browseError = message
+                self.errorChanged?(message)
+            }
             if case .failed(let error) = state {
                 NSLog("tokenstat Bonjour discovery failed: %@", error.localizedDescription)
             }
@@ -58,6 +74,7 @@ final class BonjourDiscovery {
         connections.removeAll()
         resolvedAddresses.removeAll()
         daemons = []
+        browseError = nil
         changed?([])
     }
 
@@ -73,13 +90,14 @@ final class BonjourDiscovery {
             else { continue }
 
             activeKeys.insert(key)
-            let address = resolvedAddress(for: result.endpoint, key: key)
+            let serving = value(for: "serving", in: txt) == "1"
             next.append(DiscoveredDaemon(
                 key: key,
                 fingerprint: fingerprint,
                 words: value(for: "words", in: txt),
                 label: label,
-                address: address
+                address: serving ? resolvedAddress(for: result.endpoint, key: key) : nil,
+                serving: serving
             ))
         }
 
@@ -93,6 +111,10 @@ final class BonjourDiscovery {
         changed?(daemons)
     }
 
+    /// mDNS hands the endpoint straight to the browser in almost every case;
+    /// the connection-based resolution below is only for the rare endpoint
+    /// that arrives unresolved, and it gives up fast so the row is not the
+    /// thing holding the list up.
     private func resolvedAddress(for endpoint: NWEndpoint, key: String) -> String? {
         if let address = resolvedAddresses[key] {
             return address
@@ -101,13 +123,9 @@ final class BonjourDiscovery {
             return formatAddress(host: host, port: port)
         }
 
-        if let connection = connections[key],
-           case let .hostPort(host, port) = connection.currentPath?.remoteEndpoint {
-            return formatAddress(host: host, port: port)
-        }
-
         let connection = NWConnection(to: endpoint, using: .tcp)
         connections[key] = connection
+        var timedOut = false
         connection.stateUpdateHandler = { [weak self] state in
             guard state == .ready else { return }
             Task { @MainActor in
@@ -123,13 +141,41 @@ final class BonjourDiscovery {
                     fingerprint: self.daemons[index].fingerprint,
                     words: self.daemons[index].words,
                     label: self.daemons[index].label,
-                    address: address
+                    address: address,
+                    serving: self.daemons[index].serving
                 )
                 self.changed?(self.daemons)
             }
         }
         connection.start(queue: .main)
+        Task { @MainActor [weak self] in
+            // A name that will not resolve in two seconds is not going to be
+            // the machine the user is waiting for. Drop the probe; the row
+            // stays visible with its key, ready to pair the moment it answers.
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, !timedOut, self.connections[key] != nil else { return }
+            timedOut = true
+            self.connections.removeValue(forKey: key)?.cancel()
+        }
         return nil
+    }
+
+    /// A readable reason the browse is stuck, or nil while it is fine.
+    nonisolated private static func errorMessage(for state: NWBrowser.State) -> String? {
+        switch state {
+        case .failed(let error), .waiting(let error):
+            let text = error.localizedDescription
+            let lower = text.lowercased()
+            if lower.contains("denied") || lower.contains("permission") || lower.contains("local network") {
+                return "Local network access is blocked. Allow tokenstat in System Settings → Privacy & Security → Local Network, then reopen this screen."
+            }
+            if lower.contains("dns") || lower.contains("service") {
+                return "The system could not browse for tokenstat machines on this network (\(text))."
+            }
+            return nil
+        default:
+            return nil
+        }
     }
 
     private func value(for key: String, in record: NWTXTRecord) -> String? {
@@ -150,7 +196,9 @@ final class BonjourDiscovery {
 @MainActor
 final class BonjourDiscovery {
     private(set) var daemons: [DiscoveredDaemon] = []
+    private(set) var browseError: String?
     var changed: (([DiscoveredDaemon]) -> Void)?
+    var errorChanged: ((String?) -> Void)?
 
     func start() {}
     func stop() {}

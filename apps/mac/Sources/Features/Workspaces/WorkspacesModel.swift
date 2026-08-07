@@ -27,6 +27,12 @@ enum WorkspacePreference {
     }
 }
 
+extension Notification.Name {
+    /// A peer connection succeeded, so its folders can be fetched now instead
+    /// of waiting for the 60-second peer sweep.
+    static let remotePeerDidConnect = Notification.Name("tokenstat.remotePeerDidConnect")
+}
+
 /// The tabs of the workspace inspector.
 enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     case files = "Files"
@@ -509,8 +515,13 @@ final class WorkspacesModel {
     /// stay listed.
     func loadRemote() async {
         do {
+            // A peer without an address is dialled through the tunnel, which is
+            // how same-account machines behind NAT are reached. The sweep must
+            // include those peers when this machine's tunnel is on, or a
+            // successfully connected machine never appears in the sidebar.
+            let tunnelOn = (try? await Bridge.remoteStatus())?.tunnel == true
             let peers = try await Bridge.peers().filter {
-                $0.trust == .approved && $0.address?.isEmpty == false
+                $0.trust == .approved && ($0.address?.isEmpty == false || tunnelOn)
             }
             let liveKeys = Set(peers.map(\.key))
             for key in remoteFolders.keys where !liveKeys.contains(key) {

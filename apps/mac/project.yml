@@ -69,6 +69,18 @@ targets:
       # The terminal view. Resolved through Swift Package Manager; the package
       # declaration is under `packages:` at the top of this file.
       - package: SwiftTerm
+    # Xcode's generated Info.plist merges INFOPLIST_KEY_* string keys but drops
+    # the array form of NSBonjourServices, and local network privacy (macOS 15+)
+    # needs that exact key present or every browse is silently denied. Inject
+    # it after the plist is generated instead of fighting the generator.
+    postBuildScripts:
+      - name: Inject Bonjour service declaration
+        basedOnDependencyAnalysis: false
+        script: |
+          PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+          /usr/libexec/PlistBuddy -c "Delete :NSBonjourServices" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string _tokenstat._tcp" "$PLIST"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.Tokenstat
@@ -78,6 +90,12 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: tokenstat
         INFOPLIST_KEY_NSHumanReadableCopyright: "© pueev OÜ. All rights reserved."
+        # Local network privacy (macOS 15+): the app browses for tokenstat
+        # daemons with Network.framework, so the system needs both the
+        # user-facing explanation and the Bonjour service type declared, or it
+        # silently denies every browse and the Nearby devices list spins.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "tokenstat looks for other machines running tokenstat on your local network so you can connect to their workspaces."
+        "INFOPLIST_KEY_NSBonjourServices[0]": _tokenstat._tcp
         # No sandbox. See CODE_SIGN_IDENTITY above for why.
         ENABLE_APP_SANDBOX: NO
         # On, because notarization requires it. It is not the sandbox: the app

@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
+use tokenstat_identity::{MachineIdentity, PeerStore, Trust, public_key_from_hex};
 use tokenstat_remote::{DEFAULT_PORT, Refused, Server, authorize};
 
 use crate::session::Session;
@@ -111,7 +111,6 @@ fn save_settings(settings: &RemoteSettings) -> Result<(), String> {
 struct Listening {
     address: String,
     stop: Arc<AtomicBool>,
-    advertisement: bonjour::Advertisement,
 }
 
 #[cfg(target_os = "macos")]
@@ -192,8 +191,9 @@ mod bonjour {
         fingerprint: &str,
         words: &str,
         label: &str,
+        serving: bool,
     ) -> Result<Advertisement, String> {
-        let txt = txt_record(key, fingerprint, words, label)?;
+        let txt = txt_record(key, fingerprint, words, label, serving)?;
         let service_type = b"_tokenstat._tcp\0";
         let mut service = std::ptr::null_mut();
         let error = unsafe {
@@ -260,6 +260,7 @@ mod bonjour {
         fingerprint: &str,
         words: &str,
         label: &str,
+        serving: bool,
     ) -> Result<Vec<u8>, String> {
         let mut record = Vec::new();
         // The words travel with the advertisement so a machine found nearby can
@@ -270,6 +271,7 @@ mod bonjour {
             ("fingerprint", fingerprint),
             ("words", words),
             ("label", label),
+            ("serving", if serving { "1" } else { "0" }),
         ] {
             let entry = format!("{name}={value}");
             if entry.len() > u8::MAX as usize {
@@ -296,10 +298,10 @@ mod bonjour {
 
         #[test]
         fn txt_record_contains_the_identity_fields() {
-            let record = txt_record("key", "fingerprint", "words", "label").unwrap();
+            let record = txt_record("key", "fingerprint", "words", "label", true).unwrap();
             assert_eq!(
                 record,
-                b"\x07key=key\x17fingerprint=fingerprint\x0bwords=words\x0blabel=label"
+                b"\x07key=key\x17fingerprint=fingerprint\x0bwords=words\x0blabel=label\x09serving=1"
             );
         }
 
@@ -320,6 +322,7 @@ mod bonjour {
         _fingerprint: &str,
         _words: &str,
         _label: &str,
+        _serving: bool,
     ) -> Result<Advertisement, String> {
         Ok(Advertisement)
     }
@@ -330,9 +333,54 @@ fn listening() -> &'static Mutex<Option<Listening>> {
     LISTENING.get_or_init(|| Mutex::new(None))
 }
 
+/// The currently registered Bonjour advertisement, whether or not the daemon
+/// is serving. The daemon advertises whenever it runs so machines show up on
+/// nearby screens immediately; the `serving` flag in the record is what tells
+/// the other side whether Connect can work yet.
+fn advertisement_slot() -> &'static Mutex<Option<bonjour::Advertisement>> {
+    static SLOT: OnceLock<Mutex<Option<bonjour::Advertisement>>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+fn set_advertisement(advertisement: Option<bonjour::Advertisement>) {
+    if let Ok(mut slot) = advertisement_slot().lock() {
+        *slot = advertisement;
+    }
+}
+
 fn tunnel_running() -> &'static AtomicBool {
     static RUNNING: AtomicBool = AtomicBool::new(false);
     &RUNNING
+}
+
+/// What the tunnel is doing right now, for the screen that reports it.
+///
+/// `remote.status` reports the user's *setting* and, separately, what is
+/// actually true. The tunnel is the one place the two can differ for a while
+/// (DENIED for the plan, a bad token, an endpoint that is down), and a screen
+/// that showed only the toggle would invite somebody to press Connect against
+/// a listener that is not there.
+#[derive(Debug, Clone, Default)]
+pub struct TunnelState {
+    /// The daemon is holding a live socket on the tunnel right now.
+    pub connected: bool,
+    /// Why the last attempt failed, when it did.
+    pub error: Option<String>,
+    /// The account directory has this machine's key and name. Registration is
+    /// what lets a same-account machine dial this one, so "on the tunnel but
+    /// not in the directory" is a real state worth showing.
+    pub registered: bool,
+}
+
+fn tunnel_state() -> &'static Mutex<TunnelState> {
+    static STATE: OnceLock<Mutex<TunnelState>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(TunnelState::default()))
+}
+
+fn set_tunnel_state(update: impl FnOnce(&mut TunnelState)) {
+    if let Ok(mut state) = tunnel_state().lock() {
+        update(&mut state);
+    }
 }
 
 /// The session a peer will be answered from.
@@ -375,6 +423,24 @@ pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
             // window, and the Machines screen will show that serving is off.
             eprintln!("remote: could not listen on port {}: {e}", settings.port);
         }
+    } else {
+        // Advertise anyway, marked as not serving. Finding machines is the
+        // point of the screen, and a list that stays empty until every other
+        // machine happens to be linking reads as broken. The flag stops a
+        // Connect from being offered against a daemon that would refuse it.
+        if let Ok(identity) = MachineIdentity::load_or_create() {
+            match bonjour::advertise(
+                0,
+                &identity.public_key_hex(),
+                &identity.fingerprint(),
+                &tokenstat_identity::key_words(&identity.public_key()),
+                &tokenstat_identity::machine_label(),
+                false,
+            ) {
+                Ok(advertisement) => set_advertisement(Some(advertisement)),
+                Err(e) => eprintln!("remote: could not advertise over Bonjour: {e}"),
+            }
+        }
     }
     start_tunnel_if_enabled(session, &settings);
 }
@@ -400,6 +466,7 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         return;
     }
     let endpoint = settings.tunnel_endpoint.clone();
+    let registered_settings = settings.clone();
     let token = match account_token() {
         Ok(token) => token,
         Err(error) => {
@@ -417,16 +484,36 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         }
     };
     std::thread::spawn(move || {
+        register_with_account(&registered_settings);
         while tunnel_running().load(Ordering::Acquire) {
             match tokenstat_remote::tunnel::listen(&endpoint, &identity, &token) {
-                Ok(connection) => match authorize(connection, "tunnel") {
-                    Ok(connection) => {
-                        let peer_session = Arc::clone(&session);
-                        std::thread::spawn(move || serve_peer(connection, &peer_session));
+                Ok(connection) => {
+                    set_tunnel_state(|state| {
+                        state.connected = true;
+                        state.error = None;
+                    });
+                    // The account directory may have missed this machine while
+                    // it was away; a reconnect is the moment to make sure the
+                    // other screens see it. Cheap, and a failure only lowers
+                    // the `registered` flag rather than dropping the socket.
+                    register_with_account(&registered_settings);
+                    match authorize(connection, "tunnel") {
+                        // Served inline, not on a spawned thread like the TCP
+                        // accept loop. The tunnel gives a machine one socket;
+                        // pairing it with a peer is what that socket *is*, so
+                        // re-listening before the session ends would open a
+                        // second socket for the same key and be denied
+                        // key_already_live by the relay. The loop comes back
+                        // to `listen` only after this session is over.
+                        Ok(connection) => serve_peer(connection, &session),
+                        Err(refused) => report(&refused),
                     }
-                    Err(refused) => report(&refused),
-                },
+                }
                 Err(error) => {
+                    set_tunnel_state(|state| {
+                        state.connected = false;
+                        state.error = Some(error.to_string());
+                    });
                     eprintln!("remote: tunnel connection failed: {error}");
                     std::thread::sleep(std::time::Duration::from_secs(5));
                 }
@@ -438,6 +525,49 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
 
 fn stop_tunnel() {
     tunnel_running().store(false, Ordering::Release);
+    set_tunnel_state(|state| {
+        state.connected = false;
+        state.error = None;
+        state.registered = false;
+    });
+}
+
+/// Put this machine's key and name on the account directory, when remote reach
+/// is on. Called when the tunnel comes up and after a rename; it is the
+/// opt-in part of "reach machines from anywhere", so a plain sync never
+/// triggers it.
+fn register_with_account(settings: &RemoteSettings) {
+    if !settings.tunnel {
+        return;
+    }
+    let outcome = (|| -> Result<(), String> {
+        let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+        let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
+        tokenstat_sync::profile::register_machine_identity(
+            None,
+            &machine_id,
+            &identity.public_key_hex(),
+            &tokenstat_identity::machine_label(),
+        )
+        .map_err(|e| e.to_string())
+    })();
+    match outcome {
+        Ok(()) => set_tunnel_state(|state| state.registered = true),
+        Err(error) => {
+            set_tunnel_state(|state| state.registered = false);
+            eprintln!("remote: could not register with the account directory: {error}");
+        }
+    }
+}
+
+/// Re-register after a rename, so the account directory shows the new name on
+/// the other screens. A no-op when remote reach is off.
+pub(crate) fn register_if_tunnel_enabled() {
+    let settings = load_settings();
+    if !settings.tunnel {
+        return;
+    }
+    std::thread::spawn(move || register_with_account(&settings));
 }
 
 /// Bind the preferred port, or any free one.
@@ -492,8 +622,10 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
         &identity.fingerprint(),
         &tokenstat_identity::key_words(&identity.public_key()),
         &tokenstat_identity::machine_label(),
+        true,
     )
     .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
+    set_advertisement(Some(advertisement));
 
     let stop = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&stop);
@@ -529,7 +661,6 @@ pub fn start(session: Arc<Mutex<Session>>, port: u16) -> Result<String, String> 
     *guard = Some(Listening {
         address: address.clone(),
         stop,
-        advertisement,
     });
     Ok(address)
 }
@@ -563,9 +694,10 @@ pub(crate) fn readvertise() -> Result<(), String> {
         &identity.fingerprint(),
         &tokenstat_identity::key_words(&identity.public_key()),
         &tokenstat_identity::machine_label(),
+        true,
     )
     .map_err(|e| format!("could not advertise over Bonjour: {e}"))?;
-    current.advertisement = fresh;
+    set_advertisement(Some(fresh));
     Ok(())
 }
 
@@ -578,6 +710,7 @@ pub fn stop() -> Result<(), String> {
     let Some(current) = guard.take() else {
         return Ok(());
     };
+    set_advertisement(None);
     current.stop.store(true, Ordering::Relaxed);
     // The bind address is 0.0.0.0; connect to the loopback on the same port.
     if let Some(port) = current.address.rsplit(':').next() {
@@ -607,6 +740,12 @@ fn report(refused: &Refused) {
 /// socket, because neither transport knows what a method is.
 fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Session>) {
     let peer = connection.peer_key();
+    // A machine cannot serve itself. A self-dial through the tunnel, or a
+    // mistaken local pair that pinned this machine's own key, would otherwise
+    // pass the approval check with its own store and answer itself.
+    if MachineIdentity::load_or_create().is_ok_and(|identity| identity.public_key() == peer) {
+        return;
+    }
     loop {
         let request = match connection.receive(MAX_MESSAGE) {
             Ok(bytes) => bytes,
@@ -649,6 +788,29 @@ fn pool() -> &'static Mutex<HashMap<String, Vec<tokenstat_remote::Connection>>> 
 
 const MAX_IDLE_PER_PEER: usize = 4;
 
+/// Call a peer and return its answer's result, unwrapped from the peer's
+/// envelope. The shared form of `remote.call` and the pty forwarding in
+/// dispatch: a failure on the far machine is a failure here, not a success
+/// carrying a failure, and the caller must never see a second envelope where
+/// a result belongs.
+pub(crate) fn call_peer_result(
+    peer_hex: &str,
+    method: &str,
+    params: &str,
+) -> Result<Value, String> {
+    let answer = call_peer(peer_hex, method, params)?;
+    let value: Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
+    if value.get("ok").and_then(Value::as_bool) != Some(true) {
+        let message = value
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("the other machine rejected the call without saying why");
+        return Err(message.to_string());
+    }
+    Ok(value.get("result").cloned().unwrap_or(Value::Null))
+}
+
 /// Forward one call to a peer and return its envelope verbatim.
 ///
 /// Verbatim matters: the answer a peer gives is already the shape every front
@@ -690,15 +852,13 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     }
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let mut fresh = match address {
-        Some(address) => {
-            match tokenstat_remote::dial(&address, &identity, Some(expected), &label) {
-                Ok(connection) => connection,
-                Err(direct_error) => {
-                    tunnel_dial(&settings(), expected, &identity, &label, direct_error)?
-                }
+    let mut fresh = match &address {
+        Some(address) => match tokenstat_remote::dial(address, &identity, Some(expected), &label) {
+            Ok(connection) => connection,
+            Err(direct_error) => {
+                tunnel_dial(&settings(), expected, &identity, &label, direct_error)?
             }
-        }
+        },
         None => tunnel_dial(
             &settings(),
             expected,
@@ -707,13 +867,60 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
             "no direct address",
         )?,
     };
-    let answer = round_trip(&mut fresh, request.as_bytes()).map_err(|e| e.to_string())?;
+    let answer = round_trip(&mut fresh, request.as_bytes());
+    // A freshly dialled connection that closes before the first answer usually
+    // means the far daemon was just replacing its listener, the same reconnect
+    // window `tunnel_dial` retries through. One redial rides over it; anything
+    // more is a real failure and should be reported as one.
+    if answer
+        .as_ref()
+        .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
+    {
+        let retry = match address.as_deref() {
+            Some(addr) => tokenstat_remote::dial(addr, &identity, Some(expected), &label)
+                .map_err(|e| e.to_string()),
+            None => tunnel_dial(
+                &settings(),
+                expected,
+                &identity,
+                &label,
+                "no direct address",
+            ),
+        };
+        if let Ok(mut connection) = retry
+            && let Ok(second) = round_trip(&mut connection, request.as_bytes())
+        {
+            checkin(peer_hex, connection);
+            return Ok(second);
+        }
+    }
+    let answer = answer.map_err(|e| e.to_string())?;
     checkin(peer_hex, fresh);
     Ok(answer)
 }
 
 fn settings() -> RemoteSettings {
     load_settings()
+}
+
+/// Peers this machine may dial right now: approved, and reachable either
+/// directly (an address on the record) or through the tunnel when remote reach
+/// is on. The same rule the app's sidebar applies, so sweeps like `pty.list`
+/// that want "all the machines" see exactly the machines they can reach.
+pub(crate) fn reachable_peers() -> Vec<String> {
+    let Ok(store) = PeerStore::load() else {
+        return Vec::new();
+    };
+    let tunnel = load_settings().tunnel;
+    store
+        .list()
+        .into_iter()
+        .filter(|peer| {
+            peer.trust == Trust::Approved
+                && (!peer.address.as_deref().unwrap_or_default().is_empty() || tunnel)
+        })
+        .map(|peer| peer.key)
+        .collect()
 }
 
 fn tunnel_dial(
@@ -727,18 +934,36 @@ fn tunnel_dial(
         return Err(format!("could not reach {label} directly: {direct_error}"));
     }
     let token = account_token()?;
-    tokenstat_remote::tunnel::dial(
-        &settings.tunnel_endpoint,
-        peer,
-        identity,
-        Some(peer),
-        &token,
-    )
-    .map_err(|tunnel_error| {
-        format!(
-            "could not reach {label} directly ({direct_error}) or through the tunnel: {tunnel_error}"
-        )
-    })
+    // The target's listener can be mid-reconnect (its daemon restarted, or it
+    // just finished serving another session), which the relay answers with
+    // NOPEER, or the pairing can drop before the answer arrives. All of those
+    // are transient, so a few short retries ride over them instead of showing
+    // a failure that resolved itself a second later.
+    let mut last = String::new();
+    for attempt in 0..3 {
+        match tokenstat_remote::tunnel::dial(
+            &settings.tunnel_endpoint,
+            peer,
+            identity,
+            Some(peer),
+            &token,
+        ) {
+            Ok(connection) => return Ok(connection),
+            Err(error) => {
+                last = error.to_string();
+                let retryable = last.contains("NOPEER")
+                    || last.contains("closed")
+                    || last.contains("failed to fill whole buffer");
+                if !retryable || attempt == 2 {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+            }
+        }
+    }
+    Err(format!(
+        "could not reach {label} directly ({direct_error}) or through the tunnel: {last}"
+    ))
 }
 
 fn round_trip(
@@ -815,12 +1040,20 @@ fn status() -> Result<Value, String> {
         .ok()
         .and_then(|guard| guard.as_ref().map(|l| l.address.clone()));
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    let tunnel_state = tunnel_state().lock().map_err(|e| e.to_string())?.clone();
     Ok(json!({
         // What the user chose, and what is actually true. They differ when a
         // port is taken, and a screen that showed only the setting would say
         // "serving" about a daemon that is not.
         "serving": settings.serving,
         "tunnel": settings.tunnel,
+        // What the tunnel is actually doing: the toggle can be on while the
+        // daemon is being refused (plan gate, revoked token, endpoint down),
+        // and a screen that cannot tell the difference will offer a Connect
+        // that can never work.
+        "tunnelOnline": tunnel_state.connected,
+        "tunnelRegistered": tunnel_state.registered,
+        "tunnelError": tunnel_state.error,
         "listening": address.is_some(),
         // The port actually bound, which is not always the one asked for: a
         // taken port falls back to any free one rather than refusing to serve.
@@ -891,26 +1124,7 @@ fn forward(params: &str) -> Result<Value, String> {
         return Err("a remote call cannot ask a peer to make another remote call".into());
     }
 
-    let answer = call_peer(&p.peer, &p.method, &p.params.to_string())?;
-    let value: Value = serde_json::from_str(&answer).map_err(|e| e.to_string())?;
-
-    // A failure on the far machine is a failure here, not a success carrying a
-    // failure. Unwrapping it means a client has one error path whether the call
-    // was local or remote, which is the whole reason the envelope is the same
-    // shape over every transport.
-    if value.get("ok").and_then(Value::as_bool) != Some(true) {
-        let message = value
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(Value::as_str)
-            .unwrap_or("the other machine rejected the call without saying why");
-        return Err(message.to_string());
-    }
-
-    // The result only. The `id` the peer echoed is this machine's request id,
-    // not the client's, and the envelope is re-added by whichever transport
-    // answers the client.
-    Ok(value.get("result").cloned().unwrap_or(Value::Null))
+    call_peer_result(&p.peer, &p.method, &p.params.to_string())
 }
 
 #[cfg(test)]
