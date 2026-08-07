@@ -470,10 +470,14 @@ final class WorkspacesModel {
     /// re-dialling every peer on every file change.
     private var remoteFolders: [String: [WorkspaceFolder]] = [:]
     /// When each peer may be dialled again, whether the last dial worked or
-    /// not. A dead machine stays listed with its last known folders rather than
-    /// disappearing on the next refresh, and a live one is not re-dialled at
-    /// the rate files change.
+    /// not. A single failure keeps the last known folders (the peer may just
+    /// be reconnecting), and a live one is not re-dialled at the rate files
+    /// change; after enough consecutive failures the folders leave the list.
     private var remotePeerNextDial: [String: Date] = [:]
+    /// Consecutive dial failures per peer. One failure is a reconnect and the
+    /// last-known folders stay; a machine that keeps failing is gone, and its
+    /// folders must not linger in the sidebar pretending to be reachable.
+    private var remotePeerFailures: [String: Int] = [:]
 
     /// Everything: this machine's folders and every reachable peer's.
     ///
@@ -526,14 +530,21 @@ final class WorkspacesModel {
             let liveKeys = Set(peers.map(\.key))
             for key in remoteFolders.keys where !liveKeys.contains(key) {
                 remoteFolders.removeValue(forKey: key)
+                remotePeerFailures.removeValue(forKey: key)
             }
             for peer in peers {
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
+                    remotePeerFailures[peer.key] = 0
                 } catch {
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRetrySeconds)
+                    let failures = (remotePeerFailures[peer.key] ?? 0) + 1
+                    remotePeerFailures[peer.key] = failures
+                    if failures >= Self.maxPeerFailures {
+                        remoteFolders.removeValue(forKey: peer.key)
+                    }
                 }
             }
             publishFolders()
@@ -562,6 +573,8 @@ final class WorkspacesModel {
     /// How long a peer that did not answer is left alone. Shorter, because a
     /// machine waking up should show up reasonably soon.
     private static let peerRetrySeconds: TimeInterval = 30
+    /// Consecutive failures before a peer's folders leave the sidebar.
+    private static let maxPeerFailures = 2
 
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
