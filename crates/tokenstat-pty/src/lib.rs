@@ -548,6 +548,13 @@ pub fn login_env() -> Option<Arc<LoginEnv>> {
         .clone()
 }
 
+/// No login shell on Windows: sessions inherit the process environment, which
+/// is the closest equivalent to the user's interactive environment.
+#[cfg(not(unix))]
+pub fn login_env() -> Option<Arc<LoginEnv>> {
+    None
+}
+
 /// The one cache, shared by the blocking resolve and the warm thread.
 #[cfg(unix)]
 fn env_cell() -> &'static std::sync::OnceLock<Option<Arc<LoginEnv>>> {
