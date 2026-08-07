@@ -1012,6 +1012,17 @@ extension Bridge {
         try await background("remote.status", as: RemoteStatus.self)
     }
 
+    /// Bind a loopback port on this machine and bridge it to a service on a
+    /// peer's own localhost. The browser tab opens the returned URL as if the
+    /// service ran here.
+    static func proxyListen(peer: String, host: String, port: Int) async throws -> ProxyListen {
+        try await background(
+            "proxy.listen",
+            ["peer": peer, "host": host, "port": port],
+            as: ProxyListen.self
+        )
+    }
+
     /// Start or stop serving other machines.
     ///
     /// Slow enough to await: it binds or unbinds a port. Never called on a

@@ -594,6 +594,12 @@ struct SyncOutcome: Codable, Sendable, Hashable {
     var to: String
 }
 
+/// A loopback port on this machine that bridges to a service on a peer's own
+/// localhost. The browser opens `url` as if the service were local.
+struct ProxyListen: Codable, Sendable, Hashable {
+    var url: String
+}
+
 struct SyncScheduleStatus: Codable, Sendable {
     let loggedIn: Bool
     let cliScheduleActive: Bool

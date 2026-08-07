@@ -314,6 +314,25 @@ final class WorkspacesModel {
         browserTabs[workspaceID]?[index].url = url
     }
 
+    /// Open a browser tab pointed at a service on a remote machine's own
+    /// localhost. The daemon binds a loopback port here and bridges it over
+    /// the authenticated stream, so the tab is an ordinary local URL.
+    func openRemotePort(_ port: Int, in folder: WorkspaceFolder) async {
+        let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3, parts[0] == "remote" else {
+            errorMessage = "Port forwarding works on a workspace on another machine."
+            return
+        }
+        do {
+            let proxy = try await Bridge.proxyListen(peer: parts[1], host: "127.0.0.1", port: port)
+            let tab = showBrowser(in: folder.id)
+            setBrowserURL(proxy.url, in: folder.id, tabID: tab.id)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func showFiles(in workspaceID: String) {
         exitLauncher(in: workspaceID)
         activeFile[workspaceID] = nil

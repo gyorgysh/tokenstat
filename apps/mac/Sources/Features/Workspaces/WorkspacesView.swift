@@ -73,6 +73,11 @@ struct WorkspacesView: View {
                     .fixedSize()
                     .layoutPriority(2)
             }
+            if folder.isRemote {
+                RemotePortButton(folder: folder) { port in
+                    Task { await model.openRemotePort(port, in: folder) }
+                }
+            }
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
@@ -550,5 +555,50 @@ private struct ChangeRow: View {
             }
         }
         .help(file.path)
+    }
+}
+
+/// Opens a service on the other machine's localhost in a browser tab.
+///
+/// The daemon binds a loopback port on this machine and bridges it over the
+/// authenticated stream, so the tab is an ordinary local URL and the remote
+/// machine never exposes anything to its own network.
+private struct RemotePortButton: View {
+    let folder: WorkspaceFolder
+    let open: (Int) -> Void
+
+    @State private var port = ""
+    @State private var showing = false
+
+    var body: some View {
+        Button {
+            showing = true
+        } label: {
+            Label("Open port", systemImage: "network")
+        }
+        .buttonStyle(SecondaryButtonStyle(small: true))
+        .help("Open a service running on \(folder.machineLabel ?? "the other machine")'s localhost in a browser tab")
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Open a port on \(folder.machineLabel ?? "the other machine")")
+                    .font(.callout.weight(.medium))
+                TextField("Port", text: $port)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+                HStack {
+                    Spacer()
+                    Button("Open") {
+                        if let value = Int(port.trimmingCharacters(in: .whitespaces)),
+                           value > 0, value <= 65_535 {
+                            open(value)
+                        }
+                        showing = false
+                    }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(width: 280)
+        }
     }
 }
