@@ -22,7 +22,7 @@ fn cell() -> &'static Mutex<Option<Session>> {
 /// first `pty.spawn`, with a person watching an empty pane.
 fn warm() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(tokenstat_host::warm_login_shell_path);
+    ONCE.call_once(tokenstat_host::warm_login_env);
 }
 
 /// Handle one call, opening the default archive on first use.

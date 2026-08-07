@@ -272,9 +272,16 @@ impl Manager {
             cmd.env_remove("NO_COLOR");
             cmd.env("FORCE_COLOR", "3");
         }
+        // The user's interactive environment, captured once per process. PATH
+        // alone is not enough: version managers, auth agents, language runtimes
+        // and the rest of a profile's exports all live in variables the launchd
+        // daemon never sees. Applied before the terminal settings above so the
+        // emulator's own claims win.
         #[cfg(unix)]
-        if let Some(path) = login_shell_path() {
-            cmd.env("PATH", path);
+        if let Some(env) = login_env() {
+            for (key, value) in &env.vars {
+                cmd.env(key, value);
+            }
         }
 
         let child = pair
@@ -483,43 +490,105 @@ impl Manager {
     }
 }
 
-/// A GUI app or launch agent does not inherit the interactive shell's PATH.
-/// Ask the user's login shell for it so direct CLI launches work just like
-/// they do from Terminal.app. The inherited PATH remains the fallback.
+/// The user's interactive login environment, captured once per process.
+#[derive(Debug, Clone)]
+pub struct LoginEnv {
+    pub path: String,
+    pub vars: HashMap<String, String>,
+}
+
+/// Ask the user's login shell for its whole environment, once per process.
 ///
-/// Resolve the login shell's PATH ahead of the first spawn.
+/// A GUI app or launch agent does not inherit the interactive shell's
+/// environment: the launchd daemon starts with `/usr/bin:/bin:/usr/sbin:/sbin`
+/// plus HOME, and a harness that needs nvm, pyenv, an auth agent or any other
+/// profile export would fail or require setup on every new session. Terminal.app
+/// sessions look seamless because they *are* the login shell; these sessions
+/// are not, so the shell is asked once and the answer is reused.
+///
+/// The cost is a full `$SHELL -ilc` run, which is why it is warmed ahead of
+/// the first spawn (see [`warm_login_env`]) rather than paid there. The answer
+/// is cached for the process's life, so a loaded shell costs seconds once and
+/// nothing ever again. A shell that fails to answer keeps the inherited
+/// environment as the fallback, exactly as before.
+#[cfg(unix)]
+pub fn login_env() -> Option<Arc<LoginEnv>> {
+    env_cell()
+        .get_or_init(|| {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            // `env` between two markers, rather than the whole stdout: profiles
+            // print banners and prompts, and treating that noise as environment
+            // corrupts every variable (the previous PATH-only version did exactly
+            // that with a profile that printed anything).
+            let output = Command::new(shell)
+            .args([
+                "-ilc",
+                "printf '\\n__TOKENSTAT_ENV_START__\\n'; env; printf '__TOKENSTAT_ENV_END__\\n'",
+            ])
+            .output()
+            .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let stdout = String::from_utf8(output.stdout).ok()?;
+            let vars = parse_env(&stdout)?;
+            let path = vars.get("PATH")?.trim().to_string();
+            (!path.is_empty()).then(|| Arc::new(LoginEnv { path, vars }))
+        })
+        .clone()
+}
+
+/// The one cache, shared by the blocking resolve and the warm thread.
+#[cfg(unix)]
+fn env_cell() -> &'static std::sync::OnceLock<Option<Arc<LoginEnv>>> {
+    static ENV: std::sync::OnceLock<Option<Arc<LoginEnv>>> = std::sync::OnceLock::new();
+    &ENV
+}
+
+/// Resolve the login environment ahead of the first spawn.
 ///
 /// Without this the cost lands inside the first `pty.spawn` of the process's
 /// life, where a person is sitting waiting for a terminal to open, and it is
 /// the largest single part of that wait. Called at daemon start, on a thread
 /// nobody is waiting on. Cheap and correct to call more than once: the work
 /// happens once and every later caller reads the answer.
-pub fn warm_login_shell_path() {
+pub fn warm_login_env() {
     #[cfg(unix)]
     std::thread::spawn(|| {
-        let _ = login_shell_path();
+        let _ = login_env();
     });
 }
 
-/// Asked once per process, not once per session. A login shell reads the
-/// user's whole startup file set, which is tens to hundreds of milliseconds
-/// spent before a terminal can open, and it answers the same thing every time.
+/// Parse `KEY=VALUE` lines between the sentinel markers, ignoring anything a
+/// startup file printed before or after the real environment.
+///
+/// A variable whose value contains a newline (pathological, but legal in POSIX)
+/// loses the continuation lines: the first line still parses and the rest are
+/// skipped as non-`KEY=VALUE` noise. Better one truncated value than a corrupt
+/// parse of everything after it.
 #[cfg(unix)]
-fn login_shell_path() -> Option<&'static str> {
-    static PATH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    PATH.get_or_init(|| {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let output = Command::new(shell)
-            .args(["-ilc", "printf %s \"$PATH\""])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
+fn parse_env(stdout: &str) -> Option<HashMap<String, String>> {
+    const START: &str = "__TOKENSTAT_ENV_START__";
+    const END: &str = "__TOKENSTAT_ENV_END__";
+    let body = stdout.split_once(START)?.1.split_once(END)?.0;
+    let mut vars = HashMap::new();
+    for line in body.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            continue;
         }
-        let path = String::from_utf8(output.stdout).ok()?;
-        (!path.trim().is_empty()).then_some(path.trim().to_string())
-    })
-    .as_deref()
+        // The pty owns the working directory: the child chdirs to the
+        // workspace, and a stale PWD from wherever the daemon was started
+        // would make tools that trust $PWD over getcwd report the wrong
+        // folder.
+        if key == "PWD" {
+            continue;
+        }
+        vars.insert(key.to_string(), value.to_string());
+    }
+    (!vars.is_empty()).then_some(vars)
 }
 
 #[cfg(test)]
@@ -534,6 +603,52 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
         false
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_login_env_parse_ignores_profile_noise() {
+        // A profile that prints a banner must not corrupt the environment: the
+        // previous PATH-only version took the whole stdout, so one `echo` made
+        // every spawn start with a garbage PATH.
+        let out = concat!(
+            "Last login: Tue Aug  1 12:00:00 on ttys000\n",
+            "Welcome to your machine!\n",
+            "__TOKENSTAT_ENV_START__\n",
+            "PATH=/opt/homebrew/bin:/usr/bin:/bin\n",
+            "NVM_DIR=/Users/x/.nvm\n",
+            "AUTH_TOKEN=abc=def\n",
+            "PWD=/somewhere/else\n",
+            "not a variable line\n",
+            "__TOKENSTAT_ENV_END__\n",
+            "more banner text\n",
+        );
+        let vars = parse_env(out).expect("markers present");
+        assert_eq!(
+            vars.get("PATH").map(String::as_str),
+            Some("/opt/homebrew/bin:/usr/bin:/bin")
+        );
+        assert_eq!(
+            vars.get("NVM_DIR").map(String::as_str),
+            Some("/Users/x/.nvm")
+        );
+        // split on the first `=`, so an `=` inside a value survives.
+        assert_eq!(vars.get("AUTH_TOKEN").map(String::as_str), Some("abc=def"));
+        // PWD is the pty's business, not the login shell's: the child chdirs
+        // to the workspace, and a stale value would lie to tools that read it.
+        assert!(!vars.contains_key("PWD"));
+        assert!(!vars.contains_key("not a variable line"));
+        assert_eq!(vars.len(), 3);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_marker_is_not_an_environment() {
+        assert_eq!(parse_env("no markers here"), None);
+        assert_eq!(
+            parse_env("__TOKENSTAT_ENV_START__\n\n__TOKENSTAT_ENV_END__"),
+            None
+        );
     }
 
     /// Run a script in the platform's own shell.

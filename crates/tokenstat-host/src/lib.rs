@@ -57,7 +57,7 @@ pub use session::{OpenParams, Session};
 /// Re-exported so a transport can warm the pty before its first spawn without
 /// taking a dependency on the pty crate of its own. `server::serve` calls it;
 /// the C ABI has no `serve` to call, so it needs this.
-pub use tokenstat_pty::warm_login_shell_path;
+pub use tokenstat_pty::warm_login_env;
 
 /// Version of the wire contract, not of the crate.
 ///

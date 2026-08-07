@@ -223,6 +223,17 @@ fn search_path() -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(str::to_string)
         .collect();
+    // The login shell's PATH, resolved once per process and shared with the
+    // sessions that will actually run. Same answer for "what can launch" and
+    // "what the launched session can find", so a tile and its spawn agree.
+    if let Some(env) = tokenstat_pty::login_env() {
+        paths.extend(
+            env.path
+                .split(':')
+                .filter(|p| !p.is_empty())
+                .map(str::to_string),
+        );
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     let mut conventional = vec![
         format!("{home}/.local/bin"),

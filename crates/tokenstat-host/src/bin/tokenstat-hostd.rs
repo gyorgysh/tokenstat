@@ -58,6 +58,12 @@ fn run() -> Result<(), String> {
         None => server::default_socket_path()?,
     };
 
+    // The login environment resolve is the one piece of a first spawn that can
+    // take seconds (a loaded shell profile). Start it now, on a thread, so the
+    // archive open and socket bind below overlap with it and the resolve is
+    // finished by the time anybody can ask for a terminal.
+    tokenstat_pty::warm_login_env();
+
     // Open the archive before binding. Failing after the socket exists would
     // leave clients connecting to something that answers every request with an
     // error, which is harder to diagnose than a daemon that refused to start.

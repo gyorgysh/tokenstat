@@ -123,7 +123,7 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     // Before anybody asks for a terminal. Resolving the login shell's PATH
     // costs a full startup file read, and paying it inside the first spawn
     // means paying it while a person waits for a window to fill.
-    tokenstat_pty::warm_login_shell_path();
+    tokenstat_pty::warm_login_env();
     crate::automations::start_scheduler();
     crate::sync_scheduler::start(Arc::clone(&shared));
 
