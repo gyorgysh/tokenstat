@@ -78,6 +78,42 @@ final class MachinesModel {
         }
     }
 
+    /// The best name this machine has for an account machine.
+    ///
+    /// A machine that was never named on the server shows only its code, which
+    /// is a row of strangers on a screen meant to answer "which one is my
+    /// other computer". The app knows two of them by a name anyway: this
+    /// machine's own identity, and any peer it has already approved. Those
+    /// resolved names are used in place of "Machine abc" / "Unnamed machine";
+    /// nil means nobody here knows it yet and the code stays the title.
+    func resolvedName(for machine: Machine) -> String? {
+        if let label = machine.label, !label.isEmpty {
+            return label
+        }
+        let isSelf = machine.machineID == account?.thisMachineID
+            || machine.publicIdentity == identity?.key
+        if isSelf {
+            if let label = identity?.label, !label.isEmpty {
+                return label
+            }
+            return status?.label
+        }
+        if let peer = peer(for: machine), !peer.label.isEmpty {
+            return peer.label
+        }
+        return nil
+    }
+
+    /// The account directory's name for a peer, when the peer itself is
+    /// unnamed. Mirrors `peer(for:)` in reverse, so the two directions agree
+    /// on which keys identify the same machine.
+    func accountName(for peer: Peer) -> String? {
+        accountMachines.first { machine in
+            let identity = machine.publicIdentity ?? machine.machineID
+            return identity == peer.key || identity == peer.fingerprint
+        }?.label
+    }
+
     /// The one string to move to the other machine: the key. Everything rides
     /// the tunnel now, so there is no address to carry; the far end's Add
     /// device box accepts the key as pasted.

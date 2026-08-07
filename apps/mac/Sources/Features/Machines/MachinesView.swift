@@ -71,7 +71,7 @@ struct MachinesView: View {
             Button("Cancel", role: .cancel) { pendingUnlink = nil }
         } message: {
             Text(pendingUnlink.map {
-                "\($0.displayName) will be removed from this account and its uploaded history deleted. Use this for a machine id that no longer exists, for example after a reinstall."
+                "\(model.resolvedName(for: $0) ?? $0.displayName) will be removed from this account and its uploaded history deleted. Use this for a machine id that no longer exists, for example after a reinstall."
             } ?? "")
         }
         .overlay(alignment: .bottomTrailing) {
@@ -297,7 +297,7 @@ struct MachinesView: View {
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.pending) { peer in
-                    PeerRow(peer: peer) {
+                    PeerRow(peer: peer, resolvedName: model.accountName(for: peer)) {
                         HStack(spacing: Theme.Space.s) {
                             Button("Approve") { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
@@ -318,7 +318,7 @@ struct MachinesView: View {
         Card(title: "Your devices", subtitle: "Manage connections you have already approved.") {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.known) { peer in
-                    PeerRow(peer: peer) {
+                    PeerRow(peer: peer, resolvedName: model.accountName(for: peer)) {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
                                 Button("Revoke") { Task { await model.revoke(peer) } }
@@ -345,6 +345,12 @@ struct MachinesView: View {
                     // suddenly look like a stranger with Connect buttons.
                     let isSelf = machine.machineID == model.account?.thisMachineID
                         || machine.publicIdentity == model.identity?.key
+                    // The row's title: the machine's own name, or the name we
+                    // know it by (this machine, or an approved peer) when the
+                    // account has never named it. The code stays as the
+                    // subtitle either way, so a resolved title never hides
+                    // which machine the row is.
+                    let resolved = model.resolvedName(for: machine)
                     HStack(spacing: Theme.Space.s) {
                         Image(systemName: isSelf ? "laptopcomputer" : "desktopcomputer")
                             .foregroundStyle(isSelf ? Theme.accent : .secondary)
@@ -365,14 +371,18 @@ struct MachinesView: View {
                             StatusDot(online: machine.online)
                         }
                         VStack(alignment: .leading, spacing: 2) {
-                            if let label = machine.label, !label.isEmpty {
-                                Text(label)
+                            // An unnamed machine is still known by name when it
+                            // is this one or a peer this Mac has approved: the
+                            // account row keeps its code, but the title says
+                            // who it actually is instead of "Machine abc".
+                            if let name = resolved {
+                                Text(name)
                                     .font(.callout.weight(.medium))
                             } else {
                                 Text(machine.machineID.map { "Machine \($0)" } ?? "Unnamed machine")
                                     .font(.callout.weight(.medium))
                             }
-                            if let id = machine.machineID, machine.label?.isEmpty == false {
+                            if let id = machine.machineID, machine.label?.isEmpty == false || resolved != nil {
                                 Text(id)
                                     .font(Theme.mono(11))
                                     .foregroundStyle(.tertiary)
@@ -568,6 +578,9 @@ private struct MachineNameField: View {
 
 private struct PeerRow<Actions: View>: View {
     var peer: Peer
+    /// The account directory's name for this machine, when the peer itself
+    /// was never named. Shown in place of "Unnamed machine".
+    var resolvedName: String?
     @ViewBuilder var actions: Actions
 
     var body: some View {
@@ -576,7 +589,7 @@ private struct PeerRow<Actions: View>: View {
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(peer.label.isEmpty ? "Unnamed machine" : peer.label)
+                    Text(peer.label.isEmpty ? (resolvedName ?? "Unnamed machine") : peer.label)
                         .font(.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
