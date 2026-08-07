@@ -73,6 +73,17 @@ enum AppInstaller {
 
         try verify(mounted)
         try replaceRunningBundle(with: mounted)
+        // The Dock and LaunchServices cache a bundle's icon and identity the
+        // first time they see it. Replacing the bundle in place leaves that
+        // cache pointing at the old entry, which is how an update sometimes
+        // ends with a stale or duplicate dock icon. Re-register the new
+        // bundle and point this still-running instance's dock tile at the new
+        // icon, so the update is visible before the relaunch, not only after.
+        let current = Bundle.main.bundleURL
+        refreshLaunchServices(bundle: current)
+        DispatchQueue.main.async {
+            updateDockIcon(to: current)
+        }
     }
 
     // MARK: - The image
@@ -252,6 +263,38 @@ enum AppInstaller {
         task.arguments = ["-n", bundle.path]
         try? task.run()
         NSApp.terminate(nil)
+    }
+
+    /// Re-register the bundle with LaunchServices.
+    ///
+    /// `lsregister -f` forces the icon and metadata caches to re-read the
+    /// bundle, which is what stops an in-place update from leaving the old
+    /// icon in the Dock or Launchpad.
+    private static func refreshLaunchServices(bundle: URL) {
+        let tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: tool)
+        task.arguments = ["-f", bundle.path]
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            // The cache refresh is a nicety; a failed one must not fail the
+            // update that already succeeded.
+        }
+    }
+
+    /// Point this running instance's dock tile at the replaced bundle's icon.
+    ///
+    /// The process keeps its launch-time tile after its bundle is swapped
+    /// underneath it; loading the icon file from the new bundle and handing it
+    /// to AppKit updates the tile immediately.
+    @MainActor
+    private static func updateDockIcon(to bundle: URL) {
+        let icon = bundle.appendingPathComponent("Contents/Resources/AppIcon.icns")
+        if let image = NSImage(contentsOf: icon) {
+            NSApp.applicationIconImage = image
+        }
     }
 
     // MARK: - Running a tool
