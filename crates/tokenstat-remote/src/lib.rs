@@ -37,6 +37,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use thiserror::Error;
@@ -114,6 +115,14 @@ pub trait Transport: Read + Write + Send {
     /// Set the handshake timeout. Transports without a native deadline may
     /// leave this as a no-op because their connection setup has its own limit.
     fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
+
+    /// Set the read timeout on the underlying socket.
+    ///
+    /// A stream split into read and write halves shares one transport, and a
+    /// reader that blocks forever would starve the writer. A bounded read
+    /// timeout is what lets the reader give the lock back; a timed-out read
+    /// means "no data yet", never a failure.
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()>;
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -123,6 +132,10 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
 
     fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         (**self).set_deadline(timeout)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        (**self).set_read_timeout(timeout)
     }
 }
 
@@ -134,6 +147,10 @@ impl Transport for TcpStream {
     fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         self.set_read_timeout(timeout)?;
         self.set_write_timeout(timeout)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        TcpStream::set_read_timeout(self, timeout)
     }
 }
 
@@ -180,20 +197,7 @@ impl Connection {
 
     /// Send one message.
     pub fn send(&mut self, payload: &[u8]) -> Result<(), RemoteError> {
-        // A payload larger than one Noise message is split across several,
-        // with a total length in front so the far end knows when it has all of
-        // it. A file's diff exceeds 64 KB routinely.
-        let mut header = [0u8; 4];
-        let total = u32::try_from(payload.len())
-            .map_err(|_| RemoteError::FrameTooLarge(payload.len() as u64, u32::MAX as usize))?;
-        header.copy_from_slice(&total.to_be_bytes());
-        self.write_noise_frame(&header)?;
-
-        for chunk in payload.chunks(MAX_PAYLOAD) {
-            self.write_noise_frame(chunk)?;
-        }
-        self.stream.flush()?;
-        Ok(())
+        write_one(&mut self.noise, &mut *self.stream, payload)
     }
 
     /// Receive one message.
@@ -202,42 +206,7 @@ impl Connection {
     /// a large frame. An approved peer is trusted, not unlimited: a bug on the
     /// other side should not be able to exhaust this machine's memory.
     pub fn receive(&mut self, max: usize) -> Result<Vec<u8>, RemoteError> {
-        let header = self.read_noise_frame()?;
-        if header.len() != 4 {
-            return Err(RemoteError::Noise(format!(
-                "expected a 4 byte length header, got {}",
-                header.len()
-            )));
-        }
-        let total = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
-        if total > max {
-            return Err(RemoteError::FrameTooLarge(total as u64, max));
-        }
-
-        let mut payload = Vec::with_capacity(total.min(MAX_NOISE_MESSAGE));
-        while payload.len() < total {
-            let chunk = self.read_noise_frame()?;
-            if chunk.is_empty() {
-                return Err(RemoteError::Closed);
-            }
-            payload.extend_from_slice(&chunk);
-        }
-        payload.truncate(total);
-        Ok(payload)
-    }
-
-    fn write_noise_frame(&mut self, plaintext: &[u8]) -> Result<(), RemoteError> {
-        let mut buffer = vec![0u8; plaintext.len() + 16];
-        let n = self.noise.write_message(plaintext, &mut buffer)?;
-        write_framed(&mut self.stream, &buffer[..n])
-    }
-
-    fn read_noise_frame(&mut self) -> Result<Vec<u8>, RemoteError> {
-        let ciphertext = read_framed(&mut self.stream, MAX_NOISE_MESSAGE)?;
-        let mut plaintext = vec![0u8; ciphertext.len()];
-        let n = self.noise.read_message(&ciphertext, &mut plaintext)?;
-        plaintext.truncate(n);
-        Ok(plaintext)
+        read_one(&mut self.noise, &mut *self.stream, max)
     }
 
     /// Close the socket. Idempotent, and a failure is not worth reporting: the
@@ -245,6 +214,194 @@ impl Connection {
     pub fn close(&mut self) {
         self.stream.close();
     }
+
+    /// Split into independent read and write halves for a byte stream.
+    ///
+    /// The proxy and the terminal subscription both need bytes moving in both
+    /// directions at once, which a single request/response owner cannot do.
+    /// The halves share one Noise session behind a mutex; the read half uses a
+    /// short read timeout so an idle reader gives the writer the lock back
+    /// within milliseconds. An empty message is a clean end-of-stream.
+    pub fn split(self) -> (StreamReader, StreamWriter) {
+        let Connection {
+            stream,
+            noise,
+            peer: _,
+        } = self;
+        let mut core = Core {
+            noise,
+            stream,
+            closed: std::sync::atomic::AtomicBool::new(false),
+        };
+        let _ = core.stream.set_read_timeout(Some(STREAM_READ_TIMEOUT));
+        let core = Arc::new(Mutex::new(core));
+        (
+            StreamReader {
+                core: Arc::clone(&core),
+            },
+            StreamWriter { core },
+        )
+    }
+}
+
+/// How long the read half of a split stream waits for data before giving the
+/// writer the lock. Short enough that a write behind an idle reader is never
+/// visibly stalled. A timeout inside a partially arrived frame (the length
+/// header in, the body still coming) means the link is dying anyway; the next
+/// read fails loudly rather than silently corrupting anything.
+const STREAM_READ_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// The shared state of a split connection: one Noise session, one transport,
+/// one ownership flag.
+struct Core {
+    noise: snow::TransportState,
+    stream: Box<dyn Transport>,
+    closed: std::sync::atomic::AtomicBool,
+}
+
+/// The read half of a split connection.
+pub struct StreamReader {
+    core: Arc<Mutex<Core>>,
+}
+
+impl StreamReader {
+    /// Read one message. An empty vec is a clean end-of-stream. A read that
+    /// simply found no data yet is retried rather than reported, so the caller
+    /// sees either bytes, EOF, or a real failure.
+    pub fn read(&self, max: usize) -> Result<Vec<u8>, RemoteError> {
+        loop {
+            let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+            let Core {
+                noise,
+                stream,
+                closed,
+            } = &mut *guard;
+            if closed.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(RemoteError::Closed);
+            }
+            match read_one(noise, &mut **stream, max) {
+                Err(RemoteError::Io(e))
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                other => return other,
+            }
+            drop(guard);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Close the underlying stream. Idempotent.
+    pub fn close(&self) {
+        if let Ok(mut guard) = self.core.lock() {
+            guard
+                .closed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            guard.stream.close();
+        }
+    }
+}
+
+/// The write half of a split connection.
+pub struct StreamWriter {
+    core: Arc<Mutex<Core>>,
+}
+
+impl StreamWriter {
+    /// Send one message. An empty slice is a clean end-of-stream marker.
+    pub fn write(&self, payload: &[u8]) -> Result<(), RemoteError> {
+        let mut guard = self.core.lock().map_err(|_| RemoteError::Closed)?;
+        let Core {
+            noise,
+            stream,
+            closed,
+        } = &mut *guard;
+        if closed.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(RemoteError::Closed);
+        }
+        write_one(noise, &mut **stream, payload)
+    }
+
+    /// Close the underlying stream. Idempotent.
+    pub fn close(&self) {
+        if let Ok(mut guard) = self.core.lock() {
+            guard
+                .closed
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            guard.stream.close();
+        }
+    }
+}
+
+/// Send one message over an established Noise session. A payload larger than
+/// one Noise message is split across several, with a total length in front so
+/// the far end knows when it has all of it; a file's diff exceeds 64 KB
+/// routinely.
+fn write_one(
+    noise: &mut snow::TransportState,
+    stream: &mut dyn Transport,
+    payload: &[u8],
+) -> Result<(), RemoteError> {
+    let mut header = [0u8; 4];
+    let total = u32::try_from(payload.len())
+        .map_err(|_| RemoteError::FrameTooLarge(payload.len() as u64, u32::MAX as usize))?;
+    header.copy_from_slice(&total.to_be_bytes());
+    write_noise_frame(noise, stream, &header)?;
+
+    for chunk in payload.chunks(MAX_PAYLOAD) {
+        write_noise_frame(noise, stream, chunk)?;
+    }
+    stream.flush()?;
+    Ok(())
+}
+
+fn write_noise_frame(
+    noise: &mut snow::TransportState,
+    stream: &mut dyn Transport,
+    plaintext: &[u8],
+) -> Result<(), RemoteError> {
+    let mut buffer = vec![0u8; plaintext.len() + 16];
+    let n = noise.write_message(plaintext, &mut buffer)?;
+    write_framed(stream, &buffer[..n])
+}
+
+fn read_one(
+    noise: &mut snow::TransportState,
+    stream: &mut dyn Transport,
+    max: usize,
+) -> Result<Vec<u8>, RemoteError> {
+    let header = read_noise_frame(noise, stream)?;
+    if header.len() != 4 {
+        return Err(RemoteError::Noise(format!(
+            "expected a 4 byte length header, got {}",
+            header.len()
+        )));
+    }
+    let total = u32::from_be_bytes([header[0], header[1], header[2], header[3]]) as usize;
+    if total > max {
+        return Err(RemoteError::FrameTooLarge(total as u64, max));
+    }
+
+    let mut payload = Vec::with_capacity(total.min(MAX_NOISE_MESSAGE));
+    while payload.len() < total {
+        let chunk = read_noise_frame(noise, stream)?;
+        if chunk.is_empty() {
+            return Err(RemoteError::Closed);
+        }
+        payload.extend_from_slice(&chunk);
+    }
+    payload.truncate(total);
+    Ok(payload)
+}
+
+fn read_noise_frame(
+    noise: &mut snow::TransportState,
+    stream: &mut dyn Transport,
+) -> Result<Vec<u8>, RemoteError> {
+    let ciphertext = read_framed(stream, MAX_NOISE_MESSAGE)?;
+    let mut plaintext = vec![0u8; ciphertext.len()];
+    let n = noise.read_message(&ciphertext, &mut plaintext)?;
+    plaintext.truncate(n);
+    Ok(plaintext)
 }
 
 // MARK: - Dialling out
@@ -569,5 +726,51 @@ mod tests {
     fn timestamps_sort_as_text() {
         assert!(format_epoch(1_000) < format_epoch(2_000_000_000));
         assert_eq!(format_epoch(0).len(), format_epoch(2_000_000_000).len());
+    }
+
+    /// A split connection moves bytes in both directions at once over one
+    /// Noise session: an echo loop on one side, a write and a read on the
+    /// other. This is the pump the localhost proxy and the terminal
+    /// subscription both depend on, so it gets a test of its own rather than
+    /// being assumed.
+    #[test]
+    fn a_split_connection_echoes_both_ways() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a listener");
+        let address = listener.local_addr().expect("its address");
+        let responder_ident = MachineIdentity::from_secret([1u8; 32]);
+        let initiator_ident = MachineIdentity::from_secret([2u8; 32]);
+        let responder_key = responder_ident.public_key();
+
+        let echo = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("a connection");
+            let connection =
+                handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
+            let (reader, writer) = connection.split();
+            loop {
+                match reader.read(1 << 20) {
+                    Ok(data) if data.is_empty() => break,
+                    Ok(data) => {
+                        writer.write(&data).expect("echo write");
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let stream = TcpStream::connect(address).expect("connect");
+        let connection = handshake_initiator(
+            Box::new(stream),
+            &initiator_ident,
+            Some(responder_key),
+            "test",
+        )
+        .expect("handshake");
+        let (reader, writer) = connection.split();
+        writer.write(b"first").expect("write one");
+        writer.write(b"second").expect("write two");
+        assert_eq!(reader.read(1 << 20).expect("read one"), b"first");
+        assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
+        writer.write(&[]).expect("end of stream");
+        echo.join().expect("echo thread");
     }
 }

@@ -72,6 +72,18 @@ impl Transport for WsTransport {
     fn set_deadline(&mut self, _timeout: Option<std::time::Duration>) -> std::io::Result<()> {
         Ok(())
     }
+
+    fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) -> std::io::Result<()> {
+        use tungstenite::stream::MaybeTlsStream;
+        // The read timeout lives on the raw socket, below both the WebSocket
+        // framing and TLS. A timeout surfaces through tungstenite as an Io
+        // error, which the split stream treats as "no data yet".
+        match self.socket.get_ref() {
+            MaybeTlsStream::Plain(tcp) => tcp.set_read_timeout(timeout),
+            MaybeTlsStream::Rustls(owned) => owned.sock.set_read_timeout(timeout),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Open the registered side of a tunnel and establish an end-to-end session

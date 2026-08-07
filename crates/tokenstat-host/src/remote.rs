@@ -746,17 +746,45 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
     if MachineIdentity::load_or_create().is_ok_and(|identity| identity.public_key() == peer) {
         return;
     }
+
+    // The first message decides what this connection is. A stream claim
+    // (`{"stream": "<token>"}`) means the peer opened a reservation with
+    // `stream.open` and is handing this connection to its pump; anything else
+    // is a request and the connection joins the request/response loop.
+    let first = match connection.receive(MAX_MESSAGE) {
+        Ok(bytes) => bytes,
+        // Includes the ordinary case of the peer hanging up.
+        Err(_) => return,
+    };
+    if let Some(token) = crate::remote_stream::parse_handshake(&String::from_utf8_lossy(&first)) {
+        // `accept` hands the connection to the pump, or closes it when the
+        // token is not a live reservation: nobody gets a stream this machine
+        // did not open for them. Either way this connection is spoken for.
+        crate::remote_stream::accept(&token, connection);
+        return;
+    }
+
+    // The same per-request approval check, on the first request and on every
+    // request after it. Connections are held open and reused, so a peer
+    // revoked while connected would otherwise keep being answered until it
+    // chose to hang up. Revocation has to mean the next request.
+    if !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer)) {
+        let _ = connection.send(
+            br#"{"ok":false,"error":{"code":"not_approved","message":"That machine has withdrawn access."}}"#,
+        );
+        connection.close();
+        return;
+    }
+    let line = String::from_utf8_lossy(&first).to_string();
+    let response = crate::server::respond(&line, session);
+    if connection.send(response.as_bytes()).is_err() {
+        return;
+    }
     loop {
         let request = match connection.receive(MAX_MESSAGE) {
             Ok(bytes) => bytes,
-            // Includes the ordinary case of the peer hanging up.
             Err(_) => return,
         };
-
-        // Checked per request, not once at the handshake. Connections are held
-        // open and reused, so a peer revoked while connected would otherwise
-        // keep being answered until it chose to hang up. Revocation has to mean
-        // the next request.
         if !PeerStore::cached().is_ok_and(|store| store.is_approved(&peer)) {
             let _ = connection.send(
                 br#"{"ok":false,"error":{"code":"not_approved","message":"That machine has withdrawn access."}}"#,
@@ -764,7 +792,6 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
             connection.close();
             return;
         }
-
         let line = String::from_utf8_lossy(&request).to_string();
         let response = crate::server::respond(&line, session);
         if connection.send(response.as_bytes()).is_err() {
@@ -817,8 +844,42 @@ pub(crate) fn call_peer_result(
 /// end decodes, so re-wrapping it here would create a second envelope format
 /// that only remote calls use.
 pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, String> {
-    let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
+    let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
 
+    // One retry on a pooled connection, for a peer daemon that restarted. A
+    // fresh connection failing is a real failure and is reported.
+    if let Some(mut pooled) = checkout(peer_hex)
+        && let Ok(answer) = round_trip(&mut pooled, request.as_bytes())
+    {
+        checkin(peer_hex, pooled);
+        return Ok(answer);
+    }
+
+    let mut fresh = dial_peer(peer_hex)?;
+    let answer = round_trip(&mut fresh, request.as_bytes());
+    // A freshly dialled connection that closes before the first answer usually
+    // means the far daemon was just replacing its listener, the same reconnect
+    // window `tunnel_dial` retries through. One redial rides over it; anything
+    // more is a real failure and should be reported as one.
+    if answer
+        .as_ref()
+        .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
+        && let Ok(mut connection) = dial_peer(peer_hex)
+        && let Ok(second) = round_trip(&mut connection, request.as_bytes())
+    {
+        checkin(peer_hex, connection);
+        return Ok(second);
+    }
+    let answer = answer.map_err(|e| e.to_string())?;
+    checkin(peer_hex, fresh);
+    Ok(answer)
+}
+
+/// Open a fresh, authenticated connection to a peer: direct when the record
+/// has an address, through the tunnel otherwise. The same ladder `call_peer`
+/// climbs, exposed so a stream can claim its own connection.
+pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, String> {
+    let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
     let store = PeerStore::load().map_err(|e| e.to_string())?;
     let peer = store
         .get(&key)
@@ -836,67 +897,14 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
     let label = peer.label.clone();
     drop(store);
 
-    // The pinned key, which is the map key, so it is the peer's own record
-    // rather than anything the far end will offer.
-    let expected = key;
-
-    let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
-
-    // One retry on a pooled connection, for a peer daemon that restarted. A
-    // fresh connection failing is a real failure and is reported.
-    if let Some(mut pooled) = checkout(peer_hex)
-        && let Ok(answer) = round_trip(&mut pooled, request.as_bytes())
-    {
-        checkin(peer_hex, pooled);
-        return Ok(answer);
-    }
-
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    let mut fresh = match &address {
-        Some(address) => match tokenstat_remote::dial(address, &identity, Some(expected), &label) {
-            Ok(connection) => connection,
-            Err(direct_error) => {
-                tunnel_dial(&settings(), expected, &identity, &label, direct_error)?
-            }
+    match address.as_deref() {
+        Some(address) => match tokenstat_remote::dial(address, &identity, Some(key), &label) {
+            Ok(connection) => Ok(connection),
+            Err(direct_error) => tunnel_dial(&settings(), key, &identity, &label, direct_error),
         },
-        None => tunnel_dial(
-            &settings(),
-            expected,
-            &identity,
-            &label,
-            "no direct address",
-        )?,
-    };
-    let answer = round_trip(&mut fresh, request.as_bytes());
-    // A freshly dialled connection that closes before the first answer usually
-    // means the far daemon was just replacing its listener, the same reconnect
-    // window `tunnel_dial` retries through. One redial rides over it; anything
-    // more is a real failure and should be reported as one.
-    if answer
-        .as_ref()
-        .is_err_and(|e| matches!(e, tokenstat_remote::RemoteError::Closed))
-    {
-        let retry = match address.as_deref() {
-            Some(addr) => tokenstat_remote::dial(addr, &identity, Some(expected), &label)
-                .map_err(|e| e.to_string()),
-            None => tunnel_dial(
-                &settings(),
-                expected,
-                &identity,
-                &label,
-                "no direct address",
-            ),
-        };
-        if let Ok(mut connection) = retry
-            && let Ok(second) = round_trip(&mut connection, request.as_bytes())
-        {
-            checkin(peer_hex, connection);
-            return Ok(second);
-        }
+        None => tunnel_dial(&settings(), key, &identity, &label, "no direct address"),
     }
-    let answer = answer.map_err(|e| e.to_string())?;
-    checkin(peer_hex, fresh);
-    Ok(answer)
 }
 
 fn settings() -> RemoteSettings {

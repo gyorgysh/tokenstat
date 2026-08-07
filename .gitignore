@@ -25,9 +25,6 @@ credentials.json
 /WORKLOG.md
 # Task tracking with local machine details. Same rule as WORKLOG.md: internal.
 /TODO.md
-# The whole docs directory is internal: design notes, build plans, work
-# handovers and licensing rationale are ours, not the repo's. What the public
-# needs is README.md, LICENSE and TRADEMARK.md.
 /docs/
 
 # Coverage and profiling

@@ -1,0 +1,481 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
+// licensed with the code. See TRADEMARK.md.
+
+//! Byte streams between machines, on top of the remote transport.
+//!
+//! `remote.call` is one request, one response. A terminal subscription or a
+//! localhost proxy is many bytes in each direction with no natural request, so
+//! each is a dedicated Noise connection used as a pipe: the local side opens
+//! a reservation with `stream.open` over the call channel, dials a fresh
+//! connection, and claims it by sending `{"stream": "<token>"}` as its first
+//! message. The owning side's accept path sees that handshake and hands the
+//! connection to the pump instead of treating it as a request.
+//!
+//! Everything here runs over the same pinned, end-to-end encrypted session the
+//! calls run over, so the tunnel stays a blind pipe for streams exactly as it
+//! is for calls. See the streaming design in `docs/remote-streaming.md`.
+
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+use serde_json::{Value, json};
+use tokenstat_remote::Connection;
+
+/// How long a stream reservation waits for its connection before it is given
+/// up. A dial that fails after `stream.open` would otherwise leave an entry
+/// and a parked thread forever.
+const CLAIM_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone)]
+pub(crate) enum StreamKind {
+    /// Reach a TCP service on the far machine's own loopback.
+    Proxy { host: String, port: u16 },
+    /// Push a far machine's terminal session output to the local daemon.
+    PtySubscribe { session: String },
+}
+
+struct PendingStream {
+    tx: mpsc::Sender<Connection>,
+}
+
+fn registry() -> &'static Mutex<HashMap<String, PendingStream>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, PendingStream>>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Reserve a stream and start the pump that will serve it. Returns the token
+/// the far side sends on its fresh connection to claim the reservation.
+pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
+    let token = tokenstat_identity::hex(&bytes);
+    let (tx, rx) = mpsc::channel::<Connection>();
+    registry()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(token.clone(), PendingStream { tx });
+    let answer = token.clone();
+    std::thread::spawn(move || {
+        let connection = match rx.recv_timeout(CLAIM_TIMEOUT) {
+            Ok(connection) => connection,
+            Err(_) => {
+                // Nobody claimed it. Give the reservation back rather than
+                // leaking an entry and a parked thread.
+                let _ = registry().lock().map(|mut r| r.remove(&token));
+                return;
+            }
+        };
+        match kind {
+            StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port),
+            StreamKind::PtySubscribe { session } => pump_pty_subscribe(connection, &session),
+        }
+    });
+    Ok(answer)
+}
+
+/// Claim a reservation. Called from the serve path when a fresh connection's
+/// first message is a stream handshake. Returns false when the token is not a
+/// live reservation, in which case the caller closes the connection.
+pub(crate) fn accept(token: &str, connection: Connection) -> bool {
+    let pending = registry().lock().ok().and_then(|mut r| r.remove(token));
+    match pending {
+        Some(pending) => pending.tx.send(connection).is_ok(),
+        None => {
+            // Not a live reservation: refuse outright, and make sure the
+            // connection is gone either way.
+            drop(connection);
+            false
+        }
+    }
+}
+
+/// `{"stream": "<token>"}` as a fresh connection's first message.
+pub(crate) fn parse_handshake(first: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(first.trim()).ok()?;
+    let token = value.get("stream")?.as_str()?;
+    Some(token.to_string())
+}
+
+// MARK: - The pumps
+
+/// Bridge a TCP socket and a stream connection in both directions.
+///
+/// Two threads, one per direction. EOF on either side is propagated: a closed
+/// stream sends an empty message (the clean end-of-stream marker) before
+/// closing, and a closed socket shuts the remote TCP end down.
+fn pump_tcp_connection(tcp: TcpStream, connection: Connection) {
+    let (reader, writer) = connection.split();
+    let tcp_reader = tcp.try_clone().expect("cloning a socket for the pump");
+    let reader = Arc::new(reader);
+    let writer = Arc::new(writer);
+
+    let to_remote = {
+        let mut tcp_reader = tcp_reader;
+        let writer = Arc::clone(&writer);
+        std::thread::spawn(move || {
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                match tcp_reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if writer.write(&buffer[..n]).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            let _ = writer.write(&[]);
+            writer.close();
+        })
+    };
+
+    let to_tcp = std::thread::spawn(move || {
+        let mut tcp = tcp;
+        loop {
+            match reader.read(1 << 20) {
+                Ok(data) if data.is_empty() => break,
+                Ok(data) => {
+                    if tcp.write_all(&data).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        reader.close();
+        let _ = tcp.shutdown(std::net::Shutdown::Both);
+    });
+
+    let _ = to_remote.join();
+    let _ = to_tcp.join();
+}
+
+/// The owning side of a proxy stream: dial the far machine's own loopback and
+/// bridge.
+fn pump_proxy(connection: Connection, host: &str, port: u16) {
+    let tcp = match TcpStream::connect((host, port)) {
+        Ok(tcp) => tcp,
+        Err(error) => {
+            eprintln!("remote stream: proxy to {host}:{port} failed: {error}");
+            drop(connection);
+            return;
+        }
+    };
+    let _ = tcp.set_nodelay(true);
+    pump_tcp_connection(tcp, connection);
+}
+
+/// Open a proxy stream on a peer and claim a fresh connection for it.
+///
+/// The local half of `proxy.listen`: reserve with `stream.open` over the call
+/// channel, dial a fresh connection, and claim it with the stream handshake.
+pub(crate) fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {
+    let params = json!({"kind": "proxy", "host": host, "port": port});
+    let result = crate::remote::call_peer_result(peer, "stream.open", &params.to_string())?;
+    let token = result
+        .get("token")
+        .and_then(Value::as_str)
+        .ok_or("the peer's stream.open returned no token")?
+        .to_string();
+    let mut connection = crate::remote::dial_peer(peer)?;
+    let handshake = json!({"stream": token});
+    connection
+        .send(handshake.to_string().as_bytes())
+        .map_err(|e| e.to_string())?;
+    Ok(connection)
+}
+
+/// Bridge a local TCP socket to a claimed stream connection. The local half
+/// of `proxy.listen`, mirrored from the owning side's `pump_proxy`.
+pub(crate) fn pump_local(tcp: TcpStream, connection: Connection) {
+    pump_tcp_connection(tcp, connection);
+}
+
+/// One pushed chunk of terminal output. The same shape `pty.read` answers
+/// with, so the local daemon can serve its cache with no translation.
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PtyFrame {
+    next_offset: u64,
+    dropped: u64,
+    data: String,
+}
+
+/// The owning side of a terminal subscription: read the session's buffer by
+/// offset and push every new chunk. The far side's bounded buffer does the
+/// memory accounting and its `dropped` counter travels with each frame, so no
+/// ack channel is needed in this version; the read half is kept only so the
+/// connection's close is observed.
+fn pump_pty_subscribe(connection: Connection, session: &str) {
+    let (reader, writer) = connection.split();
+    let mut offset = 0u64;
+    loop {
+        let alive = tokenstat_pty::manager()
+            .info(session)
+            .map(|info| info.alive)
+            .unwrap_or(false);
+        match tokenstat_pty::manager().read(session, offset) {
+            Ok(chunk) if !chunk.bytes.is_empty() => {
+                let frame = PtyFrame {
+                    next_offset: chunk.next_offset,
+                    dropped: chunk.dropped,
+                    data: crate::base64::encode(&chunk.bytes),
+                };
+                let Ok(encoded) = serde_json::to_vec(&frame) else {
+                    break;
+                };
+                if writer.write(&encoded).is_err() {
+                    break;
+                }
+                offset = chunk.next_offset;
+            }
+            Ok(_) if !alive => {
+                // The process is gone and the buffer is drained: a clean end.
+                let _ = writer.write(&[]);
+                break;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!("remote stream: pty subscribe {session} ended: {error}");
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    writer.close();
+    // Drain whatever the far side sent so its close is consumed; the read
+    // timeout bounds this if it never sends anything.
+    let _ = reader.read(4096);
+    reader.close();
+}
+
+// MARK: - The local side of a terminal subscription
+
+/// How much pushed output a subscription cache keeps. Terminals are small, and
+/// anything older is evicted from the front with the lost bytes counted.
+const PTY_CACHE_CAP: usize = 8 * 1024 * 1024;
+
+struct PtySubscription {
+    buffer: Vec<u8>,
+    /// Bytes evicted from the front because the cache hit its cap.
+    trimmed: u64,
+    active: bool,
+}
+
+fn pty_subscriptions() -> &'static Mutex<HashMap<String, Arc<Mutex<PtySubscription>>>> {
+    static SUBSCRIPTIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<PtySubscription>>>>> =
+        OnceLock::new();
+    SUBSCRIPTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Make sure a remote session is being pushed into a local cache. Called on
+/// the first `pty.read` for that session; the pump runs until the stream or
+/// the session ends, and later reads are served from the cache locally.
+pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
+    let key = format!("{peer}:{session}");
+    {
+        let map = match pty_subscriptions().lock() {
+            Ok(map) => map,
+            Err(_) => return,
+        };
+        if map.contains_key(&key) {
+            return;
+        }
+    }
+    let cache = Arc::new(Mutex::new(PtySubscription {
+        buffer: Vec::new(),
+        trimmed: 0,
+        active: true,
+    }));
+    match pty_subscriptions().lock() {
+        Ok(mut map) => {
+            if map.contains_key(&key) {
+                return;
+            }
+            map.insert(key.clone(), Arc::clone(&cache));
+        }
+        Err(_) => return,
+    }
+
+    let peer = peer.to_string();
+    let session = session.to_string();
+    std::thread::spawn(move || {
+        let fail = |cache: &Arc<Mutex<PtySubscription>>| {
+            if let Ok(mut guard) = cache.lock() {
+                guard.active = false;
+            }
+        };
+        let params = json!({"kind": "pty.subscribe", "id": session});
+        let result =
+            match crate::remote::call_peer_result(&peer, "stream.open", &params.to_string()) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("remote pty: subscribe to {session} failed: {error}");
+                    fail(&cache);
+                    return;
+                }
+            };
+        let Some(token) = result.get("token").and_then(Value::as_str) else {
+            fail(&cache);
+            return;
+        };
+        let mut connection = match crate::remote::dial_peer(&peer) {
+            Ok(connection) => connection,
+            Err(error) => {
+                eprintln!("remote pty: dial for {session} failed: {error}");
+                fail(&cache);
+                return;
+            }
+        };
+        let handshake = json!({"stream": token});
+        if connection.send(handshake.to_string().as_bytes()).is_err() {
+            fail(&cache);
+            return;
+        }
+        let (reader, _writer) = connection.split();
+        loop {
+            match reader.read(1 << 20) {
+                Ok(data) if data.is_empty() => break,
+                Ok(data) => {
+                    let Ok(frame) = serde_json::from_slice::<PtyFrame>(&data) else {
+                        continue;
+                    };
+                    let bytes = crate::base64::decode(&frame.data).unwrap_or_default();
+                    let mut guard = match cache.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => break,
+                    };
+                    guard.buffer.extend_from_slice(&bytes);
+                    if guard.buffer.len() > PTY_CACHE_CAP {
+                        let excess = guard.buffer.len() - PTY_CACHE_CAP;
+                        guard.buffer.drain(..excess);
+                        guard.trimmed += excess as u64;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if let Ok(mut guard) = cache.lock() {
+            guard.active = false;
+        }
+        reader.close();
+    });
+}
+
+/// Serve a `pty.read` from the subscription cache when one is live. Returns
+/// None when there is no subscription or it has ended, so the caller falls
+/// back to forwarding the read to the peer.
+pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<Value> {
+    let key = format!("{peer}:{session}");
+    let cache = pty_subscriptions().lock().ok()?.get(&key)?.clone();
+    let guard = cache.lock().ok()?;
+    if !guard.active {
+        return None;
+    }
+    let len = guard.buffer.len() as u64;
+    let dropped = guard.trimmed.saturating_sub(offset);
+    let start = offset.min(len) as usize;
+    Some(json!({
+        "data": crate::base64::encode(&guard.buffer[start..]),
+        "nextOffset": len,
+        "dropped": dropped,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    use tokenstat_identity::MachineIdentity;
+    use tokenstat_remote::{handshake_initiator, handshake_responder};
+
+    use super::{parse_handshake, pump_local, pump_proxy};
+
+    #[test]
+    fn a_stream_handshake_names_its_token() {
+        assert_eq!(
+            parse_handshake(r#"{"stream":"abcd1234"}"#).as_deref(),
+            Some("abcd1234")
+        );
+        assert!(parse_handshake(r#"{"id":0,"method":"info"}"#).is_none());
+        assert!(parse_handshake("not json").is_none());
+    }
+
+    /// A local port on one machine bridged through a Noise connection to a
+    /// service on another machine's loopback, both directions, with EOF
+    /// propagated. This is the whole proxy path minus the dispatch layer.
+    #[test]
+    fn a_proxy_stream_bridges_a_local_port_to_the_peer() {
+        let echo = std::net::TcpListener::bind("127.0.0.1:0").expect("an echo listener");
+        let echo_port = echo.local_addr().expect("its port").port();
+        let echo_thread = std::thread::spawn(move || {
+            let (mut sock, _) = echo.accept().expect("an echo client");
+            let mut buffer = [0u8; 4096];
+            loop {
+                match sock.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if sock.write_all(&buffer[..n]).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("a peer listener");
+        let address = listener.local_addr().expect("its address");
+        let responder_ident = MachineIdentity::from_secret([3u8; 32]);
+        let initiator_ident = MachineIdentity::from_secret([4u8; 32]);
+        let responder_key = responder_ident.public_key();
+
+        let peer_side = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("a peer connection");
+            let connection =
+                handshake_responder(Box::new(stream), &responder_ident).expect("handshake");
+            pump_proxy(connection, "127.0.0.1", echo_port);
+        });
+
+        let stream = TcpStream::connect(address).expect("dial the peer");
+        let connection = handshake_initiator(
+            Box::new(stream),
+            &initiator_ident,
+            Some(responder_key),
+            "test",
+        )
+        .expect("handshake");
+
+        let local = std::net::TcpListener::bind("127.0.0.1:0").expect("a local listener");
+        let local_port = local.local_addr().expect("its port").port();
+        let local_side = std::thread::spawn(move || {
+            let (tcp, _) = local.accept().expect("a local client");
+            pump_local(tcp, connection);
+        });
+
+        let mut client = TcpStream::connect(("127.0.0.1", local_port)).expect("connect locally");
+        client.write_all(b"ping").expect("write");
+        let mut reply = [0u8; 4];
+        client.read_exact(&mut reply).expect("read");
+        assert_eq!(
+            &reply, b"ping",
+            "the service's reply came back through the stream"
+        );
+
+        drop(client);
+        let _ = local_side.join();
+        let _ = peer_side.join();
+        let _ = echo_thread.join();
+    }
+}

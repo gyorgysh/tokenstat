@@ -2579,6 +2579,7 @@ name = "tokenstat-host"
 version = "0.2.3"
 dependencies = [
  "directories",
+ "getrandom 0.4.3",
  "jiff",
  "serde",
  "serde_json",

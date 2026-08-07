@@ -1327,6 +1327,20 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // `dropped` is non-zero when the reader fell behind the buffer, and a
         // terminal should say so rather than pretend the output never existed.
         "pty.read" => {
+            // A remote session reads from a pushed cache when a subscription
+            // is live, so the poll loop is local and the remote hop happened
+            // in the background. Falls back to forwarding when there is no
+            // subscription yet or it ended.
+            if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
+                && let Some((peer, session)) = split_remote(&parsed.id)
+            {
+                crate::remote_stream::ensure_pty_subscription(peer, session);
+                if let Some(answer) =
+                    crate::remote_stream::cached_pty_read(peer, session, parsed.offset)
+                {
+                    return Some(Ok(answer));
+                }
+            }
             if let Some(answer) = route_remote_pty("pty.read", params) {
                 return Some(answer);
             }
@@ -1395,6 +1409,17 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 Ok(json!({"closed": true}))
             })
         }
+
+        // A byte stream between machines. Runs on the machine that owns the
+        // resource: it reserves a stream and returns a token; the caller then
+        // dials a fresh connection and claims it with `{"stream": token}` as
+        // its first message.
+        "stream.open" => stream_open(params),
+
+        // Bind a loopback port here and bridge every accepted connection to a
+        // proxy stream on the peer, so a browser tab can reach a service on
+        // the other machine's own localhost. The listener binds loopback only.
+        "proxy.listen" => proxy_listen(params),
 
         _ => return None,
     })
@@ -1477,6 +1502,59 @@ fn pty_id(params: &str) -> Result<PtyIdParams, String> {
     serde_json::from_str(params.trim()).map_err(|e| e.to_string())
 }
 
+/// `stream.open`: reserve a byte stream on this machine and hand out the token
+/// the caller claims it with. The pump starts immediately and waits for the
+/// connection, so `proxy` and `pty.subscribe` are ready the moment the token
+/// is sent back over the call channel.
+fn stream_open(params: &str) -> Result<Value, String> {
+    let p: StreamOpenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    let kind = match p.kind.as_str() {
+        "proxy" => {
+            let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
+            let port = p.port.ok_or("proxy stream needs a port")?;
+            crate::remote_stream::StreamKind::Proxy { host, port }
+        }
+        "pty.subscribe" => {
+            let session = p.id.ok_or("pty.subscribe needs a session id")?;
+            // The session must exist here; the pump reads it by offset.
+            tokenstat_pty::manager()
+                .info(&session)
+                .map_err(|e| e.to_string())?;
+            crate::remote_stream::StreamKind::PtySubscribe { session }
+        }
+        other => return Err(format!("unknown stream kind {other}")),
+    };
+    let token = crate::remote_stream::open(kind)?;
+    Ok(json!({"token": token}))
+}
+
+/// `proxy.listen`: bind a loopback port on this machine and bridge every
+/// accepted connection to a proxy stream on the peer. Loopback only, so
+/// nothing on this machine's network is exposed; the caller (a browser tab)
+/// talks to the port as if the service were local.
+fn proxy_listen(params: &str) -> Result<Value, String> {
+    let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| format!("could not bind a loopback port: {e}"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let peer = p.peer;
+    let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
+    let target = p.port;
+    std::thread::spawn(move || {
+        for incoming in listener.incoming() {
+            let Ok(tcp) = incoming else { break };
+            let _ = tcp.set_nodelay(true);
+            match crate::remote_stream::open_proxy_stream(&peer, &host, target) {
+                Ok(connection) => crate::remote_stream::pump_local(tcp, connection),
+                Err(error) => {
+                    eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
+                }
+            }
+        }
+    });
+    Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
+}
+
 // MARK: - Remote pty routing
 
 /// A resource id namespaced to another machine: `remote:<peer hex>:<inner>`.
@@ -1539,6 +1617,23 @@ impl Default for PtyListParams {
             include_remote: true,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamOpenParams {
+    kind: String,
+    id: Option<String>,
+    host: Option<String>,
+    port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProxyListenParams {
+    peer: String,
+    host: Option<String>,
+    port: u16,
 }
 
 /// Colour a buffer.

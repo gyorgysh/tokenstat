@@ -31,6 +31,7 @@ tokenstat-pty.workspace = true
 tokenstat-highlight.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-remote.workspace = true
+getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 directories.workspace = true

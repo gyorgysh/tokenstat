@@ -42,6 +42,7 @@ pub mod dispatch;
 pub mod dto;
 mod machine;
 pub mod remote;
+pub(crate) mod remote_stream;
 pub mod server;
 pub mod session;
 #[cfg(unix)]
