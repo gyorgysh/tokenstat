@@ -75,6 +75,10 @@ struct LaunchProfile: Identifiable, Sendable {
             bypassArgs: [], harnessID: "muse", symbol: nil
         ),
         LaunchProfile(
+            id: "pi", name: "Pi", command: "pi", args: [],
+            bypassArgs: [], harnessID: "pi", symbol: nil
+        ),
+        LaunchProfile(
             id: "zed", name: "Zed", command: "zed", args: [],
             bypassArgs: [], harnessID: "zed", symbol: nil
         ),

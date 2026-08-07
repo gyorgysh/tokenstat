@@ -110,6 +110,15 @@ const PROFILES: &[Profile] = &[
         symbol: None,
     },
     Profile {
+        id: "pi",
+        name: "Pi",
+        command: "pi",
+        args: &[],
+        bypass_args: &[],
+        harness_id: Some("pi"),
+        symbol: None,
+    },
+    Profile {
         id: "zed",
         name: "Zed",
         command: "zed",
@@ -232,7 +241,7 @@ fn search_path() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::catalog;
+    use super::{PROFILES, catalog};
 
     #[test]
     fn the_catalog_always_includes_the_shell() {
@@ -244,5 +253,19 @@ mod tests {
             .filter_map(|v| v.get("id").and_then(|v| v.as_str()))
             .collect();
         assert!(ids.contains(&"shell"), "{ids:?}");
+    }
+
+    #[test]
+    fn the_pi_harness_is_in_the_catalog() {
+        // The launcher, the session-tab mark and the archive display name are
+        // keyed by the same harness id. The profile's id must match so the
+        // launched session renders with the Pi mark rather than a letter tile.
+        let pi = PROFILES
+            .iter()
+            .find(|p| p.id == "pi")
+            .expect("the Pi harness must be in the catalog");
+        assert_eq!(pi.name, "Pi");
+        assert_eq!(pi.command, "pi");
+        assert_eq!(pi.harness_id, Some("pi"));
     }
 }

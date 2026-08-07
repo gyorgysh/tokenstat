@@ -63,6 +63,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         case "grok": return "grok"
         case "copilot": return "copilot"
         case "muse": return "muse"
+        case "pi": return "pi"
         default: return nil
         }
     }
