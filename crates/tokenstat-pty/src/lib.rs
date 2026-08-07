@@ -427,8 +427,18 @@ impl Manager {
     }
 
     pub fn list(&self) -> Vec<SessionInfo> {
-        let sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut out: Vec<_> = sessions.values().map(|s| self.snapshot(s)).collect();
+        // Clone the handles under the map lock, then snapshot outside it:
+        // snapshot takes the per-session child/info/buffer locks, and holding
+        // the map lock across all of them makes one slow session block every
+        // spawn, close and list in the process.
+        let sessions: Vec<Arc<Session>> = self
+            .sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect();
+        let mut out: Vec<_> = sessions.iter().map(|s| self.snapshot(s)).collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
     }
