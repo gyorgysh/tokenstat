@@ -1772,11 +1772,22 @@ pub fn call_sessionless(method: &str, params: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     /// A clock alone is not unique enough: two threads entering within the same
     /// tick would build the same path and fight over one SQLite file.
     static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// The identity directory is chosen by a process-wide environment
+    /// variable, so the tests that point it at their own temp directory must
+    /// not run at the same time: two stores at once would read each other's
+    /// identity and approvals, and the failure would look like a refusal bug
+    /// rather than a harness bug. `tokenstat-remote`'s handshake test chose to
+    /// fold into one function for the same reason; these stay separate and
+    /// take the lock instead. Poisoned by a panicking test, which must not
+    /// take the rest of the suite down with it.
+    static IDENTITY_LOCK: Mutex<()> = Mutex::new(());
 
     /// A fresh archive per test.
     ///
@@ -1897,13 +1908,15 @@ mod tests {
     /// peer list, which is a thing a test has no business writing to.
     #[test]
     fn a_peer_is_paired_revoked_and_forgotten() {
+        // The identity directory is process-wide, so this and the other
+        // tests that set TOKENSTAT_IDENTITY_DIR take IDENTITY_LOCK for the
+        // whole test. See the lock's comment.
+        let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-identity-{}-{}",
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
-        // SAFETY: single-threaded within this test, and every path it reaches
-        // reads the variable rather than caching it.
         unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
 
         // A machine has an identity the first time it is asked, with no setup
@@ -1987,13 +2000,14 @@ mod tests {
     /// every path (typed, pasted, account-supplied) answers the same way.
     #[test]
     fn pairing_with_your_own_key_is_refused() {
+        // See IDENTITY_LOCK: the environment variable is process-wide, so the
+        // identity tests are serialised rather than racing each other's dirs.
+        let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-identity-self-{}-{}",
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
-        // SAFETY: single-threaded within this test, and every path it reaches
-        // reads the variable rather than caching it.
         unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
 
         let me: Value =
@@ -2032,12 +2046,14 @@ mod tests {
     /// machine to anybody who already trusts it.
     #[test]
     fn naming_a_machine_leaves_its_identity_alone() {
+        // See IDENTITY_LOCK: the environment variable is process-wide, so the
+        // identity tests are serialised rather than racing each other's dirs.
+        let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "tokenstat-name-{}-{}",
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
-        // SAFETY: single-threaded within this test, as above.
         unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
 
         let before: Value =
