@@ -62,6 +62,7 @@ desktop.ini
 # `scripts/build-ffi-xcframework.sh`.
 /apps/mac/Tokenstat.xcodeproj/
 /apps/mac/Vendor/
+/apps/mac/Resources/THIRD_PARTY_NOTICES.md
 /apps/*/DerivedData/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist

@@ -51,6 +51,26 @@ targets:
     # they share these sources and branch on `#if os(macOS)` where the chrome
     # genuinely differs.
     supportedDestinations: [macOS, iOS]
+    preBuildScripts:
+      # Third-party attribution for the bundled dependencies. The Cargo side
+      # is generated from the resolved dependency graph (see xtask notices);
+      # SwiftTerm is a Swift package, so its notice is a committed file
+      # appended here. The generated file lives in Resources so the app can
+      # render it in the Account screen's Open source licenses sheet.
+      - name: Third-party notices
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/../.."
+          cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
+          cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
+    postBuildScripts:
+      # The notices file is generated during the build, so Xcode's resource
+      # copy phase never saw it in the project. Drop it into the finished
+      # bundle here.
+      - name: Bundle third-party notices
+        basedOnDependencyAnalysis: false
+        script: |
+          cp "$SRCROOT/Resources/THIRD_PARTY_NOTICES.md" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/THIRD_PARTY_NOTICES.md"
     sources:
       - path: Sources
       # Vendor marks for the harnesses. See TRADEMARK.md: these belong to

@@ -9,6 +9,8 @@ import SwiftUI
 
 struct AccountView: View {
     @Bindable var model: AccountModel
+    /// Whether the third-party notices sheet is open.
+    @State private var showLicenses = false
 
     var body: some View {
         ScrollView {
@@ -29,12 +31,16 @@ struct AccountView: View {
                 }
 
                 terminalCard
+                licensesCard
                 privacyNote
             }
             .padding(Theme.Space.m)
         }
         .background(Theme.background)
         .navigationTitle("Account")
+        .sheet(isPresented: $showLicenses) {
+            LicensesSheet()
+        }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.syncNotice,
                            severity: model.syncNoticeIsError ? .danger : .success)
@@ -303,6 +309,25 @@ struct AccountView: View {
         }
     }
 
+    private var licensesCard: some View {
+        Card(
+            title: "Open source licenses",
+            subtitle: "Third-party notices for the bundled dependencies."
+        ) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "doc.text.magnifyingglass")
+                    .foregroundStyle(.secondary)
+                Text("tokenstat links open source libraries, each under its own licence. The notices are generated from the resolved dependency graph at build time.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("View") { showLicenses = true }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .help("Show the licence and notice for every bundled dependency")
+            }
+        }
+    }
+
     /// Label on the left, the switch pinned to the row's trailing edge, so
     /// every switch in the list sits in the same column whatever the label
     /// length. The switch is the state; no redundant word beside it.
@@ -323,6 +348,63 @@ struct AccountView: View {
                 .accessibilityLabel(title)
                 .fixedSize()
         }
+    }
+}
+
+/// The third-party notices sheet: every bundled dependency and its licence
+/// text, in the same monospaced reading pane the automation transcript uses.
+private struct LicensesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    /// The generated notices file, or a fallback line when a development
+    /// build ran without the generating build phase.
+    private var text: String {
+        guard let url = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md"),
+              let contents = try? String(contentsOf: url, encoding: .utf8)
+        else {
+            return "The third-party notices are generated at build time and were not found in this build."
+        }
+        return contents
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Open source licenses")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Third-party notices for bundled dependencies")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.controlGlyph)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(Theme.controlSeat))
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help("Close")
+            }
+
+            ScrollView {
+                Text(text)
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(Theme.Space.s)
+            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        }
+        .padding(Theme.Space.m)
+        .frame(width: 620, height: 520)
+        .background(Theme.panel)
     }
 }
 
