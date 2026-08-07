@@ -1410,6 +1410,12 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             })
         }
 
+        // What can be launched in a workspace on this machine. The app answers
+        // this from its own PATH for a local folder; a remote folder asks the
+        // machine that owns it through `remote.call`, so the launcher always
+        // means the machine the session would actually run on.
+        "launcher.catalog" => Ok(crate::launcher::catalog()),
+
         // A byte stream between machines. Runs on the machine that owns the
         // resource: it reserves a stream and returns a token; the caller then
         // dials a fresh connection and claims it with `{"stream": token}` as

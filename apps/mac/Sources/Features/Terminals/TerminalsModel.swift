@@ -102,6 +102,21 @@ final class TerminalsModel {
         }
     }
 
+    /// Keep the session list in step with the host while the app is open.
+    ///
+    /// Sessions do not only start from this window: another machine can spawn
+    /// one on this host, and an automation can too. Without a slow reconcile
+    /// loop the host's own window would never learn about them, which is the
+    /// parity failure of "I started a session remotely and it did not appear
+    /// on the machine it runs on".
+    func watch() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            await load()
+        }
+    }
+
     /// Launch a command in a workspace's folder and select it.
     @discardableResult
     func start(

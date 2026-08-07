@@ -600,6 +600,19 @@ struct ProxyListen: Codable, Sendable, Hashable {
     var url: String
 }
 
+/// What a machine can launch in a workspace, as its daemon reports it. A
+/// remote folder asks the machine that owns it, so the launcher always means
+/// the machine the session would actually run on.
+struct RemoteLaunchProfile: Codable, Sendable, Hashable {
+    var id: String
+    var name: String
+    var command: String
+    var args: [String]
+    var bypassArgs: [String]
+    var harnessId: String?
+    var symbol: String?
+}
+
 struct SyncScheduleStatus: Codable, Sendable {
     let loggedIn: Bool
     let cliScheduleActive: Bool

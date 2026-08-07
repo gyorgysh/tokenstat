@@ -66,6 +66,18 @@ struct TerminalPane: View {
     /// actor: see `LaunchCatalog` for the crash that reading it inline caused.
     private var launcher: LaunchCatalog { LaunchCatalog.shared }
 
+    /// The machine that owns this folder, when it is remote.
+    private var peer: String? {
+        let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
+        return parts.count == 3 && parts[0] == "remote" ? parts[1] : nil
+    }
+
+    /// What to offer in the launcher: this machine's harnesses for a local
+    /// folder, the owning machine's for a remote one.
+    private var launcherProfiles: [LaunchProfile] {
+        peer == nil ? launcher.available : launcher.remoteAvailable
+    }
+
     /// Size of the terminal area, measured rather than assumed.
     @State private var paneSize: CGSize = .zero
 
@@ -78,6 +90,9 @@ struct TerminalPane: View {
     private var spawnGrid: (rows: Int, cols: Int) {
         TerminalMetrics.grid(fitting: paneSize)
     }
+
+    /// The Open port popover in the strip menu, for a remote folder.
+    @State private var showingPort = false
 
     /// The session to display: the globally selected one when it belongs to
     /// this folder, otherwise the folder's first.
@@ -112,9 +127,15 @@ struct TerminalPane: View {
             terminals.focus(focusedSessionID)
         }
         .onDisappear { terminals.focus(nil) }
-        // Asking the login shell for the real PATH. Once per launch, off the
-        // main actor, and the launch surface fills in when it answers.
-        .task { await launcher.resolve() }
+        // Asking the login shell for the real PATH (once per launch, off the
+        // main actor), and a remote folder's owner what it can launch. Both
+        // fill in when they answer.
+        .task {
+            await launcher.resolve()
+            if let peer {
+                await launcher.resolveRemote(peer: peer)
+            }
+        }
         // Three buttons and not two, because "Cancel" and "Don't Save" are
         // different answers and a two-button dialog forces one of them to mean
         // both.
@@ -170,7 +191,13 @@ struct TerminalPane: View {
                 // while sessions are running underneath. Any real navigation
                 // (opening a file, browser, terminal) clears the flag.
                 if workspaces.showingLauncher.contains(folder.id) {
-                    LaunchSurface(folder: folder, terminals: terminals, workspaces: workspaces, grid: spawnGrid)
+                    LaunchSurface(
+                        folder: folder,
+                        terminals: terminals,
+                        workspaces: workspaces,
+                        grid: spawnGrid,
+                        profiles: launcherProfiles
+                    )
                         .frame(width: size.width, height: size.height)
                 } else if reviewingWorkingTree {
                     WorkingTreeReviewView(folder: folder, model: workspaces)
@@ -195,7 +222,13 @@ struct TerminalPane: View {
                     )
                     .frame(width: size.width, height: size.height)
                 } else if sessions.isEmpty {
-                    LaunchSurface(folder: folder, terminals: terminals, workspaces: workspaces, grid: spawnGrid)
+                    LaunchSurface(
+                        folder: folder,
+                        terminals: terminals,
+                        workspaces: workspaces,
+                        grid: spawnGrid,
+                        profiles: launcherProfiles
+                    )
                         .frame(width: size.width, height: size.height)
                 }
             }
@@ -332,7 +365,7 @@ struct TerminalPane: View {
                     Label("Files", systemImage: "folder")
                 }
                 Divider()
-                ForEach(launcher.available) { profile in
+                ForEach(launcherProfiles) { profile in
                     Button {
                         start(profile)
                     } label: {
@@ -346,6 +379,14 @@ struct TerminalPane: View {
                         }
                     }
                 }
+                if peer != nil {
+                    Divider()
+                    Button {
+                        showingPort = true
+                    } label: {
+                        Label("Open port…", systemImage: "network")
+                    }
+                }
             } label: {
                 Label("New session", systemImage: "plus")
                     .font(.system(size: 12))
@@ -354,11 +395,23 @@ struct TerminalPane: View {
             .fixedSize()
             .help("Launch a shell or an agent CLI in this folder")
 
+            if let error = active?.transportError {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.warning)
+                    .help("Input cannot reach this session: \(error)")
+            }
+
             Spacer()
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, 4)
         .background(Theme.background)
+        .popover(isPresented: $showingPort, arrowEdge: .bottom) {
+            RemotePortForm(folder: folder, workspaces: workspaces) {
+                showingPort = false
+            }
+        }
     }
 
     private func start(_ profile: LaunchProfile) {
@@ -588,8 +641,9 @@ private struct LaunchSurface: View {
     /// The grid to spawn at, measured by the pane. Passed in rather than
     /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
-
-    private var launcher: LaunchCatalog { LaunchCatalog.shared }
+    /// What can be launched: this machine's harnesses for a local folder, the
+    /// owning machine's for a remote one.
+    let profiles: [LaunchProfile]
 
     /// The tile that was pressed, while the host is still working on it.
     ///
@@ -638,7 +692,7 @@ private struct LaunchSurface: View {
                     utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
                         workspaces.showFiles(in: folder.id)
                     }
-                    ForEach(launcher.available) { profile in
+                    ForEach(profiles) { profile in
                         launchButton(profile)
                     }
                 }
@@ -793,6 +847,42 @@ private struct LaunchSurface: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Opens a service on the other machine's localhost in a browser tab.
+///
+/// The daemon binds a loopback port on this machine and bridges it over the
+/// authenticated stream, so the tab is an ordinary local URL and the remote
+/// machine never exposes anything to its own network.
+private struct RemotePortForm: View {
+    let folder: WorkspaceFolder
+    @Bindable var workspaces: WorkspacesModel
+    let done: () -> Void
+
+    @State private var port = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Open a port on \(folder.machineLabel ?? "the other machine")")
+                .font(.callout.weight(.medium))
+            TextField("Port", text: $port)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
+            HStack {
+                Spacer()
+                Button("Open") {
+                    if let value = Int(port.trimmingCharacters(in: .whitespaces)),
+                       value > 0, value <= 65_535 {
+                        Task { await workspaces.openRemotePort(value, in: folder) }
+                    }
+                    done()
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(width: 280)
     }
 }
 

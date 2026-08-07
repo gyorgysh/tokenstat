@@ -230,7 +230,13 @@ struct RootView: View {
             Task { await workspaces.loadRemote() }
         }
         #if os(macOS)
-        .task { await terminals.load() }
+        .task {
+            await terminals.load()
+            // Sessions can start on this machine from a remote window or an
+            // automation; the sidebar has to learn about them without an app
+            // restart.
+            await terminals.watch()
+        }
         // The File menu's Add Workspace. The menu has no model, so it posts and
         // this acts.
         .task {

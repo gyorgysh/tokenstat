@@ -83,6 +83,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// observed pair catches up on the next turn.
     @ObservationIgnored private var reportedSize: (rows: Int, cols: Int)
 
+    /// Why keystrokes are not reaching the process, when they are not. Set on
+    /// a failed write so "I cannot type" is a visible, diagnosable state
+    /// rather than a silently dropped `try?`.
+    var transportError: String?
+
     /// The title the program asked for via OSC 0/2, when it set one.
     var title: String?
     /// The directory the program reported via OSC 7, when it reported one.
@@ -209,7 +214,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 for await event in self.eventStream.stream {
                     switch event {
                     case let .write(bytes):
-                        try? await Bridge.ptyWrite(id: self.id, bytes: bytes)
+                        do {
+                            try await Bridge.ptyWrite(id: self.id, bytes: bytes)
+                            transportError = nil
+                        } catch {
+                            transportError = error.localizedDescription
+                        }
                     case let .resize(rows, cols):
                         try? await Bridge.ptyResize(id: self.id, rows: rows, cols: cols)
                     }

@@ -40,6 +40,7 @@ pub mod automations;
 pub mod base64;
 pub mod dispatch;
 pub mod dto;
+pub(crate) mod launcher;
 mod machine;
 pub mod remote;
 pub(crate) mod remote_stream;

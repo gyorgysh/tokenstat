@@ -127,12 +127,16 @@ final class LaunchCatalog {
     /// `resolve()` has run, and under-reporting for a moment is the right
     /// trade against blocking the first frame.
     private(set) var available: [LaunchProfile]
+    /// Profiles on a specific peer (the machine that owns a remote
+    /// workspace), fetched from its daemon once per peer.
+    private(set) var remoteAvailable: [LaunchProfile] = []
 
     /// Set once the login shell has been asked. The strip calls `resolve()`
     /// every time it appears, and it must run once per launch, not once per
     /// workspace switch.
     private var resolving = false
     private var resolved = false
+    private var remoteFetched = Set<String>()
 
     private init() {
         available = Self.filter(LaunchProfile.all, onPathIn: Self.launchTimeSearchPath())
@@ -152,6 +156,33 @@ final class LaunchCatalog {
         available = found
         resolved = true
         resolving = false
+    }
+
+    /// Ask the machine that owns a remote workspace what it can launch. One
+    /// fetch per peer; a failure forgets the peer so the next visit retries.
+    func resolveRemote(peer: String) async {
+        guard !remoteFetched.contains(peer) else { return }
+        remoteFetched.insert(peer)
+        do {
+            let dtos = try await Bridge.onPeer(
+                peer,
+                "launcher.catalog",
+                as: [RemoteLaunchProfile].self
+            )
+            remoteAvailable = dtos.map { profile in
+                LaunchProfile(
+                    id: profile.id,
+                    name: profile.name,
+                    command: profile.command,
+                    args: profile.args,
+                    bypassArgs: profile.bypassArgs,
+                    harnessID: profile.harnessId,
+                    symbol: profile.symbol
+                )
+            }
+        } catch {
+            remoteFetched.remove(peer)
+        }
     }
 
     private nonisolated static func filter(_ profiles: [LaunchProfile], onPathIn path: [String]) -> [LaunchProfile] {
