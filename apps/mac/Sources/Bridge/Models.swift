@@ -711,6 +711,7 @@ func harnessName(_ id: String) -> String {
     case "opencode": return "OpenCode"
     case "cline": return "Cline"
     case "openclaw": return "OpenClaw"
+    case "muse": return "Muse"
     case "zed": return "Zed"
     case "copilot": return "Copilot CLI"
     case "antigravity": return "Antigravity CLI"
@@ -729,7 +730,7 @@ func harnessName(_ id: String) -> String {
 func harnessBrandAsset(_ id: String) -> String? {
     let known: Set<String> = [
         "claude_code", "claude_code_rollup", "codex", "grok", "opencode",
-        "cline", "openclaw", "zed", "copilot", "antigravity",
+        "cline", "openclaw", "muse", "zed", "copilot", "antigravity",
         "antigravity_ide", "cursor", "gemini",
     ]
     return known.contains(id) ? "brand_\(id)" : nil

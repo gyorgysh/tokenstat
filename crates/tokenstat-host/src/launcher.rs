@@ -101,6 +101,15 @@ const PROFILES: &[Profile] = &[
         symbol: None,
     },
     Profile {
+        id: "muse",
+        name: "Muse",
+        command: "muse",
+        args: &[],
+        bypass_args: &[],
+        harness_id: Some("muse"),
+        symbol: None,
+    },
+    Profile {
         id: "zed",
         name: "Zed",
         command: "zed",

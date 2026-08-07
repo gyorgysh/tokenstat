@@ -62,6 +62,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         case "opencode": return "opencode"
         case "grok": return "grok"
         case "copilot": return "copilot"
+        case "muse": return "muse"
         default: return nil
         }
     }
