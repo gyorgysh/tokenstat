@@ -19,7 +19,7 @@ and reports spend by model, project, tool, and time. Everything runs on your
 machine by default. Sync to a public profile is opt in.
 
 <p align="center">
-  <img src="docs/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
+  <img src="assets/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
 </p>
 
 <p align="center">
@@ -52,7 +52,7 @@ The website is a separate project. This repository is the CLI, shared core, and
 MCP server.
 
 <p align="center">
-  <img src="docs/flow.svg" alt="Local logs feed a terminal, opt-in sync sends only aggregate counters, and a public profile page renders them" width="900">
+  <img src="assets/flow.svg" alt="Local logs feed a terminal, opt-in sync sends only aggregate counters, and a public profile page renders them" width="900">
 </p>
 
 ```
