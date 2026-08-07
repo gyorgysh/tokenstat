@@ -265,7 +265,7 @@ struct InspectorView: View {
                 if info.hasPrices {
                     KeyValue(key: "Rates from", value: info.priceBookEffectiveFrom)
                 } else {
-                    Text("No price book yet, so every value reads as zero. Run `tokenstat pricing --refresh`.")
+                    Text("No price book yet, so values are estimated from the model catalog. The app refreshes the price book automatically; the first fetch can take a moment on a fresh install.")
                         .font(.caption)
                         .foregroundStyle(Theme.warning)
                 }

@@ -20,13 +20,31 @@ const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(60 * 60);
 /// sync cannot overlap either scheduler.
 pub fn start(session: Arc<Mutex<Session>>) {
     std::thread::spawn(move || {
+        // Fresh installs have no CLI and no price book, and the Home screen
+        // would otherwise read as all-zero values until the first hourly pass.
+        // Refresh once up front; a machine offline right now keeps its last
+        // known book and retries with the schedule.
+        refresh_pricing();
         loop {
             if !tokenstat_sync::cli_sync_schedule_active() {
                 run_once(&session);
             }
+            refresh_pricing();
             std::thread::sleep(sync_interval());
         }
     });
+}
+
+/// Fetch the hosted list-rate snapshot and write it where the core reads it.
+///
+/// Quiet on success. A failure is the machine being offline or the feed being
+/// down: the previous book (or the built-in estimate rates) keeps values
+/// readable, and the next pass retries.
+fn refresh_pricing() {
+    match tokenstat_sync::pricing::refresh(false) {
+        Ok(_) => {}
+        Err(error) => eprintln!("pricing: refresh failed: {error}"),
+    }
 }
 
 fn sync_interval() -> Duration {
