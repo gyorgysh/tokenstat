@@ -24,12 +24,12 @@ pub fn start(session: Arc<Mutex<Session>>) {
         // would otherwise read as all-zero values until the first hourly pass.
         // Refresh once up front; a machine offline right now keeps its last
         // known book and retries with the schedule.
-        refresh_pricing();
+        refresh_pricing(&session);
         loop {
             if !tokenstat_sync::cli_sync_schedule_active() {
                 run_once(&session);
             }
-            refresh_pricing();
+            refresh_pricing(&session);
             std::thread::sleep(sync_interval());
         }
     });
@@ -40,9 +40,16 @@ pub fn start(session: Arc<Mutex<Session>>) {
 /// Quiet on success. A failure is the machine being offline or the feed being
 /// down: the previous book (or the built-in estimate rates) keeps values
 /// readable, and the next pass retries.
-fn refresh_pricing() {
+fn refresh_pricing(session: &Mutex<Session>) {
     match tokenstat_sync::pricing::refresh(false) {
-        Ok(_) => {}
+        Ok(_) => {
+            // The fetch wrote a new file; the session still prices from the
+            // book it opened with. Reload it, or every report keeps pricing
+            // against the empty book a fresh install opened with.
+            if let Ok(mut guard) = session.lock() {
+                crate::pricing::reload(&mut guard);
+            }
+        }
         Err(error) => eprintln!("pricing: refresh failed: {error}"),
     }
 }

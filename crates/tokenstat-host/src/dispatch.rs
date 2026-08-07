@@ -759,6 +759,25 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             })
         }
 
+        // Long running and it talks to the network, same rule as `sync.run`:
+        // not from a thread that draws. This is the in-process path to the
+        // refresh the daemon already runs on its own schedule — a machine
+        // with no host agent installed has no scheduler of its own, so the
+        // app asks for it.
+        "pricing.refresh" => with_session(s, |b| {
+            let refreshed = tokenstat_sync::pricing::refresh(false).map_err(|e| e.to_string())?;
+            // The session's cached book predates this fetch. Reload it here so
+            // the very next report prices against the new rates instead of the
+            // empty book the session opened with.
+            crate::pricing::reload(b);
+            serde_json::to_value(json!({
+                "effectiveFrom": refreshed.effective_from,
+                "models": refreshed.models,
+                "hasPrices": !b.prices.is_empty(),
+            }))
+            .map_err(|e| e.to_string())
+        }),
+
         // Remote vendor usage is fetched only after an explicit user action.
         // Local log scanning remains separate and never needs the network.
         "fetch" => with_session(s, |b| {
@@ -1891,7 +1910,9 @@ mod tests {
         );
 
         // Anything that reads the archive still does.
-        for method in ["info", "totals"] {
+        // Pricing talks to the network and mutates the session's cached book,
+        // so it needs the lock like any other state-changing call.
+        for method in ["info", "totals", "pricing.refresh"] {
             assert!(
                 call_sessionless(method, "{}").is_none(),
                 "{method} must not bypass the session"

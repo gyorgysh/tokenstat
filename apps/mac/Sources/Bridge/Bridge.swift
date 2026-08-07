@@ -602,6 +602,17 @@ extension Bridge {
     static func syncScheduleStatus() async throws -> SyncScheduleStatus {
         try await background("sync.scheduleStatus", as: SyncScheduleStatus.self)
     }
+
+    /// Fetch the hosted list-rate snapshot and reload the session's cached
+    /// copy. The daemon does this on its own schedule; the in-process
+    /// scheduler is the only thing that can on a machine with no host agent.
+    static func pricingRefresh() async throws -> PricingRefresh {
+        try await background(
+            "pricing.refresh",
+            patience: Patience.long,
+            as: PricingRefresh.self
+        )
+    }
 }
 
 /// For methods whose result is only "it worked".

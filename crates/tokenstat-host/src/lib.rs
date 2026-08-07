@@ -42,6 +42,7 @@ pub mod dispatch;
 pub mod dto;
 pub(crate) mod launcher;
 mod machine;
+pub mod pricing;
 pub mod remote;
 pub(crate) mod remote_stream;
 pub mod server;

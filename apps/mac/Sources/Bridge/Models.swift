@@ -342,6 +342,13 @@ struct Info: Codable, Sendable, Hashable {
     var hasPrices: Bool
 }
 
+/// What `pricing.refresh` fetched and loaded.
+struct PricingRefresh: Codable, Sendable, Hashable {
+    var effectiveFrom: String
+    var models: UInt64
+    var hasPrices: Bool
+}
+
 struct AppUpdate: Codable, Sendable, Hashable {
     var current: String
     var latest: String
