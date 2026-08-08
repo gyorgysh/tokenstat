@@ -12,7 +12,9 @@
 //! straight into here, so a method cannot exist over one transport and not the
 //! other, and there is no second copy to keep in step.
 
-use std::sync::{Mutex, PoisonError};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -314,20 +316,70 @@ fn avatar_url(host: &str, raw: &Value) -> Option<String> {
     ))
 }
 
+/// How long a folder's git description is reused without re-running git.
+///
+/// Long enough to absorb a launch fan-out and a file-watcher debounce burst,
+/// short enough that a save still shows up within a beat. Without this,
+/// every concurrent `workspace.list` and every 600ms refresh after a build
+/// paid three git process spawns per folder again.
+const WORKSPACE_STATUS_TTL: Duration = Duration::from_millis(400);
+
+struct WorkspaceStatusCache {
+    entries: HashMap<String, (Instant, WorkspaceDto)>,
+}
+
+fn workspace_status_cache() -> &'static Mutex<WorkspaceStatusCache> {
+    static CACHE: OnceLock<Mutex<WorkspaceStatusCache>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        Mutex::new(WorkspaceStatusCache {
+            entries: HashMap::new(),
+        })
+    })
+}
+
+/// Drop cached git state for one folder, or for every folder.
+///
+/// Called after mutations that change what `git status` would report, so the
+/// next list is honest rather than a few hundred milliseconds behind the write.
+fn invalidate_workspace_status(id: Option<&str>) {
+    let Ok(mut cache) = workspace_status_cache().lock() else {
+        return;
+    };
+    match id {
+        Some(id) => {
+            cache.entries.remove(id);
+        }
+        None => cache.entries.clear(),
+    }
+}
+
 /// Describe a registered folder, reading git only when it is actually there.
 ///
 /// A missing folder gets `git: None` rather than an empty status, so a caller
 /// cannot mistake "we did not look" for "nothing has changed".
 fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
+    if let Ok(cache) = workspace_status_cache().lock() {
+        if let Some((at, dto)) = cache.entries.get(&ws.id) {
+            if at.elapsed() < WORKSPACE_STATUS_TTL {
+                return dto.clone();
+            }
+        }
+    }
+
     let exists = ws.exists();
-    WorkspaceDto {
+    let dto = WorkspaceDto {
         id: ws.id.clone(),
         path: ws.path.display().to_string(),
         name: ws.name.clone(),
         added_at_ms: ws.added_at_ms,
         exists,
         git: exists.then(|| tokenstat_workspace::git::status(&ws.path)),
+    };
+
+    if let Ok(mut cache) = workspace_status_cache().lock() {
+        cache.entries.insert(ws.id.clone(), (Instant::now(), dto.clone()));
     }
+    dto
 }
 
 /// Apply a closure to the session.
@@ -1021,6 +1073,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 ws
             };
             // Described after the guard is dropped: this runs git.
+            invalidate_workspace_status(Some(&ws.id));
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
         }
 
@@ -1032,6 +1085,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let removed = registry.remove(&p.id);
             if removed {
                 crate::workspaces::save(&registry)?;
+                invalidate_workspace_status(Some(&p.id));
             }
             Ok(json!({"removed": removed}))
         }
@@ -1044,6 +1098,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let renamed = registry.rename(&p.id, &name);
             if renamed {
                 crate::workspaces::save(&registry)?;
+                invalidate_workspace_status(Some(&p.id));
             }
             Ok(json!({"renamed": renamed}))
         }
@@ -1051,6 +1106,9 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         "workspace.status" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            // Explicit status is a "tell me now" call: never serve a cached
+            // answer for it.
+            invalidate_workspace_status(Some(&p.id));
             let ws = crate::workspaces::get(&p.id)?;
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
         }
@@ -1134,6 +1192,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             } else {
                 tokenstat_workspace::gitwrite::unstage(&ws.path, &paths)
             };
+            invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 
@@ -1143,6 +1202,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let message = p.message.unwrap_or_default();
             let ws = crate::workspaces::folder(&p.id)?;
             let outcome = tokenstat_workspace::gitwrite::commit(&ws.path, &message);
+            invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 
@@ -1153,6 +1213,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             let content = p.content.ok_or("workspace.write needs content")?;
             let ws = crate::workspaces::folder(&p.id)?;
             let outcome = tokenstat_workspace::gitwrite::write_text(&ws.path, &path, &content);
+            invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 
@@ -1161,6 +1222,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
             let ws = crate::workspaces::folder(&p.id)?;
             let outcome = tokenstat_workspace::gitwrite::push(&ws.path);
+            invalidate_workspace_status(Some(&p.id));
             serde_json::to_value(outcome).map_err(|e| e.to_string())
         }
 

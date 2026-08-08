@@ -472,20 +472,26 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
         };
         let items = match cached {
             Some(items) => items,
-            None => match crate::remote::call_peer_result(
-                &peer,
-                "pty.list",
-                r#"{"includeRemote":false}"#,
-            ) {
-                Ok(Value::Array(items)) => {
-                    cache
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .insert(peer.clone(), (Instant::now(), items.clone()));
-                    items
-                }
-                _ => continue,
-            },
+            None => {
+                // Cache hits **and** misses. A peer that is offline used to be
+                // redialled on every `pty.list` (the app polls this for session
+                // parity), and each dial retries the tunnel with backoff. That
+                // turned every local terminal poll cycle into multi-second
+                // stalls whenever a machine on the account was asleep.
+                let items = match crate::remote::call_peer_result(
+                    &peer,
+                    "pty.list",
+                    r#"{"includeRemote":false}"#,
+                ) {
+                    Ok(Value::Array(items)) => items,
+                    _ => Vec::new(),
+                };
+                cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(peer.clone(), (Instant::now(), items.clone()));
+                items
+            }
         };
         for mut item in items {
             crate::dispatch::renamespace_session(&mut item, &peer);

@@ -414,27 +414,34 @@ fn parse_log(raw: &str, unpushed: &std::collections::HashSet<String>) -> Vec<Com
 /// Never fails for "this is not a repository": a plain folder is a legitimate
 /// workspace, it just has no branch. Errors are reserved for git being absent
 /// or refusing to run.
+///
+/// One `git status` is enough to decide "is this a repo": a separate
+/// `rev-parse` was a full process spawn for every folder on every list, and
+/// the status command already fails cleanly outside a work tree.
 pub fn status(dir: &Path) -> GitStatus {
-    if !inside_work_tree(dir) {
-        return GitStatus::default();
-    }
-
-    let mut status = GitStatus {
-        is_repo: true,
-        ..GitStatus::default()
-    };
-
     let raw = match git(
         dir,
         &[
             "status",
             "--porcelain=v2",
             "--branch",
-            "--untracked-files=all",
+            // `normal` lists untracked files but does not recurse into
+            // untracked directories. `all` did, and on a build tree or a
+            // monorepo that walk dominated `workspace.list`. The sidebar
+            // needs to know something is dirty, not every file under
+            // `target/` or `node_modules/` that was never gitignored.
+            "--untracked-files=normal",
         ],
     ) {
         Some(s) => s,
-        None => return status,
+        // Not a repository, or git is missing. A plain folder is a valid
+        // workspace with no branch.
+        None => return GitStatus::default(),
+    };
+
+    let mut status = GitStatus {
+        is_repo: true,
+        ..GitStatus::default()
     };
     parse_porcelain_v2(&raw, &mut status);
 

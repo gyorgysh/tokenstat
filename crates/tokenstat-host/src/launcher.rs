@@ -171,9 +171,7 @@ pub(crate) fn catalog() -> Value {
         .filter(|profile| {
             profile.id == "shell"
                 || profile.command.starts_with('/')
-                || path
-                    .iter()
-                    .any(|dir| is_executable(&Path::new(dir).join(profile.command)))
+                || resolve_on_path(profile.command, &path).is_some()
         })
         .map(|profile| {
             let mut value = json!({
@@ -188,11 +186,27 @@ pub(crate) fn catalog() -> Value {
             if profile.id == "shell" {
                 value["command"] = json!(shell);
                 value["args"] = json!(shell_args);
+            } else if let Some(full) = resolve_on_path(profile.command, &path) {
+                // Absolute path so a click does not need the login PATH to
+                // find the binary. Spawn used to block on `$SHELL -ilc env`
+                // just to resolve `claude` → `/Users/…/bin/claude`.
+                value["command"] = json!(full);
             }
             value
         })
         .collect();
     Value::Array(available)
+}
+
+/// First executable match for a bare command name on the search path.
+fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
+    if command.starts_with('/') {
+        return is_executable(Path::new(command)).then(|| command.to_string());
+    }
+    path.iter()
+        .map(|dir| Path::new(dir).join(command))
+        .find(|p| is_executable(p))
+        .map(|p| p.display().to_string())
 }
 
 fn is_executable(path: &Path) -> bool {

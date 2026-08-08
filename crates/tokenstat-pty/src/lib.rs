@@ -330,22 +330,20 @@ impl Manager {
         // and the rest of a profile's exports all live in variables the launchd
         // daemon never sees. Applied before the terminal settings above so the
         // emulator's own claims win.
+        //
+        // Never block a spawn on the resolve. A click that waits for
+        // `$SHELL -ilc env` is an 8–10s blank pane on a loaded profile, and
+        // the warm thread is already computing the answer. Use it if ready;
+        // otherwise give harnesses a usable PATH and let the shell profile
+        // source its own environment when it is a shell.
         #[cfg(unix)]
         {
-            // An interactive shell profile is itself `$SHELL -il`, so it
-            // sources its own environment; waiting for the process-wide login
-            // resolve on top of that is a second full shell startup paid by
-            // the first click. Everything else needs the cached PATH before it
-            // can find itself on disk, and keeps the blocking read.
-            let env = if is_shell_profile(req) {
-                login_env()
-            } else {
-                login_env_ready()
-            };
-            if let Some(env) = env {
+            if let Some(env) = login_env() {
                 for (key, value) in &env.vars {
                     cmd.env(key, value);
                 }
+            } else if !is_shell_profile(req) {
+                cmd.env("PATH", fallback_path());
             }
         }
 
@@ -434,24 +432,27 @@ impl Manager {
 
     /// Hand a pooled shell over as a real session.
     ///
-    /// The shell is already fully started and sitting at a prompt, so the
-    /// click pays for a resize, a `cd` into the workspace and a registry
-    /// insert instead of a full login-shell startup. The handoff is invisible
-    /// in the transcript: the `cd` is followed by a unique marker, and once
-    /// the marker is seen the whole pre-handoff buffer is discarded, so a
-    /// client that reads from offset 0 sees the shell as it is now, in the
-    /// requested folder.
+    /// The shell is already fully started and sitting at a prompt (see
+    /// [`Self::build_pool_shell`]), so the click pays for a resize, a `cd`
+    /// into the workspace and a registry insert instead of a full login-shell
+    /// startup. The handoff is invisible in the transcript: the `cd` is
+    /// followed by a unique marker, and once the marker is seen the whole
+    /// pre-handoff buffer is discarded, so a client that reads from offset 0
+    /// sees the shell as it is now, in the requested folder.
+    ///
+    /// If the marker never arrives the handoff **fails** rather than clearing
+    /// the buffer and returning anyway. Clearing a half-started shell was how
+    /// a Shell click became eight seconds of blank pane: the profile was still
+    /// loading, the buffer was wiped, and nothing else printed until it
+    /// finished. Falling through to a fresh spawn is better than a blank pane.
     fn handoff_pooled(&self, shell: Arc<Session>, req: &Spawn) -> Result<SessionInfo, PtyError> {
         let result = (|| {
             // A pooled shell that exited while idle is not a session to hand
             // over. (It is still killed on the way out, see below.)
-            {
-                let mut child = shell.child.lock().unwrap_or_else(PoisonError::into_inner);
-                if let Ok(Some(_)) = child.try_wait() {
-                    return Err(PtyError::Spawn(
-                        "the pooled shell had already exited".into(),
-                    ));
-                }
+            if !session_is_alive(&shell) {
+                return Err(PtyError::Spawn(
+                    "the pooled shell had already exited".into(),
+                ));
             }
 
             let size = PtySize {
@@ -478,34 +479,21 @@ impl Manager {
                 writer.flush().map_err(|e| PtyError::Spawn(e.to_string()))?;
             }
 
-            // The cd is usually done in a few milliseconds. If the shell was
-            // still starting, give up waiting and hand it over anyway: the
-            // click must not pay the remaining startup, and the queued input
-            // runs as soon as the shell reaches its prompt.
-            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
-            loop {
-                {
-                    let buffer = shell.buffer.lock().unwrap_or_else(PoisonError::into_inner);
-                    if String::from_utf8_lossy(&buffer.data).contains(&marker) {
-                        break;
-                    }
-                }
-                if std::time::Instant::now() >= deadline {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
+            // A ready pooled shell answers in milliseconds. A couple of
+            // seconds is only a safety net for a slow `cd` on a network
+            // volume; past that the shell is not the ready one we thought.
+            if !wait_for_marker(&shell, &marker, HANDOFF_READY_TIMEOUT) {
+                return Err(PtyError::Spawn(
+                    "the pooled shell did not accept the handoff".into(),
+                ));
             }
 
-            // Discard everything before the handoff: startup output, the cd
+            // Discard everything before the handoff: the idle prompt, the cd
             // line, the marker. The client starts at offset 0 with the shell
             // already in the requested folder. The reader thread may push
             // while we clear; the buffer lock serializes, and nothing the
             // client reads predates the handoff.
-            {
-                let mut buffer = shell.buffer.lock().unwrap_or_else(PoisonError::into_inner);
-                buffer.data.clear();
-                buffer.total = 0;
-            }
+            clear_session_buffer(&shell);
 
             // Reprint the prompt the clear just removed, so the pane opens on
             // a prompt rather than on blank space.
@@ -546,6 +534,13 @@ impl Manager {
     /// Build one fully-started login shell for the pool, without registering
     /// it as a session. The shell sources its own profile, so it needs no
     /// login environment injected, exactly like the Shell tile it will serve.
+    ///
+    /// **Ready means at a prompt**, not merely forked. `build_session` returns
+    /// as soon as the process exists; a loaded `.zshrc` can still take many
+    /// seconds after that. Parking a half-started shell made every first
+    /// Shell click clear that partial buffer and wait out the rest of the
+    /// profile as a blank pane. The warm path pays that wait on a background
+    /// thread instead, and only parks shells that have answered a marker.
     #[cfg(unix)]
     fn build_pool_shell(&self) -> Option<Arc<Session>> {
         let cwd = std::env::var("HOME").unwrap_or_else(|_| "/".into());
@@ -564,9 +559,16 @@ impl Manager {
             cols: 80,
             no_color: false,
         };
-        self.build_session(&req, self.next_session_id())
-            .ok()
-            .map(|(session, _)| session)
+        let (session, _) = self.build_session(&req, self.next_session_id()).ok()?;
+        if !prove_shell_ready(&session, POOL_READY_TIMEOUT) {
+            let _ = session
+                .child
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .kill();
+            return None;
+        }
+        Some(session)
     }
 
     /// Start a replacement pooled shell in the background after one was taken.
@@ -724,7 +726,31 @@ impl Manager {
 #[cfg(unix)]
 fn is_shell_profile(req: &Spawn) -> bool {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    req.command == shell && (req.args.is_empty() || req.args == ["-il"])
+    if req.command != shell {
+        return false;
+    }
+    // The Shell tile sends `-il` for zsh and nothing for other shells. Accept
+    // the common reorderings (`-li`, split `-i -l`) so a small catalog drift
+    // does not silently drop the pool path and force a cold startup.
+    shell_args_are_login_interactive(&req.args)
+}
+
+#[cfg(unix)]
+fn shell_args_are_login_interactive(args: &[String]) -> bool {
+    if args.is_empty() {
+        // Non-zsh shells (and a bare `zsh`) start with no flags. Bare zsh is
+        // the slow path on some profiles; the catalog still uses it for non-
+        // zsh shells, and the pool builds the same shape.
+        return true;
+    }
+    let mut letters = String::new();
+    for arg in args {
+        if !arg.starts_with('-') || arg.starts_with("--") || arg == "-" {
+            return false;
+        }
+        letters.extend(arg.chars().skip(1));
+    }
+    !letters.is_empty() && letters.chars().all(|c| c == 'i' || c == 'l')
 }
 
 #[cfg(not(unix))]
@@ -740,6 +766,97 @@ fn is_shell_profile(_req: &Spawn) -> bool {
 /// daemon anyway.
 #[cfg(unix)]
 const POOL_SIZE: usize = 2;
+
+/// How long a warm shell may take to reach a prompt before we give up on it.
+///
+/// A loaded interactive profile is the whole reason the pool exists; ten to
+/// fifteen seconds is common on a cold machine with heavy plugins. The wait
+/// runs on the warm thread, never on a click.
+#[cfg(unix)]
+const POOL_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// How long a handoff may wait for `cd` + marker from a shell that was already
+/// proven ready when it entered the pool.
+const HANDOFF_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// True while the child process is still running.
+fn session_is_alive(session: &Session) -> bool {
+    if !session.alive.load(Ordering::SeqCst) {
+        return false;
+    }
+    let mut child = session
+        .child
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    match child.try_wait() {
+        Ok(None) => true,
+        Ok(Some(_)) => {
+            session.alive.store(false, Ordering::SeqCst);
+            false
+        }
+        Err(_) => false,
+    }
+}
+
+/// Wait until `needle` appears in the session buffer, or the timeout / exit.
+fn wait_for_marker(session: &Session, needle: &str, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        {
+            let buffer = session
+                .buffer
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if String::from_utf8_lossy(&buffer.data).contains(needle) {
+                return true;
+            }
+        }
+        if !session_is_alive(session) {
+            return false;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn clear_session_buffer(session: &Session) {
+    let mut buffer = session
+        .buffer
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    buffer.data.clear();
+    buffer.total = 0;
+}
+
+/// Drive a freshly forked shell until it accepts input, then clear its buffer.
+///
+/// The input is queued by the kernel while the profile is still running, and
+/// is processed the moment the shell reaches a prompt. Seeing the marker is
+/// therefore "the profile finished", which is exactly when the shell is safe
+/// to park and later hand over without wiping a half-started startup.
+#[cfg(unix)]
+fn prove_shell_ready(session: &Session, timeout: std::time::Duration) -> bool {
+    let marker = format!("__TS_POOL_READY_{}__", next_marker());
+    {
+        let mut writer = session.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        if writer
+            .write_all(format!("echo {marker}\r").as_bytes())
+            .is_err()
+        {
+            return false;
+        }
+        if writer.flush().is_err() {
+            return false;
+        }
+    }
+    if !wait_for_marker(session, &marker, timeout) {
+        return false;
+    }
+    clear_session_buffer(session);
+    true
+}
 
 /// Start the process-wide shell pool ahead of the first Shell click.
 ///
@@ -811,6 +928,35 @@ fn shell_quote(s: &str) -> String {
 pub struct LoginEnv {
     pub path: String,
     pub vars: HashMap<String, String>,
+}
+
+/// PATH for a harness spawn when the login resolve has not finished yet.
+///
+/// launchd's PATH is too small to find Homebrew or `~/.local/bin`. This is
+/// the same conventional list the launcher catalog uses, not a guess at the
+/// user's full profile.
+#[cfg(unix)]
+fn fallback_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut parts: Vec<String> = std::env::var("PATH")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect();
+    parts.extend([
+        format!("{home}/.local/bin"),
+        format!("{home}/.npm-global/bin"),
+        format!("{home}/.volta/bin"),
+        format!("{home}/.cargo/bin"),
+        "/opt/homebrew/bin".into(),
+        "/usr/local/bin".into(),
+        "/usr/bin".into(),
+        "/bin".into(),
+    ]);
+    let mut seen = std::collections::HashSet::new();
+    parts.retain(|p| !p.is_empty() && seen.insert(p.clone()));
+    parts.join(":")
 }
 
 /// Ask the user's login shell for its whole environment, once per process.
@@ -1032,6 +1178,28 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
         false
+    }
+
+    #[test]
+    fn shell_login_flags_are_recognised() {
+        assert!(shell_args_are_login_interactive(&[]));
+        assert!(shell_args_are_login_interactive(&[
+            "-il".to_string()
+        ]));
+        assert!(shell_args_are_login_interactive(&[
+            "-li".to_string()
+        ]));
+        assert!(shell_args_are_login_interactive(&[
+            "-i".to_string(),
+            "-l".to_string()
+        ]));
+        assert!(!shell_args_are_login_interactive(&[
+            "-c".to_string(),
+            "true".to_string()
+        ]));
+        assert!(!shell_args_are_login_interactive(&[
+            "--login".to_string()
+        ]));
     }
 
     #[cfg(unix)]
