@@ -278,9 +278,21 @@ impl Manager {
         // daemon never sees. Applied before the terminal settings above so the
         // emulator's own claims win.
         #[cfg(unix)]
-        if let Some(env) = login_env() {
-            for (key, value) in &env.vars {
-                cmd.env(key, value);
+        {
+            // An interactive shell profile is itself `$SHELL -il`, so it
+            // sources its own environment; waiting for the process-wide login
+            // resolve on top of that is a second full shell startup paid by
+            // the first click. Everything else needs the cached PATH before it
+            // can find itself on disk, and keeps the blocking read.
+            let env = if is_shell_profile(req) {
+                login_env()
+            } else {
+                login_env_ready()
+            };
+            if let Some(env) = env {
+                for (key, value) in &env.vars {
+                    cmd.env(key, value);
+                }
             }
         }
 
@@ -500,6 +512,23 @@ impl Manager {
     }
 }
 
+/// Whether a request is the interactive shell profile rather than a harness.
+///
+/// The launcher's Shell tile asks for the user's own login shell with its
+/// profile arguments. These requests are the hot path a person clicks, and the
+/// one profile that genuinely does not need the cached login environment, so
+/// they get the fast spawn path and the non-blocking env read.
+#[cfg(unix)]
+fn is_shell_profile(req: &Spawn) -> bool {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    req.command == shell && (req.args.is_empty() || req.args == ["-il"])
+}
+
+#[cfg(not(unix))]
+fn is_shell_profile(_req: &Spawn) -> bool {
+    false
+}
+
 /// The user's interactive login environment, captured once per process.
 #[derive(Debug, Clone)]
 pub struct LoginEnv {
@@ -521,31 +550,33 @@ pub struct LoginEnv {
 /// is cached for the process's life, so a loaded shell costs seconds once and
 /// nothing ever again. A shell that fails to answer keeps the inherited
 /// environment as the fallback, exactly as before.
+///
+/// Two reads, deliberately different:
+///
+/// - [`login_env`] returns whatever the cache holds **right now**, without
+///   waiting. An interactive shell profile is itself `$SHELL -il`, so it
+///   sources its own environment and does not need this answer; making its
+///   first spawn wait for a separate full shell startup on top of its own is
+///   how a fresh daemon paid two loaded-profile startups for one terminal.
+/// - [`login_env_ready`] blocks until the resolve has finished. The launcher
+///   catalog and one-shot harness launches need the real PATH before they can
+///   say what exists or find the command, so they keep paying the wait.
 #[cfg(unix)]
 pub fn login_env() -> Option<Arc<LoginEnv>> {
-    env_cell()
-        .get_or_init(|| {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-            // `env` between two markers, rather than the whole stdout: profiles
-            // print banners and prompts, and treating that noise as environment
-            // corrupts every variable (the previous PATH-only version did exactly
-            // that with a profile that printed anything).
-            let output = Command::new(shell)
-            .args([
-                "-ilc",
-                "printf '\\n__TOKENSTAT_ENV_START__\\n'; env; printf '__TOKENSTAT_ENV_END__\\n'",
-            ])
-            .output()
-            .ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            let stdout = String::from_utf8(output.stdout).ok()?;
-            let vars = parse_env(&stdout)?;
-            let path = vars.get("PATH")?.trim().to_string();
-            (!path.is_empty()).then(|| Arc::new(LoginEnv { path, vars }))
-        })
-        .clone()
+    env_cache().snapshot()
+}
+
+/// [`login_env`], waiting out a resolve that is still in flight.
+///
+/// Starts the resolve if nothing is working on it yet, so a caller can rely on
+/// the answer being final when this returns. See [`login_env`] for which call
+/// sites want which read.
+#[cfg(unix)]
+pub fn login_env_ready() -> Option<Arc<LoginEnv>> {
+    // A caller may arrive before any warm call did. Start the resolver; the
+    // once inside it guarantees a single `$SHELL -ilc` run process-wide.
+    warm_login_env();
+    env_cache().wait_ready()
 }
 
 /// No login shell on Windows: sessions inherit the process environment, which
@@ -555,11 +586,108 @@ pub fn login_env() -> Option<Arc<LoginEnv>> {
     None
 }
 
-/// The one cache, shared by the blocking resolve and the warm thread.
+/// No login shell on Windows; the blocking read is the same nothing.
+#[cfg(not(unix))]
+pub fn login_env_ready() -> Option<Arc<LoginEnv>> {
+    None
+}
+
+/// What the cache holds while nobody has asked the login shell yet.
 #[cfg(unix)]
-fn env_cell() -> &'static std::sync::OnceLock<Option<Arc<LoginEnv>>> {
-    static ENV: std::sync::OnceLock<Option<Arc<LoginEnv>>> = std::sync::OnceLock::new();
-    &ENV
+enum EnvState {
+    /// The resolve is still running, or has not started.
+    Pending,
+    /// The resolve finished. `None` means the shell failed to answer and the
+    /// inherited environment stays in use.
+    Done(Option<Arc<LoginEnv>>),
+}
+
+/// The one cache, shared by the blocking and non-blocking reads and the warm
+/// thread. `Pending` while the resolve runs, so a spawn that does not want to
+/// wait can see "not ready" instead of blocking on a mutex the resolve holds.
+///
+/// A plain struct rather than inline statics so the non-blocking contract is
+/// testable without touching process-wide state.
+#[cfg(unix)]
+struct EnvCache {
+    state: Mutex<EnvState>,
+    condvar: std::sync::Condvar,
+}
+
+#[cfg(unix)]
+impl EnvCache {
+    fn new() -> EnvCache {
+        EnvCache {
+            state: Mutex::new(EnvState::Pending),
+            condvar: std::sync::Condvar::new(),
+        }
+    }
+
+    /// What is known right now. `None` while the resolve is still running:
+    /// returning it is an answer, not a promise that no resolve is happening.
+    fn snapshot(&self) -> Option<Arc<LoginEnv>> {
+        match &*self.state.lock().unwrap_or_else(PoisonError::into_inner) {
+            EnvState::Done(env) => env.clone(),
+            EnvState::Pending => None,
+        }
+    }
+
+    /// Wait for the resolve to finish and return its final answer.
+    fn wait_ready(&self) -> Option<Arc<LoginEnv>> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            match &*state {
+                EnvState::Done(env) => return env.clone(),
+                EnvState::Pending => {
+                    state = self
+                        .condvar
+                        .wait(state)
+                        .unwrap_or_else(PoisonError::into_inner);
+                }
+            }
+        }
+    }
+
+    /// Store the resolve's answer and wake everyone waiting for it.
+    fn store(&self, env: Option<Arc<LoginEnv>>) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        *state = EnvState::Done(env);
+        self.condvar.notify_all();
+    }
+}
+
+#[cfg(unix)]
+fn env_cache() -> &'static EnvCache {
+    static CACHE: std::sync::OnceLock<EnvCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(EnvCache::new)
+}
+
+/// Run `$SHELL -ilc env` and cache the answer. Called at most once per
+/// process, from the warm thread.
+#[cfg(unix)]
+fn resolve_and_store() {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // `env` between two markers, rather than the whole stdout: profiles
+    // print banners and prompts, and treating that noise as environment
+    // corrupts every variable (the previous PATH-only version did exactly
+    // that with a profile that printed anything).
+    let output = Command::new(shell)
+        .args([
+            "-ilc",
+            "printf '\\n__TOKENSTAT_ENV_START__\\n'; env; printf '__TOKENSTAT_ENV_END__\\n'",
+        ])
+        .output()
+        .ok();
+    let resolved = output.and_then(|output| {
+        if !output.status.success() {
+            return None;
+        }
+        let stdout = String::from_utf8(output.stdout).ok()?;
+        let vars = parse_env(&stdout)?;
+        let path = vars.get("PATH")?.trim().to_string();
+        (!path.is_empty()).then(|| Arc::new(LoginEnv { path, vars }))
+    });
+    env_cache().store(resolved);
 }
 
 /// Resolve the login environment ahead of the first spawn.
@@ -571,9 +699,16 @@ fn env_cell() -> &'static std::sync::OnceLock<Option<Arc<LoginEnv>>> {
 /// happens once and every later caller reads the answer.
 pub fn warm_login_env() {
     #[cfg(unix)]
-    std::thread::spawn(|| {
-        let _ = login_env();
-    });
+    {
+        static WARMED: AtomicBool = AtomicBool::new(false);
+        if WARMED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        std::thread::spawn(|| {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            ONCE.call_once(resolve_and_store);
+        });
+    }
 }
 
 /// Parse `KEY=VALUE` lines between the sentinel markers, ignoring anything a
@@ -666,6 +801,51 @@ mod tests {
             parse_env("__TOKENSTAT_ENV_START__\n\n__TOKENSTAT_ENV_END__"),
             None
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_env_snapshot_does_not_wait_for_a_pending_resolve() {
+        // A shell profile sources its own environment, so its first spawn must
+        // never block on the process-wide login resolve. The snapshot read is
+        // the contract that makes that true: Pending answers None immediately.
+        let cache = EnvCache::new();
+        assert!(
+            cache.snapshot().is_none(),
+            "pending resolve answers nothing"
+        );
+
+        let env = Arc::new(LoginEnv {
+            path: "/opt/homebrew/bin:/usr/bin:/bin".into(),
+            vars: HashMap::from([("PATH".into(), "/opt/homebrew/bin:/usr/bin:/bin".into())]),
+        });
+        cache.store(Some(Arc::clone(&env)));
+        let read = cache.snapshot().expect("done resolve answers a value");
+        assert_eq!(read.path, env.path);
+        assert_eq!(read.vars, env.vars);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_env_ready_read_wakes_when_the_resolve_finishes() {
+        // The blocking read exists for callers that genuinely need the login
+        // PATH (the launcher catalog, one-shot harness launches). It must wait
+        // out a resolve that is still running and return the final answer.
+        let cache = Arc::new(EnvCache::new());
+        let waiting = {
+            let cache = Arc::clone(&cache);
+            std::thread::spawn(move || cache.wait_ready())
+        };
+        // Give the waiter time to park, then finish the resolve on this thread.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let env = Arc::new(LoginEnv {
+            path: "/usr/bin:/bin".into(),
+            vars: HashMap::from([("PATH".into(), "/usr/bin:/bin".into())]),
+        });
+        cache.store(Some(Arc::clone(&env)));
+        let read = waiting.join().expect("waiter").expect("a resolved value");
+        assert_eq!(read.path, env.path);
+        assert_eq!(read.vars, env.vars);
     }
 
     /// Run a script in the platform's own shell.

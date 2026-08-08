@@ -226,7 +226,10 @@ fn search_path() -> Vec<String> {
     // The login shell's PATH, resolved once per process and shared with the
     // sessions that will actually run. Same answer for "what can launch" and
     // "what the launched session can find", so a tile and its spawn agree.
-    if let Some(env) = tokenstat_pty::login_env() {
+    // Blocking here on purpose: a catalog that answered before the resolve
+    // finished would hide harnesses that only exist in the login PATH, and
+    // this runs on the launch surface, not on a terminal click.
+    if let Some(env) = tokenstat_pty::login_env_ready() {
         paths.extend(
             env.path
                 .split(':')
