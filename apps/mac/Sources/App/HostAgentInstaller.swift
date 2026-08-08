@@ -22,6 +22,43 @@ enum HostAgentInstaller {
 
     private static let label = "ai.tokenstat.hostd"
 
+    /// Bring the agent up without a full reinstall when the helper is already
+    /// on disk.
+    ///
+    /// A cold app used to call `installAndStart` whenever the socket was quiet,
+    /// which always copied the binary and ran `bootout`/`bootstrap`. That is
+    /// correct for a missing install, and wrong for the ordinary case where
+    /// launchd is simply still starting the agent after login. Kickstarting
+    /// the loaded job (or bootstrapping the existing plist once) is enough,
+    /// and it avoids thrashing a daemon that owns live terminals.
+    static func ensureRunning() throws {
+        let fileManager = FileManager.default
+        guard let helper = installedHelper, fileManager.isExecutableFile(atPath: helper.path) else {
+            try installAndStart()
+            return
+        }
+        let plist = launchAgentPlistURL
+        if !fileManager.fileExists(atPath: plist.path) {
+            try installAndStart()
+            return
+        }
+        let domain = "gui/\(getuid())"
+        let service = "\(domain)/\(label)"
+        // Already loaded: ask launchd to start it. No `-k`, so a running host
+        // is left alone rather than killed and restarted.
+        if (try? run("/bin/launchctl", ["print", service])) != nil {
+            _ = try? run("/bin/launchctl", ["kickstart", service])
+            return
+        }
+        try run("/bin/launchctl", ["bootstrap", domain, plist.path])
+    }
+
+    /// Install the helper and (re)load the launch agent.
+    ///
+    /// Copies only when the installed binary differs from the one in this
+    /// bundle, and prefers `kickstart` over `bootout`/`bootstrap` when the
+    /// job is already loaded. A full tear-down is reserved for a first
+    /// install or a helper that actually changed.
     static func installAndStart() throws {
         let fileManager = FileManager.default
         let applicationSupport = try fileManager.url(
@@ -35,11 +72,7 @@ enum HostAgentInstaller {
         try fileManager.createDirectory(at: binDirectory, withIntermediateDirectories: true)
 
         guard let bundled = bundledHelper else { throw InstallerError.helperMissing }
-        if fileManager.fileExists(atPath: helper.path) {
-            try fileManager.removeItem(at: helper)
-        }
-        try fileManager.copyItem(at: bundled, to: helper)
-        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        let helperChanged = replaceHelperIfNeeded(from: bundled, to: helper, fileManager: fileManager)
 
         let launchAgents = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
@@ -58,10 +91,26 @@ enum HostAgentInstaller {
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
         ]
-        (contents as NSDictionary).write(to: plist, atomically: true)
+        let plistChanged = writePlistIfNeeded(contents, to: plist)
 
         let domain = "gui/\(getuid())"
-        _ = try? run("/bin/launchctl", ["bootout", "\(domain)/\(label)"])
+        let service = "\(domain)/\(label)"
+        let alreadyLoaded = (try? run("/bin/launchctl", ["print", service])) != nil
+
+        if alreadyLoaded && !helperChanged && !plistChanged {
+            // Same binary, same job definition: just make sure it is running.
+            _ = try? run("/bin/launchctl", ["kickstart", service])
+            return
+        }
+
+        if alreadyLoaded {
+            // A changed helper has to replace the process. `-k` restarts it
+            // without unloading the job, which is gentler than bootout and
+            // keeps the KeepAlive policy intact.
+            _ = try? run("/bin/launchctl", ["kickstart", "-k", service])
+            return
+        }
+
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
     }
 
@@ -76,19 +125,14 @@ enum HostAgentInstaller {
         guard let bundled = bundledHelper, let installed = installedHelper else { return }
         let manager = FileManager.default
         guard manager.fileExists(atPath: installed.path) else { return }
-        // Size and modification date, not a hash: reading two attributes on
-        // every launch is free, and the two files are either the same copy or
-        // they are not.
-        let attributes: (URL) -> (Int, Date)? = { url in
-            guard let values = try? manager.attributesOfItem(atPath: url.path),
-                  let size = values[.size] as? Int,
-                  let modified = values[.modificationDate] as? Date
-            else { return nil }
-            return (size, modified)
-        }
-        guard let new = attributes(bundled), let old = attributes(installed) else { return }
-        guard new.0 != old.0 || new.1 != old.1 else { return }
+        guard helpersDiffer(bundled, installed, manager: manager) else { return }
         try? installAndStart()
+    }
+
+    private static var launchAgentPlistURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+            .appendingPathComponent("\(label).plist")
     }
 
     private static var installedHelper: URL? {
@@ -108,6 +152,55 @@ enum HostAgentInstaller {
             Bundle.main.resourceURL?.appendingPathComponent("tokenstat-hostd")
         ]
         return candidates.compactMap { $0 }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+    }
+
+    /// Copy the bundled helper over the installed one only when they differ.
+    @discardableResult
+    private static func replaceHelperIfNeeded(
+        from bundled: URL,
+        to helper: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        if fileManager.fileExists(atPath: helper.path),
+           !helpersDiffer(bundled, helper, manager: fileManager)
+        {
+            return false
+        }
+        if fileManager.fileExists(atPath: helper.path) {
+            try? fileManager.removeItem(at: helper)
+        }
+        do {
+            try fileManager.copyItem(at: bundled, to: helper)
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+            return true
+        } catch {
+            return true
+        }
+    }
+
+    /// Size and modification date, not a hash: free on every launch, and the
+    /// two files are either the same copy or they are not.
+    private static func helpersDiffer(_ a: URL, _ b: URL, manager: FileManager) -> Bool {
+        let attributes: (URL) -> (Int, Date)? = { url in
+            guard let values = try? manager.attributesOfItem(atPath: url.path),
+                  let size = values[.size] as? Int,
+                  let modified = values[.modificationDate] as? Date
+            else { return nil }
+            return (size, modified)
+        }
+        guard let left = attributes(a), let right = attributes(b) else { return true }
+        return left.0 != right.0 || left.1 != right.1
+    }
+
+    /// Write the plist only when its contents actually changed, so a no-op
+    /// install does not touch the file and re-trigger launchd bookkeeping.
+    private static func writePlistIfNeeded(_ contents: [String: Any], to plist: URL) -> Bool {
+        let next = contents as NSDictionary
+        if let existing = NSDictionary(contentsOf: plist), existing.isEqual(to: next) {
+            return false
+        }
+        next.write(to: plist, atomically: true)
+        return true
     }
 
     @discardableResult

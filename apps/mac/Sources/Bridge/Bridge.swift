@@ -145,6 +145,53 @@ enum Bridge {
         connect()
     }
 
+    /// Make the hosted transport the one in use, starting the daemon if it is
+    /// not serving yet.
+    ///
+    /// `connect()` probes the socket once at launch, and when the daemon has
+    /// not come up yet the app quietly falls back to in-process. The fallback
+    /// works, but it owns sessions in this process and keeps Home waiting on
+    /// an archive open nobody asked for. This is the launch-time catch-up:
+    /// probe again, start the agent when nothing answers, wait a bounded time
+    /// for the socket, then hand the bridge over. Screens that started loading
+    /// in-process simply continue over the daemon once it is up; their data
+    /// comes from the same archive either way.
+    ///
+    /// Order matters. A quiet socket often means launchd is still starting the
+    /// agent after login, not that the install is missing. Waiting briefly,
+    /// then kickstarting the existing job, and only then doing a full install
+    /// avoids the bootout/bootstrap thrash that used to kill a half-started
+    /// host and re-prompt for background permission.
+    ///
+    /// Runs off the main thread. Blocking on purpose: a fresh daemon takes a
+    /// moment to bind, and waiting here is what makes the first screen's
+    /// calls land on it instead of on a second in-process archive.
+    static func ensureHosted() {
+        guard !isHosted else { return }
+        #if os(macOS)
+        if socketIsUp() {
+            reconnect()
+            return
+        }
+        // Launchd may already be bringing the agent up. Give it a short
+        // window before any launchctl work, so a healthy install is not
+        // torn down and restarted on every cold app open.
+        if waitForSocket(seconds: hostSoftWait) {
+            reconnect()
+            return
+        }
+        try? HostAgentInstaller.ensureRunning()
+        if waitForSocket(seconds: hostRepairWait) {
+            reconnect()
+            return
+        }
+        // Soft start failed: the helper or the plist is missing or broken.
+        try? HostAgentInstaller.installAndStart()
+        _ = waitForSocket(seconds: hostRepairWait)
+        reconnect()
+        #endif
+    }
+
     /// Call across the boundary and decode the result.
     ///
     /// Synchronous and potentially slow. Everything public here is `async` and
@@ -281,12 +328,12 @@ enum Bridge {
 
     /// Bring the local daemon back after it stopped answering.
     ///
-    /// Runs on the calls queue, so it can afford to block. Reinstalling the
-    /// launch agent is idempotent: it replaces a missing or stale helper and
-    /// reloads launchd, and needs no password, because the agent is this
-    /// user's own. The reinstall is gated by a cooldown so a burst of failing
-    /// calls does not boot the daemon repeatedly; the socket probe itself is
-    /// cheap and runs on every failure.
+    /// Runs on the calls queue, so it can afford to block. Prefer a soft
+    /// kickstart of the existing launch agent over a full reinstall: most
+    /// `host_unreachable` failures are a host that exited, not a missing
+    /// install. The reinstall is the last resort, and the whole path is gated
+    /// by a cooldown so a burst of failing calls does not boot the daemon
+    /// repeatedly. The socket probe itself is cheap and runs on every failure.
     private static func repairHost() -> Bool {
         #if os(macOS)
         hostRepairLock.lock()
@@ -300,8 +347,12 @@ enum Bridge {
         }
         lastHostRepairAt = Date()
 
-        // A failure to reinstall is not the end: the daemon may already be
-        // coming up on its own, so the socket poll decides.
+        // Soft first: the agent is usually installed and only needs a nudge.
+        try? HostAgentInstaller.ensureRunning()
+        if waitForSocket(seconds: hostRepairWait) {
+            return true
+        }
+        // Soft start failed: reinstall and try once more.
         try? HostAgentInstaller.installAndStart()
         return waitForSocket(seconds: hostRepairWait)
         #else
@@ -314,8 +365,10 @@ enum Bridge {
     nonisolated(unsafe) private static var lastHostRepairAt: Date?
     /// How long a completed repair stays fresh before launchd is touched again.
     private static let hostRepairCooldown: TimeInterval = 30
-    /// How long to wait for the socket after the reinstall itself.
-    private static let hostRepairWait: TimeInterval = 8
+    /// How long to wait for a host that may already be coming up on its own.
+    private static let hostSoftWait: TimeInterval = 1.2
+    /// How long to wait for the socket after a kickstart or reinstall.
+    private static let hostRepairWait: TimeInterval = 5
     /// How long a caller arriving mid-repair waits for the socket.
     private static let hostRepairShareWait: TimeInterval = 2
 
@@ -326,9 +379,13 @@ enum Bridge {
 
     private static func waitForSocket(seconds: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
+        // Start tight: a healthy host binds in tens of milliseconds, and a
+        // 150ms sleep on every probe added a visible lag to every recovery.
+        var interval: TimeInterval = 0.05
         while Date() < deadline {
             if socketIsUp() { return true }
-            Thread.sleep(forTimeInterval: 0.15)
+            Thread.sleep(forTimeInterval: interval)
+            interval = min(0.15, interval * 1.4)
         }
         return socketIsUp()
     }

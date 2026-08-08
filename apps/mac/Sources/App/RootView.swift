@@ -237,15 +237,33 @@ struct RootView: View {
                     }
             }
         }
-        .task { await model.load() }
-        // Loaded up front, not on first visit, so the sidebar can show the
-        // handle without the user opening the screen to populate it.
-        .task { await account.load() }
-        // Checked, fetched and put in place without being asked. Only the
-        // restart is a decision, and it waits in the sidebar until it is taken.
-        .task { await appUpdate.checkAndInstall() }
+        // Insights is not the first screen. Loading it at launch used to fire
+        // eight archive queries that all take the session lock and queue
+        // behind (and in front of) Home's own work. Load on first visit.
+        .task(id: destination) {
+            guard destination == .insights else { return }
+            await model.load()
+        }
+        // Sidebar footer needs the handle, but not on the first frame. A short
+        // yield lets Home's archive calls claim the host first.
         .task {
-            await workspaces.load()
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await account.load()
+        }
+        // Update check talks to the network and is not part of first paint.
+        .task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await appUpdate.checkAndInstall()
+        }
+        .task {
+            // Local folder names for the sidebar first. Git status is part of
+            // that call, but it is still cheaper than also dialling peers.
+            await workspaces.loadLocal()
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            await workspaces.loadRemote()
             // Other machines on their own slow schedule. Local folders refresh
             // from the file watcher, which must not dial anybody.
             await workspaces.watchPeers()
@@ -270,6 +288,10 @@ struct RootView: View {
         }
         #if os(macOS)
         .task {
+            // Terminals are not on the first screen. A short yield keeps the
+            // host free for Home's archive answers.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
             await terminals.load()
             // Sessions can start on this machine from a remote window or an
             // automation; the sidebar has to learn about them without an app
@@ -289,10 +311,13 @@ struct RootView: View {
         // does, copying a file and asking launchctl to reload is not work the
         // window should wait on.
         .task {
-            await Task.detached(priority: .background) {
+            await Task.detached(priority: .utility) {
                 HostAgentInstaller.refreshIfStale()
+                // The refresh above may have restarted the daemon; make sure
+                // the bridge is on the hosted transport (starting the agent
+                // when nothing is installed or running).
+                Bridge.ensureHosted()
             }.value
-            Bridge.reconnect()
         }
         #endif
         .toolbar {

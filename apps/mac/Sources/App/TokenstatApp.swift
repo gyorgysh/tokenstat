@@ -46,6 +46,14 @@ struct TokenstatApp: App {
     init() {
         Bridge.connect()
         DesktopSyncScheduler.start()
+        // The socket probe in `connect()` can miss a daemon that is still
+        // coming up (or not installed yet), leaving the app in-process until
+        // something fails. Catch up off the main thread so the first screen's
+        // data load finds the daemon instead of an archive opened in this
+        // process, and terminals belong to a process that outlives the window.
+        Task.detached(priority: .userInitiated) {
+            Bridge.ensureHosted()
+        }
     }
 
     var body: some Scene {
