@@ -186,6 +186,15 @@ struct TerminalPane: View {
                 )
                 .frame(width: size.width, height: size.height)
 
+                // Starting state over the stack: pending host spawn, or the
+                // process is up but has not painted yet. Agent CLIs spend
+                // several seconds in that gap; an empty live terminal there
+                // is what read as a 10s hang.
+                if showsTerminal, let active, active.showsStartingState {
+                    SessionStartingView(command: active.command)
+                        .frame(width: size.width, height: size.height)
+                }
+
                 // The launcher wins over every other surface when toggled on:
                 // that is its whole point, to put a new launch in front even
                 // while sessions are running underneath. Any real navigation
@@ -233,6 +242,14 @@ struct TerminalPane: View {
                 }
             }
             .frame(width: size.width, height: size.height)
+            // Only the explicit launcher toggle animates. Animating
+            // `sessions.isEmpty` made every spawn fade the whole pane in and
+            // out (and re-layout the terminal under it), which read as the
+            // tty blinking before it settled.
+            .animation(
+                .easeOut(duration: 0.15),
+                value: workspaces.showingLauncher.contains(folder.id)
+            )
             // Also the size a new session is spawned at, so it never opens at
             // 24x80 and jumps.
             // Quantised to the cell grid's order of magnitude. This only feeds
@@ -589,18 +606,60 @@ private struct FileChip: View {
     }
 }
 
+/// Full-pane starting state while a session has no process output yet.
+///
+/// Replaces the empty live terminal that used to sit there with a blinking
+/// caret for the whole of an agent boot (measured 3–6s for Claude Code under
+/// hostd). The host call itself is tens of milliseconds; this covers the
+/// process's own startup, not the bridge.
+private struct SessionStartingView: View {
+    let command: String
+
+    private var label: String {
+        let base = URL(fileURLWithPath: command).lastPathComponent
+        switch base {
+        case "claude": return "Claude Code"
+        case "codex": return "Codex"
+        case "grok": return "Grok"
+        case "opencode": return "OpenCode"
+        case "agent": return "Cursor Agent"
+        case "agy": return "Antigravity"
+        case "zsh", "bash", "fish", "sh": return "Shell"
+        default: return base
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: Theme.Space.m) {
+            ProgressView()
+                .controlSize(.regular)
+            Text("Starting \(label)")
+                .font(.title3.weight(.medium))
+            Text("The session is up. Waiting for the program to draw.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+    }
+}
+
 /// A thin line under the terminal for the two facts a terminal should never
 /// hide: that its process ended, and that output was dropped because the reader
 /// fell behind.
 ///
 /// Separate from the terminal view, which is owned by `TerminalStack` in AppKit
-/// so that switching sessions never relayouts it.
+/// so that switching sessions never relayouts it. Starting state lives in the
+/// pane above, not here: a second "Starting…" strip under an empty terminal is
+/// what made the wait feel like a stuck UI.
 struct TerminalHost: View {
     let session: TerminalSession
 
     var body: some View {
         VStack(spacing: 0) {
-            if session.isPending || session.exitCode != nil || session.droppedOutput {
+            if session.exitCode != nil || session.droppedOutput {
                 statusLine
             }
         }
@@ -608,13 +667,6 @@ struct TerminalHost: View {
 
     private var statusLine: some View {
         HStack(spacing: Theme.Space.s) {
-            if session.isPending {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Starting \(session.command)…")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
             if let code = session.exitCode {
                 Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .font(.system(size: 11))
@@ -768,14 +820,19 @@ private struct LaunchSurface: View {
             let args = workspaces.bypassPermissions(for: folder.id)
                 ? profile.args + profile.bypassArgs
                 : profile.args
-            // Hand the pane to the console before the spawn answers. The
-            // pending session lands in the next frame; the host's answer
-            // attaches to it when it arrives.
+            // Pending session and pane switch are synchronous. The host call
+            // runs after, so the tty pane is already up for the round trip
+            // instead of waiting on a Task hop with the launcher still drawn.
+            let session = terminals.begin(
+                workspace: folder,
+                command: profile.command,
+                rows: grid.rows,
+                cols: grid.cols
+            )
             workspaces.showTerminal(in: folder.id)
             Task {
-                _ = await terminals.start(
-                    workspace: folder,
-                    command: profile.command,
+                _ = await terminals.complete(
+                    session,
                     args: args,
                     rows: grid.rows,
                     cols: grid.cols

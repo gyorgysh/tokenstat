@@ -34,10 +34,11 @@ struct TerminalStack: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: TerminalStackView, context: Context) {
-        nsView.sync(
-            views: sessions.map(\.view),
-            active: sessions.first { $0 === active }?.view
-        )
+        // Only sessions that already have an emulator. Pending ones have no
+        // view on purpose: the pane draws a starting state over them instead.
+        let loaded = sessions.compactMap(\.terminalViewIfLoaded)
+        let activeView = active.flatMap(\.terminalViewIfLoaded)
+        nsView.sync(views: loaded, active: activeView)
     }
 }
 

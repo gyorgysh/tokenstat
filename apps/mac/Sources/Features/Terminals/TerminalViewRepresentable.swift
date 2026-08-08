@@ -17,9 +17,9 @@ import SwiftUI
 /// switches and navigation. The wrapper's only real job is to push the current
 /// system appearance into the view and to give it focus.
 ///
-/// Callers must give this an `.id(session.id)`. Without one SwiftUI treats a
-/// switch to another session as an update of the same view and never calls
-/// `makeNSView` again, which leaves the previous session's terminal on screen.
+/// Callers that wrap this in SwiftUI should key on `session.id`, which is the
+/// stable client id (not the host's `pty-N`). The host id used to change on
+/// attach and force a full view rebuild; that is fixed on the session.
 struct TerminalViewRepresentable: NSViewRepresentable {
     let session: TerminalSession
     @Environment(\.colorScheme) private var colorScheme

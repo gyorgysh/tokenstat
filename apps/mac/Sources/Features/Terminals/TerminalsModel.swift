@@ -20,6 +20,7 @@ import Observation
 @Observable
 final class TerminalsModel {
     var sessions: [TerminalSession] = []
+    /// Client id of the selected session (stable; never the host's `pty-N`).
     var selectedID: String?
     var errorMessage: String?
     private var selectedByWorkspace: [String: String] = [:]
@@ -73,34 +74,84 @@ final class TerminalsModel {
     func load() async {
         do {
             let list = try await Bridge.ptyList()
-            var byID: [String: PtySessionInfo] = [:]
-            for info in list { byID[info.id] = info }
+            var byHostID: [String: PtySessionInfo] = [:]
+            for info in list { byHostID[info.id] = info }
 
             // Forget sessions the host no longer has.
             // A pending session is not on the host yet: the spawn is in
             // flight, so it must not be treated as a session that vanished.
-            let gone = sessions.filter { !$0.isPending && byID[$0.id] == nil }
+            let gone = sessions.filter { !$0.isPending && byHostID[$0.hostID] == nil }
             for session in gone {
                 session.stop()
                 sessions.removeAll { $0.id == session.id }
             }
 
+            // Host ids already represented by a local session (pending ones
+            // still use a synthetic host id, so they never match).
+            let knownHostIDs = Set(sessions.map(\.hostID))
+
             // Adopt sessions that appeared since we last looked (another
-            // surface, or the host itself).
-            // Reading starts here, not when a view first appears. A session
-            // nobody has opened yet still has to drain the host's bounded
-            // buffer, or its earliest output is dropped before anyone looks.
-            let known = Set(sessions.map(\.id))
-            for info in list where !known.contains(info.id) {
+            // surface, or the host itself). Prefer attaching a pending local
+            // spawn over creating a second session: spawn completion and this
+            // list can race, and creating both was the "session appears,
+            // vanishes, comes back" glitch.
+            for info in list where !knownHostIDs.contains(info.id) {
+                if let pending = pendingMatch(for: info) {
+                    pending.attach(info: info)
+                    // Drop any accidental second copy with the same host id.
+                    dedupe(hostID: info.id, keeping: pending)
+                    continue
+                }
                 let session = TerminalSession(info: info)
                 session.start()
                 sessions.append(session)
             }
 
             if selectedID == nil, let first = sessions.first { select(first) }
+            // Selection can point at a session that was removed as gone.
+            if let selectedID, !sessions.contains(where: { $0.id == selectedID }) {
+                self.selectedID = sessions.first?.id
+            }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    /// A pending local spawn that should absorb this host session rather than
+    /// becoming a second tab.
+    private func pendingMatch(for info: PtySessionInfo) -> TerminalSession? {
+        let workspace = info.workspaceID ?? ""
+        let pending = sessions.filter {
+            $0.isPending && ($0.workspaceID == workspace || workspace.isEmpty)
+        }
+        guard !pending.isEmpty else { return nil }
+        // Prefer the same command when several pendings share a workspace.
+        if let exact = pending.first(where: { commandMatches($0.command, info.command) }) {
+            return exact
+        }
+        // One pending in this workspace: it is almost certainly this spawn.
+        if pending.count == 1 { return pending[0] }
+        return pending.first
+    }
+
+    private func commandMatches(_ local: String, _ host: String) -> Bool {
+        if local == host { return true }
+        // Catalog may send a basename; the host reports the path it exec'd.
+        let localBase = URL(fileURLWithPath: local).lastPathComponent
+        let hostBase = URL(fileURLWithPath: host).lastPathComponent
+        return localBase == hostBase
+    }
+
+    /// Keep one session per host id. The list reconcile and spawn completion
+    /// can both claim the same pty; the keeper is the one the user already has
+    /// on screen.
+    private func dedupe(hostID: String, keeping keeper: TerminalSession) {
+        let extras = sessions.filter { $0.hostID == hostID && $0.id != keeper.id }
+        for extra in extras {
+            extra.stop()
+            sessions.removeAll { $0.id == extra.id }
+            if selectedID == extra.id { select(keeper) }
         }
     }
 
@@ -119,6 +170,63 @@ final class TerminalsModel {
         }
     }
 
+    /// Put a pending session on screen **now**, before any host call.
+    ///
+    /// The click handler must call this synchronously. Waiting until an
+    /// `async` `Task` starts left the launcher up for a frame (or longer under
+    /// main-actor load), which is the blink before the tty pane appears.
+    @discardableResult
+    func begin(
+        workspace: WorkspaceFolder,
+        command: String,
+        rows: Int = 24,
+        cols: Int = 80
+    ) -> TerminalSession {
+        let session = TerminalSession(
+            pendingCommand: command,
+            workspace: workspace,
+            rows: rows,
+            cols: cols
+        )
+        sessions.append(session)
+        select(session)
+        return session
+    }
+
+    /// Finish a `begin` by talking to the host. Safe if list reconcile already
+    /// attached the pending session.
+    @discardableResult
+    func complete(
+        _ session: TerminalSession,
+        args: [String],
+        rows: Int,
+        cols: Int
+    ) async -> TerminalSession? {
+        guard sessions.contains(where: { $0.id == session.id }) else { return nil }
+        do {
+            // The caller measured the pane; spawn at that grid so the first
+            // paint is not a 24×80 flash.
+            let info = try await Bridge.ptySpawn(
+                workspaceID: session.workspaceID,
+                command: session.command,
+                args: args,
+                rows: rows,
+                cols: cols,
+                noColor: TerminalPreferences.disablesColor
+            )
+            session.attach(info: info)
+            dedupe(hostID: info.id, keeping: session)
+            select(session)
+            errorMessage = nil
+            return session
+        } catch {
+            errorMessage = error.localizedDescription
+            session.stop()
+            sessions.removeAll { $0.id == session.id }
+            return nil
+        }
+    }
+
     /// Launch a command in a workspace's folder and select it.
     @discardableResult
     func start(
@@ -128,50 +236,14 @@ final class TerminalsModel {
         rows: Int = 24,
         cols: Int = 80
     ) async -> TerminalSession? {
-        // The console goes on screen now, before the round trip: a real
-        // terminal shows its window the moment it is asked for. The host's
-        // first spawn of a process's life can take seconds behind a login
-        // shell resolve, and holding the launcher on screen for that was the
-        // "nothing happened" wait.
-        let session = TerminalSession(
-            pendingCommand: command,
-            workspace: workspace,
-            rows: rows,
-            cols: cols
-        )
-        sessions.append(session)
-        select(session)
-        do {
-            // The caller measures the pane and passes its grid, so the shell
-            // prints its first prompt at the size it will keep. Spawning at
-            // 24x80 and letting the first layout correct it makes every session
-            // draw once and then repaint, which is the flash on launch.
-            let info = try await Bridge.ptySpawn(
-                workspaceID: workspace.id,
-                command: command,
-                args: args,
-                rows: rows,
-                cols: cols,
-                noColor: TerminalPreferences.disablesColor
-            )
-            session.attach(info: info)
-            // The id changed from pending to real; point selection at it again
-            // so the workspace remembers this session by the id it will keep.
-            select(session)
-            errorMessage = nil
-            return session
-        } catch {
-            errorMessage = error.localizedDescription
-            session.stop()
-            sessions.removeAll { $0 === session }
-            return nil
-        }
+        let session = begin(workspace: workspace, command: command, rows: rows, cols: cols)
+        return await complete(session, args: args, rows: rows, cols: cols)
     }
 
     /// Kill the process and forget the session. The host's buffer goes with it.
     func close(_ session: TerminalSession) async {
         if !session.isPending {
-            try? await Bridge.ptyClose(id: session.id)
+            try? await Bridge.ptyClose(id: session.hostID)
         }
         session.stop()
         sessions.removeAll { $0.id == session.id }

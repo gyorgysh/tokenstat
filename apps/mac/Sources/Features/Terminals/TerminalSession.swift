@@ -39,19 +39,21 @@ enum TerminalPreferences {
 /// resize events, all over the same JSON bridge every other surface uses.
 ///
 /// Output is read by offset and polled, never pushed. The SwiftTerm view is
-/// created with the session rather than on first display, and the stream is fed
-/// into it whether or not it is the session on screen, so a background session
-/// keeps its scrollback, drains the host's bounded buffer, and is already drawn
-/// the moment its tab is selected. Nothing here is lazy, because "load it when
-/// you look at it" is exactly what makes a terminal feel like a web page.
+/// created on attach (when a process exists), not on the click: building a
+/// full emulator on the button action was main-thread work the user felt as
+/// hitch, and an empty live terminal with a caret is what made a multi-second
+/// agent boot read as "the app is broken" rather than "the agent is starting".
 @MainActor
 @Observable
 final class TerminalSession: TerminalViewDelegate, Identifiable {
-    /// A placeholder until the host answers the spawn, then the host's real
-    /// session id. The console is on screen with the placeholder so a slow
-    /// first spawn reads as a terminal that is starting, not a click that did
-    /// nothing.
-    private(set) var id: String
+    /// Stable for the life of this object. SwiftUI `ForEach` and selection use
+    /// this, and it must never change: swapping it from `pending-…` to the
+    /// host's `pty-N` made every chip and the terminal stack tear down and
+    /// rebuild on attach, which is the blink / disappear / reappear glitch.
+    let id: String
+    /// What the host knows this session as. `pending-…` until `attach`, then
+    /// the real `pty-…` id used for every bridge call.
+    private(set) var hostID: String
     nonisolated let workspaceID: String
     /// The command as launched, for a tab label.
     nonisolated let command: String
@@ -104,10 +106,27 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// rather than pretending the output never existed.
     var droppedOutput = false
 
-    /// The SwiftTerm view, owned for the session's whole life. It exists before
-    /// anything displays it, so the emulator's state is never a function of
-    /// what the window happens to be showing.
-    let view: TerminalView
+    /// True after the first host output has been fed into the emulator.
+    ///
+    /// Agent CLIs (Claude, Grok, …) take several seconds after `pty.spawn`
+    /// returns before they paint. The pane uses this to show a starting state
+    /// instead of an empty blinking terminal for that whole boot.
+    private(set) var hasOutput = false
+
+    /// The SwiftTerm view, created on first use after attach. Pending sessions
+    /// have none: there is nothing to draw yet.
+    @ObservationIgnored private var terminalView: TerminalView?
+
+    /// The live emulator, if this session has one. Does not create it.
+    var terminalViewIfLoaded: TerminalView? { terminalView }
+
+    /// The emulator, created on first access. Only call after attach.
+    var view: TerminalView {
+        if let terminalView { return terminalView }
+        let created = Self.makeTerminalView(delegate: self)
+        terminalView = created
+        return created
+    }
 
     /// Where this reader is in the output stream.
     private var offset: UInt64 = 0
@@ -165,7 +184,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated private let eventStream = AsyncStream<PtyEvent>.makeStream()
 
     init(info: PtySessionInfo) {
-        id = info.id
+        id = UUID().uuidString
+        hostID = info.id
         workspaceID = info.workspaceID ?? ""
         command = info.command
         cwd = info.cwd
@@ -174,28 +194,20 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         rows = info.rows
         cols = info.cols
         reportedSize = (info.rows, info.cols)
-
-        view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
-        view.font = TerminalMetrics.font
-        // Option-as-meta is how every terminal worth using behaves on a Mac,
-        // and the agent CLIs are written assuming it.
-        view.optionAsMetaKey = true
-        // SwiftTerm defaults to 500 lines, which a build log passes in seconds.
-        view.terminal.changeHistorySize(Self.scrollbackLines)
-        view.terminalDelegate = self
+        // Adopted from the host: the process already exists, so the emulator
+        // is built now and polling starts immediately.
+        _ = view
+        start()
     }
 
-    /// The console for a session the user just asked for, before the host has
-    /// actually spawned anything.
+    /// A session the user just asked for, before the host has spawned anything.
     ///
-    /// A real terminal shows its window the moment it is requested; this app
-    /// used to hold the launcher on screen until `pty.spawn` answered, so the
-    /// first spawn of a process's life (a login shell resolve behind it) was
-    /// seconds of "Starting…" with nothing to look at. The view exists here,
-    /// and `attach` hands the session the host's id and starts reading once
-    /// the process is real.
+    /// Deliberately **no** TerminalView yet. The click only records intent and
+    /// shows a starting pane; the emulator is built on `attach` when there is
+    /// a process to talk to.
     init(pendingCommand command: String, workspace: WorkspaceFolder, rows: Int, cols: Int) {
-        id = "pending-\(UUID().uuidString)"
+        id = UUID().uuidString
+        hostID = "pending-\(UUID().uuidString)"
         workspaceID = workspace.id
         self.command = command
         cwd = workspace.path
@@ -205,32 +217,49 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         self.cols = cols
         reportedSize = (rows, cols)
         isPending = true
-
-        view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
-        view.font = TerminalMetrics.font
-        view.optionAsMetaKey = true
-        view.terminal.changeHistorySize(Self.scrollbackLines)
-        view.terminalDelegate = self
     }
 
     /// True from the click until the host has spawned the process.
-    ///
-    /// The terminal is visible in this state; polling starts on `attach`.
     var isPending = false
 
-    /// The host answered `pty.spawn`. Adopt the real id and start reading.
+    /// True while the pane should show a starting state rather than the live
+    /// emulator: still pending on the host, or the process is up but has not
+    /// painted anything yet (agent CLIs spend seconds in that gap).
+    var showsStartingState: Bool {
+        (isPending || !hasOutput) && exitCode == nil
+    }
+
+    /// The host answered `pty.spawn`. Adopt the real host id, build the
+    /// emulator, and start reading.
     func attach(info: PtySessionInfo) {
         // A session closed before the host answered must not come back: the
         // spawn still succeeded on the host, but nobody is watching it here.
+        // Also ignore a second attach (list reconcile and spawn completion can
+        // both try): the first one already owns the host id.
         guard isPending, !removed else { return }
-        id = info.id
+        hostID = info.id
         alive = info.alive
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
         reportedSize = (info.rows, info.cols)
         isPending = false
+        // Build the emulator now that a process exists. Before this there was
+        // nothing to draw.
+        _ = view
         start()
+    }
+
+    private static func makeTerminalView(delegate: TerminalViewDelegate) -> TerminalView {
+        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        view.font = TerminalMetrics.font
+        // Option-as-meta is how every terminal worth using behaves on a Mac,
+        // and the agent CLIs are written assuming it.
+        view.optionAsMetaKey = true
+        // SwiftTerm defaults to 500 lines, which a build log passes in seconds.
+        view.terminal.changeHistorySize(scrollbackLines)
+        view.terminalDelegate = delegate
+        return view
     }
 
     /// Set once the session is being torn down, so a late `attach` cannot
@@ -269,6 +298,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         // Pending sessions have no process behind them yet; attach() starts
         // polling once the host has answered.
         guard !isPending else { return }
+        // Capture the host id once: it is stable after attach, and the writer
+        // must not chase a changing value mid-stream.
+        let bridgeID = hostID
         if writerTask == nil {
             writerTask = Task { [weak self] in
                 guard let self else { return }
@@ -276,20 +308,20 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     switch event {
                     case let .write(bytes):
                         do {
-                            try await Bridge.ptyWrite(id: id, bytes: bytes)
+                            try await Bridge.ptyWrite(id: bridgeID, bytes: bytes)
                             transportError = nil
                         } catch {
                             transportError = error.localizedDescription
                         }
                     case let .resize(rows, cols):
-                        try? await Bridge.ptyResize(id: id, rows: rows, cols: cols)
+                        try? await Bridge.ptyResize(id: bridgeID, rows: rows, cols: cols)
                     }
                 }
             }
         }
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
-            await self?.poll(id: id)
+            await self?.poll(id: bridgeID)
         }
     }
 
@@ -363,6 +395,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// leaves a terminal that takes input, runs the command, and shows nothing
     /// until an unrelated click or resize happens to invalidate the view.
     private func feed(_ bytes: Data) {
+        if !hasOutput {
+            hasOutput = true
+        }
         view.feed(byteArray: ArraySlice(bytes))
         if TerminalPreferences.exposesToVoiceOver {
             publishAccessibilityValue()
