@@ -10,14 +10,13 @@ import SwiftUI
 /// Placeholders shaped like the thing that is coming.
 ///
 /// The rule for every screen in this app: draw the layout immediately, with
-/// grey shapes where the numbers will be, and swap the shapes for the numbers
-/// when they arrive. Never a spinner in the middle of an empty pane. A spinner
-/// says "wait" and nothing else. A wireframe says how much is coming, where it
-/// will be, and how long the screen will end up. The window also stops jumping,
-/// because the space is already claimed.
+/// grey shapes where the numbers will be, and **replace** those shapes with
+/// the real content when it arrives (short fade, see `smoothIn`). Never a
+/// spinner in the middle of an empty pane, and never a blurred wireframe under
+/// a brand mark: that made loading feel heavier than the wait.
 ///
-/// Nothing here animates. A shimmer is a brand animation between a person and
-/// their own data, and a launch is not an event worth celebrating.
+/// Nothing here animates on its own. A shimmer is a brand animation between a
+/// person and their own data, and a launch is not an event worth celebrating.
 enum Skeleton {
     /// One grey bar standing in for a line of text or a number.
     ///
@@ -83,29 +82,36 @@ enum Skeleton {
     }
 }
 
-/// Blurred and dimmed rather than replaced by something that spins.
+/// Marks a placeholder subtree as non-interactive while data is loading.
 ///
-/// The screen people are waiting for is already the best thing to show them: it
-/// says how much is coming and where each piece will be, and it does not put a
-/// brand animation between them and their own data. Nothing here moves, and
-/// nothing here is tinted: a launch is not an event worth celebrating.
+/// Wireframes stay **sharp** at full opacity. Blur was retired: stacking blur
+/// on a skeleton under a logo made the first paint feel like a glass door
+/// rather than a layout that is about to fill in. Real content replaces the
+/// placeholder with `.smoothIn`.
 struct Warming: ViewModifier {
     let active: Bool
 
     func body(content: Content) -> some View {
-        content
-            .blur(radius: active ? 7 : 0)
-            .opacity(active ? 0.45 : 1)
-            .allowsHitTesting(!active)
-            // Short, and only on the way out. Arriving data should look like
-            // the screen coming into focus, not like a transition playing.
-            .animation(.easeOut(duration: 0.22), value: active)
+        content.allowsHitTesting(!active)
     }
 }
 
 extension View {
     /// Mark this subtree as a placeholder for data that has not arrived.
+    ///
+    /// Does not blur or dim. Kept so existing call sites stay readable; the
+    /// visual rule is "sharp wireframe, then fade real content in".
     func warming(_ active: Bool) -> some View {
         modifier(Warming(active: active))
+    }
+}
+
+extension AnyTransition {
+    /// The arrival of loaded content: a short fade with a small rise, the
+    /// difference between "appeared" and "arrived". Cheap on purpose — one
+    /// easeOut on a view that is replacing a placeholder. Collapses to a
+    /// plain fade when Reduce Motion is on.
+    static func smoothIn(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 4))
     }
 }

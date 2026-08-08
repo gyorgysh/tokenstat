@@ -121,11 +121,11 @@ struct TodoView: View {
                         // Card-shaped grey, so the columns are already the
                         // right width and the board does not jump when the
                         // real cards land. Backlog gets more of them because
-                        // that is where cards usually are.
+                        // that is where cards usually are. Sharp, then fade.
                         ForEach(0..<(id == "backlog" ? 3 : 1), id: \.self) { _ in
                             Skeleton.CardPlaceholder(rows: 2)
                         }
-                        .warming(true)
+                        .transition(.opacity)
                     } else if model.cards(in: id).isEmpty {
                         Text(id == "done" ? "Nothing done yet" : "No cards")
                             .font(.caption)

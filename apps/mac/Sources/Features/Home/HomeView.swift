@@ -16,6 +16,7 @@ import SwiftUI
 struct HomeView: View {
     @Bindable var model: HomeModel
     @Bindable var account: AccountModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Clicking a day on the heatmap goes to Insights filtered to it.
     var onSelectDay: ((HeatCell) -> Void)?
     /// Where the account flow lives, for the sign-in prompt when All machines
@@ -46,35 +47,35 @@ struct HomeView: View {
             .padding(Theme.Space.s)
         }
         .background(Theme.background)
-        .overlay {
-            if isWarming {
-                // The mark alone, over the blurred cards. No panel, no
-                // headline, no sentence about opening an archive: by the time
-                // anyone finishes reading one, the data is already there.
-                LogoMark(size: 34, animated: true)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.22), value: isWarming)
+        // No full-screen logo over a blurred wireframe. The cards themselves
+        // are the loading state: sharp skeletons, then real content fades in
+        // section by section as the archive answers.
         // Leaving the screen while a cell is under the pointer: the popover
         // must not stay pinned to a grid that is no longer there.
         .onDisappear { model.hover(day: nil) }
         .task {
-            // Started together, not one after the other. The vendor limits
-            // include a network call for one provider, and waiting for the
-            // archive first only meant the panels arrived a round trip later
-            // than they had to. They land in whichever order they finish.
-            async let archive: Void = model.load()
-            // Once on arrival rather than on every refresh.
-            if model.planLimits.isEmpty { await model.loadPlanLimits() }
-            await archive
+            // Archive first: the heatmap and the streaks are what Home is
+            // about, and they answer from the local store. Vendor plan limits
+            // include network calls that can sit for seconds on a slow or
+            // unreachable provider. Starting them after the archive work is
+            // in flight (and not awaiting them here) keeps the first real
+            // paint free of that wait. The panels still fill in when ready.
+            await model.load()
+        }
+        .task {
+            guard model.planLimits.isEmpty else { return }
+            // Let the archive claims land on the host before the vendor fan
+            // out competes with them for connections and CPU.
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await model.loadPlanLimits()
         }
     }
 
-    /// Whether the archive has yet to say anything.
+    /// Whether the archive has yet to fill the profile streaks and heatmap.
     ///
-    /// The screen is drawn either way. There is no separate launch screen: the
-    /// cards are the launch screen, quiet until they have something to say.
+    /// Per-section, not a full-window veil: plan panels have their own
+    /// placeholder and load on a separate task.
     private var isWarming: Bool {
         model.isLoading && model.calendar == nil && model.errorMessage == nil
     }
@@ -103,6 +104,7 @@ struct HomeView: View {
                 HStack(alignment: .top, spacing: Theme.Space.s) {
                     ForEach(row) { panel in
                         view(for: panel)
+                            .transition(.smoothIn(reduceMotion: reduceMotion))
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
@@ -112,6 +114,9 @@ struct HomeView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
+        // A panel joins when its vendor or plan data arrives; the fade keeps
+        // that from reading as a layout that just changed under the cursor.
+        .animation(.easeOut(duration: 0.18), value: panels.count)
     }
 
     /// The panels dealt into rows of as many as the width fits.
@@ -208,8 +213,8 @@ struct HomeView: View {
             // card: they are about the person, and the card below is about the
             // data.
             if isWarming {
-                // The same three slots the streaks will fill, so the name
-                // beside them does not shift sideways when they arrive.
+                // Sharp wireframe in the same three slots the streaks will
+                // fill, so the name does not shift when numbers arrive.
                 HStack(spacing: Theme.Space.l) {
                     ForEach(0..<3, id: \.self) { _ in
                         VStack(alignment: .leading, spacing: 4) {
@@ -218,7 +223,7 @@ struct HomeView: View {
                         }
                     }
                 }
-                .warming(true)
+                .transition(.opacity)
             } else if let calendar = model.calendar {
                 HStack(spacing: Theme.Space.l) {
                     streak(
@@ -230,8 +235,10 @@ struct HomeView: View {
                     streak("Best", "\(calendar.streakBest)", note: "days")
                     streak("Active", "\(calendar.activeDays)", note: "days")
                 }
+                .transition(.smoothIn(reduceMotion: reduceMotion))
             }
         }
+        .animation(.easeOut(duration: 0.18), value: model.calendar != nil)
         .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -258,13 +265,14 @@ struct HomeView: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
-        .warming(true)
+        .transition(.opacity)
     }
 
     /// The activity card's own layout, with nothing in it yet.
     ///
     /// Same shapes and same heights as the real thing, so the card does not
-    /// jump when the archive answers and the heatmap takes its place.
+    /// jump when the archive answers and the heatmap takes its place. Sharp,
+    /// not blurred: the real card fades in over it.
     private var activityPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .top, spacing: Theme.Space.xl) {
@@ -280,7 +288,7 @@ struct HomeView: View {
             // size it will still be a moment later.
             bar(width: nil, height: 187)
         }
-        .warming(true)
+        .transition(.opacity)
     }
 
     /// Home's own name for the shared placeholder bar, so the call sites below
@@ -400,6 +408,7 @@ struct HomeView: View {
                         onHover: { model.hover(day: $0) }
                     )
                 }
+                .transition(.smoothIn(reduceMotion: reduceMotion))
             } else if model.errorMessage != nil {
                 // "We could not look" and "there is nothing" are different
                 // answers, and telling someone with a full archive that they
@@ -417,6 +426,7 @@ struct HomeView: View {
                 )
             }
         }
+        .animation(.easeOut(duration: 0.18), value: model.calendar != nil)
     }
 
     /// The account grid fell back because a sign-in is missing or stale.

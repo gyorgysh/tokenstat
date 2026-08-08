@@ -10,6 +10,7 @@ import SwiftUI
 
 struct InsightsView: View {
     @Bindable var model: InsightsModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Leave a day-focused view and return to Home, which is where it came
     /// from. Nil when Insights was opened directly, so there is no back arrow
     /// for a journey nobody took.
@@ -67,6 +68,7 @@ struct InsightsView: View {
                     switch model.tab {
                     case .overview:
                         overview
+                            .transition(.smoothIn(reduceMotion: reduceMotion))
                     case .models, .projects, .harnesses, .sessions:
                         BreakdownTable(
                             rows: model.rows,
@@ -77,10 +79,12 @@ struct InsightsView: View {
                             monospaced: model.tab != .harnesses,
                             isHarness: model.tab == .harnesses
                         )
+                        .transition(.smoothIn(reduceMotion: reduceMotion))
                     }
                 }
             }
             .padding(Theme.Space.m)
+            .animation(.easeOut(duration: 0.18), value: isWarming)
         }
     }
 
@@ -95,6 +99,8 @@ struct InsightsView: View {
 
     /// The overview's layout in grey: the daily chart, then the row of lists.
     private var placeholder: some View {
+        // Sharp wireframe of the overview. Real content replaces it with
+        // `.smoothIn` when the first report lands; no blur veil.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
                 Skeleton.Bar(width: nil, height: 160)
@@ -103,7 +109,7 @@ struct InsightsView: View {
                 skeletonTriple(width: width)
             }
         }
-        .warming(true)
+        .transition(.opacity)
     }
 
     private var overview: some View {

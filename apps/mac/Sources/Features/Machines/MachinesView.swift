@@ -20,6 +20,7 @@ import SwiftUI
 /// whoever is debugging their own network.
 struct MachinesView: View {
     @Bindable var model: MachinesModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
@@ -174,36 +175,39 @@ struct MachinesView: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
-                    LabeledContent("Name") {
-                        MachineNameField(identity: identity) { name in
-                            await model.rename(to: name)
-                        }
-                    }
-                    if let words = model.words {
-                        LabeledContent("Known as") {
-                            // The comparison a person actually performs. The
-                            // fingerprint and the key still exist and are one
-                            // disclosure away, under Connection details.
-                            // The words are derived from a public key: there is
-                            // nothing private in them, so they are shown plain
-                            // and selectable.
-                            Text(words)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.accent)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    if model.pairingCode != nil {
-                        LabeledContent("Connection invite") {
-                            Button {
-                                model.copyInvite()
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        LabeledContent("Name") {
+                            MachineNameField(identity: identity) { name in
+                                await model.rename(to: name)
                             }
-                            .buttonStyle(AccentButtonStyle(small: true))
-                            .help("Paste this in the other machine's Add device box")
+                        }
+                        if let words = model.words {
+                            LabeledContent("Known as") {
+                                // The comparison a person actually performs.
+                                // The fingerprint and the key still exist and
+                                // are one disclosure away, under Connection
+                                // details. The words are derived from a public
+                                // key: there is nothing private in them, so
+                                // they are shown plain and selectable.
+                                Text(words)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Theme.accent)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        if model.pairingCode != nil {
+                            LabeledContent("Connection invite") {
+                                Button {
+                                    model.copyInvite()
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                .buttonStyle(AccentButtonStyle(small: true))
+                                .help("Paste this in the other machine's Add device box")
+                            }
                         }
                     }
+                    .transition(.smoothIn(reduceMotion: reduceMotion))
                 } else {
                     // The identity comes from the daemon, so this card is empty
                     // for a moment on a cold launch. Two grey rows keep the card
@@ -213,7 +217,7 @@ struct MachinesView: View {
                         Skeleton.Bar(width: 220)
                         Skeleton.Bar(width: 160)
                     }
-                    .warming(true)
+                    .transition(.opacity)
                 }
                 Divider()
                 serving
@@ -221,73 +225,80 @@ struct MachinesView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             }
+            .animation(.easeOut(duration: 0.22), value: model.identity != nil)
         }
     }
 
     @ViewBuilder
     private var serving: some View {
-        if let status = model.status {
-            let allowed = model.remoteReachAllowed
-            let planExpired = status.tunnel
-                && status.tunnelError?.contains("not_on_this_plan") == true
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                HStack(alignment: .center, spacing: Theme.Space.m) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reach machines from anywhere").font(.callout)
-                        Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+        Group {
+            if let status = model.status {
+                let allowed = model.remoteReachAllowed
+                let planExpired = status.tunnel
+                    && status.tunnelError?.contains("not_on_this_plan") == true
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack(alignment: .center, spacing: Theme.Space.m) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Reach machines from anywhere").font(.callout)
+                            Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: Theme.Space.m)
+                        Toggle("", isOn: Binding(
+                            get: { allowed && status.tunnel },
+                            set: { enabled in Task { await model.setTunnel(enabled) } }
+                        ))
+                        .toggleStyle(.switch)
+                        .tint(Theme.accent)
+                        .labelsHidden()
+                        .accessibilityLabel("Reach machines from anywhere")
+                        .disabled(!allowed)
+                        .fixedSize()
                     }
-                    Spacer(minLength: Theme.Space.m)
-                    Toggle("", isOn: Binding(
-                        get: { allowed && status.tunnel },
-                        set: { enabled in Task { await model.setTunnel(enabled) } }
-                    ))
-                    .toggleStyle(.switch)
-                    .tint(Theme.accent)
-                    .labelsHidden()
-                    .accessibilityLabel("Reach machines from anywhere")
-                    .disabled(!allowed)
-                    .fixedSize()
-                }
 
-                if !allowed {
-                    // The relay enforces the plan at every HELLO; this is the
-                    // courtesy copy of the same gate, so nobody is invited to
-                    // flip a switch the relay will refuse. A switch that was
-                    // left on reads as off until the account qualifies again.
-                    Banner(
-                        text: model.account?.signedIn == true
-                            ? "Remote reach needs a Supporter or Patron plan, and this account does not have one."
-                            : "Remote reach needs a Supporter or Patron plan. Sign in with an account that has it.",
-                        severity: .warning
-                    )
-                } else if planExpired {
-                    Banner(
-                        text: "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",
-                        severity: .warning
-                    )
-                }
+                    if !allowed {
+                        // The relay enforces the plan at every HELLO; this is
+                        // the courtesy copy of the same gate, so nobody is
+                        // invited to flip a switch the relay will refuse. A
+                        // switch that was left on reads as off until the
+                        // account qualifies again.
+                        Banner(
+                            text: model.account?.signedIn == true
+                                ? "Remote reach needs a Supporter or Patron plan, and this account does not have one."
+                                : "Remote reach needs a Supporter or Patron plan. Sign in with an account that has it.",
+                            severity: .warning
+                        )
+                    } else if planExpired {
+                        Banner(
+                            text: "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",
+                            severity: .warning
+                        )
+                    }
 
-                if status.tunnel && status.tunnelOnline == false && !planExpired {
-                    // The toggle is on but the daemon is not holding a socket.
-                    // The plan gate, a revoked token and a dead endpoint all
-                    // land here, and each needs different words from "wait".
-                    Banner(
-                        text: status.tunnelError.map {
-                            "Remote reach is on, but the tunnel is not connected: \($0)"
-                        } ?? "Remote reach is on, but the tunnel has not connected yet. It retries automatically.",
-                        severity: .warning
-                    )
+                    if status.tunnel && status.tunnelOnline == false && !planExpired {
+                        // The toggle is on but the daemon is not holding a
+                        // socket. The plan gate, a revoked token and a dead
+                        // endpoint all land here, and each needs different
+                        // words from "wait".
+                        Banner(
+                            text: status.tunnelError.map {
+                                "Remote reach is on, but the tunnel is not connected: \($0)"
+                            } ?? "Remote reach is on, but the tunnel has not connected yet. It retries automatically.",
+                            severity: .warning
+                        )
+                    }
+                    if status.tunnel, status.tunnelOnline == true, status.tunnelRegistered == false {
+                        Banner(
+                            text: "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically.",
+                            severity: .warning
+                        )
+                    }
                 }
-                if status.tunnel, status.tunnelOnline == true, status.tunnelRegistered == false {
-                    Banner(
-                        text: "This machine is on the tunnel, but the account directory does not list it yet. It will retry registration automatically.",
-                        severity: .warning
-                    )
-                }
+                .transition(.smoothIn(reduceMotion: reduceMotion))
             }
         }
+        .animation(.easeOut(duration: 0.22), value: model.status != nil)
     }
 
     private var waitingForApproval: some View {
@@ -333,7 +344,9 @@ struct MachinesView: View {
                     }
                 }
             }
+            .transition(.smoothIn(reduceMotion: reduceMotion))
         }
+        .animation(.easeOut(duration: 0.22), value: model.known.isEmpty)
     }
 
     private var accountDevices: some View {
@@ -431,7 +444,9 @@ struct MachinesView: View {
                     if machine.id != model.accountMachines.last?.id { Divider() }
                 }
             }
+            .transition(.smoothIn(reduceMotion: reduceMotion))
         }
+        .animation(.easeOut(duration: 0.22), value: model.accountMachines.isEmpty)
     }
 
     /// One caption line under a machine's name. The presence light is the

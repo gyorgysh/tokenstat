@@ -66,13 +66,13 @@ struct AutomationsView: View {
                 .padding(.leading, 4)
                 if isWarming {
                     // "Nothing yet" is an answer, and it must not be given
-                    // before the question has been asked. Grey job rows say
-                    // the daemon is being read instead.
+                    // before the question has been asked. Sharp grey job rows
+                    // say the daemon is being read; real cards replace them.
                     VStack(alignment: .leading, spacing: Theme.Space.s) {
                         Skeleton.CardPlaceholder(rows: 2)
                         Skeleton.CardPlaceholder(rows: 2)
                     }
-                    .warming(true)
+                    .transition(.opacity)
                 } else if filteredJobs.isEmpty {
                     nothingYet
                 } else {
