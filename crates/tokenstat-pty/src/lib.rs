@@ -29,7 +29,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -219,6 +219,10 @@ pub fn manager() -> &'static Manager {
 pub struct Manager {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     next: Mutex<u64>,
+    /// Fully-started login shells waiting to be handed over, so a Shell click
+    /// does not pay a login-shell startup. Kept out of `sessions`: a pooled
+    /// shell has no client until it is taken.
+    pool: Mutex<Vec<Arc<Session>>>,
 }
 
 impl Manager {
@@ -232,6 +236,55 @@ impl Manager {
     /// there is output, and doing that on a request thread would freeze every
     /// other call for as long as the command stayed quiet.
     pub fn spawn(&self, req: &Spawn) -> Result<SessionInfo, PtyError> {
+        // The Shell tile is the click a person watches. A shell that was
+        // started when the daemon was, and kept idle since, hands over its
+        // already-loaded process instead of making the click pay a full
+        // login-shell startup. Colour is part of the deal: a pooled shell was
+        // started with the colour defaults, so a no-colour request takes the
+        // fresh path rather than inheriting the wrong setting.
+        if is_shell_profile(req) && !req.no_color {
+            let pooled = self
+                .pool
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop();
+            if let Some(shell) = pooled {
+                match self.handoff_pooled(shell, req) {
+                    Ok(info) => {
+                        self.replenish_pool();
+                        return Ok(info);
+                    }
+                    Err(_) => {
+                        // The pooled shell was already gone or refused to
+                        // answer. Fall through to a fresh spawn rather than
+                        // losing the click.
+                        self.replenish_pool();
+                    }
+                }
+            }
+        }
+        self.spawn_fresh(req)
+    }
+
+    /// The ordinary spawn path: a brand-new pty and a brand-new process.
+    fn spawn_fresh(&self, req: &Spawn) -> Result<SessionInfo, PtyError> {
+        let id = self.next_session_id();
+        let (session, info) = self.build_session(req, id)?;
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(info.id.clone(), session);
+        Ok(info)
+    }
+
+    /// Open a pty, spawn the command and start its reader thread. Used by both
+    /// the fresh path and the shell pool, so the two share one definition of
+    /// what a session is.
+    fn build_session(
+        &self,
+        req: &Spawn,
+        id: String,
+    ) -> Result<(Arc<Session>, SessionInfo), PtyError> {
         let size = PtySize {
             rows: req.rows.max(1),
             cols: req.cols.max(1),
@@ -313,12 +366,6 @@ impl Manager {
             .take_writer()
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
-        let id = {
-            let mut n = self.next.lock().unwrap_or_else(PoisonError::into_inner);
-            *n += 1;
-            format!("pty-{n}")
-        };
-
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
@@ -376,12 +423,168 @@ impl Manager {
             exit_code,
         });
 
-        self.sessions
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, session);
+        Ok((session, info))
+    }
 
-        Ok(info)
+    fn next_session_id(&self) -> String {
+        let mut n = self.next.lock().unwrap_or_else(PoisonError::into_inner);
+        *n += 1;
+        format!("pty-{n}")
+    }
+
+    /// Hand a pooled shell over as a real session.
+    ///
+    /// The shell is already fully started and sitting at a prompt, so the
+    /// click pays for a resize, a `cd` into the workspace and a registry
+    /// insert instead of a full login-shell startup. The handoff is invisible
+    /// in the transcript: the `cd` is followed by a unique marker, and once
+    /// the marker is seen the whole pre-handoff buffer is discarded, so a
+    /// client that reads from offset 0 sees the shell as it is now, in the
+    /// requested folder.
+    fn handoff_pooled(&self, shell: Arc<Session>, req: &Spawn) -> Result<SessionInfo, PtyError> {
+        let result = (|| {
+            // A pooled shell that exited while idle is not a session to hand
+            // over. (It is still killed on the way out, see below.)
+            {
+                let mut child = shell.child.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Ok(Some(_)) = child.try_wait() {
+                    return Err(PtyError::Spawn(
+                        "the pooled shell had already exited".into(),
+                    ));
+                }
+            }
+
+            let size = PtySize {
+                rows: req.rows.max(1),
+                cols: req.cols.max(1),
+                pixel_width: 0,
+                pixel_height: 0,
+            };
+            shell
+                .master
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .resize(size)
+                .map_err(|e| PtyError::Spawn(e.to_string()))?;
+
+            // Point the shell at the workspace and prove it got there.
+            let marker = format!("__TS_READY_{}__", next_marker());
+            let quoted = shell_quote(&req.cwd.to_string_lossy());
+            {
+                let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
+                writer
+                    .write_all(format!("cd {quoted}\recho {marker}\r").as_bytes())
+                    .map_err(|e| PtyError::Spawn(e.to_string()))?;
+                writer.flush().map_err(|e| PtyError::Spawn(e.to_string()))?;
+            }
+
+            // The cd is usually done in a few milliseconds. If the shell was
+            // still starting, give up waiting and hand it over anyway: the
+            // click must not pay the remaining startup, and the queued input
+            // runs as soon as the shell reaches its prompt.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+            loop {
+                {
+                    let buffer = shell.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+                    if String::from_utf8_lossy(&buffer.data).contains(&marker) {
+                        break;
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+
+            // Discard everything before the handoff: startup output, the cd
+            // line, the marker. The client starts at offset 0 with the shell
+            // already in the requested folder. The reader thread may push
+            // while we clear; the buffer lock serializes, and nothing the
+            // client reads predates the handoff.
+            {
+                let mut buffer = shell.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+                buffer.data.clear();
+                buffer.total = 0;
+            }
+
+            // Reprint the prompt the clear just removed, so the pane opens on
+            // a prompt rather than on blank space.
+            {
+                let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
+                let _ = writer.write_all(b"\r");
+                let _ = writer.flush();
+            }
+
+            let id = self.next_session_id();
+            {
+                let mut info = shell.info.lock().unwrap_or_else(PoisonError::into_inner);
+                info.id = id.clone();
+                info.command = req.command.clone();
+                info.cwd = req.cwd.display().to_string();
+                info.workspace_id = req.workspace_id.clone();
+                info.rows = size.rows;
+                info.cols = size.cols;
+            }
+            self.sessions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.clone(), Arc::clone(&shell));
+            Ok(self.snapshot(&shell))
+        })();
+
+        // A shell that failed to hand over must not keep running unowned.
+        if result.is_err() {
+            let _ = shell
+                .child
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .kill();
+        }
+        result
+    }
+
+    /// Build one fully-started login shell for the pool, without registering
+    /// it as a session. The shell sources its own profile, so it needs no
+    /// login environment injected, exactly like the Shell tile it will serve.
+    #[cfg(unix)]
+    fn build_pool_shell(&self) -> Option<Arc<Session>> {
+        let cwd = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let args: Vec<String> = if shell.ends_with("zsh") {
+            vec!["-il".to_string()]
+        } else {
+            Vec::new()
+        };
+        let req = Spawn {
+            command: shell,
+            args,
+            cwd: PathBuf::from(cwd),
+            workspace_id: None,
+            rows: 24,
+            cols: 80,
+            no_color: false,
+        };
+        self.build_session(&req, self.next_session_id())
+            .ok()
+            .map(|(session, _)| session)
+    }
+
+    /// Start a replacement pooled shell in the background after one was taken.
+    ///
+    /// Only the process-wide manager refills from a background thread; a test
+    /// manager keeps exactly the pool the test put there, so tests never spawn
+    /// login shells they did not ask for.
+    fn replenish_pool(&self) {
+        if !std::ptr::eq(self as *const Manager, manager() as *const Manager) {
+            return;
+        }
+        #[cfg(unix)]
+        std::thread::spawn(|| {
+            let m = manager();
+            if let Some(shell) = m.build_pool_shell() {
+                park_pool_shell(m, shell);
+            }
+        });
     }
 
     fn get(&self, id: &str) -> Result<Arc<Session>, PtyError> {
@@ -527,6 +730,80 @@ fn is_shell_profile(req: &Spawn) -> bool {
 #[cfg(not(unix))]
 fn is_shell_profile(_req: &Spawn) -> bool {
     false
+}
+
+/// How many fully-started login shells to keep ready.
+///
+/// Two, so a second Shell click right after the first does not have to wait
+/// for the pool to rebuild itself. Each is one idle process sitting at a
+/// prompt until it is handed over, which is nothing on a machine that has a
+/// daemon anyway.
+#[cfg(unix)]
+const POOL_SIZE: usize = 2;
+
+/// Start the process-wide shell pool ahead of the first Shell click.
+///
+/// A login-shell startup is the slowest thing a terminal open can pay, and it
+/// is the same startup for every Shell tile, so it is paid once at daemon
+/// start on a thread nobody is waiting on and the first real request takes a
+/// shell straight out of the pool. Called beside [`warm_login_env`], and
+/// equally cheap and correct to call more than once: the pool caps itself.
+pub fn warm_shell_pool() {
+    #[cfg(unix)]
+    {
+        // Called from both the daemon's entry point and its serve loop; the
+        // second call must not start a second set of profile startups.
+        static WARMED: AtomicBool = AtomicBool::new(false);
+        if WARMED.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        std::thread::spawn(|| {
+            let m = manager();
+            // Start the shells in parallel: on a loaded machine each is a full
+            // profile startup, and doing them serially doubles the warm time.
+            let handles: Vec<_> = (0..POOL_SIZE)
+                .map(|_| std::thread::spawn(move || m.build_pool_shell()))
+                .collect();
+            for handle in handles {
+                if let Some(shell) = handle.join().ok().flatten() {
+                    park_pool_shell(m, shell);
+                }
+            }
+        });
+    }
+}
+
+/// Put a built shell into the pool, or kill it when the pool is already full.
+///
+/// The full case is rare (a replenish finishing while another replenish or the
+/// warm already refilled), but a shell left running with nobody to hand it to
+/// is a process the user did not ask for, so it is stopped rather than leaked.
+#[cfg(unix)]
+fn park_pool_shell(m: &'static Manager, shell: Arc<Session>) {
+    let mut pool = m.pool.lock().unwrap_or_else(PoisonError::into_inner);
+    if pool.len() < POOL_SIZE {
+        pool.push(shell);
+    } else {
+        drop(pool);
+        let _ = shell
+            .child
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .kill();
+    }
+}
+
+/// Monotonic suffix for handoff markers, so two handoffs in one process can
+/// never confuse their markers.
+fn next_marker() -> u64 {
+    static MARKER: AtomicU64 = AtomicU64::new(0);
+    MARKER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Single-quote a string for the shell, escaping an embedded quote so a path
+/// like `O'Brien/` cannot break out of the quoting.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// The user's interactive login environment, captured once per process.
@@ -846,6 +1123,212 @@ mod tests {
         let read = waiting.join().expect("waiter").expect("a resolved value");
         assert_eq!(read.path, env.path);
         assert_eq!(read.vars, env.vars);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_quoting_survives_an_apostrophe() {
+        // A path like O'Brien/ must stay inside the quotes, or the handoff cd
+        // would split into two commands and the shell would run the tail.
+        assert_eq!(shell_quote("plain"), "'plain'");
+        assert_eq!(shell_quote("O'Brien"), "'O'\\''Brien'");
+        assert_eq!(shell_quote("a b"), "'a b'");
+    }
+
+    /// The shell profile request a Shell tile produces.
+    #[cfg(unix)]
+    fn shell_req(cwd: std::path::PathBuf) -> Spawn {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let args: Vec<String> = if shell.ends_with("zsh") {
+            vec!["-il".to_string()]
+        } else {
+            Vec::new()
+        };
+        Spawn {
+            command: shell,
+            args,
+            cwd,
+            workspace_id: Some("ws-1".into()),
+            rows: 30,
+            cols: 100,
+            no_color: false,
+        }
+    }
+
+    /// Wait until a pooled shell has printed its prompt, so a handoff test is
+    /// testing the ready case and not the mid-startup fallback.
+    #[cfg(unix)]
+    fn wait_until_prompt(shell: &Arc<Session>) {
+        assert!(
+            wait_for(|| {
+                !shell
+                    .buffer
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .data
+                    .is_empty()
+            }),
+            "the pooled shell printed its prompt"
+        );
+        // The first bytes can be a banner with the prompt still coming; a
+        // short grace makes the "sitting at a prompt" assumption honest.
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    #[cfg(unix)]
+    fn close_pool(m: &Manager) {
+        if let Some(shell) = m.pool.lock().unwrap_or_else(PoisonError::into_inner).pop() {
+            let _ = shell
+                .child
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .kill();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pooled_shell_handoff_lands_in_the_workspace() {
+        let m = Manager::new();
+        let ws = std::env::temp_dir().join(format!("ts-pool-ws-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let shell = m.build_pool_shell().expect("pool shell");
+        wait_until_prompt(&shell);
+        m.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(shell);
+
+        let info = m
+            .spawn(&shell_req(ws.clone()))
+            .expect("a pooled shell hands over");
+        assert_eq!(info.cwd, ws.display().to_string());
+        assert_eq!(info.workspace_id.as_deref(), Some("ws-1"));
+        assert_eq!((info.rows, info.cols), (30, 100));
+
+        // The handoff transcript starts clean: no cd line, no marker.
+        let text = String::from_utf8_lossy(&m.read(&info.id, 0).unwrap().bytes).to_string();
+        assert!(
+            !text.contains("cd "),
+            "handoff must not show the cd: {text:?}"
+        );
+        assert!(
+            !text.contains("__TS_READY_"),
+            "handoff must not show the marker: {text:?}"
+        );
+
+        // The shell really is in the workspace, not just labelled so.
+        m.write(&info.id, b"pwd\r").unwrap();
+        assert!(
+            wait_for(|| m
+                .read(&info.id, 0)
+                .map(|c| String::from_utf8_lossy(&c.bytes).contains(&ws.display().to_string()))
+                .unwrap_or(false)),
+            "the pooled shell changed into the workspace"
+        );
+
+        m.close(&info.id).unwrap();
+        // The pool gave its only shell away, so nothing is left behind.
+        assert!(
+            m.pool
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_spawn_bypasses_the_pool() {
+        let m = Manager::new();
+        let shell = m.build_pool_shell().expect("pool shell");
+        wait_until_prompt(&shell);
+        m.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(shell);
+
+        // /bin/sh is not the user's login shell, so this is a harness-style
+        // request and must spawn fresh even though a shell is waiting.
+        let s = spawn(&m, "echo hello-from-fresh", "echo hello-from-fresh");
+        assert!(wait_for(|| m
+            .read(&s.id, 0)
+            .map(|c| String::from_utf8_lossy(&c.bytes).contains("hello-from-fresh"))
+            .unwrap_or(false)));
+        assert_eq!(
+            m.pool.lock().unwrap_or_else(PoisonError::into_inner).len(),
+            1,
+            "a harness spawn must not consume the pooled shell"
+        );
+        m.close(&s.id).unwrap();
+        close_pool(&m);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_no_colour_shell_spawn_bypasses_the_pool() {
+        let m = Manager::new();
+        let shell = m.build_pool_shell().expect("pool shell");
+        wait_until_prompt(&shell);
+        m.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(shell);
+
+        let mut req = shell_req(std::env::temp_dir());
+        req.no_color = true;
+        let info = m.spawn(&req).expect("fresh spawn honours no colour");
+        assert_eq!(
+            m.pool.lock().unwrap_or_else(PoisonError::into_inner).len(),
+            1,
+            "a no-colour request must not inherit a colour-enabled shell"
+        );
+        m.close(&info.id).unwrap();
+        close_pool(&m);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_pooled_shell_falls_back_to_a_fresh_spawn() {
+        let m = Manager::new();
+        let shell = m.build_pool_shell().expect("pool shell");
+        let _ = shell
+            .child
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .kill();
+        assert!(wait_for(|| shell
+            .child
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .try_wait()
+            .ok()
+            .flatten()
+            .is_some()));
+        m.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(shell);
+
+        // The dead shell must not be handed over as a corpse; the click gets
+        // a real spawn and still works.
+        let info = m
+            .spawn(&shell_req(std::env::temp_dir()))
+            .expect("fresh spawn");
+        m.write(&info.id, b"echo alive\r").unwrap();
+        assert!(wait_for(|| m
+            .read(&info.id, 0)
+            .map(|c| String::from_utf8_lossy(&c.bytes).contains("alive"))
+            .unwrap_or(false)));
+        assert!(
+            m.pool
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_empty(),
+            "the dead shell was consumed and replaced by the fresh spawn"
+        );
+        m.close(&info.id).unwrap();
     }
 
     /// Run a script in the platform's own shell.

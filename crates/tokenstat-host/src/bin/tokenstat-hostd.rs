@@ -63,6 +63,10 @@ fn run() -> Result<(), String> {
     // archive open and socket bind below overlap with it and the resolve is
     // finished by the time anybody can ask for a terminal.
     tokenstat_pty::warm_login_env();
+    // The first Shell click should not pay a login-shell startup either, so a
+    // fully-started shell is warmed beside the environment and handed over on
+    // request.
+    tokenstat_pty::warm_shell_pool();
 
     // Open the archive before binding. Failing after the socket exists would
     // leave clients connecting to something that answers every request with an
