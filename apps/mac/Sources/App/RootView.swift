@@ -135,16 +135,38 @@ struct RootView: View {
     @State private var terminals = TerminalsModel()
     @State private var collapsedWorkspaces: Set<String> = []
     #endif
+    /// Logo splash until the host answers; then wireframes and data take over.
+    @State private var launch = LaunchState()
+
     var body: some View {
-        NavigationSplitView(columnVisibility: sidebarVisibility) {
-            sidebar
-        } detail: {
-            detailColumn
+        ZStack {
+            NavigationSplitView(columnVisibility: sidebarVisibility) {
+                sidebar
+            } detail: {
+                detailColumn
+            }
+            .navigationSplitViewStyle(.balanced)
+            // Keep interaction off the chrome until the host is up, so a click
+            // during splash cannot race an in-process archive.
+            .opacity(launch.hostReady ? 1 : 0)
+            .allowsHitTesting(launch.hostReady)
+
+            if !launch.hostReady {
+                LaunchSplashView()
+                    .transition(.opacity)
+                    .zIndex(1)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
+        .animation(.easeOut(duration: 0.32), value: launch.hostReady)
+        .task {
+            await launch.prepare()
+        }
         // Cell frames are reported in this space, and the popover overlay is
         // positioned in the same space, so a frame and its card agree wherever
-        // the window is.
+        // the window is. Applied to the split view's result via the ZStack
+        // content above: the modifiers below still attach to that tree.
+        // (coordinateSpace stays on the outer ZStack so Home's heatmap and
+        // popover share one space once the splash is gone.)
         .coordinateSpace(name: HeatmapView.coordinateSpace)
         .onPreferenceChange(HoveredCellFrameKey.self) { hoveredCell = $0 }
         // The inspector decision follows the window's width, published by the
@@ -305,20 +327,8 @@ struct RootView: View {
                 workspaces.requestAdd()
             }
         }
-        // The daemon outlives the app, so a helper installed by an older build
-        // keeps answering until something replaces it. Off the main actor and
-        // after the first frame: it usually finds nothing to do, and when it
-        // does, copying a file and asking launchctl to reload is not work the
-        // window should wait on.
-        .task {
-            await Task.detached(priority: .utility) {
-                HostAgentInstaller.refreshIfStale()
-                // The refresh above may have restarted the daemon; make sure
-                // the bridge is on the hosted transport (starting the agent
-                // when nothing is installed or running).
-                Bridge.ensureHosted()
-            }.value
-        }
+        // Host bring-up lives in `LaunchState.prepare` (splash). No second
+        // ensureHosted here: that would race the splash and reinstall thrash.
         #endif
         .toolbar {
             if destinationHasInspector {

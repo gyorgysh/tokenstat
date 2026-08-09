@@ -47,28 +47,36 @@ struct HomeView: View {
             .padding(Theme.Space.s)
         }
         .background(Theme.background)
-        // No full-screen logo over a blurred wireframe. The cards themselves
-        // are the loading state: sharp skeletons, then real content fades in
-        // section by section as the archive answers.
+        // Launch flow: app splash (logo) → these wireframes with a light pulse
+        // → real content fades in. The splash is owned by RootView.
         // Leaving the screen while a cell is under the pointer: the popover
         // must not stay pinned to a grid that is no longer there.
         .onDisappear { model.hover(day: nil) }
         .task {
-            // Archive first: the heatmap and the streaks are what Home is
-            // about, and they answer from the local store. Vendor plan limits
-            // include network calls that can sit for seconds on a slow or
-            // unreachable provider. Starting them after the archive work is
-            // in flight (and not awaiting them here) keeps the first real
-            // paint free of that wait. The panels still fill in when ready.
+            // Wait until the host splash has finished (or the host already
+            // answers). Loading during splash races ensureHosted and can open
+            // a second in-process archive.
+            await Self.waitForHost()
+            guard !Task.isCancelled else { return }
+            // Archive first: heatmap and streaks. Vendor limits load after.
             await model.load()
         }
         .task {
             guard model.planLimits.isEmpty else { return }
-            // Let the archive claims land on the host before the vendor fan
-            // out competes with them for connections and CPU.
+            await Self.waitForHost()
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await model.loadPlanLimits()
+        }
+    }
+
+    /// Spin until `info` answers, matching the splash's readiness gate without
+    /// sharing a binding. Bounded so a dead host still shows empty Home.
+    private static func waitForHost() async {
+        for _ in 0..<100 {
+            if (try? await Bridge.info()) != nil { return }
+            try? await Task.sleep(for: .milliseconds(50))
+            if Task.isCancelled { return }
         }
     }
 
@@ -213,13 +221,13 @@ struct HomeView: View {
             // card: they are about the person, and the card below is about the
             // data.
             if isWarming {
-                // Sharp wireframe in the same three slots the streaks will
+                // Pulsing wireframe in the same three slots the streaks will
                 // fill, so the name does not shift when numbers arrive.
                 HStack(spacing: Theme.Space.l) {
-                    ForEach(0..<3, id: \.self) { _ in
+                    ForEach(0..<3, id: \.self) { index in
                         VStack(alignment: .leading, spacing: 4) {
-                            bar(width: 44, height: 8)
-                            bar(width: 62, height: 20)
+                            bar(width: 44, height: 8, phase: Double(index) * 0.1)
+                            bar(width: 62, height: 20, phase: Double(index) * 0.1 + 0.05)
                         }
                     }
                 }
@@ -254,9 +262,9 @@ struct HomeView: View {
     /// depends on what is installed, so this claims one and no more.
     private var panelPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            bar(width: 96, height: 11)
-            bar(width: nil, height: 10)
-            bar(width: nil, height: 10)
+            bar(width: 96, height: 11, phase: 0)
+            bar(width: nil, height: 10, phase: 0.08)
+            bar(width: nil, height: 10, phase: 0.16)
         }
         .padding(Theme.cardPadding)
         .frame(width: .panelWidth, alignment: .leading)
@@ -276,25 +284,25 @@ struct HomeView: View {
     private var activityPlaceholder: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: .top, spacing: Theme.Space.xl) {
-                ForEach(0..<3, id: \.self) { _ in
+                ForEach(0..<3, id: \.self) { index in
                     VStack(alignment: .leading, spacing: 6) {
-                        bar(width: 54, height: 9)
-                        bar(width: 88, height: 18)
+                        bar(width: 54, height: 9, phase: Double(index) * 0.1)
+                        bar(width: 88, height: 18, phase: Double(index) * 0.1 + 0.05)
                     }
                 }
                 Spacer(minLength: 0)
             }
             // The height the heatmap reserves for its grid, so the card is the
             // size it will still be a moment later.
-            bar(width: nil, height: 187)
+            bar(width: nil, height: 187, phase: 0.12)
         }
         .transition(.opacity)
     }
 
     /// Home's own name for the shared placeholder bar, so the call sites below
     /// read the way they did before it moved into `Skeleton`.
-    private func bar(width: CGFloat?, height: CGFloat) -> some View {
-        Skeleton.Bar(width: width, height: height)
+    private func bar(width: CGFloat?, height: CGFloat, phase: Double = 0) -> some View {
+        Skeleton.Bar(width: width, height: height, phase: phase)
     }
 
     private func streak(
