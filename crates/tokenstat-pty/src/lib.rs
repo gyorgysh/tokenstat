@@ -784,10 +784,7 @@ fn session_is_alive(session: &Session) -> bool {
     if !session.alive.load(Ordering::SeqCst) {
         return false;
     }
-    let mut child = session
-        .child
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
+    let mut child = session.child.lock().unwrap_or_else(PoisonError::into_inner);
     match child.try_wait() {
         Ok(None) => true,
         Ok(Some(_)) => {
@@ -840,7 +837,10 @@ fn clear_session_buffer(session: &Session) {
 fn prove_shell_ready(session: &Session, timeout: std::time::Duration) -> bool {
     let marker = format!("__TS_POOL_READY_{}__", next_marker());
     {
-        let mut writer = session.writer.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut writer = session
+            .writer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if writer
             .write_all(format!("echo {marker}\r").as_bytes())
             .is_err()
@@ -1180,15 +1180,12 @@ mod tests {
         false
     }
 
+    #[cfg(unix)]
     #[test]
     fn shell_login_flags_are_recognised() {
         assert!(shell_args_are_login_interactive(&[]));
-        assert!(shell_args_are_login_interactive(&[
-            "-il".to_string()
-        ]));
-        assert!(shell_args_are_login_interactive(&[
-            "-li".to_string()
-        ]));
+        assert!(shell_args_are_login_interactive(&["-il".to_string()]));
+        assert!(shell_args_are_login_interactive(&["-li".to_string()]));
         assert!(shell_args_are_login_interactive(&[
             "-i".to_string(),
             "-l".to_string()
@@ -1197,9 +1194,7 @@ mod tests {
             "-c".to_string(),
             "true".to_string()
         ]));
-        assert!(!shell_args_are_login_interactive(&[
-            "--login".to_string()
-        ]));
+        assert!(!shell_args_are_login_interactive(&["--login".to_string()]));
     }
 
     #[cfg(unix)]

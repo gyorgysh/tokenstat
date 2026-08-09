@@ -377,7 +377,9 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
     };
 
     if let Ok(mut cache) = workspace_status_cache().lock() {
-        cache.entries.insert(ws.id.clone(), (Instant::now(), dto.clone()));
+        cache
+            .entries
+            .insert(ws.id.clone(), (Instant::now(), dto.clone()));
     }
     dto
 }
