@@ -1274,12 +1274,7 @@ mod tests {
     use super::*;
 
     fn wait_for(mut f: impl FnMut() -> bool) -> bool {
-        wait_for_up_to(&mut f, 200)
-    }
-
-    /// Poll `f` up to `iterations` times, 25ms apart.
-    fn wait_for_up_to(f: &mut impl FnMut() -> bool, iterations: usize) -> bool {
-        for _ in 0..iterations {
+        for _ in 0..200 {
             if f() {
                 return true;
             }
@@ -1467,32 +1462,33 @@ mod tests {
         }
     }
 
-    /// Wait until a pooled shell has printed its prompt, so a handoff test is
+    /// Wait until a pooled shell is sitting at a prompt, so a handoff test is
     /// testing the ready case and not the mid-startup fallback.
+    ///
+    /// Readiness is proved by echoing a marker and waiting for it, the same
+    /// probe `prove_shell_ready` uses, rather than by waiting for "any new
+    /// bytes". The bytes after a profile are racy: `prove_shell_ready` clears
+    /// the buffer the moment its marker arrives, and the shell's following
+    /// prompt is sometimes already inside that cleared chunk — on a loaded
+    /// CI runner the buffer could then stay empty for the whole wait even
+    /// though the shell is fine. A marker command always produces output if
+    /// the shell is alive, so the probe cannot starve.
     #[cfg(unix)]
     fn wait_until_prompt(shell: &Arc<Session>) {
+        let marker = format!("__TS_PROMPT_{}__", next_marker());
+        {
+            let mut writer = shell.writer.lock().unwrap_or_else(PoisonError::into_inner);
+            writer
+                .write_all(format!("echo {marker}\r").as_bytes())
+                .expect("write prompt probe");
+            writer.flush().expect("flush prompt probe");
+        }
         assert!(
-            wait_for_up_to(
-                &mut || {
-                    !shell
-                        .buffer
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .data
-                        .is_empty()
-                },
-                // A fresh login shell on a loaded CI runner can take several
-                // seconds to source its profile and draw its first prompt
-                // bytes; the shared 5s `wait_for` window was tight enough to
-                // fail intermittently on macOS runners. The prompt wait is
-                // about readiness, not speed, so give it a generous 30s.
-                1200,
-            ),
-            "the pooled shell printed its prompt"
+            wait_for_marker(shell, &marker, POOL_READY_TIMEOUT),
+            "the pooled shell answered the prompt probe"
         );
-        // The first bytes can be a banner with the prompt still coming; a
-        // short grace makes the "sitting at a prompt" assumption honest.
-        std::thread::sleep(std::time::Duration::from_millis(250));
+        // Leave the handoff a clean transcript, like `prove_shell_ready` does.
+        clear_session_buffer(shell);
     }
 
     #[cfg(unix)]
