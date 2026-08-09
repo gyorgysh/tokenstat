@@ -81,3 +81,19 @@ struct LaunchSplashView: View {
         .accessibilityLabel("Starting tokenstat")
     }
 }
+
+/// Whether the host splash has finished and the real chrome may show tools.
+///
+/// Toolbar items attach to the window, not the opacity-0 split view, so each
+/// screen must gate its own buttons on this instead of hiding the whole
+/// window toolbar (which also took the traffic lights with it).
+private struct HostReadyKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var hostReady: Bool {
+        get { self[HostReadyKey.self] }
+        set { self[HostReadyKey.self] = newValue }
+    }
+}

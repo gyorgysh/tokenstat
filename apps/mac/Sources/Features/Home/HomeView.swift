@@ -18,6 +18,7 @@ struct HomeView: View {
     @Bindable var account: AccountModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.hostReady) private var hostReady
     /// Clicking a day on the heatmap goes to Insights filtered to it.
     var onSelectDay: ((HeatCell) -> Void)?
     /// Where the account flow lives, for the sign-in prompt when All machines
@@ -49,19 +50,23 @@ struct HomeView: View {
         }
         .background(Theme.background)
         .toolbar {
-            ToolbarItem {
-                Button {
-                    Task { await model.refresh() }
-                } label: {
-                    if model.isRefreshing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+            // Window toolbar is always present (traffic lights). Only add our
+            // controls once the splash has finished.
+            if hostReady {
+                ToolbarItem {
+                    Button {
+                        Task { await model.refresh() }
+                    } label: {
+                        if model.isRefreshing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
                     }
+                    .labelStyle(.iconOnly)
+                    .disabled(model.isLoading || model.isRefreshing)
+                    .help("Re-read the archive for this machine's activity and plan usage")
                 }
-                .labelStyle(.iconOnly)
-                .disabled(model.isLoading || model.isRefreshing)
-                .help("Re-read the archive for this machine's activity and plan usage")
             }
         }
         // Launch flow: app splash (logo) → these wireframes with a light pulse

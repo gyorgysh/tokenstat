@@ -158,10 +158,9 @@ struct RootView: View {
             }
         }
         .animation(.easeOut(duration: 0.32), value: launch.hostReady)
-        // Toolbar items live on the window chrome, not inside the opacity-0
-        // split view, so Home's refresh and the inspector toggle still showed
-        // on the splash. Hide the whole window toolbar until the host is up.
-        .toolbar(launch.hostReady ? .visible : .hidden, for: .windowToolbar)
+        // Screens gate their own toolbar items on this. Do not hide the whole
+        // window toolbar: that also removed the close / minimise / zoom buttons.
+        .environment(\.hostReady, launch.hostReady)
         .task {
             await launch.prepare()
         }
