@@ -124,6 +124,12 @@ struct RootView: View {
     /// The window's content width, published by `WindowScreenObserver` from
     /// resize notifications rather than measured inside the split view.
     @State private var windowContentWidth: CGFloat = 0
+    #if os(macOS)
+    /// Full screen switches to a native titlebar above the content (real
+    /// traffic lights on the system reveal bar). Windowed keeps the
+    /// transparent titlebar. Owned by `WindowScreenObserver`.
+    @State private var isFullScreen = false
+    #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
     /// consumed by the Automations screen once its runs have loaded.
     @State private var pendingRunID: String?
@@ -146,32 +152,11 @@ struct RootView: View {
         // lights stay because the window itself is already up with the splash.
         ZStack {
             if launch.hostReady {
-                NavigationSplitView(columnVisibility: sidebarVisibility) {
-                    sidebar
-                } detail: {
-                    detailColumn
-                        .toolbar {
-                            // The only toolbar the marks live on. Attaching a
-                            // second copy to the sidebar column made the window
-                            // chrome show two "Toggle Sidebar" buttons while
-                            // the sidebar was open. The detail column's
-                            // toolbar stays in the chrome whether the sidebar
-                            // is open or hidden, so one attachment is enough.
-                            ToolbarItem(placement: .navigation) {
-                                leftSidebarToolbarButton
-                            }
-                            if destinationHasInspector {
-                                ToolbarItem(placement: .primaryAction) {
-                                    rightInspectorToolbarButton
-                                }
-                            }
-                        }
-                }
-                .navigationSplitViewStyle(.balanced)
-                // Drop the stock NavigationSplitView toggle (glyph + "Hide
-                // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
-                .toolbar(removing: .sidebarToggle)
-                .transition(.opacity)
+                // Same NavigationSplitView chrome in both modes. Full screen only
+                // changes the AppKit titlebar (native bar above content); the
+                // toolbar items stay on the detail column.
+                mainChrome
+                    .transition(.opacity)
             } else {
                 LaunchSplashView()
                     .transition(.opacity)
@@ -240,7 +225,10 @@ struct RootView: View {
         // window frame follow it.
         .background {
             #if os(macOS)
-            WindowScreenObserver(contentWidth: $windowContentWidth)
+            WindowScreenObserver(
+                contentWidth: $windowContentWidth,
+                isFullScreen: $isFullScreen
+            )
             #else
             Color.clear
             #endif
@@ -391,6 +379,44 @@ struct RootView: View {
             }
             Task { await workspaces.loadRemote() }
         }
+    }
+
+    /// Shared chrome: NavigationSplitView with the window toolbar.
+    ///
+    /// Windowed hides the toolbar material so content blends under a
+    /// transparent titlebar. Full screen shows the material: that is the
+    /// native control bar above the content, with real traffic lights.
+    private var mainChrome: some View {
+        NavigationSplitView(columnVisibility: sidebarVisibility) {
+            sidebar
+        } detail: {
+            detailColumn
+                .toolbar {
+                    // The only toolbar the marks live on. Attaching a
+                    // second copy to the sidebar column made the window
+                    // chrome show two "Toggle Sidebar" buttons while
+                    // the sidebar was open. The detail column's
+                    // toolbar stays in the chrome whether the sidebar
+                    // is open or hidden, so one attachment is enough.
+                    ToolbarItem(placement: .navigation) {
+                        leftSidebarToolbarButton
+                    }
+                    if destinationHasInspector {
+                        ToolbarItem(placement: .primaryAction) {
+                            rightInspectorToolbarButton
+                        }
+                    }
+                }
+        }
+        .navigationSplitViewStyle(.balanced)
+        // Drop the stock NavigationSplitView toggle (glyph + "Hide
+        // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
+        .toolbar(removing: .sidebarToggle)
+        #if os(macOS)
+        .toolbarBackground(isFullScreen ? .visible : .hidden, for: .windowToolbar)
+        #else
+        .toolbarBackground(.hidden, for: .windowToolbar)
+        #endif
     }
 
     /// Leading sidebar mark for toolbars (sidebar column and detail column).
@@ -876,7 +902,7 @@ struct RootView: View {
                 // not.
                 Wordmark()
                     .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.s)
+                    .padding(.top, Theme.Space.m)
                     .padding(.bottom, Theme.Space.m)
 
                 // No heading over these. They are the app's four screens and
@@ -1054,7 +1080,13 @@ struct RootView: View {
         // between menus. A flat colour cannot flash, and the ScrollView's own
         // default background layer is stripped so nothing white can show
         // through the overscroll area either.
-        .background(Theme.sidebar)
+        //
+        // Ignoring top/leading/bottom safe areas lets the colour meet the
+        // windowed titlebar gap patch and run flush to the screen edges in
+        // full screen. The trailing edge still meets the split divider.
+        .background {
+            Theme.sidebar.ignoresSafeArea(edges: [.top, .leading, .bottom])
+        }
         .scrollContentBackground(.hidden)
         .navigationSplitViewColumnWidth(
             min: Self.sidebarMinimumWidth,
