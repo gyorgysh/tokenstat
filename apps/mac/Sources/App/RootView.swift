@@ -351,32 +351,108 @@ struct RootView: View {
         .toolbar {
             // Nothing in the toolbar while the splash is up: the window should
             // be mark-only, like a real product splash, not a half-loaded app.
-            if launch.hostReady, destinationHasInspector {
-                ToolbarItem {
-                    Button {
-                        isInspectorPresented.toggle()
-                        if isInspectorPresented {
-                            // Below the fit edge a press means "show me the
-                            // pane": pin the overlay so it stays past the
-                            // hover. Above the edge the column simply opens.
-                            isOverlayPinned = true
-                            isOverlayVisible = true
-                        } else {
-                            isOverlayPinned = false
-                            isOverlayVisible = false
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.right")
-                    }
-                    .keyboardShortcut("i", modifiers: [.command, .option])
-                    .help(
-                        inspectorFits
-                            ? (isInspectorPresented ? "Hide inspector" : "Show inspector")
-                            : (isInspectorPresented ? "Hide inspector" : "Peek inspector")
+            if launch.hostReady {
+                ToolbarItem(placement: .navigation) {
+                    // Shortcuts live on the View menu (⌘B / ⌥⌘B), not here:
+                    // a second .keyboardShortcut would fire twice, and a
+                    // focused editor would still steal ⌘B for bold.
+                    SidebarToggleButton(
+                        edge: .leading,
+                        isOpen: isLeftSidebarOpen,
+                        action: toggleLeftSidebar,
+                        help: isLeftSidebarOpen
+                            ? "Hide sidebar (⌘B)"
+                            : "Show sidebar (⌘B)"
                     )
+                }
+                if destinationHasInspector {
+                    ToolbarItem(placement: .primaryAction) {
+                        SidebarToggleButton(
+                            edge: .trailing,
+                            isOpen: isRightSidebarOpen,
+                            action: toggleRightSidebar,
+                            help: isRightSidebarOpen
+                                ? "Hide inspector (⌥⌘B)"
+                                : (inspectorFits
+                                    ? "Show inspector (⌥⌘B)"
+                                    : "Peek inspector (⌥⌘B)")
+                        )
+                    }
                 }
             }
         }
+        // View menu shortcuts (and the toolbar buttons) post here so a
+        // focused editor cannot swallow ⌘B as "bold".
+        .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
+            guard launch.hostReady else { return }
+            toggleLeftSidebar()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
+            guard launch.hostReady, destinationHasInspector else { return }
+            toggleRightSidebar()
+        }
+    }
+
+    /// Whether the leading sidebar is on screen as a column or a pinned float.
+    private var isLeftSidebarOpen: Bool {
+        if usesOverlaySidebar {
+            // Floating: open means the user pinned it, or it is currently
+            // peaking under the pointer.
+            return isSidebarPinned || isSidebarOverlayVisible
+        }
+        // Until width is known, treat as open so the glyph matches the
+        // default `.all` column visibility at first paint.
+        if windowContentWidth <= 0 { return true }
+        return columnVisibilityChoice == .all
+    }
+
+    /// Whether the inspector is on screen as a column or a floating pane.
+    private var isRightSidebarOpen: Bool {
+        guard destinationHasInspector else { return false }
+        if usesOverlayInspector {
+            return isOverlayPinned || isOverlayVisible
+        }
+        return isInspectorPresented && inspectorFits
+    }
+
+    /// Toggle the leading sidebar column (or its pinned float below the fit
+    /// edge). Same action as ⌘B and the toolbar mark.
+    private func toggleLeftSidebar() {
+        if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
+            // Narrow window: the column cannot hold, so pin/unpin the float.
+            if isSidebarPinned {
+                isSidebarPinned = false
+                isSidebarOverlayVisible = false
+            } else {
+                isSidebarPinned = true
+                isSidebarOverlayVisible = true
+                columnVisibilityChoice = .all
+            }
+            return
+        }
+        if columnVisibilityChoice == .all {
+            columnVisibilityChoice = .detailOnly
+            isSidebarOverlayVisible = false
+            isSidebarPinned = false
+        } else {
+            columnVisibilityChoice = .all
+            isSidebarPinned = false
+        }
+    }
+
+    /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.
+    private func toggleRightSidebar() {
+        guard destinationHasInspector else { return }
+        if isRightSidebarOpen {
+            closeInspector()
+            return
+        }
+        isInspectorPresented = true
+        // Below the fit edge a press means "show me the pane": pin the
+        // overlay so it stays past the hover. Above the edge the column
+        // simply opens.
+        isOverlayPinned = true
+        isOverlayVisible = true
     }
 
     /// The narrowest the detail column may be. `minimumContentWidth` is this

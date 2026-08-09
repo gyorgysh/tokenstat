@@ -929,49 +929,66 @@ private struct LaunchSurface: View {
 
 /// Quiet path affordance on a launch tile.
 ///
-/// Separate from the launch `Button` so a click on the (i) cannot start a
-/// session. Hover shows the resolved command (native tooltip); click copies it.
+/// Not a button and not a clipboard action: just a faint mark that, on hover,
+/// shows the resolved command in a small bubble matching the rest of the
+/// chrome. Separate from the launch `Button` so the hover target cannot start
+/// a session.
 private struct LaunchPathHint: View {
     let path: String
     @State private var hovering = false
-    @State private var copied = false
 
     var body: some View {
-        Button {
-            #if os(macOS)
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(path, forType: .string)
-            copied = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.2))
-                copied = false
+        Image(systemName: "info.circle")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(
+                hovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.45)
+            )
+            .frame(width: 18, height: 18)
+            .background(
+                Circle().fill(hovering ? Theme.controlSeat : Color.clear)
+            )
+            .contentShape(Circle())
+            .onHover { hovering = $0 }
+            .overlay(alignment: .topTrailing) {
+                if hovering {
+                    pathBubble
+                        // Sit above the tile corner so it is not clipped by
+                        // the grid cell or the mark underneath.
+                        .offset(x: 4, y: -4)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+                }
             }
-            #endif
-        } label: {
-            Image(systemName: copied ? "checkmark" : "info.circle")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(
-                    hovering || copied
-                        ? Theme.controlGlyphHover
-                        : Theme.controlGlyph.opacity(0.55)
-                )
-                .frame(width: 20, height: 20)
-                .background(
-                    Circle().fill(
-                        hovering || copied
-                            ? Theme.controlSeat
-                            : Color.clear
-                    )
-                )
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help(copied ? "Copied" : path)
-        .accessibilityLabel(copied ? "Path copied" : "Command path")
-        .accessibilityValue(path)
-        .accessibilityHint("Copies the path to the clipboard")
+            .animation(.easeOut(duration: 0.12), value: hovering)
+            .zIndex(hovering ? 1 : 0)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Command path")
+            .accessibilityValue(path)
+    }
+
+    private var pathBubble: some View {
+        Text(path)
+            .font(Theme.mono(10))
+            .foregroundStyle(.primary)
+            .lineLimit(2)
+            .multilineTextAlignment(.trailing)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: 260, alignment: .trailing)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Theme.panel)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 2)
+            // Anchor to the top-trailing of the (i) so the bubble grows up
+            // and left, away from the tile centre and the mark.
+            .fixedSize(horizontal: false, vertical: true)
+            .alignmentGuide(.top) { $0[.bottom] }
+            .alignmentGuide(.trailing) { $0[.trailing] }
+            .allowsHitTesting(false)
     }
 }
 

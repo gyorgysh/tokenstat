@@ -637,6 +637,84 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
+/// Left or right chrome toggle, drawn as a rounded frame with a rail on the
+/// chosen edge so open and closed read at a glance.
+///
+/// Not `sidebar.left` / `sidebar.right`: those glyphs do not change with state
+/// the way this one does (filled rail when open, empty frame when closed), and
+/// they do not match the product chrome used elsewhere.
+struct SidebarToggleButton: View {
+    enum Edge {
+        case leading
+        case trailing
+    }
+
+    let edge: Edge
+    /// Whether the pane this button controls is currently on screen.
+    let isOpen: Bool
+    let action: () -> Void
+    var help: String = ""
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            SidebarToggleGlyph(edge: edge, isOpen: isOpen, isHovering: isHovering)
+                .frame(width: 28, height: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(isOpen ? .isSelected : [])
+    }
+}
+
+/// The mark itself: a rounded outer frame and a vertical rail on one side.
+///
+/// Open = rail filled with the accent. Closed = quiet stroke only. Hover
+/// lifts the frame so the control reads as live without needing a second
+/// background chrome behind the whole toolbar.
+struct SidebarToggleGlyph: View {
+    let edge: SidebarToggleButton.Edge
+    let isOpen: Bool
+    var isHovering: Bool = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .strokeBorder(frameColor, lineWidth: 1.25)
+            HStack(spacing: 0) {
+                if edge == .trailing { Spacer(minLength: 0) }
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(railColor)
+                    .frame(width: isOpen ? 5 : 3.5)
+                    .padding(.vertical, 3.5)
+                    .padding(edge == .leading ? .leading : .trailing, 3.5)
+                if edge == .leading { Spacer(minLength: 0) }
+            }
+        }
+        .frame(width: 20, height: 16)
+        // A faint seat on hover, same language as close / tab controls.
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isHovering ? Theme.controlSeat : Color.clear)
+                .frame(width: 28, height: 22)
+        )
+    }
+
+    private var frameColor: Color {
+        if isOpen { return Theme.accent.opacity(isHovering ? 0.95 : 0.75) }
+        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.75)
+    }
+
+    private var railColor: Color {
+        if isOpen { return Theme.accent }
+        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.55)
+    }
+}
+
 /// Closes the right pane, from inside the right pane.
 ///
 /// The toolbar has a toggle, but a toolbar button on the far side of the window

@@ -28,6 +28,10 @@ extension Notification.Name {
     #if os(macOS)
     /// Posted by the File menu, acted on by the window that owns the folders.
     static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
+    /// View menu / ⌘B: toggle the leading sidebar. RootView acts.
+    static let toggleLeftSidebar = Notification.Name("ai.tokenstat.toggleLeftSidebar")
+    /// View menu / ⌥⌘B: toggle the trailing inspector. RootView acts.
+    static let toggleRightSidebar = Notification.Name("ai.tokenstat.toggleRightSidebar")
     #endif
     /// The local archive gained or changed events (scan, remote fetch). Home
     /// re-reads its heatmap without a full window restart.
@@ -82,6 +86,19 @@ struct TokenstatApp: App {
                     NotificationCenter.default.post(name: .addWorkspaceRequested, object: nil)
                 }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+            // Sidebar toggles live on RootView. The menu posts and the window
+            // acts, same shape as Add Workspace, so the shortcut works when a
+            // text field would otherwise claim ⌘B for bold.
+            CommandGroup(after: .sidebar) {
+                Button("Toggle Sidebar") {
+                    NotificationCenter.default.post(name: .toggleLeftSidebar, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command])
+                Button("Toggle Inspector") {
+                    NotificationCenter.default.post(name: .toggleRightSidebar, object: nil)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .option])
             }
         }
         #endif
