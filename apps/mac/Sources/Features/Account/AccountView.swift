@@ -382,14 +382,16 @@ struct AccountView: View {
         }
     }
 
-    /// Where deletion happens: `{host}/settings/data` on the website.
+    /// Where deletion happens: `{host}/settings/data#delete` on the website.
+    /// The fragment jumps to the delete section once the page loads, so the
+    /// button lands on the section instead of the top of the page.
     private static var defaultDeletionURL: URL {
-        URL(string: "https://tokenstat.ai/settings/data")!
+        URL(string: "https://tokenstat.ai/settings/data#delete")!
     }
 
     private func openAccountDeletion() {
         let host = model.account?.host ?? "https://tokenstat.ai"
-        guard let url = URL(string: "\(host)/settings/data") else { return }
+        guard let url = URL(string: "\(host)/settings/data#delete") else { return }
         #if os(macOS)
         openURL(url)
         #else
