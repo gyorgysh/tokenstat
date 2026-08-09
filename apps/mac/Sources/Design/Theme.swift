@@ -637,12 +637,12 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
-/// Left or right chrome toggle, drawn as a rounded frame with a rail on the
-/// chosen edge so open and closed read at a glance.
+/// Left or right chrome toggle, drawn as a rounded frame with a rail (open)
+/// or an accent dot (closed) so the two states read at a glance.
 ///
-/// Not `sidebar.left` / `sidebar.right`: those glyphs do not change with state
-/// the way this one does (filled rail when open, empty frame when closed), and
-/// they do not match the product chrome used elsewhere.
+/// Not the system `sidebar.left` / `sidebar.right` glyphs: those ignore our
+/// open/closed colour language, and NavigationSplitView installs its own
+/// toggle with a different help string. RootView removes that and uses this.
 struct SidebarToggleButton: View {
     enum Edge {
         case leading
@@ -653,6 +653,7 @@ struct SidebarToggleButton: View {
     /// Whether the pane this button controls is currently on screen.
     let isOpen: Bool
     let action: () -> Void
+    /// Full help string, including the shortcut (e.g. "Hide Sidebar (⌘B)").
     var help: String = ""
 
     @State private var isHovering = false
@@ -660,7 +661,7 @@ struct SidebarToggleButton: View {
     var body: some View {
         Button(action: action) {
             SidebarToggleGlyph(edge: edge, isOpen: isOpen, isHovering: isHovering)
-                .frame(width: 28, height: 22)
+                .frame(width: 30, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -671,11 +672,11 @@ struct SidebarToggleButton: View {
     }
 }
 
-/// The mark itself: a rounded outer frame and a vertical rail on one side.
+/// The mark itself.
 ///
-/// Open = rail filled with the accent. Closed = quiet stroke only. Hover
-/// lifts the frame so the control reads as live without needing a second
-/// background chrome behind the whole toolbar.
+/// - **Open:** rounded frame + filled vertical rail on the pane's edge.
+/// - **Closed:** rounded frame + accent circle on that edge (the “there is a
+///   hidden panel” cue), so closed is not just a quieter open.
 struct SidebarToggleGlyph: View {
     let edge: SidebarToggleButton.Edge
     let isOpen: Bool
@@ -685,33 +686,43 @@ struct SidebarToggleGlyph: View {
         ZStack {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .strokeBorder(frameColor, lineWidth: 1.25)
-            HStack(spacing: 0) {
-                if edge == .trailing { Spacer(minLength: 0) }
-                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                    .fill(railColor)
-                    .frame(width: isOpen ? 5 : 3.5)
-                    .padding(.vertical, 3.5)
-                    .padding(edge == .leading ? .leading : .trailing, 3.5)
-                if edge == .leading { Spacer(minLength: 0) }
+                .frame(width: 20, height: 16)
+
+            if isOpen {
+                HStack(spacing: 0) {
+                    if edge == .trailing { Spacer(minLength: 0) }
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(Theme.accent)
+                        .frame(width: 5)
+                        .padding(.vertical, 3.5)
+                        .padding(edge == .leading ? .leading : .trailing, 3.5)
+                    if edge == .leading { Spacer(minLength: 0) }
+                }
+                .frame(width: 20, height: 16)
+            } else {
+                // Closed: accent dot on the outer corner of the pane edge,
+                // the cue that the panel is hidden and can be brought back.
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().strokeBorder(Theme.panel, lineWidth: 1))
+                    .offset(
+                        x: edge == .leading ? -8 : 8,
+                        y: -7
+                    )
             }
         }
         .frame(width: 20, height: 16)
-        // A faint seat on hover, same language as close / tab controls.
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isHovering ? Theme.controlSeat : Color.clear)
-                .frame(width: 28, height: 22)
+                .frame(width: 30, height: 24)
         )
     }
 
     private var frameColor: Color {
-        if isOpen { return Theme.accent.opacity(isHovering ? 0.95 : 0.75) }
-        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.75)
-    }
-
-    private var railColor: Color {
-        if isOpen { return Theme.accent }
-        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.55)
+        if isOpen { return Theme.accent.opacity(isHovering ? 0.95 : 0.8) }
+        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.8)
     }
 }
 

@@ -151,6 +151,11 @@ struct RootView: View {
                     detailColumn
                 }
                 .navigationSplitViewStyle(.balanced)
+                // System installs its own sidebar toggle with a different help
+                // string ("Hide Sidebar", no shortcut) and the stock glyph. We
+                // draw both panes ourselves; drop the system control so the
+                // custom marks and ⌘B / ⌥⌘B help are the only ones people see.
+                .toolbar(removing: .sidebarToggle)
                 .transition(.opacity)
             } else {
                 LaunchSplashView()
@@ -351,31 +356,34 @@ struct RootView: View {
         .toolbar {
             // Nothing in the toolbar while the splash is up: the window should
             // be mark-only, like a real product splash, not a half-loaded app.
+            // Shortcuts live on the View menu (⌘B / ⌥⌘B) so a focused editor
+            // does not steal ⌘B as bold and a second .keyboardShortcut here
+            // does not double-fire.
             if launch.hostReady {
                 ToolbarItem(placement: .navigation) {
-                    // Shortcuts live on the View menu (⌘B / ⌥⌘B), not here:
-                    // a second .keyboardShortcut would fire twice, and a
-                    // focused editor would still steal ⌘B for bold.
                     SidebarToggleButton(
                         edge: .leading,
                         isOpen: isLeftSidebarOpen,
                         action: toggleLeftSidebar,
                         help: isLeftSidebarOpen
-                            ? "Hide sidebar (⌘B)"
-                            : "Show sidebar (⌘B)"
+                            ? "Hide Sidebar (⌘B)"
+                            : "Show Sidebar (⌘B)"
                     )
                 }
+                // primaryAction is the trailing side on macOS (topBarTrailing
+                // is iOS-only). Own id so sibling toolbars from Insights /
+                // Home do not coalesce this mark away.
                 if destinationHasInspector {
-                    ToolbarItem(placement: .primaryAction) {
+                    ToolbarItem(id: "tokenstat.inspectorToggle", placement: .primaryAction) {
                         SidebarToggleButton(
                             edge: .trailing,
                             isOpen: isRightSidebarOpen,
                             action: toggleRightSidebar,
                             help: isRightSidebarOpen
-                                ? "Hide inspector (⌥⌘B)"
+                                ? "Hide Inspector (⌥⌘B)"
                                 : (inspectorFits
-                                    ? "Show inspector (⌥⌘B)"
-                                    : "Peek inspector (⌥⌘B)")
+                                    ? "Show Inspector (⌥⌘B)"
+                                    : "Peek Inspector (⌥⌘B)")
                         )
                     }
                 }

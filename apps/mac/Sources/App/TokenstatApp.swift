@@ -100,6 +100,8 @@ struct TokenstatApp: App {
                 }
                 .keyboardShortcut("b", modifiers: [.command, .option])
             }
+            // Note: help strings on the toolbar marks also carry ⌘B / ⌥⌘B so
+            // the hover tooltip teaches the shortcut without opening the menu.
         }
         #endif
     }

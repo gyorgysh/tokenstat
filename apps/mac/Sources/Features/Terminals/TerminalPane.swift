@@ -813,20 +813,16 @@ private struct LaunchSurface: View {
     }
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
-        let isLaunching = launching == profile.id
-        // Path lives on a corner (i), not under the name. Absolute paths were
-        // the noisiest thing on this grid and competed with the brand marks;
-        // Browser/Files keep their short human subtitles.
-        return ZStack(alignment: .topTrailing) {
-            Button {
+        LaunchTile(
+            profile: profile,
+            isLaunching: launching == profile.id,
+            othersBusy: launching != nil && launching != profile.id,
+            onBegin: {
                 guard launching == nil else { return }
                 launching = profile.id
                 let args = workspaces.bypassPermissions(for: folder.id)
                     ? profile.args + profile.bypassArgs
                     : profile.args
-                // Pending session and pane switch are synchronous. The host call
-                // runs after, so the tty pane is already up for the round trip
-                // instead of waiting on a Task hop with the launcher still drawn.
                 let session = terminals.begin(
                     workspace: folder,
                     command: profile.command,
@@ -843,56 +839,8 @@ private struct LaunchSurface: View {
                     )
                     launching = nil
                 }
-            } label: {
-                VStack(spacing: Theme.Space.s) {
-                    // The spinner takes the mark's place rather than sitting beside
-                    // it, so the tile does not change size the instant it is hit.
-                    if isLaunching {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(height: 34)
-                    } else if let harness = profile.harnessID {
-                        HarnessMark(id: harness, size: 34)
-                    } else {
-                        Image(systemName: profile.symbol ?? "terminal")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Theme.accent)
-                            .frame(height: 34)
-                    }
-                    Text(profile.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                    // Reserve the third line so tiles match Browser/Files height
-                    // without printing a path. Only "Starting…" is content.
-                    Text(isLaunching ? "Starting…" : " ")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .opacity(isLaunching ? 1 : 0)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Theme.Space.m)
-                .background(
-                    isLaunching ? Theme.accent.opacity(0.12) : Theme.panel,
-                    in: RoundedRectangle(cornerRadius: Theme.cardRadius)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.cardRadius)
-                        .strokeBorder(isLaunching ? Theme.accent : Theme.border, lineWidth: 1)
-                )
-                .contentShape(.rect)
             }
-            .buttonStyle(.plain)
-            // Every other tile goes quiet while one is starting. Two sessions from
-            // one impatient double click is not what the second click meant.
-            .disabled(launching != nil && !isLaunching)
-            .opacity(launching != nil && !isLaunching ? 0.5 : 1)
-
-            if !isLaunching {
-                LaunchPathHint(path: profile.command)
-                    .padding(.top, 7)
-                    .padding(.trailing, 7)
-            }
-        }
+        )
     }
 
     private func utilityButton(
@@ -927,68 +875,108 @@ private struct LaunchSurface: View {
     }
 }
 
-/// Quiet path affordance on a launch tile.
+/// One agent tile: mark, name, and a path (i) that only appears when the
+/// pointer is over the tile.
 ///
-/// Not a button and not a clipboard action: just a faint mark that, on hover,
-/// shows the resolved command in a small bubble matching the rest of the
-/// chrome. Separate from the launch `Button` so the hover target cannot start
-/// a session.
-private struct LaunchPathHint: View {
-    let path: String
-    @State private var hovering = false
+/// Its own view so hover state is stable. The old free function could not hold
+/// `@State`, and the (i) was either invisible (too faint) or not receiving
+/// hover because the launch `Button` ate the hit area.
+private struct LaunchTile: View {
+    let profile: LaunchProfile
+    let isLaunching: Bool
+    let othersBusy: Bool
+    let onBegin: () -> Void
+
+    @State private var tileHovering = false
+    @State private var pathHovering = false
 
     var body: some View {
-        Image(systemName: "info.circle")
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(
-                hovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.45)
-            )
-            .frame(width: 18, height: 18)
-            .background(
-                Circle().fill(hovering ? Theme.controlSeat : Color.clear)
-            )
-            .contentShape(Circle())
-            .onHover { hovering = $0 }
-            .overlay(alignment: .topTrailing) {
-                if hovering {
-                    pathBubble
-                        // Sit above the tile corner so it is not clipped by
-                        // the grid cell or the mark underneath.
-                        .offset(x: 4, y: -4)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+        ZStack(alignment: .topTrailing) {
+            Button(action: onBegin) {
+                VStack(spacing: Theme.Space.s) {
+                    if isLaunching {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(height: 34)
+                    } else if let harness = profile.harnessID {
+                        HarnessMark(id: harness, size: 34)
+                    } else {
+                        Image(systemName: profile.symbol ?? "terminal")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.accent)
+                            .frame(height: 34)
+                    }
+                    Text(profile.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    Text(isLaunching ? "Starting…" : " ")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .opacity(isLaunching ? 1 : 0)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Space.m)
+                .background(
+                    isLaunching ? Theme.accent.opacity(0.12) : Theme.panel,
+                    in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.cardRadius)
+                        .strokeBorder(isLaunching ? Theme.accent : Theme.border, lineWidth: 1)
+                )
+                .contentShape(.rect)
             }
-            .animation(.easeOut(duration: 0.12), value: hovering)
-            .zIndex(hovering ? 1 : 0)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Command path")
-            .accessibilityValue(path)
+            .buttonStyle(.plain)
+            .disabled(othersBusy)
+            .opacity(othersBusy ? 0.5 : 1)
+            .onHover { tileHovering = $0 }
+
+            if !isLaunching, tileHovering || pathHovering {
+                pathHint
+                    .padding(.top, 6)
+                    .padding(.trailing, 6)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: tileHovering || pathHovering)
+        // Path bubble may extend past the cell; keep it above neighbours.
+        .zIndex(pathHovering || tileHovering ? 10 : 0)
     }
 
-    private var pathBubble: some View {
-        Text(path)
-            .font(Theme.mono(10))
-            .foregroundStyle(.primary)
-            .lineLimit(2)
-            .multilineTextAlignment(.trailing)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(maxWidth: 260, alignment: .trailing)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Theme.panel)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.18), radius: 8, x: 0, y: 2)
-            // Anchor to the top-trailing of the (i) so the bubble grows up
-            // and left, away from the tile centre and the mark.
-            .fixedSize(horizontal: false, vertical: true)
-            .alignmentGuide(.top) { $0[.bottom] }
-            .alignmentGuide(.trailing) { $0[.trailing] }
-            .allowsHitTesting(false)
+    private var pathHint: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            if pathHovering {
+                Text(profile.command)
+                    .font(Theme.mono(10))
+                    .foregroundStyle(.primary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.trailing)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .frame(maxWidth: 280, alignment: .trailing)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Theme.panel)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .allowsHitTesting(false)
+            }
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 12, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Theme.controlGlyphHover)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(Theme.controlSeat))
+                .contentShape(Circle())
+                .onHover { pathHovering = $0 }
+                .accessibilityLabel("Command path")
+                .accessibilityValue(profile.command)
+        }
     }
 }
 
