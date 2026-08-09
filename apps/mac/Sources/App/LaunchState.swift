@@ -13,12 +13,9 @@ import SwiftUI
 /// real window (wireframes → data).
 ///
 /// Three beats, on purpose:
-/// 1. **Splash** — animated mark while launchd / the socket comes up.
-/// 2. **Wireframes** — Home (and peers) draw sharp skeletons with a light pulse.
+/// 1. **Splash** — mark only, full window, while launchd / the socket comes up.
+/// 2. **Wireframes** — Home draws pulsing skeletons while the archive answers.
 /// 3. **Content** — numbers replace skeletons with a short fade.
-///
-/// Collapsing those into one blurred pane made the wait feel longer than it
-/// was. Separating them lets each phase finish cleanly.
 @MainActor
 @Observable
 final class LaunchState {
@@ -26,7 +23,7 @@ final class LaunchState {
     private(set) var hostReady = false
 
     /// Shortest the splash stays on screen, so a hot host is not a one-frame flash.
-    private static let minimumSplash: Duration = .milliseconds(480)
+    private static let minimumSplash: Duration = .milliseconds(560)
 
     /// Longest we wait for the host before showing the app over in-process.
     private static let hostDeadline: Duration = .seconds(8)
@@ -64,22 +61,22 @@ final class LaunchState {
     }
 }
 
-/// Full-window splash: brand mark only, no wireframe underneath.
+/// Full-window splash: mark only, no wordmark, no chrome underneath.
+///
+/// Matches the product pattern of a quiet centre mark while the process
+/// warms. The sidebar and detail stay in the tree at zero opacity; this
+/// layer covers them completely so nothing menu-like peeks through.
 struct LaunchSplashView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
             Theme.background
-            VStack(spacing: Theme.Space.m) {
-                LogoMark(size: 48, animated: !reduceMotion)
-                Text("tokenstat")
-                    .font(.system(size: 15, weight: .semibold))
-                    .textCase(.lowercase)
-                    .foregroundStyle(.secondary)
-            }
+                .ignoresSafeArea()
+            LogoMark(size: 44, animated: !reduceMotion)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Starting tokenstat")
     }

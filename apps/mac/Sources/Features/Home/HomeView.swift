@@ -17,6 +17,7 @@ struct HomeView: View {
     @Bindable var model: HomeModel
     @Bindable var account: AccountModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     /// Clicking a day on the heatmap goes to Insights filtered to it.
     var onSelectDay: ((HeatCell) -> Void)?
     /// Where the account flow lives, for the sign-in prompt when All machines
@@ -47,6 +48,22 @@ struct HomeView: View {
             .padding(Theme.Space.s)
         }
         .background(Theme.background)
+        .toolbar {
+            ToolbarItem {
+                Button {
+                    Task { await model.refresh() }
+                } label: {
+                    if model.isRefreshing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .disabled(model.isLoading || model.isRefreshing)
+                .help("Re-read the archive for this machine's activity and plan usage")
+            }
+        }
         // Launch flow: app splash (logo) → these wireframes with a light pulse
         // → real content fades in. The splash is owned by RootView.
         // Leaving the screen while a cell is under the pointer: the popover
@@ -67,6 +84,16 @@ struct HomeView: View {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await model.loadPlanLimits()
+        }
+        // App came back to the front: quiet re-read if the last load is old.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await model.refreshIfStale() }
+        }
+        // Insights Scan wrote new events into the archive; Home must not keep
+        // showing yesterday's heatmap until the window is reopened.
+        .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
+            Task { await model.load(quiet: true) }
         }
     }
 

@@ -266,6 +266,12 @@ struct RootView: View {
             guard destination == .insights else { return }
             await model.load()
         }
+        // Returning to Home after work elsewhere: quiet re-read if the last
+        // load is older than the stale window (see HomeModel.refreshIfStale).
+        .onChange(of: destination) { _, next in
+            guard next == .home else { return }
+            Task { await home.refreshIfStale() }
+        }
         // Sidebar footer needs the handle, but not on the first frame. A short
         // yield lets Home's archive calls claim the host first.
         .task {
@@ -331,7 +337,9 @@ struct RootView: View {
         // ensureHosted here: that would race the splash and reinstall thrash.
         #endif
         .toolbar {
-            if destinationHasInspector {
+            // Nothing in the toolbar while the splash is up: the window should
+            // be mark-only, like a real product splash, not a half-loaded app.
+            if launch.hostReady, destinationHasInspector {
                 ToolbarItem {
                     Button {
                         isInspectorPresented.toggle()

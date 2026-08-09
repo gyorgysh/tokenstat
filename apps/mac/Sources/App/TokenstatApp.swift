@@ -24,12 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 #endif
 
-#if os(macOS)
 extension Notification.Name {
+    #if os(macOS)
     /// Posted by the File menu, acted on by the window that owns the folders.
     static let addWorkspaceRequested = Notification.Name("ai.tokenstat.addWorkspaceRequested")
+    #endif
+    /// The local archive gained or changed events (scan, remote fetch). Home
+    /// re-reads its heatmap without a full window restart.
+    static let archiveDidChange = Notification.Name("ai.tokenstat.archiveDidChange")
 }
-#endif
 
 @main
 struct TokenstatApp: App {

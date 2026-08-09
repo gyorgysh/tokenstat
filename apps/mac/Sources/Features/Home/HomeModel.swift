@@ -87,10 +87,18 @@ final class HomeModel {
     var planBySource: [Bucket] = []
 
     var isLoading = false
+    /// Quiet re-read in progress (toolbar refresh, return to Home, post-scan).
+    /// Does not flip `isLoading`, so wireframes do not replace drawn content.
+    private(set) var isRefreshing = false
     var errorMessage: String?
 
     private var hostRetryTask: Task<Void, Never>?
     private var hostRetryCount = 0
+    /// When the archive was last successfully read. Used to skip redundant
+    /// quiet refreshes when the user bounces between destinations.
+    private var lastLoadedAt: Date?
+    /// Minimum age before an automatic quiet refresh will hit the host again.
+    private static let quietRefreshStale: TimeInterval = 45
 
     // MARK: - Day hover detail
 
@@ -115,9 +123,23 @@ final class HomeModel {
         today.map { [$0].totalValue } ?? Money(micros: 0, estimated: false, complete: true)
     }
 
-    func load() async {
-        isLoading = true
-        defer { isLoading = false }
+    /// Load archive-backed Home data.
+    ///
+    /// - Parameter quiet: when true (and content is already on screen), do not
+    ///   set `isLoading`, so the heatmap stays put while numbers update. Used
+    ///   for toolbar refresh, returning to Home, app activation, and post-scan.
+    func load(quiet: Bool = false) async {
+        let soft = quiet && calendar != nil
+        if soft {
+            guard !isRefreshing, !isLoading else { return }
+            isRefreshing = true
+        } else {
+            isLoading = true
+        }
+        defer {
+            isLoading = false
+            isRefreshing = false
+        }
         do {
             async let calendar = Bridge.activityCalendar(scope: scope.wire)
             async let daily = Bridge.report(group: .day, query: Query())
@@ -157,12 +179,33 @@ final class HomeModel {
 
             self.planBySource = try await plan
             errorMessage = nil
+            lastLoadedAt = Date()
             hostRetryCount = 0
             hostRetryTask?.cancel()
         } catch {
             errorMessage = error.localizedDescription
             scheduleHostRetryIfNeeded(error)
         }
+    }
+
+    /// Explicit re-read from the toolbar. Always hits the host; also refreshes
+    /// plan limit cards so one control covers the whole Home surface.
+    func refresh() async {
+        await load(quiet: true)
+        await loadPlanLimits()
+    }
+
+    /// Automatic re-read when the user comes back to Home or the app wakes.
+    ///
+    /// Skips if a load is already running, or the last successful load is
+    /// fresher than `quietRefreshStale`, so bouncing the sidebar is free.
+    func refreshIfStale() async {
+        if let last = lastLoadedAt,
+           Date().timeIntervalSince(last) < Self.quietRefreshStale
+        {
+            return
+        }
+        await load(quiet: true)
     }
 
     /// Keep trying while the host is still booting.

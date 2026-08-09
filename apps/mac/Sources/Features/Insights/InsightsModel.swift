@@ -228,6 +228,8 @@ final class InsightsModel {
             showAction("Scan complete: added \(report.eventsNew) new events from \(report.filesRead) files.")
             startCooldown(seconds: 10, clearing: \.scanCooldownUntil)
             await refresh()
+            // Home's heatmap is a separate model; tell it the archive moved.
+            NotificationCenter.default.post(name: .archiveDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -244,6 +246,7 @@ final class InsightsModel {
             showAction(details.isEmpty ? "Remote fetch complete." : details)
             startCooldown(seconds: 30 * 60, clearing: \.fetchCooldownUntil)
             await refresh()
+            NotificationCenter.default.post(name: .archiveDidChange, object: nil)
         } catch {
             errorMessage = error.localizedDescription
         }
