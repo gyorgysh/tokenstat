@@ -9,8 +9,12 @@ import SwiftUI
 
 struct AccountView: View {
     @Bindable var model: AccountModel
+    @Environment(\.openURL) private var openURL
     /// Whether the third-party notices sheet is open.
     @State private var showLicenses = false
+    /// iOS only: the in-app web view that completes deletion on the website.
+    @State private var showDeletionWeb = false
+    @State private var deletionURL: URL?
 
     var body: some View {
         ScrollView {
@@ -32,6 +36,7 @@ struct AccountView: View {
 
                 terminalCard
                 licensesCard
+                deleteAccountCard
                 privacyNote
             }
             .padding(Theme.Space.m)
@@ -41,6 +46,23 @@ struct AccountView: View {
         .sheet(isPresented: $showLicenses) {
             LicensesSheet()
         }
+        #if os(iOS)
+        // App Store Guideline 5.1.1(v) wants deletion available inside the
+        // app. The website's own data settings page in a web view lets the
+        // user start and finish it without leaving, and needs no backend
+        // endpoint of our own. macOS opens the same page in the browser.
+        .sheet(isPresented: $showDeletionWeb) {
+            NavigationStack {
+                AccountDeletionWebView(url: deletionURL ?? Self.defaultDeletionURL)
+                    .ignoresSafeArea(.container, edges: .bottom)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showDeletionWeb = false }
+                        }
+                    }
+            }
+        }
+        #endif
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.syncNotice,
                            severity: model.syncNoticeIsError ? .danger : .success)
@@ -326,6 +348,54 @@ struct AccountView: View {
                     .help("Show the licence and notice for every bundled dependency")
             }
         }
+    }
+
+    /// Delete the account, from the website.
+    ///
+    /// The app deliberately has no delete of its own: deletion is immediate
+    /// and permanent on the server, and the website's data settings is the
+    /// only place that is confirmed. The button sends the user there, logged
+    /// in or to log in first.
+    private var deleteAccountCard: some View {
+        Card(
+            title: "Delete this account",
+            subtitle: "Permanent. Confirmed on the website's data settings."
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text("""
+                Deleting is immediate and permanent: the account, its linked \
+                providers, its sessions, and any usage data are removed \
+                outright, not flagged as gone. There is no undo.
+                """)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+                Button {
+                    openAccountDeletion()
+                } label: {
+                    Label("Delete account", systemImage: "trash")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.danger)
+                .help("Opens the data settings where deletion is confirmed")
+            }
+        }
+    }
+
+    /// Where deletion happens: `{host}/settings/data` on the website.
+    private static var defaultDeletionURL: URL {
+        URL(string: "https://tokenstat.ai/settings/data")!
+    }
+
+    private func openAccountDeletion() {
+        let host = model.account?.host ?? "https://tokenstat.ai"
+        guard let url = URL(string: "\(host)/settings/data") else { return }
+        #if os(macOS)
+        openURL(url)
+        #else
+        deletionURL = url
+        showDeletionWeb = true
+        #endif
     }
 
     /// Label on the left, the switch pinned to the row's trailing edge, so
