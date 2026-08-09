@@ -44,12 +44,19 @@ enum HostAgentInstaller {
         }
         let domain = "gui/\(getuid())"
         let service = "\(domain)/\(label)"
-        // Already loaded: ask launchd to start it. No `-k`, so a running host
-        // is left alone rather than killed and restarted.
-        if (try? run("/bin/launchctl", ["print", service])) != nil {
+        // Already loaded and running the copy this app manages: ask launchd to
+        // start it. No `-k`, so a running host is left alone rather than
+        // killed and restarted.
+        if let printed = try? run("/bin/launchctl", ["print", service]),
+           printed.contains(helper.path)
+        {
             _ = try? run("/bin/launchctl", ["kickstart", service])
             return
         }
+        // Nothing loaded, or the loaded job runs some other copy (an earlier
+        // install at another path). Tear down a stale registration and load
+        // the plist this app owns.
+        _ = try? run("/bin/launchctl", ["bootout", service])
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
     }
 
@@ -57,8 +64,9 @@ enum HostAgentInstaller {
     ///
     /// Copies only when the installed binary differs from the one in this
     /// bundle, and prefers `kickstart` over `bootout`/`bootstrap` when the
-    /// job is already loaded. A full tear-down is reserved for a first
-    /// install or a helper that actually changed.
+    /// job is already loaded and matches the plist on disk. A full tear-down
+    /// is reserved for a first install, a changed plist, or a job definition
+    /// launchd is still running from an older install at another path.
     static func installAndStart() throws {
         let fileManager = FileManager.default
         let applicationSupport = try fileManager.url(
@@ -99,19 +107,32 @@ enum HostAgentInstaller {
 
         let domain = "gui/\(getuid())"
         let service = "\(domain)/\(label)"
-        let alreadyLoaded = (try? run("/bin/launchctl", ["print", service])) != nil
+        let printed = try? run("/bin/launchctl", ["print", service])
+        let alreadyLoaded = printed != nil
+        let loadedRunsManagedHelper = printed?.contains(helper.path) == true
 
-        if alreadyLoaded && !helperChanged && !plistChanged {
-            // Same binary, same job definition: just make sure it is running.
-            _ = try? run("/bin/launchctl", ["kickstart", service])
+        if alreadyLoaded && !plistChanged && loadedRunsManagedHelper {
+            if helperChanged {
+                // Same job definition, new binary: `-k` replaces the process
+                // without unloading the job, which is gentler than bootout and
+                // keeps the KeepAlive policy intact.
+                _ = try? run("/bin/launchctl", ["kickstart", "-k", service])
+            } else {
+                // Same binary, same job definition: just make sure it is running.
+                _ = try? run("/bin/launchctl", ["kickstart", service])
+            }
             return
         }
 
         if alreadyLoaded {
-            // A changed helper has to replace the process. `-k` restarts it
-            // without unloading the job, which is gentler than bootout and
-            // keeps the KeepAlive policy intact.
-            _ = try? run("/bin/launchctl", ["kickstart", "-k", service])
+            // The loaded definition is stale: the plist on disk changed, or
+            // the job runs a binary this app does not manage (an earlier
+            // install at another path). `kickstart -k` would only restart the
+            // process under that stale definition, so unload the job and load
+            // the plist. The daemon owns live terminals either way: replacing
+            // it means restarting it.
+            _ = try? run("/bin/launchctl", ["bootout", service])
+            try run("/bin/launchctl", ["bootstrap", domain, plist.path])
             return
         }
 
@@ -124,12 +145,26 @@ enum HostAgentInstaller {
     /// installed weeks ago answers a window opened today, and a fix shipped in
     /// the app never reaches the process that needed it. That failure is
     /// silent, which is the worst part of it. Called on launch, and it does
-    /// nothing at all in the ordinary case where the two already match.
+    /// nothing at all in the ordinary case where the two already match: same
+    /// bytes, same version, and launchd running the copy this app manages.
     static func refreshIfStale() {
         guard let bundled = bundledHelper, let installed = installedHelper else { return }
         let manager = FileManager.default
         guard manager.fileExists(atPath: installed.path) else { return }
-        guard helpersDiffer(bundled, installed, manager: manager) else { return }
+        guard helpersDiffer(bundled, installed, manager: manager) else {
+            // Same binary, but launchd may still be running an old job
+            // definition that points somewhere else (an earlier install at
+            // another path). Reload so the daemon answering the socket is the
+            // one this app manages.
+            let service = "gui/\(getuid())/\(label)"
+            if let printed = try? run("/bin/launchctl", ["print", service]),
+               printed.contains(installed.path)
+            {
+                return
+            }
+            try? installAndStart()
+            return
+        }
         try? installAndStart()
     }
 
@@ -182,8 +217,16 @@ enum HostAgentInstaller {
         }
     }
 
-    /// Size and modification date, not a hash: free on every launch, and the
-    /// two files are either the same copy or they are not.
+    /// Size and modification date first, then the binaries' own versions:
+    /// free on every launch, and the two files are either the same copy or
+    /// they are not.
+    ///
+    /// The filesystem check is trusted when it disagrees. When it reports the
+    /// files are identical, a rebuild can still have reproduced both (same
+    /// size, or packaging that copied a timestamp), so the binaries are asked
+    /// for their version before two files are declared the same copy. Only a
+    /// *newer* bundled helper counts as different. An older bundle must not
+    /// roll a newer daemon back.
     private static func helpersDiffer(_ a: URL, _ b: URL, manager: FileManager) -> Bool {
         let attributes: (URL) -> (Int, Date)? = { url in
             guard let values = try? manager.attributesOfItem(atPath: url.path),
@@ -193,7 +236,44 @@ enum HostAgentInstaller {
             return (size, modified)
         }
         guard let left = attributes(a), let right = attributes(b) else { return true }
-        return left.0 != right.0 || left.1 != right.1
+        if left.0 != right.0 || left.1 != right.1 { return true }
+        return isVersionNewer(version(of: a), than: version(of: b))
+    }
+
+    /// The version a hostd reports when run with the version flag, for
+    /// example "tokenstat-hostd 0.2.8". Nil when the binary will not run or
+    /// prints nothing parseable.
+    private static func version(of url: URL) -> String? {
+        guard FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
+        guard let output = try? run(url.path, ["--version"]) else { return nil }
+        return output.split(whereSeparator: \.isWhitespace).last.map(String.init)
+    }
+
+    /// True when `a` names a newer release than `b` (`0.2.8` > `0.2.7`).
+    ///
+    /// Numeric comparison of dotted parts, padded with zeros on the short
+    /// side. A prerelease suffix compares by its numeric part, so a release
+    /// is never replaced by an older build that merely claims the same
+    /// numbers.
+    private static func isVersionNewer(_ a: String?, than b: String?) -> Bool {
+        guard let a, let b else { return false }
+        let left = versionNumbers(a)
+        let right = versionNumbers(b)
+        for index in 0..<max(left.count, right.count) {
+            let x = index < left.count ? left[index] : 0
+            let y = index < right.count ? right[index] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
+
+    private static func versionNumbers(_ raw: String) -> [UInt64] {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        let withoutV = trimmed.first == "v" || trimmed.first == "V"
+            ? String(trimmed.dropFirst())
+            : trimmed
+        let numeric = withoutV.split(separator: "-").first.map(String.init) ?? withoutV
+        return numeric.split(separator: ".").map { UInt64($0) ?? 0 }
     }
 
     /// Write the plist only when its contents actually changed, so a no-op
