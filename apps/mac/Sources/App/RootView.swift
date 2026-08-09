@@ -147,17 +147,34 @@ struct RootView: View {
             if launch.hostReady {
                 NavigationSplitView(columnVisibility: sidebarVisibility) {
                     sidebar
+                        // Leading toggle on the sidebar column: always present
+                        // when the column is open, independent of the window
+                        // toolbar's willingness to host custom items.
+                        .toolbar {
+                            ToolbarItem(placement: .automatic) {
+                                leftSidebarToolbarButton
+                            }
+                        }
                 } detail: {
                     detailColumn
+                        .toolbar {
+                            // Both marks also live on the detail column. macOS
+                            // puts detail toolbars in the window chrome more
+                            // reliably than items attached only to the split.
+                            ToolbarItem(placement: .navigation) {
+                                leftSidebarToolbarButton
+                            }
+                            if destinationHasInspector {
+                                ToolbarItem(placement: .primaryAction) {
+                                    rightInspectorToolbarButton
+                                }
+                            }
+                        }
                 }
                 .navigationSplitViewStyle(.balanced)
-                // Drop the system sidebar toggle (stock glyph + "Hide Sidebar"
-                // with no shortcut). Our marks carry the real help strings.
+                // Drop the stock NavigationSplitView toggle (glyph + "Hide
+                // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
                 .toolbar(removing: .sidebarToggle)
-                // Toolbar lives on the split view itself, not the outer ZStack:
-                // items on the ZStack were competing with the system install and
-                // child toolbars, and the inspector mark never appeared.
-                .toolbar { chromeToolbar }
                 .transition(.opacity)
             } else {
                 LaunchSplashView()
@@ -367,80 +384,75 @@ struct RootView: View {
         }
     }
 
-    /// Leading sidebar + trailing inspector marks.
-    ///
-    /// Built as `ToolbarContent` on the split view so both marks always land
-    /// in the window chrome. Shortcuts stay on the View menu only.
-    @ToolbarContentBuilder
-    private var chromeToolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            SidebarToggleButton(
-                edge: .leading,
-                isOpen: isLeftSidebarOpen,
-                action: toggleLeftSidebar,
-                help: isLeftSidebarOpen
-                    ? "Hide Sidebar (⌘B)"
-                    : "Show Sidebar (⌘B)"
-            )
-        }
-        // Always reserve the trailing mark on destinations that have an
-        // inspector. Placement is primaryAction (trailing on macOS).
-        if destinationHasInspector {
-            ToolbarItem(id: "tokenstat.inspectorToggle", placement: .primaryAction) {
-                SidebarToggleButton(
-                    edge: .trailing,
-                    isOpen: isRightSidebarOpen,
-                    action: toggleRightSidebar,
-                    help: isRightSidebarOpen
-                        ? "Hide Inspector (⌥⌘B)"
-                        : (inspectorFits
-                            ? "Show Inspector (⌥⌘B)"
-                            : "Peek Inspector (⌥⌘B)")
-                )
-            }
-        }
+    /// Leading sidebar mark for toolbars (sidebar column and detail column).
+    private var leftSidebarToolbarButton: some View {
+        SidebarToggleButton(
+            edge: .leading,
+            isOpen: isLeftSidebarOpen,
+            action: toggleLeftSidebar,
+            help: isLeftSidebarOpen
+                ? "Hide Sidebar (⌘B)"
+                : "Show Sidebar (⌘B)"
+        )
     }
 
-    /// Whether the leading sidebar is on screen as a column or a pinned float.
+    /// Trailing inspector mark for the detail toolbar.
+    private var rightInspectorToolbarButton: some View {
+        SidebarToggleButton(
+            edge: .trailing,
+            isOpen: isRightSidebarOpen,
+            action: toggleRightSidebar,
+            help: isRightSidebarOpen
+                ? "Hide Inspector (⌥⌘B)"
+                : (inspectorFits
+                    ? "Show Inspector (⌥⌘B)"
+                    : "Peek Inspector (⌥⌘B)")
+        )
+    }
+
+    /// Whether the leading sidebar column is on screen.
+    ///
+    /// Does **not** count a hover-peek float as open: that is temporary chrome
+    /// for narrow windows, not the user's expanded preference.
     private var isLeftSidebarOpen: Bool {
-        if usesOverlaySidebar {
-            // Floating: open means the user pinned it, or it is currently
-            // peaking under the pointer.
-            return isSidebarPinned || isSidebarOverlayVisible
+        if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
+            return isSidebarPinned
         }
-        // Until width is known, treat as open so the glyph matches the
-        // default `.all` column visibility at first paint.
         if windowContentWidth <= 0 { return true }
         return columnVisibilityChoice == .all
     }
 
-    /// Whether the inspector is on screen as a column or a floating pane.
+    /// Whether the inspector is on screen as a column or a pinned float.
     private var isRightSidebarOpen: Bool {
         guard destinationHasInspector else { return false }
-        if usesOverlayInspector {
+        if !inspectorFits {
             return isOverlayPinned || isOverlayVisible
         }
-        return isInspectorPresented && inspectorFits
+        return isInspectorPresented
     }
 
-    /// Toggle the leading sidebar column (or its pinned float below the fit
-    /// edge). Same action as ⌘B and the toolbar mark.
+    /// Toggle the leading sidebar. Same action as ⌘B and the toolbar mark.
+    ///
+    /// On a wide window this only flips the split column. It must **not**
+    /// enter floating-overlay mode: that was the z-index "ghost sidebar"
+    /// behind Home when ⌘B hid the column.
     private func toggleLeftSidebar() {
+        // Always clear float state first so a hide never leaves a peek up.
+        isSidebarOverlayVisible = false
+        isSidebarEdgeHovered = false
+        isSidebarPanelHovered = false
+
         if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
-            // Narrow window: the column cannot hold, so pin/unpin the float.
+            // Narrow: column cannot hold. Pin/unpin is the only open state.
+            isSidebarPinned.toggle()
             if isSidebarPinned {
-                isSidebarPinned = false
-                isSidebarOverlayVisible = false
-            } else {
-                isSidebarPinned = true
-                isSidebarOverlayVisible = true
                 columnVisibilityChoice = .all
+                isSidebarOverlayVisible = true
             }
             return
         }
         if columnVisibilityChoice == .all {
             columnVisibilityChoice = .detailOnly
-            isSidebarOverlayVisible = false
             isSidebarPinned = false
         } else {
             columnVisibilityChoice = .all
@@ -456,11 +468,11 @@ struct RootView: View {
             return
         }
         isInspectorPresented = true
-        // Below the fit edge a press means "show me the pane": pin the
-        // overlay so it stays past the hover. Above the edge the column
-        // simply opens.
-        isOverlayPinned = true
-        isOverlayVisible = true
+        // Narrow window: pin the float so it stays past hover.
+        if !inspectorFits {
+            isOverlayPinned = true
+            isOverlayVisible = true
+        }
     }
 
     /// The narrowest the detail column may be. `minimumContentWidth` is this
@@ -643,14 +655,21 @@ struct RootView: View {
         isSidebarEdgeHovered || isSidebarPanelHovered
     }
 
-    /// The leading sidebar column is hidden, so the left-edge peek is
-    /// available. The split view collapses the sidebar below the width where
-    /// it can hold a column, and the user can collapse it above that width;
-    /// in both cases hovering the leading edge floats it back over the detail.
+    /// Whether the left-edge float is allowed.
+    ///
+    /// **Only** when the window is too narrow for a sidebar column. A user who
+    /// hid the sidebar with ⌘B on a wide window must get a clean detail-only
+    /// layout, not a float that paints behind Home (the previous behaviour).
     private var usesOverlaySidebar: Bool {
         guard windowContentWidth > 0 else { return false }
-        if windowContentWidth < Self.widthForSidebar {
-            return !isSidebarPinned
+        return windowContentWidth < Self.widthForSidebar && !isSidebarPinned
+    }
+
+    /// Wide window, user hid the sidebar with ⌘B / the mark: show a persistent
+    /// reopen control on the leading edge (not a full float).
+    private var showsSidebarReopenChip: Bool {
+        guard windowContentWidth >= Self.widthForSidebar || windowContentWidth <= 0 else {
+            return false
         }
         return columnVisibilityChoice != .all
     }
@@ -693,9 +712,13 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarDismissScrim }
             .overlay(alignment: .leading) { sidebarHoverStrip }
             .overlay(alignment: .leading) { sidebarOverlayPanel }
+            // Wide-window hide: a real clickable chip, not a full-height float
+            // behind the detail (that was the ⌘B z-index ghost).
+            .overlay(alignment: .topLeading) { sidebarReopenChip }
             .overlay(alignment: .trailing) { inspectorDismissScrim }
             .overlay(alignment: .trailing) { inspectorHoverStrip }
             .overlay(alignment: .trailing) { inspectorOverlayPanel }
+            .overlay(alignment: .topTrailing) { inspectorReopenChip }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsOverlayInspector
@@ -704,6 +727,55 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsSidebarOverlay
             )
+    }
+
+    /// Persistent control when the user hid the sidebar on a wide window.
+    @ViewBuilder
+    private var sidebarReopenChip: some View {
+        if showsSidebarReopenChip {
+            SidebarToggleButton(
+                edge: .leading,
+                isOpen: false,
+                action: toggleLeftSidebar,
+                help: "Show Sidebar (⌘B)"
+            )
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Theme.panel)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
+            )
+            .padding(.leading, 8)
+            .padding(.top, 8)
+            .transition(.opacity)
+            .zIndex(50)
+        }
+    }
+
+    /// Persistent control when the inspector is closed on a destination that
+    /// has one (toolbar marks are easy to miss; this cannot hide).
+    @ViewBuilder
+    private var inspectorReopenChip: some View {
+        if destinationHasInspector, !isRightSidebarOpen {
+            SidebarToggleButton(
+                edge: .trailing,
+                isOpen: false,
+                action: toggleRightSidebar,
+                help: inspectorFits
+                    ? "Show Inspector (⌥⌘B)"
+                    : "Peek Inspector (⌥⌘B)"
+            )
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Theme.panel)
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
+            )
+            .padding(.trailing, 8)
+            .padding(.top, 8)
+            .transition(.opacity)
+            .zIndex(50)
+        }
     }
 
     @ViewBuilder

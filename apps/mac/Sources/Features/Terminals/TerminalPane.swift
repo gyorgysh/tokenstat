@@ -940,23 +940,20 @@ private struct LaunchTile: View {
     }
 
     private var pathBadge: some View {
-        Image(systemName: "info.circle")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(showPath ? Theme.accent : Theme.controlGlyph)
-            .frame(width: 18, height: 18)
+        // Filled accent ring so the mark is always readable on a dark tile.
+        Image(systemName: "info.circle.fill")
+            .font(.system(size: 14, weight: .semibold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(Theme.accent, Theme.panel)
+            .frame(width: 22, height: 22)
             .background(
                 Circle()
-                    .fill(Theme.panel)
-                    .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
-            )
-            .overlay(
-                Circle().strokeBorder(Theme.border, lineWidth: 1)
+                    .fill(Theme.sidebar)
+                    .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
             )
             .contentShape(Circle())
-            // Hover only on the badge (no nested Button). Overlay bubble, not
-            // a popover: a popover steals the pointer and closes the hover.
             .onHover { showPath = $0 }
-            .overlay(alignment: .bottom) {
+            .overlay(alignment: .topTrailing) {
                 if showPath {
                     Text(profile.command)
                         .font(Theme.mono(11))
@@ -974,10 +971,10 @@ private struct LaunchTile: View {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .strokeBorder(Theme.border, lineWidth: 1)
                         )
-                        .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 3)
+                        .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 4)
                         .fixedSize(horizontal: false, vertical: true)
-                        // Sit just above the badge.
-                        .offset(y: -28)
+                        .offset(x: 4, y: -8)
+                        .alignmentGuide(.top) { $0[.bottom] }
                         .allowsHitTesting(false)
                         .transition(.opacity)
                 }
