@@ -875,22 +875,22 @@ private struct LaunchSurface: View {
     }
 }
 
-/// One agent tile: mark, name, and a path (i) that only appears when the
-/// pointer is over the tile.
+/// One agent tile: mark, name, and a always-visible path (i) in the corner.
 ///
-/// Its own view so hover state is stable. The old free function could not hold
-/// `@State`, and the (i) was either invisible (too faint) or not receiving
-/// hover because the launch `Button` ate the hit area.
+/// The (i) used to appear only on tile hover and was drawn too faint to see;
+/// hovering the invisible hit target also produced a busy cursor. It is now
+/// a real control on every tile: hover shows a Theme bubble with the path.
 private struct LaunchTile: View {
     let profile: LaunchProfile
     let isLaunching: Bool
     let othersBusy: Bool
     let onBegin: () -> Void
 
-    @State private var tileHovering = false
-    @State private var pathHovering = false
+    @State private var showPath = false
 
     var body: some View {
+        // Badge outside the launch Button so a click on (i) never starts a
+        // session, and so hover is not stolen by the button's hit testing.
         ZStack(alignment: .topTrailing) {
             Button(action: onBegin) {
                 VStack(spacing: Theme.Space.s) {
@@ -929,54 +929,63 @@ private struct LaunchTile: View {
             .buttonStyle(.plain)
             .disabled(othersBusy)
             .opacity(othersBusy ? 0.5 : 1)
-            .onHover { tileHovering = $0 }
 
-            if !isLaunching, tileHovering || pathHovering {
-                pathHint
-                    .padding(.top, 6)
-                    .padding(.trailing, 6)
-                    .transition(.opacity)
+            if !isLaunching {
+                pathBadge
+                    .padding(8)
             }
         }
-        .animation(.easeOut(duration: 0.12), value: tileHovering || pathHovering)
-        // Path bubble may extend past the cell; keep it above neighbours.
-        .zIndex(pathHovering || tileHovering ? 10 : 0)
+        // Bubble sits above neighbouring tiles while open.
+        .zIndex(showPath ? 20 : 0)
     }
 
-    private var pathHint: some View {
-        VStack(alignment: .trailing, spacing: 4) {
-            if pathHovering {
-                Text(profile.command)
-                    .font(Theme.mono(10))
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.trailing)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .frame(maxWidth: 280, alignment: .trailing)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Theme.panel)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .allowsHitTesting(false)
+    private var pathBadge: some View {
+        Image(systemName: "info.circle")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(showPath ? Theme.accent : Theme.controlGlyph)
+            .frame(width: 18, height: 18)
+            .background(
+                Circle()
+                    .fill(Theme.panel)
+                    .shadow(color: .black.opacity(0.15), radius: 2, x: 0, y: 1)
+            )
+            .overlay(
+                Circle().strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .contentShape(Circle())
+            // Hover only on the badge (no nested Button). Overlay bubble, not
+            // a popover: a popover steals the pointer and closes the hover.
+            .onHover { showPath = $0 }
+            .overlay(alignment: .bottom) {
+                if showPath {
+                    Text(profile.command)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(.primary)
+                        .lineLimit(4)
+                        .multilineTextAlignment(.trailing)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .frame(maxWidth: 300, alignment: .trailing)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Theme.panel)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
+                        .shadow(color: .black.opacity(0.22), radius: 10, x: 0, y: 3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        // Sit just above the badge.
+                        .offset(y: -28)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
             }
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 12, weight: .medium))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Theme.controlGlyphHover)
-                .frame(width: 20, height: 20)
-                .background(Circle().fill(Theme.controlSeat))
-                .contentShape(Circle())
-                .onHover { pathHovering = $0 }
-                .accessibilityLabel("Command path")
-                .accessibilityValue(profile.command)
-        }
+            .animation(.easeOut(duration: 0.12), value: showPath)
+            .help(profile.command)
+            .accessibilityLabel("Command path")
+            .accessibilityValue(profile.command)
     }
 }
 

@@ -77,6 +77,12 @@ struct WindowScreenObserver: NSViewRepresentable {
             observe(window)
             apply(window)
             publishWidth(from: window)
+            // SwiftUI's `.toolbar(removing: .sidebarToggle)` is not always
+            // enough: NavigationSplitView re-installs the stock control (glyph
+            // + "Hide Sidebar", no shortcut). Hide it on the real NSToolbar
+            // whenever we attach or the toolbar changes.
+            stripSystemSidebarToggle(in: window)
+            scheduleSidebarToggleStrip(for: window)
         }
 
         private func detach() {
@@ -170,6 +176,48 @@ struct WindowScreenObserver: NSViewRepresentable {
         private func apply(_ window: NSWindow) {
             DisplayFit.update(screen: window.screen)
             clamp(window)
+            stripSystemSidebarToggle(in: window)
+        }
+
+        /// Hide AppKit's stock sidebar toggle item so only our custom marks
+        /// (with ⌘B / ⌥⌘B in the help string) remain.
+        private func stripSystemSidebarToggle(in window: NSWindow) {
+            guard let toolbar = window.toolbar else { return }
+            for item in toolbar.items {
+                let id = item.itemIdentifier.rawValue
+                // Stock identifiers across recent macOS releases.
+                let isSystemSidebar =
+                    item.itemIdentifier == .toggleSidebar
+                    || id.contains("toggleSidebar")
+                    || id.contains("ToggleSidebar")
+                    || id.contains("sidebar.toggle")
+                guard isSystemSidebar else { continue }
+                // `NSToolbarItem.isHidden` is macOS 15+. On 14 hide the view
+                // and disable the item so it cannot be activated.
+                if #available(macOS 15.0, *) {
+                    item.isHidden = true
+                }
+                item.isEnabled = false
+                item.toolTip = nil
+                item.view?.isHidden = true
+                item.view?.frame = .zero
+                // Zero min size so a disabled stock item does not reserve a
+                // toolbar slot beside our custom mark.
+                item.minSize = .zero
+                item.maxSize = .zero
+            }
+        }
+
+        /// SwiftUI rebuilds the toolbar after first paint; strip again shortly
+        /// and on a couple of follow-up turns so a re-inserted stock item does
+        /// not stick.
+        private func scheduleSidebarToggleStrip(for window: NSWindow) {
+            for delay in [0.05, 0.2, 0.6, 1.2] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak window] in
+                    guard let self, let window, self.window === window else { return }
+                    self.stripSystemSidebarToggle(in: window)
+                }
+            }
         }
 
         /// Pull the window back inside the visible frame when the display

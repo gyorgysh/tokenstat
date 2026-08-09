@@ -637,12 +637,12 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
-/// Left or right chrome toggle, drawn as a rounded frame with a rail (open)
-/// or an accent dot (closed) so the two states read at a glance.
+/// Left or right chrome toggle for the window toolbar.
 ///
-/// Not the system `sidebar.left` / `sidebar.right` glyphs: those ignore our
-/// open/closed colour language, and NavigationSplitView installs its own
-/// toggle with a different help string. RootView removes that and uses this.
+/// Drawn as a rounded frame with a rail (open) or an accent dot (closed).
+/// Deliberately **not** `.buttonStyle(.plain)`: a plain button in a macOS
+/// toolbar often renders empty, which is why the mark vanished while the
+/// system `sidebar.left` control (with "Hide Sidebar" and no shortcut) stayed.
 struct SidebarToggleButton: View {
     enum Edge {
         case leading
@@ -661,10 +661,14 @@ struct SidebarToggleButton: View {
     var body: some View {
         Button(action: action) {
             SidebarToggleGlyph(edge: edge, isOpen: isOpen, isHovering: isHovering)
-                .frame(width: 30, height: 24)
+                // Fixed size so the toolbar always reserves a real hit target.
+                .frame(width: 28, height: 20)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // Borderless keeps the custom mark; plain drops the mark on macOS toolbars.
+        .buttonStyle(.borderless)
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
@@ -684,45 +688,39 @@ struct SidebarToggleGlyph: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .strokeBorder(frameColor, lineWidth: 1.25)
-                .frame(width: 20, height: 16)
-
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .strokeBorder(frameColor, lineWidth: 1.5)
             if isOpen {
                 HStack(spacing: 0) {
                     if edge == .trailing { Spacer(minLength: 0) }
                     RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                         .fill(Theme.accent)
                         .frame(width: 5)
-                        .padding(.vertical, 3.5)
-                        .padding(edge == .leading ? .leading : .trailing, 3.5)
+                        .padding(.vertical, 3)
+                        .padding(edge == .leading ? .leading : .trailing, 3)
                     if edge == .leading { Spacer(minLength: 0) }
                 }
-                .frame(width: 20, height: 16)
             } else {
-                // Closed: accent dot on the outer corner of the pane edge,
-                // the cue that the panel is hidden and can be brought back.
+                // Closed: accent dot on the outer top corner of the pane edge.
                 Circle()
                     .fill(Theme.accent)
-                    .frame(width: 7, height: 7)
-                    .overlay(Circle().strokeBorder(Theme.panel, lineWidth: 1))
+                    .frame(width: 6, height: 6)
                     .offset(
-                        x: edge == .leading ? -8 : 8,
-                        y: -7
+                        x: edge == .leading ? -7 : 7,
+                        y: -6
                     )
             }
         }
-        .frame(width: 20, height: 16)
+        .frame(width: 22, height: 16)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
                 .fill(isHovering ? Theme.controlSeat : Color.clear)
-                .frame(width: 30, height: 24)
         )
     }
 
     private var frameColor: Color {
-        if isOpen { return Theme.accent.opacity(isHovering ? 0.95 : 0.8) }
-        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph.opacity(0.8)
+        if isOpen { return Theme.accent.opacity(isHovering ? 1 : 0.9) }
+        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph
     }
 }
 

@@ -151,11 +151,13 @@ struct RootView: View {
                     detailColumn
                 }
                 .navigationSplitViewStyle(.balanced)
-                // System installs its own sidebar toggle with a different help
-                // string ("Hide Sidebar", no shortcut) and the stock glyph. We
-                // draw both panes ourselves; drop the system control so the
-                // custom marks and ⌘B / ⌥⌘B help are the only ones people see.
+                // Drop the system sidebar toggle (stock glyph + "Hide Sidebar"
+                // with no shortcut). Our marks carry the real help strings.
                 .toolbar(removing: .sidebarToggle)
+                // Toolbar lives on the split view itself, not the outer ZStack:
+                // items on the ZStack were competing with the system install and
+                // child toolbars, and the inspector mark never appeared.
+                .toolbar { chromeToolbar }
                 .transition(.opacity)
             } else {
                 LaunchSplashView()
@@ -353,44 +355,8 @@ struct RootView: View {
         // Host bring-up lives in `LaunchState.prepare` (splash). No second
         // ensureHosted here: that would race the splash and reinstall thrash.
         #endif
-        .toolbar {
-            // Nothing in the toolbar while the splash is up: the window should
-            // be mark-only, like a real product splash, not a half-loaded app.
-            // Shortcuts live on the View menu (⌘B / ⌥⌘B) so a focused editor
-            // does not steal ⌘B as bold and a second .keyboardShortcut here
-            // does not double-fire.
-            if launch.hostReady {
-                ToolbarItem(placement: .navigation) {
-                    SidebarToggleButton(
-                        edge: .leading,
-                        isOpen: isLeftSidebarOpen,
-                        action: toggleLeftSidebar,
-                        help: isLeftSidebarOpen
-                            ? "Hide Sidebar (⌘B)"
-                            : "Show Sidebar (⌘B)"
-                    )
-                }
-                // primaryAction is the trailing side on macOS (topBarTrailing
-                // is iOS-only). Own id so sibling toolbars from Insights /
-                // Home do not coalesce this mark away.
-                if destinationHasInspector {
-                    ToolbarItem(id: "tokenstat.inspectorToggle", placement: .primaryAction) {
-                        SidebarToggleButton(
-                            edge: .trailing,
-                            isOpen: isRightSidebarOpen,
-                            action: toggleRightSidebar,
-                            help: isRightSidebarOpen
-                                ? "Hide Inspector (⌥⌘B)"
-                                : (inspectorFits
-                                    ? "Show Inspector (⌥⌘B)"
-                                    : "Peek Inspector (⌥⌘B)")
-                        )
-                    }
-                }
-            }
-        }
-        // View menu shortcuts (and the toolbar buttons) post here so a
-        // focused editor cannot swallow ⌘B as "bold".
+        // View menu shortcuts post here so a focused editor cannot swallow ⌘B
+        // as "bold". Toolbar items live on the NavigationSplitView above.
         .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
             guard launch.hostReady else { return }
             toggleLeftSidebar()
@@ -398,6 +364,40 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
             guard launch.hostReady, destinationHasInspector else { return }
             toggleRightSidebar()
+        }
+    }
+
+    /// Leading sidebar + trailing inspector marks.
+    ///
+    /// Built as `ToolbarContent` on the split view so both marks always land
+    /// in the window chrome. Shortcuts stay on the View menu only.
+    @ToolbarContentBuilder
+    private var chromeToolbar: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            SidebarToggleButton(
+                edge: .leading,
+                isOpen: isLeftSidebarOpen,
+                action: toggleLeftSidebar,
+                help: isLeftSidebarOpen
+                    ? "Hide Sidebar (⌘B)"
+                    : "Show Sidebar (⌘B)"
+            )
+        }
+        // Always reserve the trailing mark on destinations that have an
+        // inspector. Placement is primaryAction (trailing on macOS).
+        if destinationHasInspector {
+            ToolbarItem(id: "tokenstat.inspectorToggle", placement: .primaryAction) {
+                SidebarToggleButton(
+                    edge: .trailing,
+                    isOpen: isRightSidebarOpen,
+                    action: toggleRightSidebar,
+                    help: isRightSidebarOpen
+                        ? "Hide Inspector (⌥⌘B)"
+                        : (inspectorFits
+                            ? "Show Inspector (⌥⌘B)"
+                            : "Peek Inspector (⌥⌘B)")
+                )
+            }
         }
     }
 
