@@ -886,7 +886,12 @@ private struct LaunchTile: View {
     let othersBusy: Bool
     let onBegin: () -> Void
 
-    @State private var showPath = false
+    /// Hover reveals the path bubble; a click pins it open so a long path can
+    /// be read without keeping the pointer on a 22pt target.
+    @State private var hovered = false
+    @State private var pinned = false
+
+    private var showPath: Bool { hovered || pinned }
 
     var body: some View {
         // Badge outside the launch Button so a click on (i) never starts a
@@ -940,49 +945,68 @@ private struct LaunchTile: View {
     }
 
     private var pathBadge: some View {
-        // Filled accent ring so the mark is always readable on a dark tile.
-        Image(systemName: "info.circle.fill")
-            .font(.system(size: 14, weight: .semibold))
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(Theme.accent, Theme.panel)
-            .frame(width: 22, height: 22)
-            .background(
-                Circle()
-                    .fill(Theme.sidebar)
-                    .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
-            )
-            .contentShape(Circle())
-            .onHover { showPath = $0 }
-            .overlay(alignment: .topTrailing) {
-                if showPath {
-                    Text(profile.command)
-                        .font(Theme.mono(11))
-                        .foregroundStyle(.primary)
-                        .lineLimit(4)
-                        .multilineTextAlignment(.trailing)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .frame(maxWidth: 300, alignment: .trailing)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Theme.panel)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(Theme.border, lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .offset(x: 4, y: -8)
-                        .alignmentGuide(.top) { $0[.bottom] }
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+        // A real button, so the mark is clickable (pin the bubble), keyboard
+        // reachable, and exposed to VoiceOver as a control rather than a
+        // decorative image. It sits outside the launch Button, so a click on
+        // (i) never starts a session.
+        Button {
+            withAnimation(.easeOut(duration: 0.12)) { pinned.toggle() }
+        } label: {
+            // Filled accent ring so the mark is always readable on a dark tile.
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(Theme.accent, Theme.panel)
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle()
+                        .fill(Theme.sidebar)
+                        .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
+                )
+                .overlay(alignment: .topTrailing) {
+                    if showPath {
+                        pathBubble
+                    }
                 }
-            }
-            .animation(.easeOut(duration: 0.12), value: showPath)
-            .help(profile.command)
-            .accessibilityLabel("Command path")
-            .accessibilityValue(profile.command)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.12)) { hovered = inside }
+        }
+        .animation(.easeOut(duration: 0.12), value: showPath)
+        .accessibilityLabel("Command path")
+        .accessibilityValue(profile.command)
+    }
+
+    /// The readable path bubble.
+    ///
+    /// The width is fixed on purpose: an overlay proposes the badge's own 22pt
+    /// size to its content, so a flexible `maxWidth` frame collapsed the text
+    /// into a 2pt-wide sliver (measured live at 2x56pt). A fixed 300pt width
+    /// keeps the whole command legible.
+    private var pathBubble: some View {
+        Text(profile.command)
+            .font(Theme.mono(11))
+            .foregroundStyle(.primary)
+            .lineLimit(nil)
+            .multilineTextAlignment(.leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(width: 300, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Theme.panel)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 4)
+            .offset(x: 4, y: -8)
+            .alignmentGuide(.top) { $0[.bottom] }
+            .allowsHitTesting(false)
+            .transition(.opacity)
     }
 }
 

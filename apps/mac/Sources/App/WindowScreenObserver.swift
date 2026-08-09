@@ -93,6 +93,30 @@ struct WindowScreenObserver: NSViewRepresentable {
 
         private func observe(_ window: NSWindow) {
             let center = NotificationCenter.default
+            // NavigationSplitView re-inserts its stock "Toggle Sidebar" item
+            // whenever the split state changes or the toolbar is rebuilt —
+            // long after `attach` and the scheduled strips have run. The
+            // result was a wide, empty, clickable slot in the window toolbar
+            // between the traffic lights and our custom mark. AppKit only
+            // posts *before* an item is added, so the removal is deferred one
+            // runloop turn, by which time the item is in `toolbar.items`.
+            observers.append(
+                center.addObserver(
+                    forName: NSToolbar.willAddItemNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] note in
+                    guard let self else { return }
+                    guard let toolbar = note.object as? NSToolbar,
+                          let item = note.userInfo?[NSToolbarUserInfoKey.itemKey] as? NSToolbarItem,
+                          Self.isSystemSidebarToggle(item) else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard !Task.isCancelled else { return }
+                        self.removeSystemSidebarToggle(from: toolbar)
+                    }
+                }
+            )
             // Moving the window to another display.
             observers.append(
                 center.addObserver(
@@ -177,21 +201,71 @@ struct WindowScreenObserver: NSViewRepresentable {
             DisplayFit.update(screen: window.screen)
             clamp(window)
             stripSystemSidebarToggle(in: window)
+            paintWindowBackground(in: window)
         }
 
-        /// Hide AppKit's stock sidebar toggle item so only our custom marks
+        /// Give the window an opaque dark backdrop.
+        ///
+        /// SwiftUI's `NavigationSplitView` leaves the window's own background
+        /// visible wherever a column has not painted yet — for a frame or two
+        /// while the inspector column appears or leaves on a destination
+        /// switch. The system default there is a light surface, which read as
+        /// a white replica of the sidebar flashing on the left edge. An
+        /// explicit opaque background (the app's own theme values, so light
+        /// and dark mode both stay correct) means an unpainted area shows the
+        /// app's backdrop, never a white bar.
+        private func paintWindowBackground(in window: NSWindow) {
+            let background = NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                if isDark {
+                    // Theme.background dark: #08070D
+                    return NSColor(red: 0x08 / 255.0, green: 0x07 / 255.0, blue: 0x0D / 255.0, alpha: 1)
+                }
+                // Theme.background light: #FBFBFD
+                return NSColor(red: 0xFB / 255.0, green: 0xFB / 255.0, blue: 0xFD / 255.0, alpha: 1)
+            }
+            window.backgroundColor = background
+            window.isOpaque = true
+        }
+
+        /// Remove AppKit's stock sidebar toggle item so only our custom marks
         /// (with ⌘B / ⌥⌘B in the help string) remain.
+        ///
+        /// The item is removed outright rather than hidden: hiding its view
+        /// and zeroing its frame still left a wide empty slot in the toolbar,
+        /// which read as a big blank button beside the traffic lights.
         private func stripSystemSidebarToggle(in window: NSWindow) {
             guard let toolbar = window.toolbar else { return }
+            removeSystemSidebarToggle(from: toolbar)
+        }
+
+        private func removeSystemSidebarToggle(from toolbar: NSToolbar) {
+            var index = 0
+            while index < toolbar.items.count {
+                let item = toolbar.items[index]
+                if Self.isSystemSidebarToggle(item) {
+                    toolbar.removeItem(at: index)
+                } else {
+                    index += 1
+                }
+            }
+        }
+
+        /// Whether this is the stock toggle NavigationSplitView installs.
+        private static func isSystemSidebarToggle(_ item: NSToolbarItem) -> Bool {
+            let id = item.itemIdentifier.rawValue
+            return item.itemIdentifier == .toggleSidebar
+                || id.contains("toggleSidebar")
+                || id.contains("ToggleSidebar")
+                || id.contains("sidebar.toggle")
+        }
+
+        /// Fallback: hide and disable any stock item the removal above missed
+        /// (macOS 15 `isHidden`; on 14 hide the view and take its space).
+        private func hideSystemSidebarToggle(in window: NSWindow) {
+            guard let toolbar = window.toolbar else { return }
             for item in toolbar.items {
-                let id = item.itemIdentifier.rawValue
-                // Stock identifiers across recent macOS releases.
-                let isSystemSidebar =
-                    item.itemIdentifier == .toggleSidebar
-                    || id.contains("toggleSidebar")
-                    || id.contains("ToggleSidebar")
-                    || id.contains("sidebar.toggle")
-                guard isSystemSidebar else { continue }
+                guard Self.isSystemSidebarToggle(item) else { continue }
                 // `NSToolbarItem.isHidden` is macOS 15+. On 14 hide the view
                 // and disable the item so it cannot be activated.
                 if #available(macOS 15.0, *) {
@@ -216,6 +290,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak window] in
                     guard let self, let window, self.window === window else { return }
                     self.stripSystemSidebarToggle(in: window)
+                    self.hideSystemSidebarToggle(in: window)
                 }
             }
         }

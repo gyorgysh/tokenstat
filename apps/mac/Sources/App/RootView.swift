@@ -147,20 +147,15 @@ struct RootView: View {
             if launch.hostReady {
                 NavigationSplitView(columnVisibility: sidebarVisibility) {
                     sidebar
-                        // Leading toggle on the sidebar column: always present
-                        // when the column is open, independent of the window
-                        // toolbar's willingness to host custom items.
-                        .toolbar {
-                            ToolbarItem(placement: .automatic) {
-                                leftSidebarToolbarButton
-                            }
-                        }
                 } detail: {
                     detailColumn
                         .toolbar {
-                            // Both marks also live on the detail column. macOS
-                            // puts detail toolbars in the window chrome more
-                            // reliably than items attached only to the split.
+                            // The only toolbar the marks live on. Attaching a
+                            // second copy to the sidebar column made the window
+                            // chrome show two "Toggle Sidebar" buttons while
+                            // the sidebar was open. The detail column's
+                            // toolbar stays in the chrome whether the sidebar
+                            // is open or hidden, so one attachment is enough.
                             ToolbarItem(placement: .navigation) {
                                 leftSidebarToolbarButton
                             }
@@ -665,15 +660,6 @@ struct RootView: View {
         return windowContentWidth < Self.widthForSidebar && !isSidebarPinned
     }
 
-    /// Wide window, user hid the sidebar with ⌘B / the mark: show a persistent
-    /// reopen control on the leading edge (not a full float).
-    private var showsSidebarReopenChip: Bool {
-        guard windowContentWidth >= Self.widthForSidebar || windowContentWidth <= 0 else {
-            return false
-        }
-        return columnVisibilityChoice != .all
-    }
-
     /// The floated sidebar is on screen.
     private var showsSidebarOverlay: Bool {
         usesOverlaySidebar && isSidebarOverlayVisible
@@ -688,6 +674,13 @@ struct RootView: View {
     /// floating overlay that replaces the column below the fit edge.
     private var detailColumn: some View {
         detail
+            // The destination views paint `Theme.background` themselves, but
+            // the column behind them does not: while a destination swaps (the
+            // inspector column appearing or leaving on the same frame), the
+            // column can show the window's default surface for a moment. A
+            // solid backing here closes that gap so the swap paints the app's
+            // backdrop, not a light flash.
+            .background(Theme.background)
             // The detail column has a declared minimum, so an overflow is
             // never absorbed by the sidebar: the split view cannot take
             // the difference from the leading column to satisfy the
@@ -712,13 +705,9 @@ struct RootView: View {
             .overlay(alignment: .leading) { sidebarDismissScrim }
             .overlay(alignment: .leading) { sidebarHoverStrip }
             .overlay(alignment: .leading) { sidebarOverlayPanel }
-            // Wide-window hide: a real clickable chip, not a full-height float
-            // behind the detail (that was the ⌘B z-index ghost).
-            .overlay(alignment: .topLeading) { sidebarReopenChip }
             .overlay(alignment: .trailing) { inspectorDismissScrim }
             .overlay(alignment: .trailing) { inspectorHoverStrip }
             .overlay(alignment: .trailing) { inspectorOverlayPanel }
-            .overlay(alignment: .topTrailing) { inspectorReopenChip }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsOverlayInspector
@@ -727,55 +716,6 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsSidebarOverlay
             )
-    }
-
-    /// Persistent control when the user hid the sidebar on a wide window.
-    @ViewBuilder
-    private var sidebarReopenChip: some View {
-        if showsSidebarReopenChip {
-            SidebarToggleButton(
-                edge: .leading,
-                isOpen: false,
-                action: toggleLeftSidebar,
-                help: "Show Sidebar (⌘B)"
-            )
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Theme.panel)
-                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
-            )
-            .padding(.leading, 8)
-            .padding(.top, 8)
-            .transition(.opacity)
-            .zIndex(50)
-        }
-    }
-
-    /// Persistent control when the inspector is closed on a destination that
-    /// has one (toolbar marks are easy to miss; this cannot hide).
-    @ViewBuilder
-    private var inspectorReopenChip: some View {
-        if destinationHasInspector, !isRightSidebarOpen {
-            SidebarToggleButton(
-                edge: .trailing,
-                isOpen: false,
-                action: toggleRightSidebar,
-                help: inspectorFits
-                    ? "Show Inspector (⌥⌘B)"
-                    : "Peek Inspector (⌥⌘B)"
-            )
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Theme.panel)
-                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 2)
-            )
-            .padding(.trailing, 8)
-            .padding(.top, 8)
-            .transition(.opacity)
-            .zIndex(50)
-        }
     }
 
     @ViewBuilder
@@ -805,7 +745,7 @@ struct RootView: View {
             sidebar
                 .frame(width: DisplayFit.box(240))
                 .frame(maxHeight: .infinity)
-                .background(Theme.sidebarMaterial)
+                .background(Theme.sidebar)
                 .overlay(alignment: .trailing) {
                     Rectangle()
                         .fill(Theme.border)
@@ -1065,7 +1005,15 @@ struct RootView: View {
             }
             .padding(.bottom, Theme.Space.m)
         }
-        .background(Theme.sidebarMaterial)
+        // Solid, not the `.bar` material. When the split view re-lays out for a
+        // destination change (the inspector column appearing or leaving), the
+        // material can momentarily resolve against an empty backdrop and paint
+        // the whole left bar light — the white flash seen when clicking
+        // between menus. A flat colour cannot flash, and the ScrollView's own
+        // default background layer is stripped so nothing white can show
+        // through the overscroll area either.
+        .background(Theme.sidebar)
+        .scrollContentBackground(.hidden)
         .navigationSplitViewColumnWidth(
             min: Self.sidebarMinimumWidth,
             ideal: DisplayFit.box(228),
@@ -1128,7 +1076,7 @@ struct RootView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.s)
         }
-        .background(Theme.sidebarMaterial)
+        .background(Theme.sidebar)
     }
 
     /// Check for an update, because somebody asked.
