@@ -1274,7 +1274,12 @@ mod tests {
     use super::*;
 
     fn wait_for(mut f: impl FnMut() -> bool) -> bool {
-        for _ in 0..200 {
+        wait_for_up_to(&mut f, 200)
+    }
+
+    /// Poll `f` up to `iterations` times, 25ms apart.
+    fn wait_for_up_to(f: &mut impl FnMut() -> bool, iterations: usize) -> bool {
+        for _ in 0..iterations {
             if f() {
                 return true;
             }
@@ -1467,14 +1472,22 @@ mod tests {
     #[cfg(unix)]
     fn wait_until_prompt(shell: &Arc<Session>) {
         assert!(
-            wait_for(|| {
-                !shell
-                    .buffer
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .data
-                    .is_empty()
-            }),
+            wait_for_up_to(
+                &mut || {
+                    !shell
+                        .buffer
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .data
+                        .is_empty()
+                },
+                // A fresh login shell on a loaded CI runner can take several
+                // seconds to source its profile and draw its first prompt
+                // bytes; the shared 5s `wait_for` window was tight enough to
+                // fail intermittently on macOS runners. The prompt wait is
+                // about readiness, not speed, so give it a generous 30s.
+                1200,
+            ),
             "the pooled shell printed its prompt"
         );
         // The first bytes can be a banner with the prompt still coming; a
