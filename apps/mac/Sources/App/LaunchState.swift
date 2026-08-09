@@ -64,8 +64,9 @@ final class LaunchState {
 /// Full-window splash: mark only, no wordmark, no chrome underneath.
 ///
 /// Matches the product pattern of a quiet centre mark while the process
-/// warms. The sidebar and detail stay in the tree at zero opacity; this
-/// layer covers them completely so nothing menu-like peeks through.
+/// warms. RootView mounts this alone until the host is ready; the split
+/// view is not in the tree yet, so the system cannot install a sidebar
+/// toggle on the window toolbar during splash.
 struct LaunchSplashView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -84,9 +85,9 @@ struct LaunchSplashView: View {
 
 /// Whether the host splash has finished and the real chrome may show tools.
 ///
-/// Toolbar items attach to the window, not the opacity-0 split view, so each
-/// screen must gate its own buttons on this instead of hiding the whole
-/// window toolbar (which also took the traffic lights with it).
+/// The split view is only mounted once this is true. Screens still gate their
+/// own toolbar items on it so a late-appearing detail cannot race first paint.
+/// Do not hide the whole window toolbar: that also took the traffic lights.
 private struct HostReadyKey: EnvironmentKey {
     static let defaultValue = true
 }

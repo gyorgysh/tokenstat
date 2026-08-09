@@ -139,27 +139,25 @@ struct RootView: View {
     @State private var launch = LaunchState()
 
     var body: some View {
+        // Do not keep NavigationSplitView in the tree under the splash. Even at
+        // opacity 0 it still installs the system sidebar toggle on the window
+        // toolbar. Mount the chrome only after the host is ready; traffic
+        // lights stay because the window itself is already up with the splash.
         ZStack {
-            NavigationSplitView(columnVisibility: sidebarVisibility) {
-                sidebar
-            } detail: {
-                detailColumn
-            }
-            .navigationSplitViewStyle(.balanced)
-            // Keep interaction off the chrome until the host is up, so a click
-            // during splash cannot race an in-process archive.
-            .opacity(launch.hostReady ? 1 : 0)
-            .allowsHitTesting(launch.hostReady)
-
-            if !launch.hostReady {
+            if launch.hostReady {
+                NavigationSplitView(columnVisibility: sidebarVisibility) {
+                    sidebar
+                } detail: {
+                    detailColumn
+                }
+                .navigationSplitViewStyle(.balanced)
+                .transition(.opacity)
+            } else {
                 LaunchSplashView()
                     .transition(.opacity)
-                    .zIndex(1)
             }
         }
         .animation(.easeOut(duration: 0.32), value: launch.hostReady)
-        // Screens gate their own toolbar items on this. Do not hide the whole
-        // window toolbar: that also removed the close / minimise / zoom buttons.
         .environment(\.hostReady, launch.hostReady)
         .task {
             await launch.prepare()
