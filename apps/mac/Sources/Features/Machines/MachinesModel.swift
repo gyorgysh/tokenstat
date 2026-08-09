@@ -136,13 +136,24 @@ final class MachinesModel {
     var words: String? { identity?.words ?? status?.words }
 
     func load() async {
-        loading = true
+        // Already warm from Home's post-heatmap pass: do not flip the loading
+        // banner for a refresh that will paint the same content.
+        let quiet = identity != nil
+        if !quiet { loading = true }
         defer { loading = false }
         do {
-            identity = try await Bridge.machineIdentity()
-            status = try await Bridge.remoteStatus()
-            peers = try await Bridge.peers()
-            if let accountResult = try? await Bridge.account(), accountResult.signedIn {
+            // These four do not depend on each other. Sequential awaits made
+            // the first Machines open pay four host RTTs; in parallel it is
+            // one slowest-call, which is what the warm cache also wants.
+            async let identityResult = Bridge.machineIdentity()
+            async let statusResult = Bridge.remoteStatus()
+            async let peersResult = Bridge.peers()
+            async let accountResult = Bridge.account()
+
+            identity = try await identityResult
+            status = try await statusResult
+            peers = try await peersResult
+            if let accountResult = try? await accountResult, accountResult.signedIn {
                 account = accountResult
                 accountMachines = accountResult.machines
             } else {
@@ -154,6 +165,9 @@ final class MachinesModel {
             errorMessage = error.localizedDescription
         }
     }
+
+    /// True once identity has been fetched at least once (warm or user open).
+    var isWarmed: Bool { identity != nil }
 
     /// Provision the tokenstat-owned helper when this screen is opened. It is
     /// safe to repeat: the installer repairs the launch agent and reconnects

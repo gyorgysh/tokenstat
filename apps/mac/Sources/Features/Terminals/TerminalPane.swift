@@ -814,71 +814,85 @@ private struct LaunchSurface: View {
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
         let isLaunching = launching == profile.id
-        return Button {
-            guard launching == nil else { return }
-            launching = profile.id
-            let args = workspaces.bypassPermissions(for: folder.id)
-                ? profile.args + profile.bypassArgs
-                : profile.args
-            // Pending session and pane switch are synchronous. The host call
-            // runs after, so the tty pane is already up for the round trip
-            // instead of waiting on a Task hop with the launcher still drawn.
-            let session = terminals.begin(
-                workspace: folder,
-                command: profile.command,
-                rows: grid.rows,
-                cols: grid.cols
-            )
-            workspaces.showTerminal(in: folder.id)
-            Task {
-                _ = await terminals.complete(
-                    session,
-                    args: args,
+        // Path lives on a corner (i), not under the name. Absolute paths were
+        // the noisiest thing on this grid and competed with the brand marks;
+        // Browser/Files keep their short human subtitles.
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                guard launching == nil else { return }
+                launching = profile.id
+                let args = workspaces.bypassPermissions(for: folder.id)
+                    ? profile.args + profile.bypassArgs
+                    : profile.args
+                // Pending session and pane switch are synchronous. The host call
+                // runs after, so the tty pane is already up for the round trip
+                // instead of waiting on a Task hop with the launcher still drawn.
+                let session = terminals.begin(
+                    workspace: folder,
+                    command: profile.command,
                     rows: grid.rows,
                     cols: grid.cols
                 )
-                launching = nil
-            }
-        } label: {
-            VStack(spacing: Theme.Space.s) {
-                // The spinner takes the mark's place rather than sitting beside
-                // it, so the tile does not change size the instant it is hit.
-                if isLaunching {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(height: 34)
-                } else if let harness = profile.harnessID {
-                    HarnessMark(id: harness, size: 34)
-                } else {
-                    Image(systemName: profile.symbol ?? "terminal")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Theme.accent)
-                        .frame(height: 34)
+                workspaces.showTerminal(in: folder.id)
+                Task {
+                    _ = await terminals.complete(
+                        session,
+                        args: args,
+                        rows: grid.rows,
+                        cols: grid.cols
+                    )
+                    launching = nil
                 }
-                Text(profile.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                Text(isLaunching ? "Starting…" : profile.command)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.tertiary)
+            } label: {
+                VStack(spacing: Theme.Space.s) {
+                    // The spinner takes the mark's place rather than sitting beside
+                    // it, so the tile does not change size the instant it is hit.
+                    if isLaunching {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(height: 34)
+                    } else if let harness = profile.harnessID {
+                        HarnessMark(id: harness, size: 34)
+                    } else {
+                        Image(systemName: profile.symbol ?? "terminal")
+                            .font(.system(size: 18))
+                            .foregroundStyle(Theme.accent)
+                            .frame(height: 34)
+                    }
+                    Text(profile.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    // Reserve the third line so tiles match Browser/Files height
+                    // without printing a path. Only "Starting…" is content.
+                    Text(isLaunching ? "Starting…" : " ")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .opacity(isLaunching ? 1 : 0)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Space.m)
+                .background(
+                    isLaunching ? Theme.accent.opacity(0.12) : Theme.panel,
+                    in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.cardRadius)
+                        .strokeBorder(isLaunching ? Theme.accent : Theme.border, lineWidth: 1)
+                )
+                .contentShape(.rect)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Theme.Space.m)
-            .background(
-                isLaunching ? Theme.accent.opacity(0.12) : Theme.panel,
-                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(isLaunching ? Theme.accent : Theme.border, lineWidth: 1)
-            )
-            .contentShape(.rect)
+            .buttonStyle(.plain)
+            // Every other tile goes quiet while one is starting. Two sessions from
+            // one impatient double click is not what the second click meant.
+            .disabled(launching != nil && !isLaunching)
+            .opacity(launching != nil && !isLaunching ? 0.5 : 1)
+
+            if !isLaunching {
+                LaunchPathHint(path: profile.command)
+                    .padding(.top, 7)
+                    .padding(.trailing, 7)
+            }
         }
-        .buttonStyle(.plain)
-        // Every other tile goes quiet while one is starting. Two sessions from
-        // one impatient double click is not what the second click meant.
-        .disabled(launching != nil && !isLaunching)
-        .opacity(launching != nil && !isLaunching ? 0.5 : 1)
     }
 
     private func utilityButton(
@@ -892,11 +906,12 @@ private struct LaunchSurface: View {
                 Image(systemName: symbol)
                     .font(.system(size: 18))
                     .foregroundStyle(Theme.accent)
+                    .frame(height: 34)
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(Theme.mono(11))
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity)
@@ -909,6 +924,54 @@ private struct LaunchSurface: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Quiet path affordance on a launch tile.
+///
+/// Separate from the launch `Button` so a click on the (i) cannot start a
+/// session. Hover shows the resolved command (native tooltip); click copies it.
+private struct LaunchPathHint: View {
+    let path: String
+    @State private var hovering = false
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            #if os(macOS)
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(path, forType: .string)
+            copied = true
+            Task {
+                try? await Task.sleep(for: .seconds(1.2))
+                copied = false
+            }
+            #endif
+        } label: {
+            Image(systemName: copied ? "checkmark" : "info.circle")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(
+                    hovering || copied
+                        ? Theme.controlGlyphHover
+                        : Theme.controlGlyph.opacity(0.55)
+                )
+                .frame(width: 20, height: 20)
+                .background(
+                    Circle().fill(
+                        hovering || copied
+                            ? Theme.controlSeat
+                            : Color.clear
+                    )
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(copied ? "Copied" : path)
+        .accessibilityLabel(copied ? "Path copied" : "Command path")
+        .accessibilityValue(path)
+        .accessibilityHint("Copies the path to the clipboard")
     }
 }
 

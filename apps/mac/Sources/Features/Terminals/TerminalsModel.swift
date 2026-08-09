@@ -190,6 +190,11 @@ final class TerminalsModel {
         )
         sessions.append(session)
         select(session)
+        // Focus now, not when the pane's onChange fires next turn. Poll floor
+        // is 16ms for focused sessions and 150ms otherwise; the first agent
+        // bytes after spawn would otherwise sit in the host buffer for an
+        // extra frame or two before the reader noticed.
+        focus(session.id)
         return session
     }
 

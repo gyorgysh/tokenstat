@@ -92,6 +92,13 @@ final class HomeModel {
     private(set) var isRefreshing = false
     var errorMessage: String?
 
+    /// True after the heatmap (or a successful archive load) has landed once.
+    ///
+    /// RootView uses this to warm Machines / remotes / the launch catalog so
+    /// the first click on those surfaces is a cache hit, not a cold host fan-out.
+    /// Not the same as `!isLoading`: a failed load must not start the warm pass.
+    private(set) var isArchiveReady = false
+
     private var hostRetryTask: Task<Void, Never>?
     private var hostRetryCount = 0
     /// When the archive was last successfully read. Used to skip redundant
@@ -151,6 +158,10 @@ final class HomeModel {
             // waiting for the other two only kept it behind a blur for longer.
             let grid = try await calendar
             self.calendar = grid
+            // Heatmap is the largest Home surface and the first query back.
+            // Mark archive ready here (not after the other two) so secondary
+            // screens can warm while day/plan reports still finish.
+            isArchiveReady = true
             // What came back, not what was asked for.
             let newScope: ActivityScope = grid?.scope == "account" ? .allMachines : .thisMachine
             if newScope != deliveredScope {

@@ -54,10 +54,13 @@ cat > "$PLIST" <<PLIST_END
     <true/>
     <key>RunAtLoad</key>
     <true/>
-    <!-- Background work. It must not compete with whatever the user is
-         actually looking at. -->
+    <!-- Interactive, not Background. The daemon owns live terminals the user
+         types into; ProcessType=Background throttles the process tree and was
+         measured at ~5s agent first paint vs ~0.3s for the same binary under a
+         normal shell. Automations still run here, but the user's session is
+         the reason this process exists. -->
     <key>ProcessType</key>
-    <string>Background</string>
+    <string>Interactive</string>
     <key>StandardOutPath</key>
     <string>$LOG_DIR/hostd.out.log</string>
     <key>StandardErrorPath</key>

@@ -82,12 +82,16 @@ enum HostAgentInstaller {
         try fileManager.createDirectory(at: logs, withIntermediateDirectories: true)
 
         let plist = launchAgents.appendingPathComponent("\(label).plist")
+        // ProcessType is Interactive on purpose. Background throttles the
+        // whole process tree (measured ~5s Claude first paint under hostd vs
+        // ~0.3s for the same binary in a normal shell). The daemon owns live
+        // terminals the user types into, so it is not a pure background job.
         let contents: [String: Any] = [
             "Label": label,
             "ProgramArguments": [helper.path],
             "KeepAlive": true,
             "RunAtLoad": true,
-            "ProcessType": "Background",
+            "ProcessType": "Interactive",
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
         ]

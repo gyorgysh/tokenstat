@@ -300,52 +300,27 @@ impl Manager {
             cmd.arg(a);
         }
         cmd.cwd(&req.cwd);
-        // Agent CLIs draw boxes and colour. Without this they fall back to
-        // something far uglier, and some refuse interactive mode entirely.
-        cmd.env("TERM", "xterm-256color");
-        if req.no_color {
-            // The user opted out of colour in settings. Honour it exactly:
-            // NO_COLOR=1 and no COLORTERM or FORCE_COLOR to override it.
-            cmd.env("NO_COLOR", "1");
-            cmd.env_remove("COLORTERM");
-            cmd.env_remove("FORCE_COLOR");
-        } else {
-            // macOS Terminal also advertises truecolor; TUIs like Claude Code
-            // and the Antigravity CLI consult COLORTERM and switch to a
-            // monochrome fallback when it is absent, even though the emulator
-            // handles 24-bit sequences. Say what the terminal can do.
-            cmd.env("COLORTERM", "truecolor");
-            // The app's own launch environment can carry NO_COLOR (a sandbox
-            // or CI shell sets it), and every session would inherit it:
-            // Claude Code and Antigravity quietly render monochrome when
-            // NO_COLOR is present. This terminal supports colour, so the
-            // launcher's claim is dropped here. FORCE_COLOR is the Node-TUI
-            // sledgehammer that wins even against a leftover NO_COLOR some
-            // future launcher might smuggle in.
-            cmd.env_remove("NO_COLOR");
-            cmd.env("FORCE_COLOR", "3");
-        }
-        // The user's interactive environment, captured once per process. PATH
-        // alone is not enough: version managers, auth agents, language runtimes
-        // and the rest of a profile's exports all live in variables the launchd
-        // daemon never sees. Applied before the terminal settings above so the
-        // emulator's own claims win.
+        // Environment order matters. CommandBuilder starts from the process
+        // env (launchd's thin set for hostd). The login shell's full env is
+        // the interactive baseline; terminal claims (TERM, colour) must be
+        // applied *after* it, or a profile that exports NO_COLOR / a dumb TERM
+        // quietly undoes the emulator's settings.
         //
-        // Never block a spawn on the resolve. A click that waits for
-        // `$SHELL -ilc env` is an 8–10s blank pane on a loaded profile, and
-        // the warm thread is already computing the answer. Use it if ready;
-        // otherwise give harnesses a usable PATH and let the shell profile
-        // source its own environment when it is a shell.
+        // When the login resolve is ready: replace the base entirely so
+        // launchd-only keys (CI leftovers, packaging vars) do not leak into
+        // agent CLIs. That is the measured hostd-vs-Terminal gap: a hybrid
+        // env made harnesses spend seconds on plugin/hook paths that a real
+        // shell session never took.
+        //
+        // When it is not ready yet: do not block a Shell tile on a second
+        // full profile startup. Harnesses get a short wait (warm thread is
+        // usually done); if still pending, PATH is filled in and hostile
+        // keys are stripped from the inherited base.
         #[cfg(unix)]
         {
-            if let Some(env) = login_env() {
-                for (key, value) in &env.vars {
-                    cmd.env(key, value);
-                }
-            } else if !is_shell_profile(req) {
-                cmd.env("PATH", fallback_path());
-            }
+            apply_login_environment(&mut cmd, req);
         }
+        apply_terminal_environment(&mut cmd, req);
 
         let child = pair
             .slave
@@ -959,6 +934,101 @@ fn fallback_path() -> String {
     parts.join(":")
 }
 
+/// How long a harness spawn may wait for the login-env warm thread.
+///
+/// Shells source their own profile and must not pay this. Harnesses do not,
+/// and a cold spawn under launchd without the full env was measured at several
+/// seconds of plugin work that a Terminal session skipped. The warm thread is
+/// started at daemon boot; this is only a bridge across the first click.
+#[cfg(unix)]
+const LOGIN_ENV_BRIEF_WAIT: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Keys that must not ride from a launchd / sandbox parent into a session when
+/// the login resolve has not replaced the whole environment yet.
+#[cfg(unix)]
+const HOSTILE_INHERITED_KEYS: &[&str] = &[
+    "CI",
+    "CONTINUOUS_INTEGRATION",
+    "GITHUB_ACTIONS",
+    "GITLAB_CI",
+    "BUILD_ID",
+    "BUILD_NUMBER",
+    "JENKINS_URL",
+    "TEAMCITY_VERSION",
+    "TF_BUILD",
+    "NO_COLOR",
+];
+
+/// Apply the login-shell environment, or a usable fallback, before terminal
+/// overrides. See the call site for why the order and the clear matter.
+#[cfg(unix)]
+fn apply_login_environment(cmd: &mut CommandBuilder, req: &Spawn) {
+    // Shells are `$SHELL -il` (or bare interactive): they source the profile
+    // themselves. Waiting here would double a cold startup.
+    let env = if is_shell_profile(req) {
+        login_env()
+    } else {
+        login_env().or_else(|| brief_login_env(LOGIN_ENV_BRIEF_WAIT))
+    };
+
+    if let Some(env) = env {
+        // Pure interactive baseline: drop launchd-only keys that are not in
+        // the user's shell, then write every login variable.
+        cmd.env_clear();
+        for (key, value) in &env.vars {
+            cmd.env(key, value);
+        }
+        return;
+    }
+
+    if !is_shell_profile(req) {
+        cmd.env("PATH", fallback_path());
+    }
+    for key in HOSTILE_INHERITED_KEYS {
+        cmd.env_remove(*key);
+    }
+}
+
+/// TERM and colour claims the emulator makes, always last so a profile cannot
+/// undo them.
+fn apply_terminal_environment(cmd: &mut CommandBuilder, req: &Spawn) {
+    // Agent CLIs draw boxes and colour. Without this they fall back to
+    // something far uglier, and some refuse interactive mode entirely.
+    cmd.env("TERM", "xterm-256color");
+    if req.no_color {
+        // The user opted out of colour in settings. Honour it exactly:
+        // NO_COLOR=1 and nothing that overrides it.
+        cmd.env("NO_COLOR", "1");
+        cmd.env_remove("COLORTERM");
+        cmd.env_remove("FORCE_COLOR");
+    } else {
+        // macOS Terminal also advertises truecolor; TUIs like Claude Code
+        // and the Antigravity CLI consult COLORTERM and switch to a
+        // monochrome fallback when it is absent, even though the emulator
+        // handles 24-bit sequences. Say what the terminal can do.
+        cmd.env("COLORTERM", "truecolor");
+        // The app's own launch environment can carry NO_COLOR (a sandbox
+        // or CI shell sets it), and every session would inherit it:
+        // Claude Code and Antigravity quietly render monochrome when
+        // NO_COLOR is present. This terminal supports colour, so the
+        // launcher's claim is dropped here. FORCE_COLOR is the Node-TUI
+        // sledgehammer that wins even against a leftover NO_COLOR some
+        // future launcher might smuggle in.
+        cmd.env_remove("NO_COLOR");
+        cmd.env("FORCE_COLOR", "3");
+    }
+}
+
+/// [`login_env`], waiting up to `timeout` if the warm resolve is still running.
+///
+/// Returns `None` when the wait expires still pending, or when the resolve
+/// finished with a failed shell. Starts the warm work if nothing has yet.
+#[cfg(unix)]
+fn brief_login_env(timeout: std::time::Duration) -> Option<Arc<LoginEnv>> {
+    warm_login_env();
+    env_cache().wait_ready_timeout(timeout)
+}
+
 /// Ask the user's login shell for its whole environment, once per process.
 ///
 /// A GUI app or launch agent does not inherit the interactive shell's
@@ -1066,6 +1136,39 @@ impl EnvCache {
                         .condvar
                         .wait(state)
                         .unwrap_or_else(PoisonError::into_inner);
+                }
+            }
+        }
+    }
+
+    /// Like [`Self::wait_ready`], but give up after `timeout` still pending.
+    ///
+    /// A timed-out wait returns `None` without marking the resolve failed: the
+    /// warm thread may still finish and later callers can read the answer.
+    fn wait_ready_timeout(&self, timeout: std::time::Duration) -> Option<Arc<LoginEnv>> {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            match &*state {
+                EnvState::Done(env) => return env.clone(),
+                EnvState::Pending => {
+                    let now = std::time::Instant::now();
+                    if now >= deadline {
+                        return None;
+                    }
+                    let (next, result) = self
+                        .condvar
+                        .wait_timeout(state, deadline - now)
+                        .unwrap_or_else(PoisonError::into_inner);
+                    state = next;
+                    if result.timed_out() {
+                        // Re-check: a notify and a timeout can race, and the
+                        // answer may have landed in the same moment.
+                        if let EnvState::Done(env) = &*state {
+                            return env.clone();
+                        }
+                        return None;
+                    }
                 }
             }
         }
@@ -1263,6 +1366,47 @@ mod tests {
         let read = cache.snapshot().expect("done resolve answers a value");
         assert_eq!(read.path, env.path);
         assert_eq!(read.vars, env.vars);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_env_brief_wait_times_out_while_pending() {
+        // Harness spawns may wait briefly for the warm thread, but must not
+        // hang when the resolve never finishes (tests, broken shell).
+        let cache = EnvCache::new();
+        let started = std::time::Instant::now();
+        assert!(
+            cache
+                .wait_ready_timeout(std::time::Duration::from_millis(50))
+                .is_none(),
+            "pending resolve must time out"
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "timeout must not block for seconds"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_env_brief_wait_returns_when_ready() {
+        let cache = Arc::new(EnvCache::new());
+        let env = Arc::new(LoginEnv {
+            path: "/bin".into(),
+            vars: HashMap::from([("PATH".into(), "/bin".into())]),
+        });
+        {
+            let cache = Arc::clone(&cache);
+            let env = Arc::clone(&env);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                cache.store(Some(env));
+            });
+        }
+        let read = cache
+            .wait_ready_timeout(std::time::Duration::from_secs(2))
+            .expect("resolve should land inside the wait");
+        assert_eq!(read.path, "/bin");
     }
 
     #[cfg(unix)]

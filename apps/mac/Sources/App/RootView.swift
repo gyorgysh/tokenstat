@@ -273,6 +273,13 @@ struct RootView: View {
             guard next == .home else { return }
             Task { await home.refreshIfStale() }
         }
+        // After the heatmap is up, warm secondary surfaces so Machines /
+        // remote workspaces / agent tiles are a cache hit on first click.
+        // Never starts before archive ready, so Home keeps the host first.
+        .task(id: home.isArchiveReady) {
+            guard home.isArchiveReady else { return }
+            await warmSecondarySurfaces()
+        }
         // Sidebar footer needs the handle, but not on the first frame. A short
         // yield lets Home's archive calls claim the host first.
         .task {
@@ -290,9 +297,13 @@ struct RootView: View {
             // Local folder names for the sidebar first. Git status is part of
             // that call, but it is still cheaper than also dialling peers.
             await workspaces.loadLocal()
+            // Remote peers wait for the post-heatmap warm (or the 600ms
+            // fallback below) so a cold Home does not compete with dials.
             try? await Task.sleep(for: .milliseconds(600))
             guard !Task.isCancelled else { return }
-            await workspaces.loadRemote()
+            if !home.isArchiveReady {
+                await workspaces.loadRemote()
+            }
             // Other machines on their own slow schedule. Local folders refresh
             // from the file watcher, which must not dial anybody.
             await workspaces.watchPeers()
@@ -1068,6 +1079,35 @@ struct RootView: View {
                 selectDestination(.home)
             }
         }
+    }
+
+    /// Background fill of secondary screens after Home's heatmap is up.
+    ///
+    /// Machines, remote workspaces and the launch catalog used to load on
+    /// first click (or on a delayed timer that still raced Home). Warm them
+    /// here at low urgency so a later click paints from model state. Never
+    /// blocks Home, and is cancelable when the root view goes away.
+    private func warmSecondarySurfaces() async {
+        // Yield once so the main actor can finish painting the heatmap before
+        // we issue more host calls.
+        await Task.yield()
+        guard !Task.isCancelled else { return }
+
+        // Machines: identity, peers, account directory. Parallel inside load().
+        if !machines.isWarmed {
+            await machines.load()
+        }
+        guard !Task.isCancelled else { return }
+
+        // Remote workspace groups for the sidebar. Local folders already
+        // loaded earlier; this is the peer dial pass.
+        await workspaces.loadRemote()
+        guard !Task.isCancelled else { return }
+
+        #if os(macOS)
+        // Agent tiles: absolute paths from the host's login PATH.
+        await LaunchCatalog.shared.resolve()
+        #endif
     }
 
     /// Select the folder and destination in one immediate transaction. The
