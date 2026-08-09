@@ -78,6 +78,7 @@ struct RootView: View {
     @State private var automations = AutomationsModel()
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
+    @State private var connectivity = ConnectivityModel()
     @State private var isInspectorPresented = true
     /// What the user chose for the sidebar, kept separate from the fit.
     ///
@@ -214,13 +215,13 @@ struct RootView: View {
         }
         // The same peek on the leading edge: a collapsed sidebar comes back as
         // a floating pane while the pointer is near the edge, and hides again
-        // once it leaves. Pinning is not offered — the split view's own
-        // sidebar is the pinned form, reachable with one click.
+        // once it leaves. A pinned popup (the only open state on a narrow
+        // window) ignores the leave so the pointer can cross to the pane.
         .onChange(of: isSidebarOverlayHovered) { _, inside in
             if inside {
                 hideSidebarOverlayTask?.cancel()
                 isSidebarOverlayVisible = true
-            } else {
+            } else if !isSidebarPinned {
                 hideSidebarOverlayTask?.cancel()
                 hideSidebarOverlayTask = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000)
@@ -233,6 +234,8 @@ struct RootView: View {
         // when the view goes away.
         .onDisappear { hideOverlayTask?.cancel() }
         .onDisappear { hideSidebarOverlayTask?.cancel() }
+        .onAppear { connectivity.start() }
+        .onDisappear { connectivity.stop() }
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
         .background {
@@ -377,6 +380,17 @@ struct RootView: View {
             guard launch.hostReady, destinationHasInspector else { return }
             toggleRightSidebar()
         }
+        // The network came back: refresh what the offline stretch starved.
+        // This is the connectionBack hook. Do it now, not on the next
+        // 30-second retry tick.
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task {
+                await account.load()
+                await home.refreshIfStale()
+                await appUpdate.checkAndInstall()
+            }
+            Task { await workspaces.loadRemote() }
+        }
     }
 
     /// Leading sidebar mark for toolbars (sidebar column and detail column).
@@ -407,8 +421,9 @@ struct RootView: View {
 
     /// Whether the leading sidebar column is on screen.
     ///
-    /// Does **not** count a hover-peek float as open: that is temporary chrome
-    /// for narrow windows, not the user's expanded preference.
+    /// Does **not** count a hover-peek float as open: that is temporary
+    /// chrome (narrow windows, or a hidden column on a wide one), not the
+    /// user's expanded preference.
     private var isLeftSidebarOpen: Bool {
         if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
             return isSidebarPinned
@@ -428,9 +443,10 @@ struct RootView: View {
 
     /// Toggle the leading sidebar. Same action as ⌘B and the toolbar mark.
     ///
-    /// On a wide window this only flips the split column. It must **not**
-    /// enter floating-overlay mode: that was the z-index "ghost sidebar"
-    /// behind Home when ⌘B hid the column.
+    /// On a wide window this flips the split column. The hover peek is never
+    /// entered by a press. Below the fit edge the column cannot be laid out,
+    /// so the press pins the floating popup instead. Asking the split view
+    /// for a column there is what crashed a narrow window on ⌘B.
     private func toggleLeftSidebar() {
         // Always clear float state first so a hide never leaves a peek up.
         isSidebarOverlayVisible = false
@@ -438,12 +454,13 @@ struct RootView: View {
         isSidebarPanelHovered = false
 
         if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
-            // Narrow: column cannot hold. Pin/unpin is the only open state.
+            // Narrow: the sidebar is a floating popup only. Pin it open or
+            // close it. The split column stays shut below the fit edge.
             isSidebarPinned.toggle()
             if isSidebarPinned {
-                columnVisibilityChoice = .all
                 isSidebarOverlayVisible = true
             }
+            columnVisibilityChoice = .detailOnly
             return
         }
         if columnVisibilityChoice == .all {
@@ -536,10 +553,18 @@ struct RootView: View {
     /// inside layout is what AppKit refuses to do, and `.inspector`'s presence
     /// is driven straight off this value.
     private func applyWidth(for width: CGFloat) {
-        // Above the sidebar fit edge the pin is moot — the choice stands on
-        // its own — so clear it, and the next narrowing auto-closes again.
+        // Above the sidebar fit edge the popup is moot. The column can exist
+        // again. A popup pinned below the edge is the user saying "keep the
+        // sidebar", so hand it to the column. Otherwise the collapsed choice
+        // stands, and the next narrowing auto-closes again.
         if width >= Self.widthForSidebar {
+            if isSidebarPinned {
+                columnVisibilityChoice = .all
+            }
             isSidebarPinned = false
+            isSidebarOverlayVisible = false
+            isSidebarEdgeHovered = false
+            isSidebarPanelHovered = false
         }
         let next = Self.fits(width)
         guard next != inspectorFits else { return }
@@ -570,23 +595,29 @@ struct RootView: View {
                 // window as wide enough: a fresh launch must not start with
                 // the sidebar shut.
                 guard windowContentWidth > 0 else { return columnVisibilityChoice }
-                if windowContentWidth < Self.widthForSidebar, !isSidebarPinned {
+                if windowContentWidth < Self.widthForSidebar {
+                    // Below the fit edge the column is never shown: the
+                    // sidebar exists there as a floating popup, pinned or
+                    // peeking. Asking the split view for a column it cannot
+                    // lay out is what crashed a narrow window on ⌘B.
                     return .detailOnly
                 }
                 return columnVisibilityChoice
             },
             set: { requested in
                 if windowContentWidth < Self.widthForSidebar {
-                    // Below the edge the split view writes its own collapsed
-                    // state back; only an explicit reopen is a user decision.
-                    // Hiding is a no-op here, so the sidebar comes back the
-                    // moment the window widens instead of staying shut.
+                    // The split view's writes below the edge are all float
+                    // state: reopening pins the popup, collapsing unpins it.
+                    // The column stays shut, and the user's choice is
+                    // restored when the window widens.
                     isSidebarPinned = requested == .all
-                    if requested == .all {
-                        columnVisibilityChoice = .all
-                    }
+                    isSidebarOverlayVisible = requested == .all
+                    columnVisibilityChoice = .detailOnly
                 } else {
                     columnVisibilityChoice = requested
+                    if requested == .all {
+                        isSidebarPinned = false
+                    }
                 }
             },
         )
@@ -652,17 +683,20 @@ struct RootView: View {
 
     /// Whether the left-edge float is allowed.
     ///
-    /// **Only** when the window is too narrow for a sidebar column. A user who
-    /// hid the sidebar with ⌘B on a wide window must get a clean detail-only
-    /// layout, not a float that paints behind Home (the previous behaviour).
+    /// The sidebar column is off screen in two situations: the window is too
+    /// narrow to hold it, or the user hid it on a wide window. Both get the
+    /// same hover peek the right inspector has: the sidebar comes back as a
+    /// floating pane while the pointer is near the leading edge.
     private var usesOverlaySidebar: Bool {
         guard windowContentWidth > 0 else { return false }
-        return windowContentWidth < Self.widthForSidebar && !isSidebarPinned
+        if windowContentWidth < Self.widthForSidebar { return true }
+        return columnVisibilityChoice == .detailOnly
     }
 
-    /// The floated sidebar is on screen.
+    /// The floated sidebar is on screen: pinned open, or peeking under the
+    /// pointer.
     private var showsSidebarOverlay: Bool {
-        usesOverlaySidebar && isSidebarOverlayVisible
+        usesOverlaySidebar && (isSidebarPinned || isSidebarOverlayVisible)
     }
 
     /// The floating pane is on screen.
@@ -729,13 +763,13 @@ struct RootView: View {
     }
 
     /// A click outside the floated sidebar closes it, mirroring the right
-    /// inspector's scrim.
+    /// inspector's scrim. A pinned popup unpins. A hover peek simply closes.
     @ViewBuilder
     private var sidebarDismissScrim: some View {
         if showsSidebarOverlay {
             Color.clear
                 .contentShape(Rectangle())
-                .onTapGesture { isSidebarOverlayVisible = false }
+                .onTapGesture { dismissSidebarOverlay() }
         }
     }
 
@@ -810,6 +844,14 @@ struct RootView: View {
     private func dismissOverlay() {
         isOverlayPinned = false
         isOverlayVisible = false
+    }
+
+    /// Hides the floated sidebar, whether it was hover-revealed or pinned.
+    private func dismissSidebarOverlay() {
+        isSidebarPinned = false
+        isSidebarOverlayVisible = false
+        isSidebarEdgeHovered = false
+        isSidebarPanelHovered = false
     }
 
     /// Shuts the pane on the user's behalf.
@@ -1030,6 +1072,9 @@ struct RootView: View {
     /// account.
     private var accountFooter: some View {
         VStack(spacing: 0) {
+            // Offline is the same card language as sync and update, so the
+            // footer reads as one place for "what is the network doing".
+            OfflineCard(connectivity: connectivity)
             // Sync feedback is a card in the same slot and the same language
             // as the update card: success is the accent, rate limiting is
             // amber, a failure is red. A plain caption made a successful sync
