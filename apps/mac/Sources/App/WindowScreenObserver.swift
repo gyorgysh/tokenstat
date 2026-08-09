@@ -74,6 +74,11 @@ struct WindowScreenObserver: NSViewRepresentable {
             detach()
             self.window = window
             self.contentWidth = contentWidth
+            // Blend the toolbar into the window instead of giving it its own
+            // material layer: with the opaque theme background below it, the
+            // leading area cannot resolve to a light surface while the
+            // toolbar rebuilds on a destination switch.
+            window.titlebarAppearsTransparent = true
             observe(window)
             apply(window)
             publishWidth(from: window)
@@ -95,11 +100,13 @@ struct WindowScreenObserver: NSViewRepresentable {
             let center = NotificationCenter.default
             // NavigationSplitView re-inserts its stock "Toggle Sidebar" item
             // whenever the split state changes or the toolbar is rebuilt —
-            // long after `attach` and the scheduled strips have run. The
-            // result was a wide, empty, clickable slot in the window toolbar
-            // between the traffic lights and our custom mark. AppKit only
-            // posts *before* an item is added, so the removal is deferred one
-            // runloop turn, by which time the item is in `toolbar.items`.
+            // long after `attach` and the scheduled strips have run. A
+            // deferred removal let the freshly inserted stock button paint
+            // for a frame first: a light system button flashing in at the
+            // sidebar toggle position, which is the white flash seen when
+            // switching destinations. `willAddItem` fires *before* the item
+            // is inserted, so the item is neutralised synchronously here and
+            // can never render or reserve a slot.
             observers.append(
                 center.addObserver(
                     forName: NSToolbar.willAddItemNotification,
@@ -107,14 +114,9 @@ struct WindowScreenObserver: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] note in
                     guard let self else { return }
-                    guard let toolbar = note.object as? NSToolbar,
-                          let item = note.userInfo?[NSToolbarUserInfoKey.itemKey] as? NSToolbarItem,
+                    guard let item = note.userInfo?[NSToolbarUserInfoKey.itemKey] as? NSToolbarItem,
                           Self.isSystemSidebarToggle(item) else { return }
-                    Task { @MainActor in
-                        await Task.yield()
-                        guard !Task.isCancelled else { return }
-                        self.removeSystemSidebarToggle(from: toolbar)
-                    }
+                    Self.neutraliseSidebarToggle(item)
                 }
             )
             // Moving the window to another display.
@@ -258,6 +260,25 @@ struct WindowScreenObserver: NSViewRepresentable {
                 || id.contains("toggleSidebar")
                 || id.contains("ToggleSidebar")
                 || id.contains("sidebar.toggle")
+        }
+
+        /// Make a stock toggle item impossible to render, before it is
+        /// inserted. Everything it could draw is removed and its size is
+        /// zeroed, so the toolbar inserts an invisible, zero-width item and
+        /// the layout does not shift when the item later goes away.
+        private static func neutraliseSidebarToggle(_ item: NSToolbarItem) {
+            item.isEnabled = false
+            item.image = nil
+            item.label = ""
+            item.toolTip = nil
+            item.minSize = .zero
+            item.maxSize = .zero
+            if #available(macOS 15.0, *) {
+                item.isHidden = true
+                item.isBordered = false
+            }
+            item.view?.isHidden = true
+            item.view?.frame = .zero
         }
 
         /// Fallback: hide and disable any stock item the removal above missed
