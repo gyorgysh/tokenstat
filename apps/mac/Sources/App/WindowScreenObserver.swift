@@ -114,9 +114,22 @@ struct WindowScreenObserver: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] note in
                     guard let self else { return }
-                    guard let item = note.userInfo?[NSToolbarUserInfoKey.itemKey] as? NSToolbarItem,
+                    guard let toolbar = note.object as? NSToolbar,
+                          let item = note.userInfo?[NSToolbarUserInfoKey.itemKey] as? NSToolbarItem,
                           Self.isSystemSidebarToggle(item) else { return }
+                    // Neutralise synchronously so the fresh item cannot paint
+                    // a light button at the toggle position...
                     Self.neutraliseSidebarToggle(item)
+                    // ...then remove it on the next main-queue turn, which
+                    // runs before the toolbar draws. Removal (not just hiding)
+                    // is what collapses the reserved slot: an invisible item
+                    // still held an enforced minimum width, leaving the empty
+                    // gap that kept the custom buttons from sitting flush
+                    // left once the sidebar closed.
+                    DispatchQueue.main.async { [weak self, weak toolbar] in
+                        guard let self, let toolbar else { return }
+                        self.removeSystemSidebarToggle(from: toolbar)
+                    }
                 }
             )
             // Moving the window to another display.
