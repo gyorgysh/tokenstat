@@ -20,9 +20,11 @@ struct DayDetailPopover: View {
     /// The window's content size, to keep the card inside it.
     var windowSize: CGSize
 
-    private let margin: CGFloat = 6
-    /// Side clearance, so the card never touches the window edge.
-    private let edgeInset: CGFloat = 8
+    private let margin: CGFloat = 8
+    /// Side clearance, so the card never touches the window edge. Larger than
+    /// a hairline inset: at compact window sizes the card must still read as
+    /// floating rather than flush against the chrome.
+    private let edgeInset: CGFloat = 16
 
     var body: some View {
         Group {
@@ -75,12 +77,17 @@ struct DayDetailPopover: View {
         let flipped = preferredLeft
             ? anchor.frame.maxX + margin + width / 2
             : anchor.frame.minX - margin - width / 2
-        let x = (candidate >= edgeInset && candidate + width <= windowSize.width - edgeInset)
+        let x = (candidate - width / 2 >= edgeInset
+            && candidate + width / 2 <= windowSize.width - edgeInset)
             ? candidate
             : flipped
         // Last resort: a window narrower than the card. Clamp rather than run
-        // off either edge.
-        return min(max(x, edgeInset), max(edgeInset, windowSize.width - width - edgeInset))
+        // off either edge. `position` takes the card's center, not its leading
+        // edge. Keeping the half-width in these bounds is what leaves the
+        // intended margin on both sides at a compact resolution.
+        let minimum = edgeInset + width / 2
+        let maximum = max(minimum, windowSize.width - edgeInset - width / 2)
+        return min(max(x, minimum), maximum)
     }
 
     private var clampedY: CGFloat {
@@ -91,10 +98,9 @@ struct DayDetailPopover: View {
         // versions drifted hundreds of points down because the loading card
         // is much shorter than the full one.
         let desired = anchor.frame.midY
-        return min(
-            max(desired, edgeInset + cardHeight / 2),
-            max(edgeInset + cardHeight / 2, windowSize.height - edgeInset - cardHeight / 2)
-        )
+        let minimum = edgeInset + cardHeight / 2
+        let maximum = max(minimum, windowSize.height - edgeInset - cardHeight / 2)
+        return min(max(desired, minimum), maximum)
     }
 
     // MARK: - Card

@@ -253,23 +253,22 @@ struct RootView: View {
         // against the window rather than the pane it floats over.
         //
         // `onGeometryChange` would be the tidy way to write this and needs
-        // macOS 15. This app targets 14.
+        // macOS 15. This app targets 14. Track both axes: width-only resizes
+        // used to leave a stale width and clamp the card against the wrong
+        // edge.
         .background {
             GeometryReader { proxy in
                 Color.clear
                     .onAppear { windowSize = proxy.size }
-                    .onChange(of: quantised(proxy.size.height, step: 4)) { _, height in
-                        let next = CGSize(
-                            width: quantised(proxy.size.width, step: 4),
-                            height: height
+                    .onChange(of: quantised(proxy.size.width, step: 4)) { _, width in
+                        publishWindowSize(
+                            CGSize(width: width, height: quantised(proxy.size.height, step: 4))
                         )
-                        guard next != windowSize else { return }
-                        // Off the layout pass, the same reason
-                        // `updateInspectorFit` defers: state written from
-                        // inside layout can feed straight back into it.
-                        Task { @MainActor in
-                            if windowSize != next { windowSize = next }
-                        }
+                    }
+                    .onChange(of: quantised(proxy.size.height, step: 4)) { _, height in
+                        publishWindowSize(
+                            CGSize(width: quantised(proxy.size.width, step: 4), height: height)
+                        )
                     }
             }
         }
@@ -571,6 +570,15 @@ struct RootView: View {
         width >= widthForThreeColumns
     }
 
+    /// Publishes the window content size for the day hover card. Deferred so a
+    /// GeometryReader measurement cannot re-enter layout on the same pass.
+    private func publishWindowSize(_ next: CGSize) {
+        guard next != windowSize else { return }
+        Task { @MainActor in
+            if windowSize != next { windowSize = next }
+        }
+    }
+
     /// Applies a measured width to the decisions that depend on it: the
     /// inspector fit below, and (through `sidebarVisibility`, which reads the
     /// same width) whether the sidebar keeps its column. Out of the layout pass
@@ -634,13 +642,9 @@ struct RootView: View {
             },
             set: { requested in
                 if windowContentWidth < Self.widthForSidebar {
-                    // The split view's writes below the edge are all float
-                    // state: reopening pins the popup, collapsing unpins it.
-                    // The column stays shut, and the user's choice is
-                    // restored when the window widens.
-                    isSidebarPinned = requested == .all
-                    isSidebarOverlayVisible = requested == .all
-                    columnVisibilityChoice = .detailOnly
+                    // Below the fit edge the split view is forced closed. Its
+                    // write-back is a layout consequence, not a user choice.
+                    // Ignore it so widening restores the embedded sidebar.
                 } else {
                     columnVisibilityChoice = requested
                     if requested == .all {
@@ -675,6 +679,43 @@ struct RootView: View {
 
     private var destinationHasInspector: Bool {
         destination == .insights || destination == .workspaces
+    }
+
+    /// Height of the titlebar band the detail column is lifted into.
+    ///
+    /// `mainChrome` pulls the whole detail column up by `titlebarInset` so
+    /// `DetailChromeBar` shares the traffic-light row. Everything mounted on
+    /// that column rises with it, including the inspector and the two floating
+    /// panels, and that is wrong for all three: the sidebar's wordmark lands
+    /// under the traffic lights, and the inspector's tab strip lands in a strip
+    /// where **AppKit's titlebar owns the mouse**, so the tabs and the close
+    /// button are not merely cramped, they are unclickable. Panes add the band
+    /// back and start where the window's content actually starts.
+    private var chromeTopInset: CGFloat {
+        #if os(macOS)
+        titlebarInset
+        #else
+        0
+        #endif
+    }
+
+    /// Puts a pane mounted on the detail column back below the titlebar band.
+    ///
+    /// The band itself is left empty on purpose. It belongs to the window, and
+    /// a panel that paints its own chrome into it is drawing controls nobody
+    /// can press.
+    private func belowTitlebar<Content: View>(
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            if chromeTopInset > 0 {
+                Color.clear
+                    .frame(height: chromeTopInset)
+                    // Never take a click that belongs to the traffic lights.
+                    .allowsHitTesting(false)
+            }
+            content()
+        }
     }
 
     /// The pane itself, shared by the fixed column and the floating overlay.
@@ -749,7 +790,7 @@ struct RootView: View {
             // detail's demand.
             .frame(minWidth: Self.detailMinimumWidth)
             .inspector(isPresented: showsInspector) {
-                inspectorContent
+                belowTitlebar { inspectorContent }
                     // Fixed, on purpose. A min/ideal/max triplet left 30 points
                     // of drag travel, and dragging that divider ran the hosted
                     // column's constraint update inside NSSplitView's own
@@ -761,15 +802,17 @@ struct RootView: View {
             // Below the fit edge the inspector stops being a column and floats
             // instead: a thin hover strip at the trailing edge, the pane
             // sliding in over the detail. It pushes nothing, so the sidebar
-            // can never be squeezed for its sake. The scrim underneath means a
-            // click on the content beside the floating pane dismisses it, the
-            // way clicking beside a popover does.
-            .overlay(alignment: .leading) { sidebarDismissScrim }
+            // can never be squeezed for its sake.
+            //
+            // Hit testing is the point of the HStack layout: the dismiss
+            // scrim and the panel must not share the same rectangle. A full-
+            // size clear scrim under the panel (ZStack) still won taps from
+            // workspace file rows and the account menu. Side-by-side means
+            // the panel's frame is exclusively the panel's.
             .overlay(alignment: .leading) { sidebarHoverStrip }
-            .overlay(alignment: .leading) { sidebarOverlayPanel }
-            .overlay(alignment: .trailing) { inspectorDismissScrim }
+            .overlay(alignment: .leading) { sidebarFloatLayer }
             .overlay(alignment: .trailing) { inspectorHoverStrip }
-            .overlay(alignment: .trailing) { inspectorOverlayPanel }
+            .overlay(alignment: .trailing) { inspectorFloatLayer }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsOverlayInspector
@@ -782,7 +825,7 @@ struct RootView: View {
 
     @ViewBuilder
     private var sidebarHoverStrip: some View {
-        if usesOverlaySidebar {
+        if usesOverlaySidebar, !showsSidebarOverlay {
             Color.clear
                 .frame(width: 14)
                 .contentShape(Rectangle())
@@ -790,39 +833,45 @@ struct RootView: View {
         }
     }
 
-    /// A click outside the floated sidebar closes it, mirroring the right
-    /// inspector's scrim. A pinned popup unpins. A hover peek simply closes.
+    /// Floated sidebar: panel on the leading edge, dismiss region to its right.
+    /// Flush to the window edge like a column, not a floating card with inset.
     @ViewBuilder
-    private var sidebarDismissScrim: some View {
+    private var sidebarFloatLayer: some View {
         if showsSidebarOverlay {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { dismissSidebarOverlay() }
-        }
-    }
+            HStack(spacing: 0) {
+                belowTitlebar { sidebar }
+                    .frame(width: DisplayFit.box(240))
+                    .frame(maxHeight: .infinity)
+                    .background(Theme.sidebar)
+                    .overlay(alignment: .trailing) {
+                        Rectangle()
+                            .fill(Theme.border)
+                            .frame(width: 1)
+                    }
+                    .shadow(color: .black.opacity(0.20), radius: 12, x: 5, y: 0)
+                    .onHover { hovering in
+                        isSidebarPanelHovered = hovering
+                        // Pin once the pointer is on the panel so a system
+                        // menu that draws outside it cannot collapse the float.
+                        if hovering {
+                            isSidebarPinned = true
+                            isSidebarOverlayVisible = true
+                            hideSidebarOverlayTask?.cancel()
+                        }
+                    }
 
-    @ViewBuilder
-    private var sidebarOverlayPanel: some View {
-        if showsSidebarOverlay {
-            sidebar
-                .frame(width: DisplayFit.box(240))
-                .frame(maxHeight: .infinity)
-                .background(Theme.sidebar)
-                .overlay(alignment: .trailing) {
-                    Rectangle()
-                        .fill(Theme.border)
-                        .frame(width: 1)
-                }
-                .compositingGroup()
-                .shadow(color: .black.opacity(0.20), radius: 12, x: 5, y: 0)
-                .onHover { isSidebarPanelHovered = $0 }
-                .transition(.move(edge: .leading).combined(with: .opacity))
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissSidebarOverlay() }
+            }
+            .transition(.move(edge: .leading).combined(with: .opacity))
         }
     }
 
     @ViewBuilder
     private var inspectorHoverStrip: some View {
-        if usesOverlayInspector {
+        if usesOverlayInspector, !showsOverlayInspector {
             Color.clear
                 .frame(width: 14)
                 .contentShape(Rectangle())
@@ -830,41 +879,37 @@ struct RootView: View {
         }
     }
 
-    /// A click outside the floating pane closes it.
-    ///
-    /// The strip and the pane sit above this, so the pane itself stays fully
-    /// interactive; anywhere else in the detail column is "outside", and the
-    /// natural instinct to click beside a floating window dismisses it.
+    /// Floated inspector: panel on the trailing edge, dismiss region to its
+    /// left. Same non-overlapping hit model as the sidebar float.
     @ViewBuilder
-    private var inspectorDismissScrim: some View {
+    private var inspectorFloatLayer: some View {
         if showsOverlayInspector {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { dismissOverlay() }
-        }
-    }
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissOverlay() }
 
-    @ViewBuilder
-    private var inspectorOverlayPanel: some View {
-        if showsOverlayInspector {
-            inspectorContent
-                .frame(width: DisplayFit.box(400))
-                .frame(maxHeight: .infinity)
-                .background(Theme.sidebarMaterial)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(Theme.border)
-                        .frame(width: 1)
-                }
-                // A real drop shadow, applied to the panel as one flattened
-                // layer. Flattened first so the shadow is cast by the panel's
-                // silhouette, full height and at its leading edge; without the
-                // group, the shadow sampled the translucent material and the
-                // individual controls inside it.
-                .compositingGroup()
-                .shadow(color: .black.opacity(0.20), radius: 12, x: -5, y: 0)
-                .onHover { isOverlayPanelHovered = $0 }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                belowTitlebar { inspectorContent }
+                    .frame(width: DisplayFit.box(400))
+                    .frame(maxHeight: .infinity)
+                    .background(Theme.background)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Theme.border)
+                            .frame(width: 1)
+                    }
+                    .shadow(color: .black.opacity(0.20), radius: 12, x: -5, y: 0)
+                    .onHover { hovering in
+                        isOverlayPanelHovered = hovering
+                        if hovering {
+                            isOverlayPinned = true
+                            isOverlayVisible = true
+                            hideOverlayTask?.cancel()
+                        }
+                    }
+            }
+            .transition(.move(edge: .trailing).combined(with: .opacity))
         }
     }
 
@@ -1127,35 +1172,106 @@ struct RootView: View {
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.vertical, Theme.Space.xs)
             }
-            Menu {
-                if account.signedIn {
-                    Button("Account settings") { destination = .account }
-                    Button("Sync now") { Task { await account.sync() } }
-                        .disabled(account.isSyncing || account.syncCooldownUntil != nil)
-                    Divider()
-                    updateItem
-                    Divider()
-                    Button("Sign out") { Task { await account.signOut() } }
-                } else {
-                    Button("Sign in to tokenstat.ai") {
-                        destination = .account
-                        account.signIn()
-                    }
-                    Divider()
-                    Button("Account") { destination = .account }
-                    Divider()
-                    updateItem
-                }
-            } label: {
-                accountLabel
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .padding(.horizontal, Theme.Space.s)
-            .padding(.vertical, Theme.Space.s)
+            accountRow
+                .padding(.horizontal, Theme.Space.s)
+                .padding(.vertical, Theme.Space.s)
         }
         .background(Theme.sidebar)
+    }
+
+    /// Who is signed in: the row as drawn, with a real menu over it.
+    ///
+    /// The row is deliberately **not** a `Menu`'s label. A macOS `Menu` does
+    /// not host a custom label so much as rebuild it: artwork is lifted out
+    /// and repainted as the control's own image across the whole button, which
+    /// is how a 22 point circle became a full-width photograph of the account
+    /// holder; a placeholder view left in its place is dropped, so the name
+    /// slid under the picture; and the label is measured with no width to work
+    /// with, so the row shrink-wrapped to the name and floated in the middle
+    /// of the sidebar. Fixed frames, a clear host, `.clipped()`,
+    /// `.fixedSize()`, a measured width and dropping `AsyncImage` all failed
+    /// for one reason: each constrains a view the menu had already stopped
+    /// laying out.
+    ///
+    /// So the row is an ordinary view, laid out by the ordinary rules, and the
+    /// menu is a real `NSMenu` popped from the row itself. The whole row stays
+    /// one click target, and the picture is a picture.
+    private var accountRow: some View {
+        #if os(macOS)
+        ZStack(alignment: .leading) {
+            accountLabel
+            NativeMenuTrigger(items: { accountMenuItems })
+        }
+        .frame(height: accountRowHeight)
+        #else
+        Menu {
+            accountMenuContent
+        } label: {
+            accountLabel
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        #endif
+    }
+
+    #if os(macOS)
+    /// The account menu, as data. Rebuilt on every press, so "Sync now" and
+    /// the update check reflect what is happening at the moment it opens.
+    private var accountMenuItems: [NativeMenuItem] {
+        let checkUpdates = NativeMenuItem(
+            appUpdate.isChecking ? "Checking for updates…" : "Check for updates",
+            isEnabled: !appUpdate.isChecking
+        ) {
+            Task { await appUpdate.checkNow() }
+        }
+        guard account.signedIn else {
+            return [
+                NativeMenuItem("Sign in to tokenstat.ai") {
+                    destination = .account
+                    account.signIn()
+                },
+                .separator,
+                NativeMenuItem("Account") { destination = .account },
+                .separator,
+                checkUpdates,
+            ]
+        }
+        return [
+            NativeMenuItem("Account settings") { destination = .account },
+            NativeMenuItem(
+                "Sync now",
+                isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
+            ) {
+                Task { await account.sync() }
+            },
+            .separator,
+            checkUpdates,
+            .separator,
+            NativeMenuItem("Sign out") { Task { await account.signOut() } },
+        ]
+    }
+    #else
+    @ViewBuilder
+    private var accountMenuContent: some View {
+        if account.signedIn {
+            Button("Account settings") { destination = .account }
+            Button("Sync now") { Task { await account.sync() } }
+                .disabled(account.isSyncing || account.syncCooldownUntil != nil)
+            Divider()
+            updateItem
+            Divider()
+            Button("Sign out") { Task { await account.signOut() } }
+        } else {
+            Button("Sign in to tokenstat.ai") {
+                destination = .account
+                account.signIn()
+            }
+            Divider()
+            Button("Account") { destination = .account }
+            Divider()
+            updateItem
+        }
     }
 
     /// Check for an update, because somebody asked.
@@ -1170,6 +1286,7 @@ struct RootView: View {
         }
         .disabled(appUpdate.isChecking)
     }
+    #endif
 
     /// Avatar, handle, plan, chevron.
     ///
@@ -1181,7 +1298,7 @@ struct RootView: View {
             Avatar(
                 url: account.account?.avatar,
                 handle: account.account?.handle,
-                size: 22
+                size: Self.accountAvatarSize
             )
 
             if account.isSyncing {
@@ -1210,9 +1327,17 @@ struct RootView: View {
         }
         .padding(.horizontal, Theme.Space.s)
         .padding(.vertical, Theme.Space.xs)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(.rect)
+        .frame(maxWidth: .infinity, maxHeight: accountRowHeight, alignment: .leading)
     }
+
+    /// One footer row. Fixed so nothing drawn inside can grow the sidebar's
+    /// bottom inset, and shared by the menu and the picture drawn over it so
+    /// the two cannot drift apart.
+    private var accountRowHeight: CGFloat { 36 }
+
+    /// The footer picture's diameter, and the width of the seat the label
+    /// leaves for it.
+    private static let accountAvatarSize: CGFloat = 22
 
     // MARK: - Detail
 
@@ -1322,6 +1447,131 @@ struct RootView: View {
         }
     }
 }
+
+#if os(macOS)
+/// One entry in a menu popped by `NativeMenuTrigger`.
+struct NativeMenuItem {
+    enum Kind {
+        case action
+        case separator
+    }
+
+    let kind: Kind
+    let title: String
+    let isEnabled: Bool
+    let action: () -> Void
+
+    init(_ title: String, isEnabled: Bool = true, action: @escaping () -> Void) {
+        self.kind = .action
+        self.title = title
+        self.isEnabled = isEnabled
+        self.action = action
+    }
+
+    private init() {
+        kind = .separator
+        title = ""
+        isEnabled = false
+        action = {}
+    }
+
+    static let separator = NativeMenuItem()
+}
+
+/// Pops a real `NSMenu` under whatever it is laid over.
+///
+/// For rows that must look exactly as designed. SwiftUI's `Menu` rebuilds a
+/// custom label rather than hosting it (see `RootView.accountRow`), so a row
+/// with a picture, a badge and a trailing chevron in it cannot survive being
+/// that label. Here the row is drawn as an ordinary view and this sits on top
+/// of it as the control: the menu is the system's own, with its keyboard
+/// handling and its placement, and the row is untouched.
+struct NativeMenuTrigger: NSViewRepresentable {
+    /// Read at press time, not at build time, so item titles and enablement
+    /// describe the moment the menu opens.
+    var items: () -> [NativeMenuItem]
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSView {
+        context.coordinator.items = items
+        let view = TriggerView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        context.coordinator.items = items
+        (nsView as? TriggerView)?.coordinator = context.coordinator
+    }
+
+    /// Builds the menu and runs the chosen item.
+    ///
+    /// The target lives here rather than on the view because `NSMenuItem.target`
+    /// is a **weak** reference: an owner AppKit does not retain can be gone by
+    /// the time the menu closes, and then choosing an item does nothing at all.
+    /// SwiftUI holds the coordinator for as long as the representable exists,
+    /// which is exactly as long as the menu can be opened.
+    final class Coordinator: NSObject {
+        var items: (() -> [NativeMenuItem])?
+        /// The set the open menu was built from. Items dispatch by index into
+        /// this, so a closure never has to survive inside an AppKit object.
+        private var current: [NativeMenuItem] = []
+
+        func menu() -> NSMenu? {
+            current = items?() ?? []
+            guard !current.isEmpty else { return nil }
+
+            let menu = NSMenu()
+            // Our own enablement. Left on, AppKit asks a validator this app
+            // does not have and greys every item out.
+            menu.autoenablesItems = false
+            for (index, entry) in current.enumerated() {
+                switch entry.kind {
+                case .separator:
+                    menu.addItem(.separator())
+                case .action:
+                    let item = NSMenuItem(
+                        title: entry.title,
+                        action: #selector(run(_:)),
+                        keyEquivalent: ""
+                    )
+                    item.target = self
+                    item.tag = index
+                    item.isEnabled = entry.isEnabled
+                    menu.addItem(item)
+                }
+            }
+            return menu
+        }
+
+        @objc private func run(_ sender: NSMenuItem) {
+            guard current.indices.contains(sender.tag) else { return }
+            current[sender.tag].action()
+        }
+    }
+
+    final class TriggerView: NSView {
+        weak var coordinator: Coordinator?
+
+        /// Menus drop from the bottom of the row, which is where a pop-up
+        /// button puts them, and flipped coordinates make that `maxY`.
+        override var isFlipped: Bool { true }
+
+        /// Open on the click that also brings the window forward. Without
+        /// this, pressing the row in a background window only activates it and
+        /// the press has to be repeated.
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let menu = coordinator?.menu() else { return }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: bounds.maxY), in: self)
+        }
+    }
+}
+#endif
 
 /// One row in the sidebar.
 ///

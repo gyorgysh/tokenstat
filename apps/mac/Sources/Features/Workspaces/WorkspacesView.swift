@@ -187,7 +187,7 @@ struct WorkspaceChangesView: View {
     var body: some View {
         changesSurface
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Theme.sidebarMaterial)
+            .background(Theme.background)
     }
 
     @ViewBuilder
@@ -494,7 +494,7 @@ private struct CommitBox: View {
             .padding(.horizontal, Theme.Space.m)
         }
         .padding(.bottom, Theme.Space.m)
-        .background(Theme.sidebarMaterial)
+        .background(Theme.background)
     }
 }
 #endif

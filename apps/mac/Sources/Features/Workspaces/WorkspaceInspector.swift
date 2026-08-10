@@ -89,21 +89,26 @@ struct WorkspaceInspector: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.sidebarMaterial)
+        .background(Theme.background)
     }
 
-    // The empty band above this panel is the window's toolbar, not padding this
-    // view controls, and two attempts to use it both came out worse:
+    // The empty band above this panel is the window's titlebar, not padding
+    // this view controls: `RootView.belowTitlebar` reserves it, because the
+    // detail column is lifted into the traffic-light row and everything
+    // mounted on it comes up too. Drawing into that band is not a matter of
+    // taste, it is a dead strip: AppKit's titlebar owns the mouse there, and
+    // the tab that used to sit in it could not be clicked.
+    //
+    // Two ways of using the band were tried and both came out worse:
     //
     // - `.ignoresSafeArea(.container, edges: .top)` does not move a view *into*
-    //   the toolbar, it slides it *behind* it, and the tabs vanish entirely.
+    //   the titlebar, it slides it *behind* it, and the tabs vanish entirely.
     // - A `ToolbarItem` does land in the band, but toolbar items fill from the
     //   leading edge, so the tabs sat beside the sidebar toggle instead of over
     //   the column they switch. `ToolbarSpacer` fixes that and is macOS 26,
     //   above this app's deployment target.
     //
-    // Leave the band alone. It is one empty strip, and the tabs belong to the
-    // panel they switch.
+    // Leave the band alone. The tabs belong to the panel they switch.
 
     @ViewBuilder
     private var content: some View {
@@ -126,7 +131,7 @@ struct WorkspaceHistoryView: View {
     var body: some View {
         historyBody
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Theme.sidebarMaterial)
+            .background(Theme.background)
             // Keyed on the folder, so switching workspaces reads the right history
             // instead of leaving the previous one on screen.
             .task(id: folder?.id) {

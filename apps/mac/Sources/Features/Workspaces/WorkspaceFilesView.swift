@@ -45,7 +45,7 @@ struct WorkspaceFilesView: View {
 
     private var backdrop: AnyShapeStyle {
         switch surface {
-        case .chrome: return AnyShapeStyle(Theme.sidebarMaterial)
+        case .chrome: return AnyShapeStyle(Theme.background)
         case .content: return AnyShapeStyle(Theme.background)
         }
     }

@@ -31,7 +31,7 @@ struct InspectorView: View {
             }
             .padding(Theme.Space.m)
         }
-        .background(Theme.sidebarMaterial)
+        .background(Theme.background)
     }
 
     /// Panels rather than sections divided by rules.

@@ -69,34 +69,107 @@ private extension Image {
     }
 }
 
+/// One decoded profile picture per URL, for the life of the process.
+///
+/// Exists because the picture must be a plain `Image` by the time it reaches
+/// the layout (see `Avatar`), and because the same face is drawn on Home, in
+/// the sidebar footer, and on the Account screen: fetching it three times to
+/// show it three times is a request nobody asked for.
+@MainActor
+final class AvatarCache {
+    static let shared = AvatarCache()
+
+    private var decoded: [String: Image] = [:]
+    /// In flight fetches, so three `Avatar` views for one account share a
+    /// single request instead of racing each other.
+    private var pending: [String: Task<Image?, Never>] = [:]
+
+    /// Already decoded, or nil. Synchronous so the first frame can paint the
+    /// picture instead of the letter when it is a cache hit.
+    func cached(_ url: String) -> Image? {
+        decoded[url]
+    }
+
+    func image(for url: String) async -> Image? {
+        if let hit = decoded[url] { return hit }
+        if let running = pending[url] { return await running.value }
+
+        let task = Task<Image?, Never> {
+            guard let parsed = URL(string: url),
+                  let (data, _) = try? await URLSession.shared.data(from: parsed)
+            else {
+                return nil
+            }
+            #if os(macOS)
+            return NSImage(data: data).map(Image.init(nsImage:))
+            #else
+            return UIImage(data: data).map(Image.init(uiImage:))
+            #endif
+        }
+        pending[url] = task
+        let image = await task.value
+        pending[url] = nil
+        if let image { decoded[url] = image }
+        return image
+    }
+}
+
 /// The account's profile picture, or a letter tile until it loads.
 ///
-/// `AsyncImage` rather than a cache of our own: this is one small image per
-/// launch, and the placeholder is the same letter tile shown when an account
-/// has no picture at all, so nothing jumps when it arrives.
+/// **Not `AsyncImage`.** That view reports the *remote pixel size* as its own
+/// ideal size, so any parent that asks a child what it would like rather than
+/// proposing a size is handed a photograph where a 22 point circle was asked
+/// for. `safeAreaInset` and a `Menu` label are both such parents, and this
+/// picture is drawn inside a `safeAreaInset` at the foot of the sidebar. A
+/// plain `Image` built from an already decoded bitmap has no such opinion:
+/// `.resizable()` takes whatever size it is handed, and the fixed clear host
+/// below owns the geometry outright.
+///
+/// The full-width photograph that used to fill the sidebar footer was a
+/// separate fault, in how a macOS `Menu` rebuilds a custom label. That is
+/// fixed where it happened, in `RootView.accountRow`.
 struct Avatar: View {
     var url: String?
     var handle: String?
     var size: CGFloat = 22
 
+    /// Seeded from the cache so a picture already fetched paints on the first
+    /// frame rather than flashing the letter tile again.
+    @State private var image: Image?
+
     var body: some View {
-        ZStack {
-            Circle().fill(Theme.accent.opacity(0.18))
-            if let url, let parsed = URL(string: url) {
-                AsyncImage(url: parsed) { phase in
-                    switch phase {
-                    case let .success(image):
-                        image.resizable().scaledToFill()
-                    default:
+        Color.clear
+            .frame(width: size, height: size)
+            .overlay {
+                ZStack {
+                    Circle().fill(Theme.accent.opacity(0.18))
+                    if let image {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    } else {
                         letter
                     }
                 }
-            } else {
-                letter
             }
-        }
-        .frame(width: size, height: size)
-        .clipShape(.circle)
+            .clipShape(Circle())
+            .contentShape(Circle())
+            // Refuse growth when a parent (Menu label) offers more space.
+            .fixedSize()
+            .task(id: url) {
+                guard let url else {
+                    image = nil
+                    return
+                }
+                if let hit = AvatarCache.shared.cached(url) {
+                    image = hit
+                    return
+                }
+                image = nil
+                let loaded = await AvatarCache.shared.image(for: url)
+                guard !Task.isCancelled else { return }
+                image = loaded
+            }
     }
 
     private var letter: some View {

@@ -846,9 +846,14 @@ struct InspectorCloseButton: View {
                 .overlay(
                     Circle().strokeBorder(Theme.border.opacity(isHovering ? 0.9 : 0.55), lineWidth: 1)
                 )
-                .contentShape(.rect)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // Keep the close target reliable inside a ScrollView and a floating
+        // inspector, where a bare glyph can otherwise lose its hit region.
+        .frame(width: 30, height: 30)
+        .contentShape(Rectangle())
+        .zIndex(10)
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(label)
@@ -1028,6 +1033,7 @@ struct AppMenuPicker<Option: Hashable>: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
@@ -1037,6 +1043,7 @@ struct AppMenuPicker<Option: Hashable>: View {
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
+            .buttonStyle(.plain)
             .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
