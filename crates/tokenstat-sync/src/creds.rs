@@ -73,12 +73,8 @@ pub fn env_token(vendor: Vendor) -> Option<String> {
 pub fn save_token(vendor: Vendor, token: &str) -> Result<PathBuf, CredsError> {
     let path = token_path(vendor)?;
     let trimmed = token.trim();
-    fs::write(&path, trimmed)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    }
+    crate::snapshot::write_private_atomically(&path, trimmed)
+        .map_err(|e| CredsError::Io(std::io::Error::other(e.to_string())))?;
     Ok(path)
 }
 

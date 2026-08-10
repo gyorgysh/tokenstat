@@ -59,6 +59,8 @@ pub fn limits() -> ProviderLimits {
     };
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(client) => client,
@@ -282,12 +284,7 @@ pub fn fetch_into(
             let raw = download_csv(&token)?;
             (parse_csv(&raw)?, raw)
         };
-        fs::write(&cache, &raw)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&cache, fs::Permissions::from_mode(0o600));
-        }
+        crate::snapshot::write_private_atomically(&cache, &raw).map_err(|e| anyhow::anyhow!(e))?;
         (events, false)
     };
 
@@ -316,6 +313,7 @@ fn download_events_json(access_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
@@ -497,6 +495,7 @@ fn download_csv(session_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 

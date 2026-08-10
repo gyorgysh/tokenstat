@@ -110,6 +110,8 @@ pub fn fetch() -> ProviderLimits {
 
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(c) => c,
@@ -353,12 +355,7 @@ fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
         #[cfg(target_os = "macos")]
         Store::Keychain => write_keychain(&updated),
         Store::File(path) => {
-            std::fs::write(path, &updated).map_err(|e| e.to_string())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-            }
+            crate::snapshot::write_private_atomically(path, &updated).map_err(|e| e.to_string())?;
             Ok(())
         }
     }
@@ -384,7 +381,11 @@ fn write_keychain(blob: &str) -> Result<(), String> {
         .spawn()
         .map_err(|e| e.to_string())?;
     if let Some(stdin) = child.stdin.as_mut() {
-        writeln!(stdin, "{blob}").map_err(|e| e.to_string())?;
+        // No trailing newline: Claude Code may not trim the Keychain value.
+        stdin
+            .write_all(blob.as_bytes())
+            .map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
     }
     let status = child.wait().map_err(|e| e.to_string())?;
     status

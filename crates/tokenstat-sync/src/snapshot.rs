@@ -77,10 +77,19 @@ pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::R
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    Ok(Fetched::Body {
-        text: resp.text()?,
-        etag,
-    })
+    let bytes = resp.bytes()?;
+    // Pricing / catalog snapshots are a few hundred KB. A hostile body must not
+    // allocate without limit into hostd during the hourly refresh.
+    const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
+    if bytes.len() > MAX_SNAPSHOT_BYTES {
+        anyhow::bail!(
+            "snapshot from {url} is {} bytes, over the {MAX_SNAPSHOT_BYTES} cap",
+            bytes.len()
+        );
+    }
+    let text = String::from_utf8(bytes.to_vec())
+        .map_err(|e| anyhow::anyhow!("snapshot from {url} is not UTF-8: {e}"))?;
+    Ok(Fetched::Body { text, etag })
 }
 
 /// Sidecar path for a snapshot file: `current.json` → `current.etag`.

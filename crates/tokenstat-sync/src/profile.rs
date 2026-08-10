@@ -205,7 +205,7 @@ pub fn login_with_code(host_flag: Option<&str>, code: &str) -> Result<LoginResul
         .send()?;
 
     let status = resp.status();
-    let text = resp.text()?;
+    let text = limited_text(resp)?;
     if !status.is_success() {
         let body: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
         let detail = body
@@ -323,13 +323,20 @@ pub fn device_start(host_flag: Option<&str>) -> Result<DeviceLogin, ProfileError
 
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().unwrap_or_default();
+        let body = limited_text(resp).unwrap_or_default();
         return Err(ProfileError::Message(format!(
             "device code request failed ({status}): {body}"
         )));
     }
 
     let device: DeviceCodeResponse = resp.json()?;
+    // Refuse phishing / non-HTTPS schemes before any UI opens a browser.
+    crate::host::assert_safe_verification_url(&device.verification_uri, &host)
+        .map_err(|e| ProfileError::Message(e.to_string()))?;
+    if let Some(ref complete) = device.verification_uri_complete {
+        crate::host::assert_safe_verification_url(complete, &host)
+            .map_err(|e| ProfileError::Message(e.to_string()))?;
+    }
     Ok(DeviceLogin {
         host,
         machine,
@@ -459,7 +466,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .header("authorization", format!("Bearer {token}"))
         .send()?;
     let status = resp.status();
-    let text = resp.text()?;
+    let text = limited_text(resp)?;
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
@@ -539,7 +546,7 @@ pub fn register_machine_identity(
         }))
         .send()?;
     let status = resp.status();
-    let text = resp.text()?;
+    let text = limited_text(resp)?;
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
@@ -654,7 +661,7 @@ pub fn account_series(
         .header("authorization", format!("Bearer {token}"))
         .send()?;
     let status = resp.status();
-    let text = resp.text()?;
+    let text = limited_text(resp)?;
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
     }
@@ -1266,6 +1273,18 @@ fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, ProfileError> {
     let mut enc = GzEncoder::new(Vec::new(), Compression::default());
     enc.write_all(bytes)?;
     Ok(enc.finish()?)
+}
+
+fn limited_text(resp: reqwest::blocking::Response) -> Result<String, ProfileError> {
+    const MAX: usize = 256 * 1024;
+    let bytes = resp.bytes()?;
+    if bytes.len() > MAX {
+        return Ok(format!(
+            "[response truncated: {} bytes over {MAX}-byte cap]",
+            bytes.len()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 fn open_browser(url: &str) -> Result<(), ProfileError> {

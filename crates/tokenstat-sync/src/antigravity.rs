@@ -263,13 +263,7 @@ fn ingest_ide_cache(store: &mut Store, tz: &jiff::tz::TimeZone) -> anyhow::Resul
 }
 
 fn write_cache(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
-    fs::write(path, text)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    crate::snapshot::write_private_atomically(path, text)
 }
 
 /// Latest quota snapshot stored in archive meta, if any.
@@ -291,6 +285,7 @@ fn download_quota_bundle(access_token: &str) -> anyhow::Result<String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent("antigravity")
         .build()?;
 
@@ -387,6 +382,7 @@ fn try_refresh_from_oauth_file() -> anyhow::Result<Option<String>> {
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .connect_timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
     let resp = client

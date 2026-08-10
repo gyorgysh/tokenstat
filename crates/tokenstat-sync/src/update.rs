@@ -624,6 +624,10 @@ fn verify_candidate(
 ///
 /// Public so the CLI can prefer a Developer ID install under `~/.local/bin`
 /// over a cargo/ad-hoc binary when writing scheduler entries.
+/// Developer ID team for pueev OU. Same value as AppInstaller in the Mac app.
+#[cfg(target_os = "macos")]
+const EXPECTED_TEAM_ID: &str = "8SY98BT8RV";
+
 #[cfg(target_os = "macos")]
 pub fn has_macos_signing_authority(path: &Path) -> bool {
     has_signing_authority(path)
@@ -671,14 +675,48 @@ fn verify_signature(candidate: &Path, current: &Path) -> Result<(), UpdateError>
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
-    if !verified || !has_signing_authority(candidate) {
+    if !verified {
         return Err(UpdateError::Message(
-            "the downloaded binary is not signed by a real identity, and the installed one is; \
-             refusing to replace a signed binary with an unsigned one"
+            "the downloaded binary failed codesign verification, and the installed one is signed;              refusing to replace a signed binary with an unverified one"
+                .into(),
+        ));
+    }
+    // Match the Mac app: any real Authority is not enough. The team must be
+    // pueev's Developer ID so a third-party signed binary cannot replace ours.
+    if !has_developer_id_team(candidate, EXPECTED_TEAM_ID) {
+        return Err(UpdateError::Message(
+            "the downloaded binary is not signed by the tokenstat Developer ID team;              refusing to replace a signed binary with one from another publisher"
                 .into(),
         ));
     }
     Ok(())
+}
+
+/// True when codesign reports Developer ID Application and the given team.
+#[cfg(target_os = "macos")]
+fn has_developer_id_team(path: &Path, team: &str) -> bool {
+    let out = Command::new("codesign")
+        .args(["-dv", "--verbose=4"])
+        .arg(path)
+        .output();
+    let Ok(out) = out else {
+        return false;
+    };
+    if !out.status.success() {
+        return false;
+    }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let has_team = text
+        .lines()
+        .any(|l| l.trim() == format!("TeamIdentifier={team}"));
+    let has_dev_id = text
+        .lines()
+        .any(|l| l.starts_with("Authority=Developer ID Application:"));
+    has_team && has_dev_id
 }
 
 #[cfg(not(target_os = "macos"))]

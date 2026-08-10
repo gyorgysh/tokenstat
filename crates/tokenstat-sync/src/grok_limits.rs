@@ -119,6 +119,8 @@ pub fn fetch() -> ProviderLimits {
 
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(15))
+        .connect_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
     {
         Ok(c) => c,

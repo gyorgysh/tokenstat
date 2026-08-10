@@ -716,6 +716,33 @@ fn status() -> Result<Value, String> {
     }))
 }
 
+fn validate_tunnel_endpoint(raw: &str) -> Result<String, String> {
+    let s = raw.trim().trim_end_matches('/');
+    let (scheme, rest) = s
+        .split_once("://")
+        .ok_or_else(|| format!("tunnel endpoint must be a wss:// URL (got {raw})"))?;
+    let scheme = scheme.to_ascii_lowercase();
+    let hostport = rest.split('/').next().unwrap_or(rest);
+    let host = hostport
+        .trim_start_matches('[')
+        .split(']')
+        .next()
+        .unwrap_or(hostport)
+        .split(':')
+        .next()
+        .unwrap_or(hostport)
+        .to_ascii_lowercase();
+    let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0";
+    match scheme.as_str() {
+        "wss" => Ok(s.to_string()),
+        "ws" if loopback => Ok(s.to_string()),
+        "ws" => Err("ws:// is only allowed for localhost tunnel endpoints; use wss://".into()),
+        _ => Err(format!(
+            "tunnel endpoint must use wss:// (got scheme {scheme})"
+        )),
+    }
+}
+
 fn serve(params: &str) -> Result<Value, String> {
     let p: ServeParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let mut settings = load_settings();
@@ -723,7 +750,7 @@ fn serve(params: &str) -> Result<Value, String> {
         settings.tunnel = tunnel;
     }
     if let Some(endpoint) = p.tunnel_endpoint {
-        settings.tunnel_endpoint = endpoint;
+        settings.tunnel_endpoint = validate_tunnel_endpoint(&endpoint)?;
     }
     save_settings(&settings)?;
     if p.tunnel == Some(false) {

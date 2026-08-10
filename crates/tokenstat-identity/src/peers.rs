@@ -149,14 +149,32 @@ impl PeerStore {
             path: path.display().to_string(),
             source: std::io::Error::other(e),
         })?;
-        std::fs::write(&path, text).map_err(|e| IdentityError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .map_err(|e| IdentityError::Io {
+                    path: path.display().to_string(),
+                    source: e,
+                })?;
+            file.write_all(text.as_bytes())
+                .map_err(|e| IdentityError::Io {
+                    path: path.display().to_string(),
+                    source: e,
+                })?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&path, text).map_err(|e| IdentityError::Io {
+                path: path.display().to_string(),
+                source: e,
+            })?;
         }
         Ok(())
     }

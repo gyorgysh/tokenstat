@@ -110,12 +110,8 @@ fn blake3_lite(bytes: &[u8]) -> String {
 
 fn file_store(host: &str, token: &str) -> Result<(), KeychainError> {
     let path = creds_path(host)?;
-    std::fs::write(&path, token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    crate::snapshot::write_private_atomically(&path, token)
+        .map_err(|e| KeychainError::Unavailable(e.to_string()))?;
     Ok(())
 }
 

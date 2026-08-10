@@ -126,12 +126,8 @@ pub fn save(cfg: &Config) -> Result<(), ConfigError> {
         fs::create_dir_all(parent)?;
     }
     let json = serde_json::to_string_pretty(cfg)?;
-    fs::write(&path, json)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    }
+    crate::snapshot::write_private_atomically(&path, &json)
+        .map_err(|e| ConfigError::Io(std::io::Error::other(e.to_string())))?;
     Ok(())
 }
 
@@ -175,12 +171,8 @@ pub fn ensure_project_salt() -> Result<ProjectSalt, ConfigError> {
         key_hex: hex_encode(&key),
     };
     let json = serde_json::to_string_pretty(&file)?;
-    fs::write(&path, json)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    }
+    crate::snapshot::write_private_atomically(&path, &json)
+        .map_err(|e| ConfigError::Io(std::io::Error::other(e.to_string())))?;
     Ok(ProjectSalt { id, key })
 }
 

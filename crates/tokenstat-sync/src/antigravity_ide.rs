@@ -243,29 +243,11 @@ fn count_session_files() -> usize {
 }
 
 fn touch_stamp(path: &std::path::Path) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, b"ok")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    crate::snapshot::write_private_atomically(path, "ok")
 }
 
 fn write_secret_file(path: &std::path::Path, contents: &str) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, contents)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
+    crate::snapshot::write_private_atomically(path, contents)
 }
 
 fn sanitize_filename(id: &str) -> String {
@@ -896,6 +878,9 @@ fn rpc_request(connection: &Connection, method: &str, body: &Value) -> anyhow::R
 }
 
 fn https_rpc_request(connection: &Connection, method: &str, body: &Value) -> anyhow::Result<Value> {
+    // Loopback-only fallback when plain HTTP fails. The IDE serves a self-signed
+    // cert, so verification is disabled here on purpose. CSRF + fixed host
+    // 127.0.0.1 + body cap are the real guards. Prefer the plain HTTP path.
     let url = format!("https://127.0.0.1:{}/{SERVICE}/{method}", connection.port);
     let client = reqwest::blocking::Client::builder()
         .danger_accept_invalid_certs(true)
