@@ -109,9 +109,10 @@ pub fn fetch_remotes(
 pub use creds::{AuthStatus, clear_token, has_token, save_token, token_for};
 pub use profile::{
     DeviceLogin, DeviceStatus, JITTER_WINDOW_SECS, LoginResult, ProfileError, ScheduledOutcome,
-    SchedulingInfo, StatusResult, SyncOptions, SyncResult, cli_sync_schedule_active, device_poll,
-    device_start, jitter_offset, login, login_with_code, logout, scheduling_info, sync,
-    sync_scheduled, sync_scheduled_now, sync_status,
+    SchedulingInfo, StatusResult, SyncOptions, SyncResult, TunnelToken, cli_sync_schedule_active,
+    device_poll, device_start, jitter_offset, login, login_with_code, logout, mint_tunnel_token,
+    register_machine_identity, scheduling_info, sync, sync_scheduled, sync_scheduled_now,
+    sync_status,
 };
 pub use update::{
     ApplyReport, ScheduledUpdate, UPDATE_JITTER_WINDOW_SECS, UpdateCheck, UpdateError,

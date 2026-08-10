@@ -186,6 +186,35 @@ fn account_token() -> Result<String, String> {
         .ok_or_else(|| "sign in to tokenstat.ai before enabling remote reach".into())
 }
 
+/// Register the machine on the account directory, then mint a short-lived
+/// tunnel:connect token for HELLO. Falls back to the long-lived login bearer
+/// only if minting fails (older server, or plan/registration error already
+/// logged). Prefer tunnel tokens so a leaked HELLO secret is not a forever key.
+fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
+    let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
+    let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    tokenstat_sync::profile::register_machine_identity(
+        None,
+        &machine_id,
+        &identity.public_key_hex(),
+        &tokenstat_identity::machine_label(),
+    )
+    .map_err(|e| e.to_string())?;
+    set_tunnel_state(|state| state.registered = true);
+
+    match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
+        Ok(tok) => Ok((tok.token, Some(tok.expires_in))),
+        Err(error) => {
+            // Older hosts without POST /api/v1/tunnel/token still accept the
+            // sync bearer on HELLO. Log and fall back so remote reach keeps
+            // working until both ends are upgraded.
+            eprintln!("remote: tunnel token mint failed ({error}); falling back to login bearer");
+            let legacy = account_token()?;
+            Ok((legacy, None))
+        }
+    }
+}
+
 fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
     if !settings.tunnel {
         return;
@@ -197,19 +226,26 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         return;
     }
     let endpoint = settings.tunnel_endpoint.clone();
-    let registered_settings = settings.clone();
-    let token = match account_token() {
-        Ok(token) => token,
-        Err(error) => {
-            eprintln!("remote: tunnel is enabled but unavailable: {error}");
-            tunnel_running().store(false, Ordering::Release);
-            return;
-        }
-    };
+    // Confirm login before starting the supervisor. Mint happens below so the
+    // HELLO secret is tunnel-scoped when the server supports it.
+    if let Err(error) = account_token() {
+        eprintln!("remote: tunnel is enabled but unavailable: {error}");
+        tunnel_running().store(false, Ordering::Release);
+        return;
+    }
     let identity = match MachineIdentity::load_or_create() {
         Ok(identity) => identity,
         Err(error) => {
             eprintln!("remote: tunnel identity unavailable: {error}");
+            tunnel_running().store(false, Ordering::Release);
+            return;
+        }
+    };
+    let (hello_token, expires_in) = match tunnel_hello_token() {
+        Ok(pair) => pair,
+        Err(error) => {
+            eprintln!("remote: tunnel is enabled but unavailable: {error}");
+            set_tunnel_state(|state| state.registered = false);
             tunnel_running().store(false, Ordering::Release);
             return;
         }
@@ -227,17 +263,28 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             }
         };
         match guard.as_ref() {
-            Some(existing) => existing.clone(),
+            Some(existing) => {
+                // Already running: refresh the HELLO secret if we just minted.
+                existing.set_token(&hello_token);
+                existing.clone()
+            }
             None => {
-                let session =
-                    tokenstat_remote::tunnel::TunnelSession::spawn(&endpoint, &identity, &token);
+                let session = tokenstat_remote::tunnel::TunnelSession::spawn(
+                    &endpoint,
+                    &identity,
+                    &hello_token,
+                );
                 *guard = Some(session.clone());
                 session
             }
         }
     };
+    // Refresh the short-lived token at half-life so HELLO never races expiry.
+    if let Some(ttl) = expires_in {
+        let refresh_tunnel = Arc::clone(&tunnel);
+        std::thread::spawn(move || tunnel_token_refresh_loop(refresh_tunnel, ttl));
+    }
     std::thread::spawn(move || {
-        register_with_account(&registered_settings);
         // Inbound channels: the relay dialled us. Each is a fresh Noise
         // handshake over the channel, answered exactly like a direct TCP
         // connection, so the approval rule cannot tell the transports apart.
@@ -270,6 +317,40 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         }
         tunnel_running().store(false, Ordering::Release);
     });
+}
+
+/// Re-mint the tunnel token before it expires and push it into the session.
+fn tunnel_token_refresh_loop(
+    tunnel: Arc<tokenstat_remote::tunnel::TunnelSession>,
+    initial_ttl_secs: u64,
+) {
+    let mut ttl = initial_ttl_secs.max(300);
+    while tunnel_running().load(Ordering::Acquire) {
+        // Refresh at half-life, never sooner than 2 minutes (local testing TTLs).
+        let sleep_secs = (ttl / 2).max(120);
+        let mut waited = 0u64;
+        while waited < sleep_secs && tunnel_running().load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_secs(1));
+            waited += 1;
+        }
+        if !tunnel_running().load(Ordering::Acquire) {
+            return;
+        }
+        let machine_id = match tokenstat_sync::config::ensure_machine_id() {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("remote: tunnel token refresh skipped: {e}");
+                continue;
+            }
+        };
+        match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
+            Ok(tok) => {
+                tunnel.set_token(&tok.token);
+                ttl = tok.expires_in.max(300);
+            }
+            Err(e) => eprintln!("remote: tunnel token refresh failed: {e}"),
+        }
+    }
 }
 
 fn stop_tunnel() {

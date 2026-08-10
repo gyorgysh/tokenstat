@@ -558,6 +558,65 @@ pub fn register_machine_identity(
     Ok(())
 }
 
+/// Short-lived tunnel HELLO credential for one machine.
+///
+/// Minted with the long-lived login/sync bearer. The returned secret is
+/// `tunnel:connect` only and expires; it is not written to the keychain.
+#[derive(Debug, Clone)]
+pub struct TunnelToken {
+    pub token: String,
+    pub expires_at: String,
+    pub expires_in: u64,
+    pub machine: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TunnelTokenResponse {
+    token: String,
+    expires_at: String,
+    expires_in: u64,
+    machine: String,
+}
+
+/// Mint (or rotate) a short-lived tunnel token for `machine_id`.
+///
+/// Call after [`register_machine_identity`] so the machine has a
+/// `public_identity` the relay can bind the token to.
+pub fn mint_tunnel_token(
+    host_flag: Option<&str>,
+    machine_id: &str,
+) -> Result<TunnelToken, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/tunnel/token"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "machine": machine_id }))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        return Err(refusal_error(&text, status.as_u16()));
+    }
+    let body: TunnelTokenResponse = serde_json::from_str(&text).map_err(|e| {
+        ProfileError::Message(format!("tunnel token response unreadable: {e}"))
+    })?;
+    if body.token.is_empty() {
+        return Err(ProfileError::Message("tunnel token response empty".into()));
+    }
+    Ok(TunnelToken {
+        token: body.token,
+        expires_at: body.expires_at,
+        expires_in: body.expires_in,
+        machine: body.machine,
+    })
+}
+
 /// Remove a machine from the account directory. The server deletes the
 /// machine's uploaded rows too, which is what makes this an explicit action
 /// rather than something a client does on its own: a stale machine id (a

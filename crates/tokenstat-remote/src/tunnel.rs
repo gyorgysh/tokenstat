@@ -64,7 +64,10 @@ const RECONNECT_CEILING: Duration = Duration::from_secs(30);
 pub struct TunnelSession {
     endpoint: String,
     key_hex: String,
-    token: String,
+    /// Short-lived tunnel:connect secret (or, during rollout, a legacy sync
+    /// bearer). Swapped under the mutex when the host refreshes it; the next
+    /// HELLO / reconnect picks up the new value.
+    token: Mutex<String>,
     next_channel: AtomicU32,
     /// The writer thread's inbox. None while disconnected.
     writer: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
@@ -130,7 +133,7 @@ impl TunnelSession {
         let session = Arc::new(Self {
             endpoint: endpoint.to_string(),
             key_hex: identity.public_key_hex(),
-            token: token.to_string(),
+            token: Mutex::new(token.to_string()),
             next_channel: AtomicU32::new(1),
             writer: Mutex::new(None),
             inbound_tx: Mutex::new(Some(inbound_tx)),
@@ -143,6 +146,16 @@ impl TunnelSession {
         let weak = Arc::downgrade(&session);
         std::thread::spawn(move || supervisor(weak));
         session
+    }
+
+    /// Replace the HELLO credential and drop the live socket so the
+    /// supervisor reconnects with the new token. Used when refreshing a
+    /// short-lived `tunnel:connect` secret before it expires.
+    pub fn set_token(&self, token: &str) {
+        *self.token.lock().unwrap_or_else(|e| e.into_inner()) = token.to_string();
+        if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = socket.close(None);
+        }
     }
 
     /// Channels the relay opened to this machine, for the host to answer.
@@ -403,10 +416,15 @@ fn supervisor(session: Weak<TunnelSession>) {
 
 /// Connect, register, and pump until the socket dies.
 fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
+    let token = session
+        .token
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
     let (mut socket, _) = connect(&session.endpoint).map_err(tunnel_error)?;
     socket
         .send(Message::Text(
-            format!("HELLO {} {} V2", session.key_hex, session.token).into(),
+            format!("HELLO {} {} V2", session.key_hex, token).into(),
         ))
         .map_err(tunnel_error)?;
     match socket.read().map_err(tunnel_error)? {
