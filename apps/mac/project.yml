@@ -32,8 +32,15 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.2.9"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "0.3.0"
+    # The build number, and it counts releases: one higher on every tagged
+    # version, never reused, never reset by a marketing version change. It sat
+    # at "2" through fourteen releases, which the App Store will not take (a
+    # build number must rise for each upload) and which makes two different
+    # builds indistinguishable in a crash report. v0.3.0 is the fifteenth
+    # release, so 15. Bump this with MARKETING_VERSION above, in the same
+    # commit.
+    CURRENT_PROJECT_VERSION: "15"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
