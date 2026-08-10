@@ -63,6 +63,10 @@ desktop.ini
 /apps/mac/Tokenstat.xcodeproj/
 /apps/mac/Vendor/
 /apps/mac/Resources/THIRD_PARTY_NOTICES.md
+# Every app's build output, whatever the tool put it there. Xcode writes
+# `build/` next to the project when a scheme is built from the command line,
+# and it is hundreds of megabytes of derived data.
+/apps/*/build/
 /apps/*/DerivedData/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
