@@ -34,6 +34,7 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::sync::Arc;
+#[cfg(unix)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
@@ -44,10 +45,13 @@ use crate::session::Session;
 
 /// Inbound request line budget. Editor saves can be multi-megabyte JSON.
 /// Matches the remote message scale without allowing multi-GB DoS lines.
+#[cfg(unix)]
 const MAX_REQUEST_LINE: usize = 32 * 1024 * 1024;
 /// Concurrent unix-socket clients. The Mac app caps itself at 16; leave headroom.
+#[cfg(unix)]
 const MAX_CONNECTIONS: usize = 64;
 
+#[cfg(unix)]
 fn live_connections() -> &'static AtomicUsize {
     static LIVE: AtomicUsize = AtomicUsize::new(0);
     &LIVE
@@ -174,8 +178,10 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
 struct ConnectionGuard;
 
+#[cfg(unix)]
 impl Drop for ConnectionGuard {
     fn drop(&mut self) {
         live_connections().fetch_sub(1, Ordering::AcqRel);

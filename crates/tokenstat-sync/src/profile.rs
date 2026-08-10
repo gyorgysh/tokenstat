@@ -603,9 +603,8 @@ pub fn mint_tunnel_token(
     if !status.is_success() {
         return Err(refusal_error(&text, status.as_u16()));
     }
-    let body: TunnelTokenResponse = serde_json::from_str(&text).map_err(|e| {
-        ProfileError::Message(format!("tunnel token response unreadable: {e}"))
-    })?;
+    let body: TunnelTokenResponse = serde_json::from_str(&text)
+        .map_err(|e| ProfileError::Message(format!("tunnel token response unreadable: {e}")))?;
     if body.token.is_empty() {
         return Err(ProfileError::Message("tunnel token response empty".into()));
     }
