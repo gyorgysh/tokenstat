@@ -34,6 +34,14 @@ struct TodoView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            DetailChromeBar {
+                ToolbarIconButton(
+                    systemImage: "plus",
+                    help: "Add a card to To Do"
+                ) {
+                    addingIn = "backlog"
+                }
+            }
             if let error = model.errorMessage {
                 Banner(text: error, severity: .warning)
                     .padding(Theme.Space.m)

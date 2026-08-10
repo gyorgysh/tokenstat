@@ -27,31 +27,41 @@ struct MachinesView: View {
     @State private var pendingUnlink: Machine?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let message = model.errorMessage {
-                    Banner(text: message, severity: .warning)
+        VStack(spacing: 0) {
+            DetailChromeBar {
+                ToolbarIconButton(
+                    systemImage: "plus",
+                    help: "Paste a key from another machine to pair it"
+                ) {
+                    addingDevice = true
                 }
-                if !Bridge.isHosted {
-                    hostSetup
-                }
-                // First, because it is the only thing here that is waiting on a
-                // person. Everything else can be read at leisure.
-                if !model.pending.isEmpty {
-                    waitingForApproval
-                }
-
-                thisMachine
-                if !model.accountMachines.isEmpty {
-                    accountDevices
-                }
-                if !model.known.isEmpty {
-                    knownMachines
-                }
-                addDeviceAction
-                privacyNote
             }
-            .padding(Theme.Space.m)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let message = model.errorMessage {
+                        Banner(text: message, severity: .warning)
+                    }
+                    if !Bridge.isHosted {
+                        hostSetup
+                    }
+                    // First, because it is the only thing here that is waiting on a
+                    // person. Everything else can be read at leisure.
+                    if !model.pending.isEmpty {
+                        waitingForApproval
+                    }
+
+                    thisMachine
+                    if !model.accountMachines.isEmpty {
+                        accountDevices
+                    }
+                    if !model.known.isEmpty {
+                        knownMachines
+                    }
+                    addDeviceAction
+                    privacyNote
+                }
+                .padding(Theme.Space.m)
+            }
         }
         .navigationTitle("Machines")
         .background(Theme.background)

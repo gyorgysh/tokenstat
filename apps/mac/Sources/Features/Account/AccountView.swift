@@ -17,29 +17,43 @@ struct AccountView: View {
     @State private var deletionURL: URL?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let message = model.errorMessage {
-                    Banner(text: message, severity: .warning)
+        VStack(spacing: 0) {
+            DetailChromeBar {
+                if model.signedIn {
+                    ToolbarIconButton(
+                        systemImage: "arrow.triangle.2.circlepath",
+                        help: "Sync now",
+                        isBusy: model.isSyncing,
+                        isEnabled: !model.isSyncing && model.syncCooldownUntil == nil
+                    ) {
+                        Task { await model.sync() }
+                    }
                 }
-                if let device = model.pendingLogin {
-                    SignInCode(device: device) { model.cancelSignIn() }
-                } else if model.signedIn, let account = model.account {
-                    signedIn(account)
-                } else if model.account != nil {
-                    signedOut
-                } else {
-                    // Neither state is known yet. Showing "sign in" here would
-                    // flash the wrong answer on every launch.
-                    ProgressView().frame(maxWidth: .infinity)
-                }
-
-                terminalCard
-                licensesCard
-                deleteAccountCard
-                privacyNote
             }
-            .padding(Theme.Space.m)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let message = model.errorMessage {
+                        Banner(text: message, severity: .warning)
+                    }
+                    if let device = model.pendingLogin {
+                        SignInCode(device: device) { model.cancelSignIn() }
+                    } else if model.signedIn, let account = model.account {
+                        signedIn(account)
+                    } else if model.account != nil {
+                        signedOut
+                    } else {
+                        // Neither state is known yet. Showing "sign in" here would
+                        // flash the wrong answer on every launch.
+                        ProgressView().frame(maxWidth: .infinity)
+                    }
+
+                    terminalCard
+                    licensesCard
+                    deleteAccountCard
+                    privacyNote
+                }
+                .padding(Theme.Space.m)
+            }
         }
         .background(Theme.background)
         .navigationTitle("Account")

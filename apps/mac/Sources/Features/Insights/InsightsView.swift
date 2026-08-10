@@ -36,15 +36,14 @@ struct InsightsView: View {
                     }
                 },
                 trailing: {
-                    Picker("Period", selection: $model.period) {
-                        ForEach(InsightsModel.Period.allCases) { p in
-                            Text(p.rawValue).tag(p)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 280)
-                    .labelsHidden()
-                    .controlSize(.small)
+                    // App capsule chips, not the system segmented control.
+                    SegmentedCapsulePicker(
+                        options: InsightsModel.Period.allCases.map {
+                            (value: $0, label: $0.rawValue, symbol: "")
+                        },
+                        selection: $model.period
+                    )
+                    .frame(maxWidth: 260)
                     .help("Report period")
 
                     ToolbarIconButton(

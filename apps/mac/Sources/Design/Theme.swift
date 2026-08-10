@@ -925,23 +925,30 @@ private struct SegmentButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label(label, systemImage: symbol)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-                .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(
-                            isSelected
-                                ? Theme.accentSoft
-                                : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear)
-                        )
-                )
-                .contentShape(.rect)
+            HStack(spacing: 4) {
+                // Empty symbol is text-only (period chips: 7d / 30d / All).
+                if !symbol.isEmpty {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.9)
+            }
+            .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+            .padding(.horizontal, symbol.isEmpty ? 10 : 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(
+                        isSelected
+                            ? Theme.accentSoft
+                            : (isHovering ? Theme.rowHighlight.opacity(0.7) : .clear)
+                    )
+            )
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
