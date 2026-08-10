@@ -44,7 +44,12 @@ struct HomeView: View {
             }
             ScrollView {
                 WidthReader { width in
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    // Lazy so plan panels below the fold are not laid out until
+                    // they scroll in. The heatmap at the top is still always
+                    // built, but it is a single Canvas now rather than hundreds
+                    // of day views, so the stack cost is the panels, not the
+                    // year of squares.
+                    LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                         if let message = model.errorMessage {
                             Banner(text: message, severity: .warning)
                         }

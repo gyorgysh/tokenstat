@@ -17,6 +17,13 @@ import SwiftUI
 /// not compute which day belongs in which column: the archive stores only days
 /// that had events, so anything that packs them together draws a plausible
 /// calendar with every date in the wrong place.
+///
+/// Drawing is a single `Canvas` (~370 cells in one layer) rather than one
+/// SwiftUI view per day. A view-per-cell grid re-laid out on every scroll
+/// frame and each cell carried its own `GeometryReader` for the hover
+/// popover, which is what made Home lag when the pointer was over the card.
+/// Hit testing, hover, and the popover anchor are one overlay that maps a
+/// point back to a cell with the same packing math.
 struct HeatmapView: View {
     let calendar: ActivityCalendar
     /// Clicking a day filters Insights to it.
@@ -25,7 +32,7 @@ struct HeatmapView: View {
     /// fetch and the popover, so this only carries which cell it is.
     var onHover: ((HeatCell?) -> Void)?
 
-    @State private var hovered: HeatCell?
+    @State private var hovered: HoveredSlot?
 
     /// The named coordinate space the popover reads cell frames in. Set on the
     /// window's root view so a frame here is a window-space frame no matter
@@ -36,6 +43,9 @@ struct HeatmapView: View {
     /// Gap as a fraction of a cell, so the grid keeps its texture at any size.
     /// A fixed 3 point gap between 28 point squares reads as a solid block.
     private let gapRatio: CGFloat = 0.2
+    /// Corner radius of each day square, kept in one place so Canvas and the
+    /// hover ring agree.
+    private let cellCorner: CGFloat = 2.5
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -53,18 +63,18 @@ struct HeatmapView: View {
                 let width = quantised(proxy.size.width, step: 4)
                 let cell = cellSize(for: width)
                 let gap = gapSize(for: width, cell: cell)
+                let layout = GridLayout(
+                    cell: cell,
+                    gap: gap,
+                    gutter: gutter,
+                    weeks: calendar.weeks,
+                    rows: calendar.rows.count
+                )
                 VStack(alignment: .leading, spacing: gap) {
-                    months(cell: cell, gap: gap)
-                    ForEach(0 ..< calendar.rows.count, id: \.self) { row in
-                        HStack(spacing: gap) {
-                            Text(Self.rowLabel(row))
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: gutter, alignment: .leading)
-                            ForEach(0 ..< calendar.rows[row].count, id: \.self) { column in
-                                square(calendar.rows[row][column], cell: cell)
-                            }
-                        }
+                    months(layout: layout)
+                    HStack(alignment: .top, spacing: gap) {
+                        rowLabels(layout: layout)
+                        grid(layout: layout)
                     }
                 }
                 // Centred, not leading. Once the cell and the gap are both at
@@ -128,7 +138,7 @@ struct HeatmapView: View {
         return 11 + gap + 7 * (maxCell + gap)
     }
 
-    private func months(cell: CGFloat, gap: CGFloat) -> some View {
+    private func months(layout: GridLayout) -> some View {
         // Absolute placement rather than a stack of spacers: a month label is
         // wider than the column it belongs to, so laying them out in sequence
         // pushes every later one out of alignment with its week.
@@ -138,67 +148,140 @@ struct HeatmapView: View {
                 Text(month.name)
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
-                    .offset(x: gutter + gap + CGFloat(month.column) * (cell + gap))
+                    .offset(x: layout.gutter + layout.gap + CGFloat(month.column) * layout.stride)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func square(_ day: HeatCell?, cell: CGFloat) -> some View {
-        if let day {
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(Theme.heat[min(day.level, Theme.heat.count - 1)])
-                .frame(width: cell, height: cell)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 2.5)
-                        .strokeBorder(
-                            hovered == day ? Color.primary.opacity(0.55) : .clear,
-                                lineWidth: 1
-                        )
-                )
-                .onHover { over in
-                    if over {
-                        hovered = day
-                        onHover?(day)
-                    } else if hovered == day {
-                        hovered = nil
-                        onHover?(nil)
-                    }
-                }
-                .onTapGesture { onSelect?(day) }
-                .accessibilityElement(children: .ignore)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("\(day.date): \(formatSpend(day.value)) at list rates")
-                .accessibilityHint("Shows day detail and filters Insights")
-                .accessibilityAction { onSelect?(day) }
-                // The popover is anchored to this cell's window-space frame.
-                // Only the hovered cell reports, so the preference never
-                // carries more than one frame and moving between cells swaps
-                // it atomically.
-                .background {
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: HoveredCellFrameKey.self,
-                            value: hovered == day
-                                ? HoveredCellFrame(
-                                    date: day.date,
-                                    frame: geo.frame(in: .named(Self.coordinateSpace))
-                                )
-                                : nil
-                        )
-                    }
-                }
-        } else {
-            // A day after today. Left blank rather than drawn as idle: it has
-            // not happened, which is not the same as nothing happening.
-            Color.clear.frame(width: cell, height: cell)
+    private func rowLabels(layout: GridLayout) -> some View {
+        VStack(alignment: .leading, spacing: layout.gap) {
+            ForEach(0 ..< calendar.rows.count, id: \.self) { row in
+                Text(Self.rowLabel(row))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: layout.gutter, height: layout.cell, alignment: .leading)
+            }
         }
+    }
+
+    /// The year of squares as one canvas, plus a thin hit layer for hover and
+    /// click. Accessibility is rebuilt as a flat list of days so VoiceOver does
+    /// not need a view per cell either.
+    private func grid(layout: GridLayout) -> some View {
+        let heat = Theme.heat
+        let corner = cellCorner
+        return ZStack(alignment: .topLeading) {
+            Canvas { context, _ in
+                for (rowIndex, row) in calendar.rows.enumerated() {
+                    for (colIndex, day) in row.enumerated() {
+                        guard let day else { continue }
+                        let rect = layout.cellRect(row: rowIndex, column: colIndex)
+                        let path = Path(
+                            roundedRect: rect,
+                            cornerRadius: corner
+                        )
+                        let level = min(max(day.level, 0), heat.count - 1)
+                        context.fill(path, with: .color(heat[level]))
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+
+            // One ring for the hovered day. Drawn as a real view so it stays
+            // crisp on top of the canvas without redrawing every cell.
+            if let hovered {
+                RoundedRectangle(cornerRadius: corner)
+                    .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1)
+                    .frame(width: layout.cell, height: layout.cell)
+                    .offset(
+                        x: layout.cellRect(row: hovered.row, column: hovered.column).minX,
+                        y: layout.cellRect(row: hovered.row, column: hovered.column).minY
+                    )
+                    .allowsHitTesting(false)
+            }
+
+            // Transparent hit target covering the canvas. Maps pointer location
+            // to a cell with the same packing math the canvas uses.
+            Color.clear
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case let .active(location):
+                        setHovered(layout.slot(at: location, in: calendar.rows))
+                    case .ended:
+                        setHovered(nil)
+                    }
+                }
+                .gesture(
+                    SpatialTapGesture()
+                        .onEnded { event in
+                            guard let slot = layout.slot(at: event.location, in: calendar.rows) else {
+                                return
+                            }
+                            onSelect?(slot.day)
+                        }
+                )
+        }
+        .frame(width: layout.contentWidth, height: layout.contentHeight, alignment: .topLeading)
+        // One GeometryReader for the whole grid reports the hovered cell's
+        // window frame. Per-cell readers were the other half of the scroll lag.
+        .background {
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: HoveredCellFrameKey.self,
+                    value: hoveredFrame(in: geo, layout: layout)
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityChildren {
+            ForEach(accessibleDays, id: \.day.date) { item in
+                Button {
+                    onSelect?(item.day)
+                } label: {
+                    Text("\(item.day.date): \(formatSpend(item.day.value)) at list rates")
+                }
+                .accessibilityHint("Shows day detail and filters Insights")
+            }
+        }
+    }
+
+    /// Days VoiceOver can land on. Future blank cells are skipped; idle days
+    /// stay so the grid is still a calendar under a screen reader.
+    private var accessibleDays: [(day: HeatCell, row: Int, column: Int)] {
+        var out: [(day: HeatCell, row: Int, column: Int)] = []
+        for (row, cells) in calendar.rows.enumerated() {
+            for (column, day) in cells.enumerated() {
+                if let day {
+                    out.append((day, row, column))
+                }
+            }
+        }
+        return out
+    }
+
+    private func setHovered(_ slot: HoveredSlot?) {
+        // Avoid thrashing the parent hover handler and the popover preference
+        // when the pointer stays inside the same square.
+        if slot == hovered { return }
+        hovered = slot
+        onHover?(slot?.day)
+    }
+
+    private func hoveredFrame(in geo: GeometryProxy, layout: GridLayout) -> HoveredCellFrame? {
+        guard let hovered else { return nil }
+        let origin = geo.frame(in: .named(Self.coordinateSpace))
+        let local = layout.cellRect(row: hovered.row, column: hovered.column)
+        return HoveredCellFrame(
+            date: hovered.day.date,
+            frame: local.offsetBy(dx: origin.minX, dy: origin.minY)
+        )
     }
 
     private var footer: some View {
         HStack(spacing: Theme.Space.s) {
-            if let day = hovered {
+            if let day = hovered?.day {
                 Text("\(day.date)")
                     .font(Theme.numeric(11))
                     .foregroundStyle(.secondary)
@@ -236,6 +319,65 @@ struct HeatmapView: View {
         default: return ""
         }
     }
+}
+
+/// Packing constants for one render of the heatmap grid.
+///
+/// Built once per layout pass from the measured width, then shared by the
+/// canvas, the hit tester, the hover ring, and the popover anchor so those
+/// four can never disagree about where a day sits.
+private struct GridLayout {
+    var cell: CGFloat
+    var gap: CGFloat
+    var gutter: CGFloat
+    var weeks: Int
+    var rows: Int
+
+    var stride: CGFloat { cell + gap }
+
+    var contentWidth: CGFloat {
+        guard weeks > 0 else { return 0 }
+        return CGFloat(weeks) * cell + CGFloat(max(weeks - 1, 0)) * gap
+    }
+
+    var contentHeight: CGFloat {
+        guard rows > 0 else { return 0 }
+        return CGFloat(rows) * cell + CGFloat(max(rows - 1, 0)) * gap
+    }
+
+    func cellRect(row: Int, column: Int) -> CGRect {
+        CGRect(
+            x: CGFloat(column) * stride,
+            y: CGFloat(row) * stride,
+            width: cell,
+            height: cell
+        )
+    }
+
+    /// Map a point in content coordinates to a day, or nil for a gap / blank
+    /// future cell / outside the grid.
+    func slot(at point: CGPoint, in rows: [[HeatCell?]]) -> HoveredSlot? {
+        guard point.x >= 0, point.y >= 0, cell > 0 else { return nil }
+        let column = Int(point.x / stride)
+        let row = Int(point.y / stride)
+        guard row >= 0, row < rows.count else { return nil }
+        guard column >= 0, column < rows[row].count else { return nil }
+        // Reject the gap band between cells so moving through a gutter clears
+        // the hover rather than sticking to the previous day.
+        let localX = point.x - CGFloat(column) * stride
+        let localY = point.y - CGFloat(row) * stride
+        guard localX <= cell, localY <= cell else { return nil }
+        guard let day = rows[row][column] else { return nil }
+        return HoveredSlot(day: day, row: row, column: column)
+    }
+}
+
+/// The cell under the pointer, with its grid index so the ring and the
+/// popover anchor can be placed without scanning the year for a date match.
+private struct HoveredSlot: Equatable {
+    var day: HeatCell
+    var row: Int
+    var column: Int
 }
 
 /// Where the hovered heatmap cell sits, in window coordinates.
