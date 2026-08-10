@@ -22,21 +22,20 @@ struct InsightsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // One row: menu (tabs) on the left, actions on the right. Same
-            // language as other destinations' DetailChromeBar, without a
-            // second empty strip above the tabs.
-            HStack(spacing: Theme.Space.s) {
-                if model.focusedDay != nil {
-                    ToolbarIconButton(
-                        systemImage: "chevron.left",
-                        help: "Back to Home"
-                    ) {
-                        onBackToHome?()
+            // Same chrome row as Home: toggles (from RootView) left, actions
+            // right. Tabs are a full-width strip under that row.
+            DetailChromeBar(
+                leading: {
+                    if model.focusedDay != nil {
+                        ToolbarIconButton(
+                            systemImage: "chevron.left",
+                            help: "Back to Home"
+                        ) {
+                            onBackToHome?()
+                        }
                     }
-                }
-                TabStrip(tabs: tabs, selection: $model.tab, showsChrome: false)
-                    .frame(maxWidth: .infinity)
-                HStack(spacing: Theme.Space.s) {
+                },
+                trailing: {
                     SegmentedCapsulePicker(
                         options: InsightsModel.Period.allCases.map {
                             (value: $0, label: $0.rawValue, symbol: "")
@@ -62,14 +61,8 @@ struct InsightsView: View {
                         Task { await model.fetchRemotes() }
                     }
                 }
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .frame(maxWidth: .infinity)
-            .frame(height: DetailChromeBarHeight)
-            .background(Theme.tabStrip)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.border).frame(height: 1)
-            }
+            )
+            TabStrip(tabs: tabs, selection: $model.tab)
             content
         }
         .background(Theme.background)

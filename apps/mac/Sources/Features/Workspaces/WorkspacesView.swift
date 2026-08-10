@@ -21,6 +21,11 @@ struct WorkspacesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Same leading toggles as every other destination; trailing empty
+            // because workspace actions sit in the folder header and terminal.
+            DetailChromeBar {
+                EmptyView()
+            }
             if let folder = model.selected {
                 header(folder)
                 Divider()

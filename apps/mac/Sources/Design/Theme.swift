@@ -360,14 +360,38 @@ struct SectionLabel: View {
     }
 }
 
+/// Sidebar / inspector marks for the shared detail chrome bar.
+///
+/// Injected by `RootView` so every destination gets the same leading controls
+/// without each screen re-wiring ⌘B / ⌥⌘B.
+struct DetailChromeToggles {
+    var leftSidebar: AnyView
+    var rightInspector: AnyView?
+}
+
+private struct DetailChromeTogglesKey: EnvironmentKey {
+    static let defaultValue: DetailChromeToggles? = nil
+}
+
+extension EnvironmentValues {
+    var detailChromeToggles: DetailChromeToggles? {
+        get { self[DetailChromeTogglesKey.self] }
+        set { self[DetailChromeTogglesKey.self] = newValue }
+    }
+}
+
 /// Fixed action strip under the window titlebar.
 ///
-/// Destination controls (refresh, scan, new, period) live here rather than in
-/// the system toolbar. Every screen then shares one layout: a bar pinned above
-/// the scrolling content, and the window toolbar only carries the sidebar and
-/// inspector marks. That also keeps the system "Icon and Text" mode off our
-/// content actions (those marks have hover help, not titles).
+/// One row on every destination:
+/// - **Leading:** sidebar toggle, inspector toggle (when that screen has one),
+///   then optional extras (e.g. Insights back).
+/// - **Trailing:** destination actions (refresh, period, scan, new, …).
+///
+/// Toggles no longer live in the system toolbar, so Home and Insights share
+/// the same chrome shape and the window titlebar stays traffic lights only.
 struct DetailChromeBar<Leading: View, Trailing: View>: View {
+    @Environment(\.detailChromeToggles) private var toggles
+    /// Extra leading items after the shared toggles (back, etc.).
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var trailing: () -> Trailing
 
@@ -384,7 +408,15 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
         // stacks vertically if dropped in raw. Leading/trailing must stay one
         // horizontal group each.
         HStack(spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) { leading() }
+            HStack(spacing: Theme.Space.s) {
+                if let toggles {
+                    toggles.leftSidebar
+                    if let right = toggles.rightInspector {
+                        right
+                    }
+                }
+                leading()
+            }
             Spacer(minLength: 0)
             HStack(spacing: Theme.Space.s) { trailing() }
         }
@@ -402,8 +434,7 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
     static var height: CGFloat { DetailChromeBarHeight }
 }
 
-/// Shared height for `DetailChromeBar` and any custom chrome row that matches
-/// it (Insights puts tabs and actions on one bar of this height).
+/// Shared height for `DetailChromeBar` and matching chrome rows.
 let DetailChromeBarHeight: CGFloat = 40
 
 /// A flat tab strip, in place of the reference layout's row of agent tabs.

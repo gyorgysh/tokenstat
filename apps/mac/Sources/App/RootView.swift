@@ -380,34 +380,36 @@ struct RootView: View {
         }
     }
 
-    /// Shared chrome: NavigationSplitView with the window toolbar.
+    /// Shared chrome: NavigationSplitView.
     ///
-    /// The window toolbar only carries the sidebar and inspector marks.
-    /// Destination actions (refresh, scan, new, period) live in each screen's
-    /// `DetailChromeBar` so Home and Insights share one fixed-bar layout and
-    /// nothing floats over the scrolling content.
+    /// Sidebar and inspector marks live in each screen's `DetailChromeBar`
+    /// (leading), with destination actions on the trailing side. The system
+    /// toolbar is empty on purpose so the titlebar is only traffic lights and
+    /// every destination shares one content chrome row.
     private var mainChrome: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
             sidebar
         } detail: {
             detailColumn
+                .environment(\.detailChromeToggles, detailChromeToggles)
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
-        // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
+        // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help, and live
+        // in DetailChromeBar rather than here.
         .toolbar(removing: .sidebarToggle)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                leftSidebarToolbarButton
-            }
-            if destinationHasInspector {
-                ToolbarItem(placement: .primaryAction) {
-                    rightInspectorToolbarButton
-                }
-            }
-        }
         // Always hidden. AppKit owns bar opacity via titlebarAppearsTransparent.
         .toolbarBackground(.hidden, for: .windowToolbar)
+    }
+
+    /// Leading toggles injected into every destination's chrome bar.
+    private var detailChromeToggles: DetailChromeToggles {
+        DetailChromeToggles(
+            leftSidebar: AnyView(leftSidebarToolbarButton),
+            rightInspector: destinationHasInspector
+                ? AnyView(rightInspectorToolbarButton)
+                : nil
+        )
     }
 
     /// Leading sidebar mark for toolbars (sidebar column and detail column).
