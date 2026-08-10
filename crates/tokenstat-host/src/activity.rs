@@ -219,7 +219,13 @@ fn tick() {
         return;
     }
 
-    let table = process_table();
+    // A failed `ps` is not "everything is at 0%". Treating it as quiet would
+    // pull every EMA toward zero, learn a false idle baseline, and drop a
+    // working session after the grace for no reason. Keep prior readings.
+    let Some(table) = process_table() else {
+        return;
+    };
+    let children = children_index(&table);
     let hooks = hook_records();
     let now = Instant::now();
 
@@ -229,15 +235,12 @@ fn tick() {
     let mut readings = HashMap::with_capacity(watches.len());
 
     for w in &watches {
-        let usage = table.as_ref().map(|table| subtree_usage(table, w.pid));
-        let (sample, memory_mb) = usage
-            .as_ref()
-            .map(|u| (u.cpu_percent, u.memory_mb))
-            .unwrap_or((0.0, 0.0));
-        let subtree = usage.map(|u| u.pids).unwrap_or_default();
+        let usage = subtree_usage(&table, &children, w.pid);
+        let sample = usage.cpu_percent;
+        let memory_mb = usage.memory_mb;
         let hook = hooks
             .iter()
-            .find(|r| r.matches(w, &subtree))
+            .find(|r| r.matches(w, &usage.pids))
             .map(|r| r.working);
         let evidence = w
             .harness
@@ -253,14 +256,17 @@ fn tick() {
             hook,
         );
 
-        // The grace is applied to the answer, not to the state machine: the
-        // EMA and the baseline must keep learning through a quiet stretch, or
-        // a session held "working" by the grace would come out of it with a
-        // baseline learned three minutes ago.
+        // Grace bridges quiet stretches between tokens for the CPU and
+        // transcript heuristics. It must not override a hook that said idle:
+        // hooks beat every measurement, and a three-minute Working after the
+        // agent has asked the user a question is worse than a brief flap.
         let previous = t.last_working.get(&w.pid).copied();
+        let hook_says_idle = hook == Some(false);
         let within_grace = previous.is_some_and(|at| now.duration_since(at) < GRACE);
         if state.working {
             last_working.insert(w.pid, now);
+        } else if hook_says_idle {
+            // Drop the grace clock so a later resume starts clean.
         } else if let Some(at) = previous {
             last_working.insert(w.pid, at);
         }
@@ -268,11 +274,7 @@ fn tick() {
         readings.insert(
             w.pid,
             Reading {
-                activity: if state.working || within_grace {
-                    Activity::Working
-                } else {
-                    Activity::Idle
-                },
+                activity: reported_activity(state.working, within_grace, hook_says_idle),
                 cpu_percent: state.average.unwrap_or(0.0),
                 memory_mb,
             },
@@ -283,6 +285,18 @@ fn tick() {
     t.states = states;
     t.last_working = last_working;
     t.readings = readings;
+}
+
+/// Fold the grace clock into the state machine's answer.
+///
+/// Grace is for quiet stretches between tokens. A lifecycle hook that said
+/// idle is authoritative and cancels it.
+fn reported_activity(working: bool, within_grace: bool, hook_says_idle: bool) -> Activity {
+    if working || (within_grace && !hook_says_idle) {
+        Activity::Working
+    } else {
+        Activity::Idle
+    }
 }
 
 /// One decision step. Pure, so the thresholds can be tested without a
@@ -372,17 +386,26 @@ fn process_table() -> Option<HashMap<u32, Proc>> {
     Some(table)
 }
 
+/// Parent → children index for one process table, built once per tick.
+fn children_index(table: &HashMap<u32, Proc>) -> HashMap<u32, Vec<u32>> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (pid, proc) in table {
+        children.entry(proc.ppid).or_default().push(*pid);
+    }
+    children
+}
+
 /// CPU of a process and everything descended from it.
 ///
 /// The subtree and not the process alone, because an agent's real work is
 /// mostly its children: a build, a test run, a language server. The agent
 /// process itself can sit at nothing while the machine is flat out on its
 /// behalf.
-fn subtree_usage(table: &HashMap<u32, Proc>, root: u32) -> Usage {
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for (pid, proc) in table {
-        children.entry(proc.ppid).or_default().push(*pid);
-    }
+fn subtree_usage(
+    table: &HashMap<u32, Proc>,
+    children: &HashMap<u32, Vec<u32>>,
+    root: u32,
+) -> Usage {
     let mut cpu = 0.0;
     let mut rss_kb = 0.0;
     let mut pids = HashSet::new();
@@ -453,14 +476,11 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
                 .collect();
             format!("{home}/.grok/sessions/{encoded}").into()
         }
-        // Codex keys its rollouts by date rather than by directory, so the
-        // day's folder stands in for the session. Yesterday counts too: a
-        // rollout file is created when the session starts, so one running
-        // across midnight keeps appending to the previous day's folder.
-        "codex" => {
-            let newest = newest_write(&format!("{home}/.codex/sessions"), 3);
-            return newest.map(|at| SystemTime::now().duration_since(at).unwrap_or_default());
-        }
+        // Codex keys its rollouts by date, not by workspace. A machine-wide
+        // newest mtime would mark every codex session Working whenever any
+        // one of them wrote, so transcript evidence is not used here until a
+        // per-session path exists. CPU and hooks still cover it.
+        "codex" => return None,
         _ => return None,
     };
     let newest = newest_write(&dir.to_string_lossy(), 1)?;
@@ -758,5 +778,26 @@ mod tests {
         assert!(!state.working);
         state = step(state, 0.0, true, None);
         assert!(state.working);
+    }
+
+    /// Grace is for quiet stretches between tokens, not for overruling a
+    /// lifecycle hook that said the agent is waiting on the user.
+    #[test]
+    fn grace_does_not_override_hook_idle() {
+        assert_eq!(
+            reported_activity(false, true, true),
+            Activity::Idle,
+            "hook idle must win even when the grace clock is still running"
+        );
+        assert_eq!(
+            reported_activity(false, true, false),
+            Activity::Working,
+            "grace still holds when no hook said idle"
+        );
+        assert_eq!(
+            reported_activity(true, false, true),
+            Activity::Working,
+            "a hook saying working is working"
+        );
     }
 }

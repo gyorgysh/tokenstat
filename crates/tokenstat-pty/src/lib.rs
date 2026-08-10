@@ -259,9 +259,10 @@ impl Manager {
         // started when the daemon was, and kept idle since, hands over its
         // already-loaded process instead of making the click pay a full
         // login-shell startup. Colour is part of the deal: a pooled shell was
-        // started with the colour defaults, so a no-colour request takes the
-        // fresh path rather than inheriting the wrong setting.
-        if is_shell_profile(req) && !req.no_color {
+        // started with the colour defaults (and no COLORFGBG), so a no-colour
+        // request, or a light-window request that needs COLORFGBG=0;15, takes
+        // the fresh path rather than inheriting the wrong setting.
+        if is_shell_profile(req) && !req.no_color && req.dark != Some(false) {
             let pooled = self
                 .pool
                 .lock()
@@ -1653,6 +1654,31 @@ mod tests {
             m.pool.lock().unwrap_or_else(PoisonError::into_inner).len(),
             1,
             "a no-colour request must not inherit a colour-enabled shell"
+        );
+        m.close(&info.id).unwrap();
+        close_pool(&m);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_light_mode_shell_spawn_bypasses_the_pool() {
+        let m = Manager::new();
+        let shell = m.build_pool_shell().expect("pool shell");
+        wait_until_prompt(&shell);
+        m.pool
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(shell);
+
+        let mut req = shell_req(std::env::temp_dir());
+        // Pooled shells are built without COLORFGBG. A light window needs
+        // COLORFGBG=0;15, so it must not take a pre-started dark-default shell.
+        req.dark = Some(false);
+        let info = m.spawn(&req).expect("fresh spawn honours light mode");
+        assert_eq!(
+            m.pool.lock().unwrap_or_else(PoisonError::into_inner).len(),
+            1,
+            "a light-mode request must not inherit a pooled shell without COLORFGBG"
         );
         m.close(&info.id).unwrap();
         close_pool(&m);

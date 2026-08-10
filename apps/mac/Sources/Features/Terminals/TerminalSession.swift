@@ -30,7 +30,7 @@ enum SessionState: Equatable {
 
     var label: String {
         switch self {
-        case .none: return "Idle"
+        case .none: return "None"
         case .starting: return "Starting"
         case .working: return "Working"
         case .idle: return "Idle"
@@ -490,6 +490,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                         alive = info.alive
                         if !info.alive {
                             idleCheckTask?.cancel()
+                            idleCheckTask = nil
                             state = info.exitCode != nil ? .stopped : .none
                         }
                     }
@@ -503,6 +504,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     if let code = info.exitCode {
                         exitCode = code
                         idleCheckTask?.cancel()
+                        idleCheckTask = nil
                         state = .stopped
                         // One last read in case output arrived right at exit.
                         if let final = try? await Bridge.ptyRead(id: id, offset: offset) {
@@ -537,9 +539,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         lastOutputAt = Date()
         // Bytes only decide the state until the host's detector has spoken.
         // After that they are just a clock for "idle for how long".
+        // Write only on transition: an unguarded assignment on every packet
+        // rebuilds the sidebar at print rate until the host's first verdict.
         if alive, !hostReportedActivity {
-            state = .working
-            scheduleIdleCheck()
+            if state != .working {
+                state = .working
+            }
+            // One long-lived timer, not a cancel/recreate per packet.
+            ensureIdleCheck()
         }
         view.feed(byteArray: ArraySlice(bytes))
         if TerminalPreferences.exposesToVoiceOver {
@@ -563,6 +570,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         memoryMb: Double? = nil
     ) {
         idleCheckTask?.cancel()
+        idleCheckTask = nil
         if !alive {
             state = exitCode != nil ? .stopped : .none
             return
@@ -577,7 +585,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         } else {
             state = .working
         }
-        scheduleIdleCheck()
+        if state == .working {
+            ensureIdleCheck()
+        }
     }
 
     /// Take the host's verdict.
@@ -605,18 +615,28 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         if state != next { state = next }
     }
 
-    /// Arrange the working-to-idle transition, replacing any previous one.
-    private func scheduleIdleCheck() {
-        idleCheckTask?.cancel()
+    /// Start the working-to-idle timer if one is not already running.
+    ///
+    /// One task for the session, not a cancel/recreate on every output
+    /// packet. The loop re-checks `lastOutputAt` after each wait, so continued
+    /// output postpones idle without thrashing the task queue.
+    private func ensureIdleCheck() {
+        guard idleCheckTask == nil else { return }
         idleCheckTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(Self.idleThreshold))
-            guard let self, !Task.isCancelled, self.alive else { return }
-            if let last = self.lastOutputAt,
-               Date().timeIntervalSince(last) >= Self.idleThreshold,
-               self.state == .working
-            {
-                self.state = .idle
+            while let self, !Task.isCancelled, self.alive {
+                try? await Task.sleep(for: .seconds(Self.idleThreshold))
+                guard !Task.isCancelled, self.alive else { break }
+                if let last = self.lastOutputAt,
+                   Date().timeIntervalSince(last) < Self.idleThreshold
+                {
+                    continue
+                }
+                if self.state == .working {
+                    self.state = .idle
+                }
+                break
             }
+            self?.idleCheckTask = nil
         }
     }
 

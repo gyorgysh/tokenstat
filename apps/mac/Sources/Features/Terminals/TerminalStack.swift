@@ -49,10 +49,18 @@ final class TerminalStackView: NSView {
     private weak var shown: NSView?
 
     func sync(views: [TerminalView], active: TerminalView?) {
+        // Views just re-parented into this stack need a repaint even when they
+        // stay visible: makeNSView can hand us a fresh TerminalStackView after
+        // a workspace switch, and the already-drawn emulator's buffer is older
+        // than the new hierarchy. Without an explicit setNeedsDisplay the
+        // screen shows only a caret until the process prints again ("tty logs
+        // go away").
+        var reparented = Set<ObjectIdentifier>()
         for view in views where view.superview !== self {
             view.frame = bounds
             view.autoresizingMask = [.width, .height]
             addSubview(view)
+            reparented.insert(ObjectIdentifier(view))
         }
         // A session closed elsewhere leaves a view here with nothing behind it.
         for sub in subviews where !views.contains(where: { $0 === sub }) {
@@ -61,10 +69,16 @@ final class TerminalStackView: NSView {
 
         for view in views {
             let visible = view === active
-            if view.isHidden == visible {
+            // isHidden and visible disagree when the view needs to flip.
+            let needsFlip = view.isHidden == visible
+            if needsFlip {
                 view.isHidden = !visible
-                // A view that was hidden while output arrived has not drawn it.
-                if visible { view.setNeedsDisplay(view.bounds) }
+            }
+            // Repaint when becoming visible (output may have arrived while
+            // hidden) or when re-parented while already visible (hierarchy is
+            // new, buffer is not). Do not repaint on every updateNSView.
+            if visible, needsFlip || reparented.contains(ObjectIdentifier(view)) {
+                view.setNeedsDisplay(view.bounds)
             }
         }
 
