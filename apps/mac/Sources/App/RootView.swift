@@ -282,26 +282,6 @@ struct RootView: View {
         }
         // Returning to Home after work elsewhere: quiet re-read if the last
         // load is older than the stale window (see HomeModel.refreshIfStale).
-        .confirmationDialog(
-            "Remove from tokenstat?",
-            isPresented: Binding(
-                get: { workspacePendingRemove != nil },
-                set: { if !$0 { workspacePendingRemove = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Remove", role: .destructive) {
-                if let folder = workspacePendingRemove {
-                    Task { await workspaces.remove(folder) }
-                }
-                workspacePendingRemove = nil
-            }
-            Button("Keep it", role: .cancel) { workspacePendingRemove = nil }
-        } message: {
-            if let folder = workspacePendingRemove {
-                Text("Remove \(folder.name) from the sidebar? The folder on disk is not deleted.")
-            }
-        }
         .onChange(of: destination) { _, next in
             guard next == .home else { return }
             Task { await home.refreshIfStale() }
@@ -1165,6 +1145,16 @@ struct RootView: View {
             max: DisplayFit.box(300)
         )
         .safeAreaInset(edge: .bottom) { accountFooter }
+        // Confirm lives on the sidebar column, not RootView's outer body chain,
+        // so the type checker can still finish the main chrome expression.
+        .background {
+            RemoveWorkspaceConfirm(
+                folder: $workspacePendingRemove,
+                remove: { folder in
+                    Task { await workspaces.remove(folder) }
+                }
+            )
+        }
     }
 
     /// Who is signed in, pinned to the bottom of the sidebar with a menu.
@@ -1469,6 +1459,40 @@ struct RootView: View {
             destination = next
             update?()
         }
+    }
+}
+
+/// Workspace remove confirm, kept off RootView's main modifier chain so the
+/// type checker can still finish the root body.
+private struct RemoveWorkspaceConfirm: View {
+    @Binding var folder: WorkspaceFolder?
+    var remove: (WorkspaceFolder) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .confirmationDialog(
+                "Remove from tokenstat?",
+                isPresented: Binding(
+                    get: { folder != nil },
+                    set: { if !$0 { folder = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove", role: .destructive) {
+                    if let folder {
+                        remove(folder)
+                    }
+                    folder = nil
+                }
+                Button("Keep it", role: .cancel) {
+                    folder = nil
+                }
+            } message: {
+                Text(
+                    "Remove \(folder?.name ?? "this folder") from the sidebar? The folder on disk is not deleted."
+                )
+            }
     }
 }
 
