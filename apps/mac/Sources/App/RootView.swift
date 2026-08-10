@@ -392,6 +392,11 @@ struct RootView: View {
         } detail: {
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
+                // Without this, an empty unified toolbar still reserves a full
+                // titlebar band above DetailChromeBar, so the real chrome looks
+                // like a second row. Draw the bar into that band (windowed
+                // fullSizeContentView + transparent titlebar).
+                .ignoresSafeArea(edges: .top)
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
