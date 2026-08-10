@@ -370,6 +370,21 @@ struct TerminalPane: View {
                 }
             }
 
+            // The working tree opens in the same pane as a commit and reads
+            // the same way, so it gets the same tab rather than a "Back to
+            // terminal" button of its own. Two surfaces that behave alike
+            // should be closed alike.
+            if reviewingWorkingTree {
+                FileChip(
+                    path: "Uncommitted changes in \(folder.name)",
+                    symbol: "plusminus",
+                    label: "Changes",
+                    isSelected: true
+                ) {} onClose: {
+                    workspaces.closeWorkingTreeReview(in: folder.id)
+                }
+            }
+
             Menu {
                 Button {
                     _ = workspaces.showBrowser(in: folder.id)

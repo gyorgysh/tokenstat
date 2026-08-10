@@ -60,10 +60,10 @@ struct WorkingTreeReviewView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Back to terminal") {
-                    model.showTerminal(in: folder.id)
-                }
-                .buttonStyle(.bordered)
+                // No "Back to terminal" button. This surface has a tab in the
+                // strip above, like a commit does, and that tab's close is how
+                // it goes away. A second way out, in a place a commit does not
+                // have one, made two alike surfaces read as different things.
             }
             if let git = folder.git {
                 HStack(spacing: Theme.Space.s) {
