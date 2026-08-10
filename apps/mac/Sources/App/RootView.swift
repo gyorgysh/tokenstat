@@ -125,9 +125,8 @@ struct RootView: View {
     /// resize notifications rather than measured inside the split view.
     @State private var windowContentWidth: CGFloat = 0
     #if os(macOS)
-    /// Full screen switches to a native titlebar above the content (real
-    /// traffic lights on the system reveal bar). Windowed keeps the
-    /// transparent titlebar. Owned by `WindowScreenObserver`.
+    /// Full screen switches to an opaque titlebar; windowed stays transparent.
+    /// Owned by `WindowScreenObserver`. Not used for toolbar background flips.
     @State private var isFullScreen = false
     #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
@@ -383,40 +382,36 @@ struct RootView: View {
 
     /// Shared chrome: NavigationSplitView with the window toolbar.
     ///
-    /// Windowed hides the toolbar material so content blends under a
-    /// transparent titlebar. Full screen shows the material: that is the
-    /// native control bar above the content, with real traffic lights.
+    /// Toolbar items sit on the split view (not only the detail column) so
+    /// the leading mark is hosted with the titlebar traffic lights in both
+    /// windowed and full screen. Windowed blends under a transparent
+    /// titlebar; full screen keeps the same item host with an opaque bar.
     private var mainChrome: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
             sidebar
         } detail: {
             detailColumn
-                .toolbar {
-                    // The only toolbar the marks live on. Attaching a
-                    // second copy to the sidebar column made the window
-                    // chrome show two "Toggle Sidebar" buttons while
-                    // the sidebar was open. The detail column's
-                    // toolbar stays in the chrome whether the sidebar
-                    // is open or hidden, so one attachment is enough.
-                    ToolbarItem(placement: .navigation) {
-                        leftSidebarToolbarButton
-                    }
-                    if destinationHasInspector {
-                        ToolbarItem(placement: .primaryAction) {
-                            rightInspectorToolbarButton
-                        }
-                    }
-                }
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
         // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
         .toolbar(removing: .sidebarToggle)
-        #if os(macOS)
-        .toolbarBackground(isFullScreen ? .visible : .hidden, for: .windowToolbar)
-        #else
+        .toolbar {
+            // Leading mark next to the traffic lights. Kept on the split view
+            // (not only the detail column) so full-screen titlebar layout sees
+            // it in the same host as windowed mode.
+            ToolbarItem(placement: .navigation) {
+                leftSidebarToolbarButton
+            }
+            if destinationHasInspector {
+                ToolbarItem(placement: .primaryAction) {
+                    rightInspectorToolbarButton
+                }
+            }
+        }
+        // Always hidden. Do not flip with full screen (late rebuild, stale
+        // leading mark). AppKit owns bar opacity via titlebarAppearsTransparent.
         .toolbarBackground(.hidden, for: .windowToolbar)
-        #endif
     }
 
     /// Leading sidebar mark for toolbars (sidebar column and detail column).

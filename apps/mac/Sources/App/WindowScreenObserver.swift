@@ -27,10 +27,11 @@ import SwiftUI
 ///   AppKit patch so the sidebar colour fills the strip above the leading
 ///   column (the split lays the sidebar below the toolbar while the detail
 ///   extends under it).
-/// - **Full screen:** a normal native titlebar/toolbar above the content. That
-///   is the system full-screen reveal bar with real close / minimize / zoom
-///   buttons. Content sits under it, square and edge to edge, with no custom
-///   traffic lights and no painting into `NSToolbarFullScreenWindow`.
+/// - **Full screen:** same `fullSizeContentView` hosting so toolbar leading
+///   items stay next to the traffic lights immediately (dropping that mask
+///   moved them into a deferred full-screen toolbar host that only reflowed
+///   after a mouse pass). Titlebar is opaque, corners flattened, traffic
+///   lights unhidden. No custom drawn buttons, no `NSToolbar` reassignment.
 struct WindowScreenObserver: NSViewRepresentable {
     /// The window's content width, published from resize notifications.
     ///
@@ -40,8 +41,8 @@ struct WindowScreenObserver: NSViewRepresentable {
     /// resize notification is delivered outside any layout pass, so writing
     /// state from it cannot re-enter one.
     @Binding var contentWidth: CGFloat
-    /// Whether the window is currently full screen. Drives toolbar background
-    /// visibility in SwiftUI and the AppKit chrome mode below.
+    /// Whether the window is currently full screen. Published for SwiftUI;
+    /// chrome itself is applied only when this bit flips, not every frame.
     @Binding var isFullScreen: Bool
 
     func makeCoordinator() -> Coordinator {
@@ -68,24 +69,27 @@ struct WindowScreenObserver: NSViewRepresentable {
         MainActor.assumeIsolated {
             context.coordinator.contentWidth = $contentWidth
             context.coordinator.isFullScreen = $isFullScreen
-            // SwiftUI may rebuild the toolbar after attach. Re-apply chrome so
-            // a full-screen enter mid-rebuild cannot leave a transparent bar.
-            if let window = context.coordinator.attachedWindow {
-                context.coordinator.applyChrome(on: window)
-            }
+            // Do **not** call applyChrome on every SwiftUI pass. Re-setting
+            // titlebar flags every frame fights the toolbar's own layout and
+            // is what left the navigation mark unpositioned until a mouse
+            // pass over the bar. Chrome is applied on attach and on enter/exit
+            // full screen only.
         }
     }
 
     @MainActor
     final class Coordinator {
         private var window: NSWindow?
-        /// Exposed so `updateNSView` can re-apply chrome without re-attaching.
+        /// Exposed for callers that need the attached window.
         var attachedWindow: NSWindow? { window }
         private var observers: [NSObjectProtocol] = []
         /// Paints the sidebar column's slice of the titlebar with the sidebar
-        /// colour in **windowed** mode only. Full screen uses a real titlebar
-        /// above the content, so the gap does not exist there.
+        /// colour. Used windowed and full screen while `fullSizeContentView`
+        /// is on (content draws under the toolbar on both).
         private var sidebarGapPatch: NSView?
+        /// Last chrome mode applied. Avoids re-entry when notifications fire
+        /// more than once for the same transition.
+        private var lastChromeFullScreen: Bool?
         /// Where the measured width goes. Refreshed from `updateNSView` so a
         /// rebuilt representable never writes through a stale binding.
         var contentWidth: Binding<CGFloat>?
@@ -129,38 +133,53 @@ struct WindowScreenObserver: NSViewRepresentable {
             observers.removeAll()
             sidebarGapPatch?.removeFromSuperview()
             sidebarGapPatch = nil
+            lastChromeFullScreen = nil
             window = nil
         }
 
         /// Switch between the windowed transparent-titlebar look and the
-        /// full-screen native bar. Called on attach, enter/exit full screen,
-        /// and every `updateNSView`.
-        func applyChrome(on window: NSWindow) {
+        /// full-screen opaque bar. Called on attach and on enter/exit full
+        /// screen only, never from `updateNSView`.
+        func applyChrome(on window: NSWindow, force: Bool = false) {
             let fullScreen = window.styleMask.contains(.fullScreen)
+            if !force, lastChromeFullScreen == fullScreen {
+                // Still keep lights visible and the gap patch sized; those are
+                // cheap and can drift after a split resize.
+                revealTrafficLights(on: window)
+                updateSidebarTopGap(in: window)
+                return
+            }
+            lastChromeFullScreen = fullScreen
             if fullScreen {
                 applyFullScreenChrome(on: window)
             } else {
                 applyWindowedChrome(on: window)
             }
-            // Always keep the real traffic lights available. Full screen hosts
-            // them in the native reveal bar; windowed hosts them in the
-            // titlebar. Custom drawn circles are never used.
-            for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
-                if let button = window.standardWindowButton(buttonType) {
-                    button.isHidden = false
-                    button.alphaValue = 1
-                }
-            }
+            revealTrafficLights(on: window)
             if let toolbar = window.toolbar {
                 toolbar.isVisible = true
             }
             updateSidebarTopGap(in: window)
         }
 
+        private func revealTrafficLights(on window: NSWindow) {
+            // Real system buttons only. Custom drawn circles are never used.
+            for buttonType: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                if let button = window.standardWindowButton(buttonType) {
+                    button.isHidden = false
+                    button.alphaValue = 1
+                }
+            }
+        }
+
         /// Windowed: content draws under a transparent titlebar so the sidebar
         /// colour can meet the traffic-light band. The gap patch fills the
         /// strip above the leading column.
         private func applyWindowedChrome(on window: NSWindow) {
+            // Always keep fullSizeContentView. The unified titlebar hosts
+            // `.navigation` toolbar items next to the traffic lights only while
+            // this mask is set; dropping it for full screen deferred that
+            // placement until a mouse pass over the bar.
             if !window.styleMask.contains(.fullSizeContentView) {
                 window.styleMask.insert(.fullSizeContentView)
             }
@@ -169,32 +188,23 @@ struct WindowScreenObserver: NSViewRepresentable {
             if #available(macOS 11.0, *) {
                 window.titlebarSeparatorStyle = .none
             }
-            // Windowed keeps its natural corner radius from the system chrome.
             restoreContentCorners(in: window)
         }
 
-        /// Full screen: put a real native titlebar/toolbar above the content.
-        /// That is the system control bar (close / minimize / zoom on reveal).
-        /// Content is square and flush to the screen edges under that bar.
+        /// Full screen: same content-view mask as windowed (so toolbar items
+        /// keep their host), opaque titlebar, square edges, native lights.
         private func applyFullScreenChrome(on window: NSWindow) {
-            // Content must sit *below* the titlebar, not under it. Drawing
-            // under a transparent bar is what produced the grey strip, the
-            // floating rounded card look, and the need for toolbar-window
-            // patches. A normal titlebar is the native method.
-            if window.styleMask.contains(.fullSizeContentView) {
-                window.styleMask.remove(.fullSizeContentView)
+            if !window.styleMask.contains(.fullSizeContentView) {
+                window.styleMask.insert(.fullSizeContentView)
             }
+            // Opaque bar so the top still reads as real chrome, while the
+            // toolbar item host stays the same as windowed.
             window.titlebarAppearsTransparent = false
             window.titleVisibility = .hidden
             if #available(macOS 11.0, *) {
-                // Keep a hairline under the bar so it reads as chrome, not as
-                // a second content band. The sidebar itself stays borderless.
-                window.titlebarSeparatorStyle = .automatic
+                window.titlebarSeparatorStyle = .none
             }
             flattenFullScreenContent(in: window)
-            // No windowed gap patch in full screen: there is no gap.
-            sidebarGapPatch?.removeFromSuperview()
-            sidebarGapPatch = nil
         }
 
         /// Full screen content must be square and flush. Hidden-title-bar
@@ -353,9 +363,13 @@ struct WindowScreenObserver: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] _ in
                     Task { @MainActor in
-                        // Apply before the transition finishes so the first
-                        // full-screen frame is already the native-bar mode.
+                        // styleMask may not yet contain `.fullScreen` here, so
+                        // call the full-screen path directly.
                         self?.applyFullScreenChrome(on: window)
+                        self?.lastChromeFullScreen = true
+                        self?.revealTrafficLights(on: window)
+                        if let toolbar = window.toolbar { toolbar.isVisible = true }
+                        self?.updateSidebarTopGap(in: window)
                     }
                 }
             )
@@ -367,16 +381,20 @@ struct WindowScreenObserver: NSViewRepresentable {
                 ) { [weak self] _ in
                     Task { @MainActor in
                         self?.publishFullScreen(from: window)
-                        self?.applyChrome(on: window)
+                        self?.applyFullScreenChrome(on: window)
+                        self?.lastChromeFullScreen = true
+                        self?.revealTrafficLights(on: window)
                         self?.stripSystemSidebarToggle(in: window)
-                        // AppKit re-applies corner radii and style masks for a
-                        // few frames after the transition. Re-assert.
-                        for delay in [0.05, 0.2, 0.5] {
-                            try? await Task.sleep(for: .seconds(delay))
-                            guard self?.window === window else { return }
-                            self?.applyChrome(on: window)
-                            self?.stripSystemSidebarToggle(in: window)
-                        }
+                        self?.updateSidebarTopGap(in: window)
+                        // One follow-up strip after AppKit finishes the
+                        // full-screen toolbar. No style-mask thrash, no
+                        // toolbar reassignment.
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard self?.window === window else { return }
+                        self?.stripSystemSidebarToggle(in: window)
+                        self?.revealTrafficLights(on: window)
+                        self?.updateSidebarTopGap(in: window)
+                        self?.flattenFullScreenContent(in: window)
                     }
                 }
             )
@@ -387,7 +405,11 @@ struct WindowScreenObserver: NSViewRepresentable {
                     queue: .main
                 ) { [weak self] _ in
                     Task { @MainActor in
+                        // styleMask still has `.fullScreen` during willExit.
                         self?.applyWindowedChrome(on: window)
+                        self?.lastChromeFullScreen = false
+                        self?.revealTrafficLights(on: window)
+                        self?.updateSidebarTopGap(in: window)
                     }
                 }
             )
@@ -399,9 +421,12 @@ struct WindowScreenObserver: NSViewRepresentable {
                 ) { [weak self] _ in
                     Task { @MainActor in
                         self?.publishFullScreen(from: window)
-                        self?.applyChrome(on: window)
+                        self?.applyWindowedChrome(on: window)
+                        self?.lastChromeFullScreen = false
+                        self?.revealTrafficLights(on: window)
                         self?.stripSystemSidebarToggle(in: window)
                         self?.scheduleSidebarToggleStrip(for: window)
+                        self?.updateSidebarTopGap(in: window)
                     }
                 }
             )
@@ -423,15 +448,10 @@ struct WindowScreenObserver: NSViewRepresentable {
             updateSidebarTopGap(in: window)
         }
 
-        /// Windowed only: fill the gap above the sidebar column so the
-        /// transparent titlebar does not show the toolbar's grey surface.
+        /// Fill the gap above the sidebar column so the titlebar band shows
+        /// the sidebar colour rather than the toolbar grey (windowed and full
+        /// screen; both keep `fullSizeContentView`).
         private func updateSidebarTopGap(in window: NSWindow) {
-            // Full screen has a real titlebar above content: no gap to patch.
-            guard !window.styleMask.contains(.fullScreen) else {
-                sidebarGapPatch?.removeFromSuperview()
-                sidebarGapPatch = nil
-                return
-            }
             guard let contentView = window.contentView,
                   let frameInContent = Self.sidebarColumnFrame(in: window)
             else {
