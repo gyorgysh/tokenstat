@@ -22,30 +22,29 @@ struct InsightsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Actions in a fixed bar (same as Home), not the window toolbar.
-            // Period, scan and fetch stay put while the report scrolls under.
-            DetailChromeBar(
-                leading: {
-                    if model.focusedDay != nil {
-                        ToolbarIconButton(
-                            systemImage: "chevron.left",
-                            help: "Back to Home"
-                        ) {
-                            onBackToHome?()
-                        }
+            // One row: menu (tabs) on the left, actions on the right. Same
+            // language as other destinations' DetailChromeBar, without a
+            // second empty strip above the tabs.
+            HStack(spacing: Theme.Space.s) {
+                if model.focusedDay != nil {
+                    ToolbarIconButton(
+                        systemImage: "chevron.left",
+                        help: "Back to Home"
+                    ) {
+                        onBackToHome?()
                     }
-                },
-                trailing: {
-                    // App capsule chips, not the system segmented control.
+                }
+                TabStrip(tabs: tabs, selection: $model.tab, showsChrome: false)
+                    .frame(maxWidth: .infinity)
+                HStack(spacing: Theme.Space.s) {
                     SegmentedCapsulePicker(
                         options: InsightsModel.Period.allCases.map {
                             (value: $0, label: $0.rawValue, symbol: "")
                         },
                         selection: $model.period
                     )
-                    .frame(maxWidth: 260)
+                    .frame(maxWidth: 240)
                     .help("Report period")
-
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
                         help: "Read new sessions from supported local tools into the archive",
@@ -63,8 +62,14 @@ struct InsightsView: View {
                         Task { await model.fetchRemotes() }
                     }
                 }
-            )
-            TabStrip(tabs: tabs, selection: $model.tab)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .frame(maxWidth: .infinity)
+            .frame(height: DetailChromeBarHeight)
+            .background(Theme.tabStrip)
+            .overlay(alignment: .bottom) {
+                Rectangle().fill(Theme.border).frame(height: 1)
+            }
             content
         }
         .background(Theme.background)

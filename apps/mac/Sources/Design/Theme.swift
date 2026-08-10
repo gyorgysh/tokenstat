@@ -380,10 +380,13 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
     }
 
     var body: some View {
+        // Nested HStacks: a multi-child `@ViewBuilder` is a TupleView that
+        // stacks vertically if dropped in raw. Leading/trailing must stay one
+        // horizontal group each.
         HStack(spacing: Theme.Space.s) {
-            leading()
+            HStack(spacing: Theme.Space.s) { leading() }
             Spacer(minLength: 0)
-            trailing()
+            HStack(spacing: Theme.Space.s) { trailing() }
         }
         .padding(.horizontal, Theme.Space.m)
         .frame(maxWidth: .infinity)
@@ -396,8 +399,12 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
 
     /// Tall enough for a 30pt circular mark with a little breathing room, and
     /// for a compact segmented period picker on Insights.
-    static var height: CGFloat { 40 }
+    static var height: CGFloat { DetailChromeBarHeight }
 }
+
+/// Shared height for `DetailChromeBar` and any custom chrome row that matches
+/// it (Insights puts tabs and actions on one bar of this height).
+let DetailChromeBarHeight: CGFloat = 40
 
 /// A flat tab strip, in place of the reference layout's row of agent tabs.
 ///
@@ -408,6 +415,9 @@ struct TabStrip<Tab: Hashable>: View {
     /// icons would push the labels into truncation.
     var tabs: [(tab: Tab, label: String, symbol: String)]
     @Binding var selection: Tab
+    /// When false, only the tab row is drawn (no full-width fill or bottom
+    /// rule). The parent chrome row owns those (Insights: tabs + actions).
+    var showsChrome: Bool = true
 
     var body: some View {
         HStack(spacing: 0) {
@@ -432,10 +442,7 @@ struct TabStrip<Tab: Hashable>: View {
                     // was selected became a guess.
                     .foregroundStyle(active ? Theme.accent : Color.secondary)
                     .padding(.horizontal, Theme.Space.xs)
-                    // Every tab takes an equal share of the full width. Sized
-                    // to their labels with a trailing spacer, two tabs left
-                    // two thirds of the strip empty and the group floated in
-                    // the corner instead of reading as a bar.
+                    // Every tab takes an equal share of the strip's width.
                     .frame(maxWidth: .infinity)
                     // An explicit height, not `maxHeight: .infinity`. The strip
                     // sits directly under the window's toolbar, and an
@@ -469,17 +476,17 @@ struct TabStrip<Tab: Hashable>: View {
         .frame(height: Self.height)
         // Nothing in a tab strip may paint outside it.
         .clipped()
-        // Darker than the pane below, so the strip reads as chrome the content
-        // sits under rather than as the first row of that content.
-        .background(Theme.tabStrip)
+        .background(showsChrome ? Theme.tabStrip : Color.clear)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Theme.border).frame(height: 1)
+            if showsChrome {
+                Rectangle().fill(Theme.border).frame(height: 1)
+            }
         }
     }
 
     /// A generic type cannot hold a static stored property, so this is a
     /// computed one.
-    private static var height: CGFloat { 28 }
+    static var height: CGFloat { 28 }
 }
 
 /// The account tier, as a small uppercase pill.
