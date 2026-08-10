@@ -224,8 +224,21 @@ struct AutomationsView: View {
             name: "Dependency check",
             prompt: "Check for outdated or vulnerable dependencies (npm audit and the package managers this project uses) and summarise what needs a bump.",
             backendID: "sh",
-            schedule: AutomationSchedule(kind: .weekly, everySeconds: 0, hour: 9, minute: 0, weekday: 0),
+            schedule: AutomationSchedule(kind: .weekly, hour: 9, minute: 0, weekday: 0),
             budgetSeconds: 900
+        ),
+        AutomationTemplate(
+            title: "Weekday standup",
+            subtitle: "Weekdays at 9:00",
+            symbol: "person.3",
+            name: "Weekday standup",
+            prompt: "Summarise open work and anything that blocked progress yesterday. Keep it short.",
+            backendID: "claude",
+            schedule: AutomationSchedule(
+                kind: .weekdays, hour: 9, minute: 0,
+                weekdays: AutomationSchedule.weekdaysMask
+            ),
+            budgetSeconds: 600
         ),
     ]
 
@@ -784,6 +797,8 @@ private struct NewAutomationSheet: View {
     @State private var intervalMinutes = "60"
     @State private var scheduleTime = Date()
     @State private var scheduleWeekday = 0
+    /// Custom multi-day pick, Monday = bit 0. Defaults to Mon–Fri.
+    @State private var customDays = AutomationSchedule.weekdaysMask
     @State private var budget = "900"
     @State private var working = false
     @State private var step = 0
@@ -795,6 +810,16 @@ private struct NewAutomationSheet: View {
         (0, "Monday"), (1, "Tuesday"), (2, "Wednesday"), (3, "Thursday"),
         (4, "Friday"), (5, "Saturday"), (6, "Sunday"),
     ]
+    private let dayShort = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    private let intervalPresets = [15, 30, 60, 120, 360, 720, 1440]
+
+    /// Presets plus the current value when it is not one of them, so editing an
+    /// older "every 45 minutes" job still shows a truthful label.
+    private var intervalMenuMinutes: [Int] {
+        let current = max(1, Int(intervalMinutes) ?? 60)
+        if intervalPresets.contains(current) { return intervalPresets }
+        return (intervalPresets + [current]).sorted()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -854,21 +879,15 @@ private struct NewAutomationSheet: View {
                 backendID = existing.backend
                 workspaceID = existing.workspaceID
                 prompt = existing.prompt
-                scheduleKind = existing.schedule.kind
+                modelChoice = existing.model ?? ""
+                effortChoice = existing.effort ?? ""
+                applySchedule(existing.schedule)
                 budget = String(existing.budgetSeconds)
             }
             if let template {
                 name = template.name
                 prompt = template.prompt
-                scheduleKind = template.schedule.kind
-                intervalMinutes = String(max(1, template.schedule.everySeconds / 60))
-                scheduleTime = Calendar.current.date(
-                    bySettingHour: template.schedule.hour,
-                    minute: template.schedule.minute,
-                    second: 0,
-                    of: Date()
-                ) ?? Date()
-                scheduleWeekday = template.schedule.weekday
+                applySchedule(template.schedule)
                 budget = String(template.budgetSeconds)
                 if model.backends.contains(where: { $0.id == template.backendID }) {
                     backendID = template.backendID
@@ -1016,54 +1035,222 @@ private struct NewAutomationSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Frequency block shaped like the familiar local-scheduler form: one
+    /// Repeat row, then the fields that kind needs (Every / On / At).
     @ViewBuilder
     private var scheduleControls: some View {
-        SegmentedCapsulePicker(
-            options: [
-                (ScheduleKind.once, "Once", "cursorarrow.click"),
-                (ScheduleKind.interval, "Interval", "repeat"),
-                (ScheduleKind.daily, "Daily", "sun.max"),
-                (ScheduleKind.weekly, "Weekly", "calendar"),
-            ],
-            selection: $scheduleKind
-        )
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Frequency")
+                .font(Theme.sectionHeader)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, Theme.Space.xs)
 
+            VStack(spacing: 0) {
+                frequencyRow("Repeat") {
+                    Menu {
+                        ForEach(ScheduleKind.allCases, id: \.self) { kind in
+                            Button {
+                                scheduleKind = kind
+                            } label: {
+                                if scheduleKind == kind {
+                                    Label(kind.label, systemImage: "checkmark")
+                                } else {
+                                    Text(kind.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        frequencyMenuLabel(scheduleKind.label)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                }
+
+                if scheduleKind == .interval {
+                    Divider()
+                    frequencyRow("Every") {
+                        Menu {
+                            ForEach(intervalMenuMinutes, id: \.self) { minutes in
+                                Button {
+                                    intervalMinutes = String(minutes)
+                                } label: {
+                                    if (Int(intervalMinutes) ?? 0) == minutes {
+                                        Label(intervalPresetLabel(minutes), systemImage: "checkmark")
+                                    } else {
+                                        Text(intervalPresetLabel(minutes))
+                                    }
+                                }
+                            }
+                        } label: {
+                            frequencyMenuLabel(intervalPresetLabel(Int(intervalMinutes) ?? 60))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                    }
+                }
+
+                if scheduleKind == .weekly {
+                    Divider()
+                    frequencyRow("On") {
+                        Menu {
+                            ForEach(weekdays, id: \.0) { day in
+                                Button {
+                                    scheduleWeekday = day.0
+                                } label: {
+                                    if scheduleWeekday == day.0 {
+                                        Label(day.1, systemImage: "checkmark")
+                                    } else {
+                                        Text(day.1)
+                                    }
+                                }
+                            }
+                        } label: {
+                            frequencyMenuLabel(weekdays.first { $0.0 == scheduleWeekday }?.1 ?? "Day")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                    }
+                }
+
+                if scheduleKind == .custom {
+                    Divider()
+                    frequencyRow("On") {
+                        HStack(spacing: 4) {
+                            ForEach(0..<7, id: \.self) { bit in
+                                let on = (customDays & (1 << bit)) != 0
+                                Button {
+                                    if on {
+                                        customDays &= ~(1 << bit)
+                                    } else {
+                                        customDays |= (1 << bit)
+                                    }
+                                } label: {
+                                    Text(dayShort[bit])
+                                        .font(.caption2.weight(.medium))
+                                        .frame(width: 28, height: 24)
+                                        .background(
+                                            on ? Theme.accent.opacity(0.2) : Theme.background,
+                                            in: RoundedRectangle(cornerRadius: 6)
+                                        )
+                                        .foregroundStyle(on ? Theme.accent : .secondary)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .strokeBorder(on ? Theme.accent.opacity(0.5) : Theme.border)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(weekdays[bit].1)
+                                .accessibilityAddTraits(on ? .isSelected : [])
+                            }
+                        }
+                    }
+                }
+
+                if scheduleKind == .daily
+                    || scheduleKind == .weekdays
+                    || scheduleKind == .weekly
+                    || scheduleKind == .custom {
+                    Divider()
+                    frequencyRow("At") {
+                        DatePicker("Time", selection: $scheduleTime, displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                    }
+                }
+
+                if scheduleKind == .once {
+                    Divider()
+                    Text("Runs only when you press Run now. Nothing is scheduled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Theme.Space.s)
+                        .padding(.horizontal, Theme.Space.s)
+                }
+            }
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        }
+    }
+
+    private func frequencyRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Text(title)
+                .font(.callout)
+                .foregroundStyle(.primary)
+            Spacer(minLength: Theme.Space.s)
+            content()
+        }
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, 10)
+    }
+
+    private func frequencyMenuLabel(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(.rect)
+    }
+
+    private func intervalPresetLabel(_ minutes: Int) -> String {
+        if minutes >= 60, minutes % 60 == 0 {
+            let hours = minutes / 60
+            return hours == 1 ? "1 hour" : "\(hours) hours"
+        }
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+    }
+
+    private func applySchedule(_ schedule: AutomationSchedule) {
+        scheduleKind = schedule.kind
+        intervalMinutes = String(max(1, schedule.everySeconds / 60))
+        scheduleTime = Calendar.current.date(
+            bySettingHour: schedule.hour,
+            minute: schedule.minute,
+            second: 0,
+            of: Date()
+        ) ?? Date()
+        scheduleWeekday = schedule.weekday
+        if schedule.weekdays != 0 {
+            customDays = schedule.weekdays
+        } else if schedule.kind == .custom || schedule.kind == .weekdays {
+            customDays = AutomationSchedule.weekdaysMask
+        } else if schedule.kind == .weekly, schedule.weekday >= 0, schedule.weekday <= 6 {
+            customDays = 1 << schedule.weekday
+        }
+    }
+
+    private func builtSchedule() -> AutomationSchedule {
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour, .minute], from: scheduleTime)
+        let hour = comps.hour ?? 9
+        let minute = comps.minute ?? 0
+        let every = max((UInt64(intervalMinutes) ?? 60) * 60, 60)
         switch scheduleKind {
-        case .interval:
-            HStack(spacing: 4) {
-                Text("Every")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField("Interval", text: $intervalMinutes)
-                    .frame(width: 70)
-                Text("minutes")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        case .daily:
-            HStack(spacing: Theme.Space.s) {
-                Text("At")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                DatePicker("Time", selection: $scheduleTime, displayedComponents: .hourAndMinute)
-                    .labelsHidden()
-            }
-        case .weekly:
-            HStack(spacing: Theme.Space.s) {
-                AppMenuPicker(
-                    title: "Day",
-                    options: weekdays.map { (value: $0.0, label: $0.1) },
-                    selection: $scheduleWeekday
-                )
-                .frame(maxWidth: 160, alignment: .leading)
-                Text("at")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                DatePicker("Time", selection: $scheduleTime, displayedComponents: .hourAndMinute)
-                    .labelsHidden()
-            }
         case .once:
-            EmptyView()
+            return AutomationSchedule(kind: .once)
+        case .interval:
+            return AutomationSchedule(kind: .interval, everySeconds: every)
+        case .daily:
+            return AutomationSchedule(kind: .daily, hour: hour, minute: minute)
+        case .weekdays:
+            return AutomationSchedule(
+                kind: .weekdays, hour: hour, minute: minute,
+                weekdays: AutomationSchedule.weekdaysMask
+            )
+        case .weekly:
+            return AutomationSchedule(
+                kind: .weekly, hour: hour, minute: minute, weekday: scheduleWeekday
+            )
+        case .custom:
+            // Do not invent days when none are selected. The host rejects an
+            // empty custom schedule, and the form blocks Continue instead.
+            return AutomationSchedule(
+                kind: .custom, hour: hour, minute: minute, weekdays: customDays
+            )
         }
     }
 
@@ -1082,21 +1269,17 @@ private struct NewAutomationSheet: View {
         case 1:
             return !workspaceID.isEmpty && !backendID.isEmpty
         default:
+            // Custom with every day cleared is not a schedule. Block Continue
+            // rather than silently rewriting the pick to weekdays.
+            if scheduleKind == .custom, (customDays & 0b0111_1111) == 0 {
+                return false
+            }
             return canCreate
         }
     }
 
     private func save() async {
-        let cal = Calendar.current
-        let comps = cal.dateComponents([.hour, .minute], from: scheduleTime)
-        let every = (UInt64(intervalMinutes) ?? 60) * 60
-        let spec = AutomationSchedule(
-            kind: scheduleKind,
-            everySeconds: scheduleKind == .interval ? max(every, 60) : 0,
-            hour: scheduleKind == .daily || scheduleKind == .weekly ? (comps.hour ?? 9) : 0,
-            minute: scheduleKind == .daily || scheduleKind == .weekly ? (comps.minute ?? 0) : 0,
-            weekday: scheduleKind == .weekly ? scheduleWeekday : 0
-        )
+        let spec = builtSchedule()
         if let existing {
             await model.update(Automation(
                 id: existing.id,
@@ -1110,7 +1293,8 @@ private struct NewAutomationSheet: View {
                 budgetSeconds: max(UInt64(budget) ?? 900, 60),
                 enabled: existing.enabled,
                 lastRunAtMs: existing.lastRunAtMs,
-                nextRunAtMs: existing.nextRunAtMs,
+                // Host recomputes next run from the new schedule on update.
+                nextRunAtMs: nil,
                 lastRunID: existing.lastRunID
             ))
         } else {
@@ -1122,7 +1306,7 @@ private struct NewAutomationSheet: View {
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 schedule: spec,
-                budget: UInt64(budget) ?? 900
+                budget: max(UInt64(budget) ?? 900, 60)
             )
         }
     }

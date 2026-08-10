@@ -1094,6 +1094,7 @@ private extension Automation {
                 "hour": schedule.hour,
                 "minute": schedule.minute,
                 "weekday": schedule.weekday,
+                "weekdays": schedule.weekdays,
             ],
             "budgetSeconds": budgetSeconds, "enabled": enabled,
             "lastRunAtMs": lastRunAtMs as Any, "nextRunAtMs": nextRunAtMs as Any,

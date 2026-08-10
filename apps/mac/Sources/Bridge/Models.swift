@@ -1054,24 +1054,68 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
     var kind: ScheduleKind
     /// Interval only, seconds.
     var everySeconds: UInt64
-    /// Daily and weekly only, local wall clock.
+    /// Wall-clock kinds only, local hour and minute.
     var hour: Int
     var minute: Int
-    /// Weekly only, 0 = Monday to 6 = Sunday.
+    /// Weekly single-day, 0 = Monday to 6 = Sunday.
     var weekday: Int
+    /// Multi-day bitset, Monday = bit 0 … Sunday = bit 6. Used by custom and
+    /// weekdays; weekly with a single day keeps using `weekday` (this stays 0).
+    var weekdays: Int
 
     enum CodingKeys: String, CodingKey {
-        case kind, everySeconds, hour, minute, weekday
+        case kind, everySeconds, hour, minute, weekday, weekdays
+    }
+
+    init(
+        kind: ScheduleKind,
+        everySeconds: UInt64 = 0,
+        hour: Int = 9,
+        minute: Int = 0,
+        weekday: Int = 0,
+        weekdays: Int = 0
+    ) {
+        self.kind = kind
+        self.everySeconds = everySeconds
+        self.hour = hour
+        self.minute = minute
+        self.weekday = weekday
+        self.weekdays = weekdays
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(ScheduleKind.self, forKey: .kind)
+        everySeconds = try c.decodeIfPresent(UInt64.self, forKey: .everySeconds) ?? 0
+        hour = try c.decodeIfPresent(Int.self, forKey: .hour) ?? 0
+        minute = try c.decodeIfPresent(Int.self, forKey: .minute) ?? 0
+        weekday = try c.decodeIfPresent(Int.self, forKey: .weekday) ?? 0
+        weekdays = try c.decodeIfPresent(Int.self, forKey: .weekdays) ?? 0
     }
 
     static let `default` = AutomationSchedule(kind: .once, everySeconds: 3600, hour: 9, minute: 0, weekday: 0)
+    /// Monday through Friday bits, matching the host.
+    static let weekdaysMask = 0b0001_1111
 }
 
-enum ScheduleKind: String, Codable, Sendable, Hashable {
+enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
     case once
     case interval
     case daily
+    case weekdays
     case weekly
+    case custom
+
+    var label: String {
+        switch self {
+        case .once: return "Once"
+        case .interval: return "Interval"
+        case .daily: return "Daily"
+        case .weekdays: return "Weekdays"
+        case .weekly: return "Weekly"
+        case .custom: return "Custom"
+        }
+    }
 }
 
 /// One completed or still-running agent run.

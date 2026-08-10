@@ -40,7 +40,15 @@ const EXIT_SETTLE: Duration = Duration::from_secs(2);
 
 // MARK: - Schedule
 
+/// Monday through Friday as a bitset, Monday = bit 0.
+const WEEKDAYS_MASK: u8 = 0b0001_1111;
+
 /// The kinds a schedule can take.
+///
+/// Wire values are camelCase (`once`, `interval`, `daily`, `weekdays`,
+/// `weekly`, `custom`). Older files only wrote once/interval/daily/weekly;
+/// weekdays and custom are additive. Unknown future kinds fail to decode and
+/// the job is refused rather than silently mis-scheduled.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum ScheduleKind {
@@ -49,7 +57,12 @@ pub enum ScheduleKind {
     Once,
     Interval,
     Daily,
+    /// Monday through Friday at the wall-clock time.
+    Weekdays,
+    /// One day of the week (`weekday`), or several when `weekdays` is set.
     Weekly,
+    /// Free multi-day pick via the `weekdays` bitset (Monday = bit 0).
+    Custom,
 }
 
 /// When a job fires. A plain struct rather than a tagged enum so the wire shape
@@ -60,12 +73,18 @@ pub struct ScheduleSpec {
     pub kind: ScheduleKind,
     /// Interval only. Seconds between runs, floored at one minute.
     pub every_seconds: u64,
-    /// Daily and weekly only. Local wall-clock hour, 0..24.
+    /// Wall-clock kinds only. Local hour, 0..23.
     pub hour: u8,
-    /// Daily and weekly only. Local wall-clock minute, 0..60.
+    /// Wall-clock kinds only. Local minute, 0..59.
     pub minute: u8,
-    /// Weekly only. 0 = Monday, matching the calendar the app draws.
+    /// Weekly single-day. 0 = Monday, matching the calendar the app draws.
     pub weekday: u8,
+    /// Multi-day bitset, Monday = bit 0 … Sunday = bit 6. Used by Custom,
+    /// by Weekdays (always Mon–Fri), and by Weekly when more than one day is
+    /// selected. Zero with Weekly falls back to the single `weekday` field so
+    /// older saves keep working.
+    #[serde(default)]
+    pub weekdays: u8,
 }
 
 impl ScheduleSpec {
@@ -79,15 +98,51 @@ impl ScheduleSpec {
                     Ok(())
                 }
             }
-            ScheduleKind::Daily | ScheduleKind::Weekly => {
-                if self.hour > 23 || self.minute > 59 {
-                    Err("a schedule time must be a real hour and minute".into())
-                } else if self.kind == ScheduleKind::Weekly && self.weekday > 6 {
-                    Err("a weekday must be Monday to Sunday".into())
+            ScheduleKind::Daily | ScheduleKind::Weekdays => self.validate_time(),
+            ScheduleKind::Weekly => {
+                self.validate_time()?;
+                if self.day_mask() == 0 {
+                    Err("a weekly schedule needs at least one day".into())
                 } else {
                     Ok(())
                 }
             }
+            ScheduleKind::Custom => {
+                self.validate_time()?;
+                if self.weekdays == 0 || self.weekdays & 0b0111_1111 == 0 {
+                    Err("a custom schedule needs at least one day".into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn validate_time(&self) -> Result<(), String> {
+        if self.hour > 23 || self.minute > 59 {
+            Err("a schedule time must be a real hour and minute".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Days of the week this schedule fires on, Monday = bit 0.
+    /// Zero means "not a multi-day wall-clock mask": Daily ignores this and
+    /// uses every day at the call site; Once/Interval never consult it.
+    fn day_mask(&self) -> u8 {
+        match self.kind {
+            ScheduleKind::Once | ScheduleKind::Interval | ScheduleKind::Daily => 0,
+            ScheduleKind::Weekdays => WEEKDAYS_MASK,
+            ScheduleKind::Weekly => {
+                if self.weekdays & 0b0111_1111 != 0 {
+                    self.weekdays & 0b0111_1111
+                } else if self.weekday <= 6 {
+                    1u8 << self.weekday
+                } else {
+                    0
+                }
+            }
+            ScheduleKind::Custom => self.weekdays & 0b0111_1111,
         }
     }
 
@@ -97,18 +152,23 @@ impl ScheduleSpec {
             ScheduleKind::Once => None,
             ScheduleKind::Interval => Some(from + self.every_seconds as i64 * 1000),
             ScheduleKind::Daily => next_wall_clock(from, self.hour, self.minute, None),
-            ScheduleKind::Weekly => {
-                next_wall_clock(from, self.hour, self.minute, Some(self.weekday))
+            ScheduleKind::Weekdays | ScheduleKind::Weekly | ScheduleKind::Custom => {
+                let mask = self.day_mask();
+                if mask == 0 {
+                    return None;
+                }
+                next_wall_clock(from, self.hour, self.minute, Some(mask))
             }
         }
     }
 }
 
-/// Next local occurrence of hour:minute, optionally restricted to a weekday.
+/// Next local occurrence of hour:minute, optionally restricted to a day mask.
 ///
-/// 0 = Monday so the picker matches the calendar the app already draws. The
-/// result is strictly after `from_ms`.
-fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, weekday: Option<u8>) -> Option<i64> {
+/// The mask uses Monday = bit 0 so the picker matches the calendar the app
+/// already draws. Pass `None` for every day. The result is strictly after
+/// `from_ms`.
+fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, day_mask: Option<u8>) -> Option<i64> {
     use jiff::civil::DateTime;
     use jiff::tz::TimeZone;
 
@@ -118,10 +178,14 @@ fn next_wall_clock(from_ms: i64, hour: u8, minute: u8, weekday: Option<u8>) -> O
     let mut day = zoned.date();
     // A schedule within a year of today is far more than anybody asks for.
     for _ in 0..400 {
-        let on_weekday = weekday
-            .map(|w| day.weekday().to_monday_zero_offset() as u8 == w)
-            .unwrap_or(true);
-        if on_weekday {
+        let on_day = match day_mask {
+            None => true,
+            Some(mask) => {
+                let bit = 1u8 << (day.weekday().to_monday_zero_offset() as u8);
+                mask & bit != 0
+            }
+        };
+        if on_day {
             let dt = DateTime::new(
                 day.year(),
                 day.month(),
@@ -555,9 +619,12 @@ impl Store {
         let last_run_id = current.last_run_id.clone();
         job.last_run_at_ms = last_run_at_ms;
         job.last_run_id = last_run_id;
+        // Always recompute next run from the schedule the client just sent.
+        // Preserving a stale next_run_at_ms left edits that changed time/days
+        // (or switched to Once) still due on the previous schedule.
         if !job.enabled {
             job.next_run_at_ms = None;
-        } else if job.next_run_at_ms.is_none() {
+        } else {
             job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
         }
         *current = job;
@@ -972,6 +1039,82 @@ mod tests {
         let from = now_ms();
         let next = s.next_run_ms(from).unwrap();
         assert!(next > from);
+    }
+
+    #[test]
+    fn weekdays_kind_is_monday_through_friday() {
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Weekdays,
+            hour: 9,
+            minute: 0,
+            ..ScheduleSpec::default()
+        };
+        assert!(s.validate().is_ok());
+        assert_eq!(s.day_mask(), 0b0001_1111);
+        let from = now_ms();
+        let next = s.next_run_ms(from).unwrap();
+        assert!(next > from);
+    }
+
+    #[test]
+    fn custom_schedule_uses_the_day_bitset() {
+        // Tuesday and Thursday only (bits 1 and 3).
+        let s = ScheduleSpec {
+            kind: ScheduleKind::Custom,
+            hour: 8,
+            minute: 30,
+            weekdays: (1 << 1) | (1 << 3),
+            ..ScheduleSpec::default()
+        };
+        assert!(s.validate().is_ok());
+        assert!(s.next_run_ms(now_ms()).is_some());
+        let empty = ScheduleSpec {
+            kind: ScheduleKind::Custom,
+            hour: 8,
+            weekdays: 0,
+            ..ScheduleSpec::default()
+        };
+        assert!(empty.validate().is_err());
+    }
+
+    #[test]
+    fn older_weekly_json_without_weekdays_still_decodes() {
+        let raw = r#"{"kind":"weekly","everySeconds":0,"hour":9,"minute":0,"weekday":2}"#;
+        let s: ScheduleSpec = serde_json::from_str(raw).unwrap();
+        assert_eq!(s.kind, ScheduleKind::Weekly);
+        assert_eq!(s.weekday, 2);
+        assert_eq!(s.weekdays, 0);
+        assert_eq!(s.day_mask(), 1 << 2);
+    }
+
+    #[test]
+    fn updating_a_schedule_recomputes_next_run() {
+        let dir = temp_dir("update-next");
+        let store = Store::at(dir.join("automations.json"));
+        let mut job = job(
+            "a",
+            ScheduleSpec {
+                kind: ScheduleKind::Daily,
+                hour: 9,
+                minute: 0,
+                ..ScheduleSpec::default()
+            },
+            120,
+        );
+        job = store.create(job).unwrap();
+        let first_next = job.next_run_at_ms;
+        assert!(first_next.is_some());
+
+        // Client still sends the old next time (as the app used to). Switching
+        // to Once must clear it so the job no longer fires on its own.
+        job.schedule = ScheduleSpec {
+            kind: ScheduleKind::Once,
+            ..ScheduleSpec::default()
+        };
+        job.next_run_at_ms = first_next;
+        let updated = store.update(job).unwrap();
+        assert_eq!(updated.next_run_at_ms, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
