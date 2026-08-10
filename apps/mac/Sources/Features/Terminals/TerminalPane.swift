@@ -760,10 +760,10 @@ private struct LaunchSurface: View {
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                     spacing: Theme.Space.m
                 ) {
-                    utilityButton("Browser", subtitle: "Enter a URL", symbol: "globe") {
+                    utilityButton("Browser", symbol: "globe") {
                         _ = workspaces.showBrowser(in: folder.id)
                     }
-                    utilityButton("Files", subtitle: "Browse project", symbol: "folder") {
+                    utilityButton("Files", symbol: "folder") {
                         workspaces.showFiles(in: folder.id)
                     }
                     ForEach(profiles) { profile in
@@ -860,7 +860,6 @@ private struct LaunchSurface: View {
 
     private func utilityButton(
         _ label: String,
-        subtitle: String,
         symbol: String,
         action: @escaping () -> Void
     ) -> some View {
@@ -873,9 +872,6 @@ private struct LaunchSurface: View {
                 Text(label)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Theme.Space.m)
@@ -926,13 +922,9 @@ private struct LaunchTile: View {
                             .foregroundStyle(Theme.accent)
                             .frame(height: 34)
                     }
-                    Text(profile.name)
+                    Text(isLaunching ? "Starting…" : profile.name)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
-                    Text(isLaunching ? "Starting…" : " ")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .opacity(isLaunching ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Theme.Space.m)
