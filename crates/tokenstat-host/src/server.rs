@@ -26,7 +26,7 @@
 //! actually be felt.
 
 #[cfg(unix)]
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 #[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
@@ -34,12 +34,24 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::session::Session;
+
+/// Inbound request line budget. Editor saves can be multi-megabyte JSON.
+/// Matches the remote message scale without allowing multi-GB DoS lines.
+const MAX_REQUEST_LINE: usize = 32 * 1024 * 1024;
+/// Concurrent unix-socket clients. The Mac app caps itself at 16; leave headroom.
+const MAX_CONNECTIONS: usize = 64;
+
+fn live_connections() -> &'static AtomicUsize {
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    &LIVE
+}
 
 #[derive(Debug, Deserialize)]
 struct Request {
@@ -137,11 +149,20 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     for incoming in listener.incoming() {
         match incoming {
             Ok(stream) => {
+                let live = live_connections();
+                let prev = live.fetch_add(1, Ordering::AcqRel);
+                if prev >= MAX_CONNECTIONS {
+                    live.fetch_sub(1, Ordering::AcqRel);
+                    // Refuse without a thread. Same-UID flood must not grow forever.
+                    drop(stream);
+                    continue;
+                }
                 let session = Arc::clone(&shared);
                 // A client that hangs up mid-request must not take the daemon
                 // with it, so each connection is its own thread and its own
                 // failure.
                 std::thread::spawn(move || {
+                    let _guard = ConnectionGuard;
                     if let Err(e) = handle(stream, &session) {
                         eprintln!("connection ended: {e}");
                     }
@@ -153,24 +174,89 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     Ok(())
 }
 
+struct ConnectionGuard;
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        live_connections().fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 #[cfg(unix)]
 fn handle(stream: UnixStream, session: &Mutex<Session>) -> Result<(), String> {
     let mut out = stream.try_clone().map_err(|e| e.to_string())?;
-    let reader = BufReader::new(stream);
+    let mut reader = BufReader::new(stream);
+    let mut buf = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.map_err(|e| e.to_string())?;
+    loop {
+        buf.clear();
+        // Cap each frame so a same-UID client cannot force multi-GB allocations.
+        let n = reader
+            .by_ref()
+            .take(MAX_REQUEST_LINE as u64 + 1)
+            .read_until(b'\n', &mut buf)
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(());
+        }
+        // Cap hit mid-line when we filled MAX+1 without a newline, or the
+        // frame itself is larger than the budget.
+        let oversize = buf.len() > MAX_REQUEST_LINE || !buf.ends_with(b"\n");
+        if oversize {
+            if !buf.ends_with(b"\n") {
+                let mut drain = Vec::new();
+                let _ = reader.read_until(b'\n', &mut drain);
+            }
+            let response = json!({
+                "id": Value::Null,
+                "ok": false,
+                "error": {
+                    "code": "bad_request",
+                    "message": format!("request exceeds {MAX_REQUEST_LINE} bytes")
+                }
+            })
+            .to_string();
+            out.write_all(response.as_bytes())
+                .and_then(|_| out.write_all(b"\n"))
+                .and_then(|_| out.flush())
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+        if buf.ends_with(b"\n") {
+            buf.pop();
+            if buf.ends_with(b"\r") {
+                buf.pop();
+            }
+        }
+        if buf.is_empty() {
+            continue;
+        }
+        let line = match std::str::from_utf8(&buf) {
+            Ok(s) => s,
+            Err(_) => {
+                let response = json!({
+                    "id": Value::Null,
+                    "ok": false,
+                    "error": {"code": "bad_request", "message": "request is not valid UTF-8"}
+                })
+                .to_string();
+                out.write_all(response.as_bytes())
+                    .and_then(|_| out.write_all(b"\n"))
+                    .and_then(|_| out.flush())
+                    .map_err(|e| e.to_string())?;
+                continue;
+            }
+        };
         if line.trim().is_empty() {
             continue;
         }
 
-        let response = respond(&line, session);
+        let response = respond(line, session);
         out.write_all(response.as_bytes())
             .and_then(|_| out.write_all(b"\n"))
             .and_then(|_| out.flush())
             .map_err(|e| e.to_string())?;
     }
-    Ok(())
 }
 
 /// Turn one request line into one response line.
@@ -199,14 +285,52 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
     // Answered without the lock where the method allows it. Connections share
     // one session, so a terminal polling for output would otherwise serialize
     // against every other client's archive and git work.
-    let envelope = match crate::dispatch::call_sessionless(&request.method, &params) {
-        Some(envelope) => envelope,
-        None => {
-            // A poisoned lock means some earlier request panicked. The session
-            // itself is still a valid open archive, so carry on rather than
-            // refusing every request from here on.
-            let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
-            crate::dispatch::call(&mut guard, &request.method, &params)
+    let envelope = if request.method == "scan" {
+        // Parse can take minutes on a large archive. Open a dedicated Engine so
+        // Home/Insights keep answering on the live session while this runs.
+        // WAL + busy timeout allow the concurrent readers.
+        let (db_path, tz_name) = {
+            let guard = session.lock().unwrap_or_else(PoisonError::into_inner);
+            (
+                guard.engine.db_path().to_path_buf(),
+                guard.engine.timezone().iana_name().map(str::to_string),
+            )
+        };
+        match tokenstat_core::Engine::open(Some(&db_path), tz_name.as_deref()) {
+            Ok(mut engine) => match engine.scan() {
+                Ok(r) => {
+                    let dto = crate::dto::ScanReportDto::from(r);
+                    match serde_json::to_value(dto) {
+                        Ok(v) => json!({"ok": true, "result": v}).to_string(),
+                        Err(e) => json!({
+                            "ok": false,
+                            "error": {"code": "call_failed", "message": e.to_string()}
+                        })
+                        .to_string(),
+                    }
+                }
+                Err(e) => json!({
+                    "ok": false,
+                    "error": {"code": "call_failed", "message": e.to_string()}
+                })
+                .to_string(),
+            },
+            Err(e) => json!({
+                "ok": false,
+                "error": {"code": "call_failed", "message": e.to_string()}
+            })
+            .to_string(),
+        }
+    } else {
+        match crate::dispatch::call_sessionless(&request.method, &params) {
+            Some(envelope) => envelope,
+            None => {
+                // A poisoned lock means some earlier request panicked. The session
+                // itself is still a valid open archive, so carry on rather than
+                // refusing every request from here on.
+                let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
+                crate::dispatch::call(&mut guard, &request.method, &params)
+            }
         }
     };
 

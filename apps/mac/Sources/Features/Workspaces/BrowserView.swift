@@ -170,9 +170,19 @@ private struct RemoteNavigation: Identifiable {
 /// Whether a URL points at this machine. The browser exists for local dev
 /// servers, so anything else is treated as external and asked about first.
 private func isLoopbackHost(_ url: URL) -> Bool {
-    guard let host = url.host?.lowercased() else { return true }
-    return host == "localhost" || host == "::1" || host == "0.0.0.0"
-        || host.hasPrefix("127.")
+    // Missing host is not loopback: fail closed so odd URLs get a confirm.
+    guard let host = url.host?.lowercased(), !host.isEmpty else { return false }
+    if host == "localhost" || host == "::1" || host == "0.0.0.0" {
+        return true
+    }
+    // IPv4 127.0.0.0/8 only when every label is numeric (not 127.evil.com).
+    let parts = host.split(separator: ".")
+    if parts.count == 4,
+       parts.allSatisfy({ $0.allSatisfy(\.isNumber) }),
+       parts[0] == "127" {
+        return true
+    }
+    return false
 }
 
 private extension BrowserView {

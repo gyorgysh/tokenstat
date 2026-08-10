@@ -70,6 +70,11 @@ pub fn stage(dir: &Path, paths: &[String]) -> GitOutcome {
     if paths.is_empty() {
         return GitOutcome::failed("nothing was selected to stage");
     }
+    for path in paths {
+        if let Err(error) = crate::tree::assert_relative_inside(path) {
+            return GitOutcome::failed(error.to_string());
+        }
+    }
     let mut args = vec!["add", "--"];
     args.extend(paths.iter().map(String::as_str));
     git(dir, &args)
@@ -82,6 +87,11 @@ pub fn stage(dir: &Path, paths: &[String]) -> GitOutcome {
 pub fn unstage(dir: &Path, paths: &[String]) -> GitOutcome {
     if paths.is_empty() {
         return GitOutcome::failed("nothing was selected to unstage");
+    }
+    for path in paths {
+        if let Err(error) = crate::tree::assert_relative_inside(path) {
+            return GitOutcome::failed(error.to_string());
+        }
     }
     let mut args = vec!["restore", "--staged", "--"];
     args.extend(paths.iter().map(String::as_str));

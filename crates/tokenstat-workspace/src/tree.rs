@@ -98,6 +98,27 @@ pub fn list(root: &Path, relative: &str) -> Result<Vec<TreeEntry>, TreeError> {
 /// Rejects absolute paths, `..`, and anything a symlink would redirect out of
 /// the workspace: the final check is against the canonical root, so a link
 /// pointing at `/etc` cannot be listed through a workspace.
+/// Reject absolute paths and `..` without requiring the path to exist.
+///
+/// Use this for git stage/diff of deleted or untracked files where
+/// [`resolve`] cannot canonicalize. Symlink escape is only fully blocked
+/// when the path exists and [`resolve`] is used.
+pub fn assert_relative_inside(relative: &str) -> Result<(), TreeError> {
+    let relative = relative.trim();
+    if relative.is_empty() {
+        return Ok(());
+    }
+    let candidate = Path::new(relative);
+    if candidate.is_absolute()
+        || candidate
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err(TreeError::Outside);
+    }
+    Ok(())
+}
+
 pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, TreeError> {
     let relative = relative.trim();
     if relative.is_empty() {
@@ -275,5 +296,12 @@ mod tests {
         let entries = list(&dir, "").unwrap();
         assert!(entries.iter().all(|e| !e.ignored));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn assert_relative_inside_rejects_escapes() {
+        assert!(assert_relative_inside("src/main.rs").is_ok());
+        assert!(assert_relative_inside("../outside").is_err());
+        assert!(assert_relative_inside("/etc/passwd").is_err());
+        assert!(assert_relative_inside("").is_ok());
     }
 }

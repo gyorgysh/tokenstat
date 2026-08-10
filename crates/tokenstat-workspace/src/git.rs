@@ -135,6 +135,23 @@ pub struct FileDiff {
     pub untracked: bool,
 }
 
+fn path_allowed(path: &str) -> bool {
+    crate::tree::assert_relative_inside(path).is_ok()
+}
+
+/// Reject option-like and empty revision strings before they reach git.
+fn safe_rev(id: &str) -> bool {
+    let id = id.trim();
+    if id.is_empty() || id.starts_with('-') {
+        return false;
+    }
+    // Allow hex hashes, HEAD, and common relative forms without shell metachars.
+    id.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '/' | '_' | '-' | '.' | '~' | '^' | '@' | '{' | '}')
+    })
+}
+
 /// Diff one file against HEAD, staged and unstaged together.
 ///
 /// An untracked file has nothing to diff against, so it is compared with an
@@ -146,6 +163,9 @@ pub fn diff(dir: &Path, path: &str) -> FileDiff {
         ..FileDiff::default()
     };
     if !inside_work_tree(dir) {
+        return out;
+    }
+    if !path_allowed(path) {
         return out;
     }
 
@@ -293,8 +313,13 @@ pub fn show(dir: &Path, id: &str) -> Option<CommitDetail> {
     if !inside_work_tree(dir) {
         return None;
     }
+    if !safe_rev(id) {
+        return None;
+    }
 
     let format = format!("--format=%H{US}%s{US}%b{US}%an{US}%ae{US}%at{US}%P");
+    // Rev already passed safe_rev (no leading dash). Do not put `--` before it:
+    // git would treat the id as a pathspec.
     let raw = git(dir, &["show", "--no-patch", &format, id])?;
     let mut fields = raw.trim_end_matches('\n').splitn(7, US);
 
