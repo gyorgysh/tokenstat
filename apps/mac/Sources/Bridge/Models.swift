@@ -880,12 +880,20 @@ struct Commit: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var subject: String
     var author: String
+    /// Author email. Optional because the running daemon can be older than the
+    /// app: a launchd agent is updated on its own schedule, and a field it does
+    /// not send must not fail the whole decode.
+    var email: String?
     /// Author time in unix seconds: when the work was done, not when a rebase
     /// last touched it.
     var timestamp: Int64
     /// True while the commit is not on the upstream branch yet. False when
     /// there is no upstream at all, because then nothing is known either way.
     var unpushed: Bool
+    /// Authored by the identity this repository is configured with. The host
+    /// decides it, because `user.email` is git's answer to "who am I here" and
+    /// can differ per repository. Optional for the same reason as `email`.
+    var mine: Bool?
 
     /// The seven characters everyone actually reads.
     var shortID: String { String(id.prefix(7)) }

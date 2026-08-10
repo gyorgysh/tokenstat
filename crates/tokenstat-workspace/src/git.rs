@@ -72,6 +72,9 @@ pub struct Commit {
     pub id: String,
     pub subject: String,
     pub author: String,
+    /// Author email, so a reader can tell two people with the same name apart
+    /// and can draw a stable mark for each of them.
+    pub email: String,
     /// Author time in unix seconds. Author rather than commit time, because
     /// that is when the work was done, and a rebase should not restate it.
     pub timestamp: i64,
@@ -79,6 +82,13 @@ pub struct Commit {
     /// there is no upstream, because then nothing is known to be behind rather
     /// than everything being unpushed.
     pub unpushed: bool,
+    /// Authored by the identity this repository is configured with, so a front
+    /// end can show the signed-in person's own picture beside it.
+    ///
+    /// Decided here rather than in the app: `user.email` is git's answer to
+    /// "who am I in this repository", it can differ per repository, and the app
+    /// has no other way to learn it.
+    pub mine: bool,
 }
 
 /// What one line of a diff is.
@@ -366,7 +376,7 @@ pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
     // Unit separator between fields and record separator between commits, so a
     // subject containing a newline or a tab cannot shift the parse. `%x1f` and
     // `%x1e` are exactly what those two ASCII controls are for.
-    let format = format!("--format=%H{US}%s{US}%an{US}%at{RS}");
+    let format = format!("--format=%H{US}%s{US}%an{US}%ae{US}%at{RS}");
     let raw = match git(
         dir,
         &["log", &format!("--max-count={limit}"), &format, "HEAD"],
@@ -382,28 +392,52 @@ pub fn log(dir: &Path, limit: u32) -> Vec<Commit> {
         .map(|s| s.lines().map(|l| l.trim().to_string()).collect())
         .unwrap_or_default();
 
-    parse_log(&raw, &unpushed)
+    // Who this repository thinks you are. Read once per history rather than
+    // per commit, and left empty when git has no answer: an empty identity
+    // matches nobody, which is the right outcome for a repository with no
+    // `user.email` set.
+    let me = configured_email(dir);
+
+    parse_log(&raw, &unpushed, me.as_deref())
+}
+
+/// `user.email` for this repository, honouring any per-repository override.
+fn configured_email(dir: &Path) -> Option<String> {
+    let value = git(dir, &["config", "--get", "user.email"])?;
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_ascii_lowercase())
 }
 
 const US: char = '\u{1f}';
 const RS: char = '\u{1e}';
 
-fn parse_log(raw: &str, unpushed: &std::collections::HashSet<String>) -> Vec<Commit> {
+fn parse_log(
+    raw: &str,
+    unpushed: &std::collections::HashSet<String>,
+    me: Option<&str>,
+) -> Vec<Commit> {
     raw.split(RS)
         .map(str::trim_start)
         .filter(|record| !record.is_empty())
         .filter_map(|record| {
-            let mut fields = record.splitn(4, US);
+            let mut fields = record.splitn(5, US);
             let id = fields.next()?.to_string();
             let subject = fields.next()?.to_string();
             let author = fields.next()?.to_string();
+            let email = fields.next()?.to_string();
             let timestamp = fields.next()?.trim().parse().ok()?;
+            // Addresses are case insensitive in practice and git does not
+            // normalise them, so a repository configured with `Ada@Example.com`
+            // still recognises its own commits.
+            let mine = me.is_some_and(|me| me == email.trim().to_ascii_lowercase());
             Some(Commit {
                 unpushed: unpushed.contains(&id),
                 id,
                 subject,
                 author,
+                email,
                 timestamp,
+                mine,
             })
         })
         .collect()
@@ -728,18 +762,39 @@ mod tests {
         // contain a newline or a tab, and splitting on either would turn one
         // commit into two and misattribute every field after it.
         let raw = format!(
-            "aaa{US}fix: a subject\nwith a newline{US}Ada{US}1700000000{RS}\
-             bbb{US}feat: plain{US}Grace{US}1700000100{RS}"
+            "aaa{US}fix: a subject\nwith a newline{US}Ada{US}ada@example.com{US}1700000000{RS}\
+             bbb{US}feat: plain{US}Grace{US}grace@example.com{US}1700000100{RS}"
         );
         let unpushed = ["bbb".to_string()].into_iter().collect();
-        let commits = parse_log(&raw, &unpushed);
+        let commits = parse_log(&raw, &unpushed, None);
 
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].subject, "fix: a subject\nwith a newline");
         assert_eq!(commits[0].author, "Ada");
+        assert_eq!(commits[0].email, "ada@example.com");
         assert_eq!(commits[0].timestamp, 1_700_000_000);
         assert!(!commits[0].unpushed);
         assert!(commits[1].unpushed);
+    }
+
+    #[test]
+    fn the_configured_identity_claims_its_own_commits() {
+        // Case is not part of an address in practice, and git stores whatever
+        // was typed, so a repository set up as `Ada@Example.com` still has to
+        // recognise a commit authored as `ada@example.com`.
+        let raw = format!(
+            "aaa{US}fix: mine{US}Ada{US}Ada@Example.com{US}1700000000{RS}\
+             bbb{US}fix: theirs{US}Grace{US}grace@example.com{US}1700000100{RS}"
+        );
+        let unpushed = std::collections::HashSet::new();
+        let commits = parse_log(&raw, &unpushed, Some("ada@example.com"));
+
+        assert!(commits[0].mine, "the configured address is this person");
+        assert!(!commits[1].mine, "somebody else's commit is not theirs");
+
+        // No identity configured: nothing is claimed, rather than everything.
+        let anonymous = parse_log(&raw, &unpushed, None);
+        assert!(anonymous.iter().all(|commit| !commit.mine));
     }
 
     #[test]

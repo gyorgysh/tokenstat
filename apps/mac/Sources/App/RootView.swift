@@ -724,7 +724,10 @@ struct RootView: View {
         Group {
             switch destination {
             case .workspaces:
-                WorkspaceInspector(model: workspaces) { closeInspector() }
+                WorkspaceInspector(
+                    model: workspaces,
+                    account: account.account
+                ) { closeInspector() }
             default:
                 InspectorView(model: model) { closeInspector() }
             }

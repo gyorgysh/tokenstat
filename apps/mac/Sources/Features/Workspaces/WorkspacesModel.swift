@@ -167,6 +167,11 @@ final class WorkspacesModel {
 
     /// Read a commit and show it. Replaces whatever the pane was showing.
     func showCommit(_ id: String, in workspaceID: String) async {
+        // The launcher sits above every other surface in the centre pane, so a
+        // commit opened while it was up loaded into a pane nobody could see:
+        // clicking a row in History simply did nothing. Same first line as
+        // `openFile`, which is this method's sibling.
+        exitLauncher(in: workspaceID)
         loadingCommit[workspaceID] = id
         activeFile[workspaceID] = nil
         reviewingWorkingTree.remove(workspaceID)

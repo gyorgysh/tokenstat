@@ -332,8 +332,10 @@ struct WorkspaceChangesView: View {
             Button("Review") {
                 model.reviewWorkingTree(in: folder.id)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            // The app's own primary action, not the system blue pill: this
+            // button sits in content, beside accent capsules, and a platform
+            // control there reads as a different design language on the row.
+            .buttonStyle(AccentButtonStyle(small: true))
             .layoutPriority(1)
         }
         .font(.caption)

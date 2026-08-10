@@ -43,6 +43,9 @@ struct InspectorEmptyState: View {
 /// "what is already in". Stacking them would bury whichever one you wanted.
 struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
+    /// The signed-in account, for the picture beside your own commits in
+    /// History. Nil signs in nobody and draws monograms throughout.
+    var account: Account?
     /// Dismisses the pane. Owned by the root view, which is the only place the
     /// inspector's presence is decided.
     var onClose: () -> Void
@@ -118,7 +121,7 @@ struct WorkspaceInspector: View {
         case .files:
             WorkspaceFilesView(model: model, folder: folder)
         case .history:
-            WorkspaceHistoryView(model: model, folder: folder)
+            WorkspaceHistoryView(model: model, folder: folder, account: account)
         }
     }
 }
@@ -127,6 +130,9 @@ struct WorkspaceInspector: View {
 struct WorkspaceHistoryView: View {
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
+    /// For the picture beside a commit of your own. Optional so the view can
+    /// still be built without an account in front of it.
+    var account: Account?
 
     var body: some View {
         historyBody
@@ -169,6 +175,13 @@ struct WorkspaceHistoryView: View {
                             ForEach(commits) { commit in
                                 CommitRow(
                                     commit: commit,
+                                    // Your own commits carry your picture. For
+                                    // anyone else the app has no picture to
+                                    // show and will not go looking for one: an
+                                    // avatar service would mean sending a
+                                    // colleague's address off this machine on
+                                    // every history load.
+                                    avatar: commit.mine == true ? account?.avatar : nil,
                                     isOpen: model.openCommit[folder.id]?.id == commit.id
                                 ) {
                                     Task { await model.showCommit(commit.id, in: folder.id) }
@@ -204,10 +217,19 @@ struct WorkspaceHistoryView: View {
 /// not left this machine yet.
 private struct CommitRow: View {
     let commit: Commit
+    /// The account picture, for a commit this account authored. Nil draws the
+    /// author's monogram instead.
+    let avatar: String?
     let isOpen: Bool
     let action: () -> Void
 
     @State private var isHovering = false
+
+    /// Identity to colour the monogram by. The address is the stable one: two
+    /// people can share a display name, and one person can change theirs.
+    private var identity: String {
+        commit.email ?? commit.author
+    }
 
     var body: some View {
         Button(action: action) {
@@ -222,7 +244,19 @@ private struct CommitRow: View {
     }
 
     private var content: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            // Beside the subject rather than beside the name: at the top of the
+            // row it lines up down the list whether a subject wraps to two
+            // lines or not, which is what makes the column readable.
+            Avatar(
+                url: avatar,
+                handle: commit.author,
+                size: 20,
+                tint: Avatar.tint(for: identity)
+            )
+            .padding(.top, 1)
+            .help(commit.email ?? commit.author)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(commit.subject)
                     .font(.system(size: 13))

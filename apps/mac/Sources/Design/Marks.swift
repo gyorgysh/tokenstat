@@ -132,17 +132,38 @@ struct Avatar: View {
     var url: String?
     var handle: String?
     var size: CGFloat = 22
+    /// Colour of the letter tile. Left at the app's accent for the account's
+    /// own picture; a per-person colour where several people appear in one
+    /// list, so a row is recognisable before the name is read.
+    var tint: Color = Theme.accent
 
     /// Seeded from the cache so a picture already fetched paints on the first
     /// frame rather than flashing the letter tile again.
     @State private var image: Image?
+
+    /// A stable colour for a person, from the app's own ramp.
+    ///
+    /// Hashed over the bytes rather than with `hashValue`, which is seeded per
+    /// process: the same author would get a different colour on every launch,
+    /// and a mark that moves is not a mark.
+    ///
+    /// The ramp's first two steps are left out. They are the heatmap's "quiet
+    /// day" greys, and a letter in one of them is a letter nobody can read.
+    static func tint(for identity: String) -> Color {
+        let palette = Theme.heat.dropFirst(2) + [Theme.warning, Theme.danger]
+        var hash: UInt64 = 5381
+        for byte in identity.lowercased().utf8 {
+            hash = hash &* 33 &+ UInt64(byte)
+        }
+        return Array(palette)[Int(hash % UInt64(palette.count))]
+    }
 
     var body: some View {
         Color.clear
             .frame(width: size, height: size)
             .overlay {
                 ZStack {
-                    Circle().fill(Theme.accent.opacity(0.18))
+                    Circle().fill(tint.opacity(0.18))
                     if let image {
                         image
                             .resizable()
@@ -177,7 +198,7 @@ struct Avatar: View {
             if let initial = handle?.first {
                 Text(String(initial).uppercased())
                     .font(.system(size: size * 0.5, weight: .semibold))
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(tint)
             } else {
                 Image(systemName: "person.fill")
                     .font(.system(size: size * 0.45))
