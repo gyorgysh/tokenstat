@@ -129,19 +129,44 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
 
         // Recover history the transcripts no longer hold.
         if let Some(stats_path) = claude_stats::path_for(&projects) {
-            if let Ok(contents) = std::fs::read_to_string(&stats_path) {
-                if let Some(stats) = claude_stats::parse(&contents) {
-                    let daily = claude_stats::daily_model_tokens(&contents);
-                    store.clear_recovered()?;
-                    let have = store.in_out_by_date_model()?;
-                    let events = claude_stats::backfill_events(&stats, &daily, &have, tz);
-                    report.days_recovered = events
-                        .iter()
-                        .map(|e| e.ts.local_date(tz))
-                        .collect::<std::collections::HashSet<_>>()
-                        .len() as u64;
-                    report.events_recovered = events.len() as u64;
-                    all_events.extend(events);
+            let stats_key = stats_path.to_string_lossy().into_owned();
+            let stats_prev = marks.get(&stats_key);
+            let stats_meta = std::fs::metadata(&stats_path).ok();
+            let stats_size = stats_meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let stats_mtime = stats_meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as i64)
+                .unwrap_or(0);
+            let stats_unchanged = watermark::classify(stats_prev, stats_size, stats_mtime)
+                == watermark::Change::Unchanged;
+            if !stats_unchanged {
+                if let Ok(contents) = std::fs::read_to_string(&stats_path) {
+                    if let Some(stats) = claude_stats::parse(&contents) {
+                        let daily = claude_stats::daily_model_tokens(&contents);
+                        store.clear_recovered()?;
+                        let have = store.in_out_by_date_model()?;
+                        let events = claude_stats::backfill_events(&stats, &daily, &have, tz);
+                        report.days_recovered = events
+                            .iter()
+                            .map(|e| e.ts.local_date(tz))
+                            .collect::<std::collections::HashSet<_>>()
+                            .len() as u64;
+                        report.events_recovered = events.len() as u64;
+                        all_events.extend(events);
+                        let (head_sig, sig_len) = watermark::head_signature(contents.as_bytes());
+                        marks_to_store.push((
+                            stats_key,
+                            watermark::Watermark {
+                                size: stats_size,
+                                mtime_ms: stats_mtime,
+                                head_sig,
+                                sig_len,
+                                byte_offset: contents.len() as u64,
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -339,6 +364,8 @@ fn read_shard(
     marks: &std::collections::HashMap<String, watermark::Watermark>,
     parse: impl Fn(&std::path::Path, &str) -> Parsed,
 ) -> FileOutcome {
+    use std::io::{Read, Seek, SeekFrom};
+
     let key = path.to_string_lossy().into_owned();
     let previous = marks.get(&key);
 
@@ -353,12 +380,13 @@ fn read_shard(
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    if watermark::classify(previous, size, mtime_ms) == watermark::Change::Unchanged {
+    let provisional = watermark::classify(previous, size, mtime_ms);
+    if provisional == watermark::Change::Unchanged {
         return FileOutcome::skipped();
     }
 
-    let contents = match std::fs::read(path) {
-        Ok(c) => c,
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
         Err(e) => {
             let mut out = FileOutcome::skipped();
             out.parsed.warnings.push(Warning::Unreadable {
@@ -368,34 +396,103 @@ fn read_shard(
             return out;
         }
     };
-    let change = watermark::confirm(
-        watermark::classify(previous, size, mtime_ms),
-        previous,
-        &contents,
-    );
+
+    // Confirm append vs rewrite using only the previously signed head, not the
+    // whole multi-hundred-MB file.
+    let change = match (provisional, previous) {
+        (watermark::Change::Appended { from_byte }, Some(w)) => {
+            let mut head = vec![0u8; w.sig_len as usize];
+            match file.read_exact(&mut head) {
+                Ok(()) if watermark::signature_of(&head, head.len()) == w.head_sig => {
+                    watermark::Change::Appended { from_byte }
+                }
+                Ok(()) | Err(_) => watermark::Change::Rewritten,
+            }
+        }
+        (other, _) => other,
+    };
 
     let start = match change {
         watermark::Change::Appended { from_byte } => from_byte as usize,
         _ => 0,
     };
-    let tail = &contents[start.min(contents.len())..];
-    let text = String::from_utf8_lossy(tail);
-    let parsed = parse(path, &text);
 
-    let consumed = start as u64 + watermark::last_complete_line_end(tail);
+    let (tail, head_for_sig): (Vec<u8>, Vec<u8>) = if start == 0 {
+        let mut contents = Vec::new();
+        if let Err(e) = file
+            .seek(SeekFrom::Start(0))
+            .and_then(|_| file.read_to_end(&mut contents))
+        {
+            let mut out = FileOutcome::skipped();
+            out.parsed.warnings.push(Warning::Unreadable {
+                path: path.to_path_buf(),
+                reason: e.to_string(),
+            });
+            return out;
+        }
+        let head = contents
+            .get(..contents.len().min(watermark::HEAD_BYTES))
+            .unwrap_or(&[])
+            .to_vec();
+        (contents, head)
+    } else {
+        // Keep the prior head signature on pure appends (prefix unchanged).
+        let head = {
+            let mut h = vec![0u8; previous.map(|w| w.sig_len as usize).unwrap_or(0)];
+            if let Err(e) = file
+                .seek(SeekFrom::Start(0))
+                .and_then(|_| file.read_exact(&mut h))
+            {
+                let mut out = FileOutcome::skipped();
+                out.parsed.warnings.push(Warning::Unreadable {
+                    path: path.to_path_buf(),
+                    reason: e.to_string(),
+                });
+                return out;
+            }
+            h
+        };
+        let mut tail = Vec::new();
+        if let Err(e) = file
+            .seek(SeekFrom::Start(start as u64))
+            .and_then(|_| file.read_to_end(&mut tail))
+        {
+            let mut out = FileOutcome::skipped();
+            out.parsed.warnings.push(Warning::Unreadable {
+                path: path.to_path_buf(),
+                reason: e.to_string(),
+            });
+            return out;
+        }
+        (tail, head)
+    };
+
+    let text = String::from_utf8_lossy(&tail);
+    let parsed = parse(path, &text);
+    let consumed = start as u64 + watermark::last_complete_line_end(&tail);
+    let (head_sig, sig_len) = if start == 0 {
+        watermark::head_signature(&tail)
+    } else if let Some(w) = previous {
+        // Append: same signed prefix as before.
+        (w.head_sig.clone(), w.sig_len)
+    } else {
+        let len = head_for_sig.len().min(watermark::HEAD_BYTES);
+        (watermark::signature_of(&head_for_sig, len), len as u64)
+    };
+
     FileOutcome {
         parsed,
         read: true,
-        mark: Some((key, {
-            let (head_sig, sig_len) = watermark::head_signature(&contents);
+        mark: Some((
+            key,
             watermark::Watermark {
                 size,
                 mtime_ms,
                 head_sig,
                 sig_len,
                 byte_offset: consumed,
-            }
-        })),
+            },
+        )),
     }
 }
 

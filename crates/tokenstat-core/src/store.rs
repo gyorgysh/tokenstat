@@ -179,6 +179,11 @@ impl Store {
         Self::configure(&conn)?;
         if fresh || !Self::schema_ready(&conn)? {
             Self::migrate(&conn)?;
+        } else {
+            // Indexes added after first ship. IF NOT EXISTS is a catalog check
+            // when present, so a ready archive still gains new ones without a
+            // full migrate write path.
+            Self::ensure_indexes(&conn)?;
         }
         Ok(Store { conn })
     }
@@ -246,6 +251,8 @@ impl Store {
             CREATE INDEX IF NOT EXISTS event_date  ON event(local_date);
             CREATE INDEX IF NOT EXISTS event_model ON event(model);
             CREATE INDEX IF NOT EXISTS event_proj  ON event(project);
+            CREATE INDEX IF NOT EXISTS event_ts    ON event(ts_ms);
+            CREATE INDEX IF NOT EXISTS event_source ON event(source);
 
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) STRICT;
 
@@ -264,6 +271,20 @@ impl Store {
         conn.execute(
             "INSERT OR IGNORE INTO meta (k, v) VALUES ('schema_version', ?1)",
             params![SCHEMA_VERSION.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Ensure post-ship indexes exist on archives that already had a schema.
+    fn ensure_indexes(conn: &Connection) -> Result<(), CoreError> {
+        conn.execute_batch(
+            r#"
+            CREATE INDEX IF NOT EXISTS event_date  ON event(local_date);
+            CREATE INDEX IF NOT EXISTS event_model ON event(model);
+            CREATE INDEX IF NOT EXISTS event_proj  ON event(project);
+            CREATE INDEX IF NOT EXISTS event_ts    ON event(ts_ms);
+            CREATE INDEX IF NOT EXISTS event_source ON event(source);
+            "#,
         )?;
         Ok(())
     }

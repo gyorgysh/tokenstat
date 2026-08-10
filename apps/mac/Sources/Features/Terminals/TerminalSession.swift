@@ -19,8 +19,17 @@ enum TerminalPreferences {
     private static let noColorKey = "terminal.noColor.enabled"
 
     /// Expose the terminal's visible screen to VoiceOver as a text area.
+    ///
+    /// Defaults on when VoiceOver is already running the first time the key is
+    /// read, so accessibility users are not left with a silent terminal until
+    /// they find the Account toggle.
     static var exposesToVoiceOver: Bool {
-        get { UserDefaults.standard.bool(forKey: voiceOverKey) }
+        get {
+            if UserDefaults.standard.object(forKey: voiceOverKey) == nil {
+                return NSWorkspace.shared.isVoiceOverEnabled
+            }
+            return UserDefaults.standard.bool(forKey: voiceOverKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: voiceOverKey) }
     }
 
@@ -160,9 +169,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// what saturated the socket pool and made a launch click wait.
     private static let minPollDelay = 16
     /// The floor for a session nobody is looking at. Still far faster than the
-    /// host's buffer fills, so no output is lost.
-    private static let backgroundPollDelay = 150
-    private static let maxPollDelay = 250
+    /// host's buffer fills, so no output is lost. Raised from 150 so several
+    /// idle agents do not saturate the 16-connection socket pool.
+    private static let backgroundPollDelay = 200
+    private static let maxPollDelay = 400
 
     /// The fastest this session polls right now.
     private var pollFloor: Int {

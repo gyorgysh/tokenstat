@@ -68,12 +68,26 @@ fn sync_interval() -> Duration {
 }
 
 fn run_once(session: &Mutex<Session>) {
-    let Ok(guard) = session.lock() else {
-        return;
+    // Snapshot path and timezone under the lock, then open a separate Store for
+    // the HTTP phase. Holding Session across the upload freezes Home/Insights.
+    let (tz, db_path) = {
+        let Ok(guard) = session.lock() else {
+            return;
+        };
+        (
+            guard.engine.timezone().iana_name().map(str::to_string),
+            guard.engine.db_path().to_path_buf(),
+        )
     };
-    let tz = guard.engine.timezone().iana_name().map(str::to_string);
+    let store = match tokenstat_core::Store::open(&db_path) {
+        Ok(store) => store,
+        Err(error) => {
+            eprintln!("sync: could not open archive: {error}");
+            return;
+        }
+    };
     let result = tokenstat_sync::sync_scheduled_now(
-        guard.engine.store(),
+        &store,
         tokenstat_sync::SyncOptions {
             host_flag: None,
             prune: false,
