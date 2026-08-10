@@ -99,6 +99,27 @@ enum Theme {
     static let warning = Color(red: 0xE0 / 255, green: 0xA9 / 255, blue: 0x3B / 255)
     static let danger = Color(red: 0xD6 / 255, green: 0x45 / 255, blue: 0x3F / 255)
 
+    /// A session that is doing something right now.
+    ///
+    /// The accent, so "something is happening" is the app's own colour rather
+    /// than a traffic light. Named separately from `success` because a run
+    /// that is working has not succeeded at anything yet, and the two will
+    /// want to diverge the first time a state screen shows both.
+    static let stateWorking = accent
+    /// A session that is alive and quiet. Grey, and quiet in the layout too:
+    /// most rows are idle most of the time, so this must not draw the eye.
+    static let stateIdle = Color.adaptive(light: hex(0x9A97A6), dark: hex(0x6E6A80))
+
+    /// Lines added, and lines removed.
+    ///
+    /// Green and red because a diff is the one place those two colours are
+    /// not a traffic light: they are what every tool that shows a diff uses,
+    /// and a purple `+128` beside a purple `−41` says nothing. Muted against
+    /// the plain `.green` and `.red`, which are loud enough to pull the eye
+    /// off the name of the workspace they belong to.
+    static let diffAdded = Color.adaptive(light: hex(0x2E8B57), dark: hex(0x5FBF8B))
+    static let diffRemoved = Color.adaptive(light: hex(0xC2453F), dark: hex(0xE8827C))
+
     /// Five steps of activity, idle first.
     ///
     /// Exact `sites/tokenstat` ramp. Step 0 is neutral so a quiet day reads as
@@ -142,6 +163,23 @@ enum Theme {
         case .variable, .operator, .punctuation, .unknown:
             return .primary
         }
+    }
+
+    /// A drop shadow, weighted for the appearance it lands on.
+    ///
+    /// The same black at the same opacity is not the same shadow twice. On a
+    /// dark window it barely reads and mostly gives an edge some depth; on a
+    /// near-white one it is a grey smudge under every button and popover, and
+    /// enough of them turn a flat, quiet layout into something that looks
+    /// embossed. Light mode gets a little under half the weight, which is
+    /// where the separation survives and the smudge does not.
+    ///
+    /// Pass the dark-mode opacity, which is the one these were tuned at.
+    static func shadow(_ opacity: Double) -> Color {
+        Color.adaptive(
+            light: Color.black.opacity(opacity * 0.35),
+            dark: Color.black.opacity(opacity)
+        )
     }
 
     private static func hex(_ value: UInt32) -> Color {
@@ -657,7 +695,7 @@ struct TransientToast: View {
                 .padding(.vertical, Theme.Space.s)
                 .background(.regularMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(severity.tint.opacity(0.35), lineWidth: 1))
-                .shadow(color: .black.opacity(0.2), radius: 14, y: 6)
+                .shadow(color: Theme.shadow(0.2), radius: 14, y: 6)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
                 .animation(.snappy(duration: 0.25), value: message)
         }

@@ -31,7 +31,20 @@ struct TerminalViewRepresentable: NSViewRepresentable {
     /// take it, including one nobody can see. `TerminalPane` gives focus to the
     /// session that is actually in front.
     func makeNSView(context: Context) -> TerminalView {
-        session.view
+        let view = session.view
+        // Ask for a repaint, because this view has just been put into a new
+        // hierarchy and its contents are older than the hierarchy is.
+        //
+        // The session owns the view, so coming back from a file, a commit or
+        // the launcher hands the same instance to a fresh window of the pane
+        // with a buffer full of output nobody has asked it to draw. Every
+        // other repaint trigger is an *event*, and no event happens when you
+        // simply return to a session that has been quiet: the terminal sat
+        // there empty but for a blinking caret until the process printed
+        // something. `makeNSView` runs once per mount, so this costs one draw
+        // per return rather than one per update.
+        view.setNeedsDisplay(view.bounds)
+        return view
     }
 
     func updateNSView(_ nsView: TerminalView, context: Context) {

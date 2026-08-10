@@ -852,7 +852,7 @@ struct RootView: View {
                             .fill(Theme.border)
                             .frame(width: 1)
                     }
-                    .shadow(color: .black.opacity(0.20), radius: 12, x: 5, y: 0)
+                    .shadow(color: Theme.shadow(0.20), radius: 12, x: 5, y: 0)
                     .onHover { hovering in
                         isSidebarPanelHovered = hovering
                         // Pin once the pointer is on the panel so a system
@@ -903,7 +903,7 @@ struct RootView: View {
                             .fill(Theme.border)
                             .frame(width: 1)
                     }
-                    .shadow(color: .black.opacity(0.20), radius: 12, x: -5, y: 0)
+                    .shadow(color: Theme.shadow(0.20), radius: 12, x: -5, y: 0)
                     .onHover { hovering in
                         isOverlayPanelHovered = hovering
                         if hovering {
@@ -1006,6 +1006,21 @@ struct RootView: View {
                     ForEach(workspaces.folders) { folder in
                         #if os(macOS)
                         let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
+                        // The open workspace, and whether a terminal inside it
+                        // is what the centre pane is actually showing. Only one
+                        // of the two rows lights up: the folder when you are
+                        // looking at the folder, the session when you are
+                        // looking at a shell.
+                        let isCurrent = destination == .workspaces
+                            && workspaces.selectedID == folder.id
+                        // The launcher lives inside the terminal column, so
+                        // `isShowingTerminal` is true while it is up. Without
+                        // this the session row stayed lit on a screen that is
+                        // not that session, and nothing marked the launcher.
+                        let showingTerminal = isCurrent
+                            && workspaces.isShowingTerminal(in: folder.id)
+                            && !workspaces.showingLauncher.contains(folder.id)
+                            && terminals.active(in: folder.id) != nil
                         HStack(spacing: 0) {
                             Button {
                                 if collapsedWorkspaces.contains(folder.id) {
@@ -1024,16 +1039,10 @@ struct RootView: View {
                             .buttonStyle(.plain)
                             .help(collapsedWorkspaces.contains(folder.id) ? "Expand workspace" : "Collapse workspace")
 
-                            SidebarRow(
-                                label: folder.isRemote
-                                    ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
-                                    : folder.name,
-                                symbol: folder.isRemote
-                                    ? "network"
-                                    : (folder.exists ? "folder" : "questionmark.folder"),
-                                trailing: folder.diffStat,
-                                isSelected: destination == .workspaces
-                                    && workspaces.selectedID == folder.id
+                            WorkspaceRow(
+                                folder: folder,
+                                isSelected: isCurrent && !showingTerminal,
+                                isCurrent: isCurrent
                             ) { selectWorkspace(folder.id) }
                         }
                         .contextMenu {
@@ -1070,12 +1079,13 @@ struct RootView: View {
                                 ActiveSessionRow(
                                     session: session,
                                     // Selected only when this session is the one
-                                    // actually on screen: the right workspace,
-                                    // its active session, and a terminal rather
-                                    // than a file or a commit in front of it.
-                                    isSelected: destination == .workspaces
-                                        && workspaces.selectedID == folder.id
-                                        && workspaces.isShowingTerminal(in: folder.id)
+                                    // actually on screen. `showingTerminal`
+                                    // carries the whole test, launcher
+                                    // included: with the launcher up, the
+                                    // pane is showing a grid of tools and no
+                                    // session at all, so no session row may
+                                    // claim to be what you are looking at.
+                                    isSelected: showingTerminal
                                         && terminals.active(in: folder.id)?.id == session.id
                                 ) {
                                     var transaction = Transaction()
@@ -1682,7 +1692,281 @@ private struct SidebarRow: View {
 }
 
 #if os(macOS)
-/// A shortcut to a running session, independent of which workspace is open.
+/// Sizing shared by the workspace row and the session rows nested under it.
+///
+/// One place, because the two are read as a single surface: a folder and the
+/// sessions inside it must share a leading tile size, a type scale and a
+/// vertical rhythm, or the indent reads as a different list rather than as
+/// the inside of this one.
+///
+/// The type scale is the platform's, not a chosen one. 13pt is the macOS
+/// source list size, and the two lines under it step down to 11pt, which is
+/// as small as text is allowed to go here. Larger reads as a settings pane
+/// rather than a sidebar, and that is what a 14/12/11 stack looked like.
+private enum RowMetrics {
+    /// The leading brand or folder tile.
+    static let mark: CGFloat = 26
+    /// Line one: the name.
+    static let title: CGFloat = 13
+    /// Lines two and three: git summary, then state.
+    static let meta: CGFloat = 11
+    /// Between the three lines. Tight: they are one block of text about one
+    /// thing, not three separate facts.
+    static let lineGap: CGFloat = 2
+    /// Above and below the text block.
+    static let rowPadding: CGFloat = 6
+    /// The state dot.
+    static let dot: CGFloat = 7
+}
+
+/// Dot plus word: what a session is doing right now.
+///
+/// Working is the accent in both the dot and the label, so the one row that
+/// matters is the one carrying colour. Everything else is grey, because a
+/// sidebar where four states all shout is a sidebar with no state at all.
+private struct StateBadge: View {
+    let state: SessionState
+    /// When the session last produced output.
+    ///
+    /// Shown for an idle session and nowhere else. "Idle" alone leaves the
+    /// one question it raises unanswered, which is *how long*: an agent quiet
+    /// for eight seconds is thinking, one quiet for an hour is waiting for
+    /// you. On a working session the answer is always "just now", so the
+    /// clock would be noise that redraws every second.
+    var since: Date?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    private var tint: Color {
+        switch state {
+        case .working: return Theme.stateWorking
+        case .starting: return Theme.stateWorking.opacity(0.5)
+        case .stopped: return Theme.danger
+        case .idle, .none: return Theme.stateIdle
+        }
+    }
+
+    private var label: String {
+        switch state {
+        case .none: return "No sessions"
+        case .working: return "Working"
+        case .starting: return "Starting"
+        case .idle: return "Idle"
+        case .stopped: return "Stopped"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if state != .none {
+                Circle()
+                    .fill(tint)
+                    .frame(width: RowMetrics.dot, height: RowMetrics.dot)
+                    // Only the live state breathes, and only when the system
+                    // allows motion. A pulsing dot on an idle row would be
+                    // movement that means nothing.
+                    .opacity(pulsing ? 0.45 : 1)
+                    .onAppear { startPulse() }
+                    .onChange(of: state) { _, _ in startPulse() }
+            }
+            Text(label)
+                .font(.system(size: DisplayFit.dp(RowMetrics.meta)))
+                .foregroundStyle(state == .working ? AnyShapeStyle(Theme.stateWorking) : AnyShapeStyle(.tertiary))
+                .lineLimit(1)
+            if state == .idle, let since {
+                Text("·").font(.system(size: DisplayFit.dp(RowMetrics.meta))).foregroundStyle(.quaternary)
+                // SwiftUI keeps a relative date current on its own, so this
+                // counts up without the sidebar owning a timer.
+                Text(since, style: .relative)
+                    .font(Theme.numeric(RowMetrics.meta))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
+    private func startPulse() {
+        guard state == .working, !reduceMotion else {
+            pulsing = false
+            return
+        }
+        pulsing = false
+        withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
+            pulsing = true
+        }
+    }
+}
+
+/// A workspace in the sidebar: a folder mark, its name, and where its
+/// checkout stands.
+///
+/// The folder mark is deliberate. This row names a workspace, and the sessions
+/// underneath it carry the harness marks, so the folder reads as the container
+/// it is rather than pretending to be an agent.
+///
+/// Two lines, and no working state. A folder does not work, the shells inside
+/// it do, and each of those says so on its own row. Folding their states into
+/// one word here only restated what was already visible one row below, and it
+/// put a live indicator on something that is really just a place.
+///
+/// No path line either. It made every row taller than the thing it described
+/// and pushed the second workspace off the top of a short sidebar. The path is
+/// in the tooltip, where it belongs: it is what you check once when adding a
+/// folder, not what you read every time you switch to one.
+private struct WorkspaceRow: View {
+    let folder: WorkspaceFolder
+    /// This row is what the centre pane is showing: the workspace itself,
+    /// with no terminal in front of it. Only then does the row take the fill
+    /// and the accent bar.
+    let isSelected: Bool
+    /// The workspace is the open one, whatever is in front of it. Carries a
+    /// tinted mark and a heavier name, and nothing louder, so that a selected
+    /// session below can be the only lit row.
+    let isCurrent: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    private var label: String {
+        folder.isRemote
+            ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+            : folder.name
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                leadingMark
+                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
+                    Text(label)
+                        .font(.system(
+                            size: DisplayFit.dp(RowMetrics.title),
+                            weight: isCurrent ? .semibold : .regular
+                        ))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    gitLine
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, RowMetrics.rowPadding)
+            .background(background)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(folder.path)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label). \(folder.subtitle ?? "No branch")")
+    }
+
+    /// Line two, in pieces rather than as one string.
+    ///
+    /// The counts carry the diff colours, which is the whole reason this is
+    /// not a `Text`. As one grey line, `main ⇡2 +535 −46` reads as a serial
+    /// number: nothing in it says which number is which without being read
+    /// word by word. Numeric face throughout, so a count ticking over does
+    /// not shift the line sideways.
+    @ViewBuilder
+    private var gitLine: some View {
+        let font = Theme.numeric(RowMetrics.meta)
+        if let git = folder.git, git.isRepo {
+            HStack(spacing: 5) {
+                // The same glyph the session rows use. Without it the branch
+                // is a bare word in a line of numbers, and `main +562 −46`
+                // reads as though `main` were another count.
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: DisplayFit.dp(RowMetrics.meta - 1), weight: .medium))
+                    .foregroundStyle(.tertiary)
+                Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
+                    .font(font)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if git.ahead > 0 {
+                    Text("⇡\(git.ahead)").font(font).foregroundStyle(Theme.accent)
+                }
+                if git.behind > 0 {
+                    Text("⇣\(git.behind)").font(font).foregroundStyle(Theme.accent)
+                }
+                if !git.files.isEmpty {
+                    Text("+\(git.added)").font(font).foregroundStyle(Theme.diffAdded)
+                    if git.removed > 0 {
+                        Text("−\(git.removed)").font(font).foregroundStyle(Theme.diffRemoved)
+                    }
+                    // The counts are a floor when some file could not be
+                    // counted, and a trailing `+` is how the rest of the app
+                    // already says so.
+                    if git.partial {
+                        Text("+").font(font).foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1)
+        } else {
+            Text(folder.subtitle ?? "No branch")
+                .font(font)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+
+    @ViewBuilder
+    private var leadingMark: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: RowMetrics.mark * 0.28, style: .continuous)
+                .fill(isCurrent ? Theme.accent.opacity(0.18) : Theme.accent.opacity(0.09))
+            Image(
+                systemName: folder.isRemote
+                    ? "network"
+                    : (folder.exists ? "folder.fill" : "questionmark.folder.fill")
+            )
+            .font(.system(size: DisplayFit.dp(RowMetrics.mark * 0.5), weight: .medium))
+            .foregroundStyle(isCurrent ? Theme.accent : Theme.accent.opacity(0.6))
+        }
+        .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))
+    }
+
+    /// Same selection treatment as the destination rows: tinted fill plus a
+    /// leading accent bar, with hover as a plain grey wash.
+    private var background: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelected
+                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+                )
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .padding(.horizontal, Theme.Space.xs)
+        // A hairline between adjacent rows. Without it two selected cards, or
+        // a card and the session under it, share an edge and read as one tall
+        // shape rather than as two things.
+        .padding(.vertical, 1)
+    }
+}
+
+/// A running session, drawn inside the workspace it belongs to.
+///
+/// Three lines: what it is, what it is costing, and whether it is working.
+/// This is the row that carries the live state, because this is the thing that
+/// is alive. The folder above it is a place, and a place is never busy.
+///
+/// The folder name and the path are both absent on purpose. The row sits
+/// directly beneath its folder, so repeating either says nothing and costs a
+/// line.
 private struct ActiveSessionRow: View {
     let session: TerminalSession
     let isSelected: Bool
@@ -1690,57 +1974,142 @@ private struct ActiveSessionRow: View {
 
     @State private var isHovering = false
 
+    /// Line one: what was launched.
+    ///
+    /// The harness name, not the shell title. A harness rewrites its title as
+    /// it works ("✳ Claude Code", then whatever it is thinking about), so a
+    /// row keyed on it renamed itself every few seconds and the list you were
+    /// reading moved under you. What you picked from the launcher does not
+    /// change, so that is what names the row.
+    private var title: String {
+        if let harnessID = session.harnessID { return harnessName(harnessID) }
+        return (session.command as NSString).lastPathComponent
+    }
+
+    /// The harness's own title, when it is saying something the row does not
+    /// already say. This is where a session that is called something else
+    /// gets to be called that.
+    /// Containment tested both ways. A harness whose title is "grok" under a
+    /// row named "Grok Build" passes a one-way test and then prints a word
+    /// the row above it already said.
+    private var dynamicTitle: String? {
+        guard let reported = session.title?.trimmingCharacters(in: .whitespaces),
+              !reported.isEmpty,
+              !reported.localizedCaseInsensitiveContains(title),
+              !title.localizedCaseInsensitiveContains(reported)
+        else { return nil }
+        return reported
+    }
+
+    /// Line two: which harness this is.
+    ///
+    /// A harness that runs with its own name as the shell title would print
+    /// that name twice, so the first candidate that is not already line one
+    /// wins, and a bare command is the last resort.
+    /// Line two: what this session is costing the machine.
+    ///
+    /// Not the branch. The folder directly above already says which branch
+    /// this is, and a session cannot be on a different one, so repeating it
+    /// spent a line saying nothing. These numbers are the opposite: they are
+    /// true of this session and of nothing else on screen.
+    ///
+    /// `nil` before the host's first reading, so a row never invents a zero.
+    private var stats: String? {
+        var parts: [String] = []
+        if let cpu = session.cpuPercent {
+            parts.append("CPU \(Int(cpu.rounded()))%")
+        }
+        if let memory = session.memoryMb, memory >= 1 {
+            // Gigabytes past a thousand: an agent with a language server and
+            // a test run under it reaches four digits, and "3.4 GB" is read
+            // at a glance where "3421 MB" is counted.
+            parts.append(
+                memory >= 1000
+                    ? String(format: "%.1f GB", memory / 1024)
+                    : "\(Int(memory.rounded())) MB"
+            )
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
-                if let harnessID = session.harnessID {
-                    HarnessMark(id: harnessID, size: 16)
-                } else {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 16, height: 16)
+                leadingMark
+                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
+                    Text(title)
+                        .font(.system(
+                            size: DisplayFit.dp(RowMetrics.title),
+                            weight: isSelected ? .semibold : .regular
+                        ))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // The live numbers, or the harness's own title until the
+                    // first reading lands. Never both: this is one line and
+                    // the numbers are what change.
+                    Text(stats ?? dynamicTitle ?? session.command)
+                        .font(Theme.numeric(RowMetrics.meta))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    StateBadge(state: session.state, since: session.lastOutputAt)
                 }
-                // One line, and no workspace name. The row is drawn directly
-                // beneath the folder it belongs to, so repeating the folder's
-                // name under it says nothing and made the row twice the height
-                // of the one above, which is what looked misaligned.
-                Text(session.title?.isEmpty == false ? session.title! : session.command)
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: Theme.Space.xs)
-                Circle()
-                    .fill(Theme.success)
-                    .frame(width: 5, height: 5)
+                Spacer(minLength: 0)
             }
             .padding(.leading, Theme.Space.m)
             .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, 5)
+            .padding(.vertical, RowMetrics.rowPadding)
             .background(background)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
         .help(session.cwd)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title). \(stats ?? ""). \(session.state.label)")
     }
 
-    /// A session sits inside a workspace and the two are selected together, so
-    /// they must not compete. The folder carries the accent bar and the tint;
-    /// this is a plain neutral fill and no bar of its own, indented to sit
-    /// under the folder's row.
+    @ViewBuilder
+    private var leadingMark: some View {
+        if let harnessID = session.harnessID {
+            HarnessMark(id: harnessID, size: DisplayFit.dp(RowMetrics.mark))
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: RowMetrics.mark * 0.28, style: .continuous)
+                    .fill(Theme.accent.opacity(0.09))
+                Image(systemName: "terminal")
+                    .font(.system(size: DisplayFit.dp(RowMetrics.mark * 0.46), weight: .medium))
+                    .foregroundStyle(Theme.accent.opacity(0.75))
+            }
+            .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))
+        }
+    }
+
+    /// The session, not its folder, carries the selection.
     ///
-    /// It used to repeat the folder's treatment at half strength, which put two
-    /// purple bars at slightly different offsets one above the other.
+    /// What is on screen when a session is picked is that shell, so the tint
+    /// and the accent bar belong here. The folder above it steps back to a
+    /// tinted mark and a heavier name, which says "you are in this workspace"
+    /// without claiming to be the thing being looked at. Both of them lit was
+    /// two selections for one choice.
     private var background: some View {
-        RoundedRectangle(cornerRadius: 6)
-            .fill(
-                isSelected
-                    ? Theme.rowSelectedNested
-                    : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
-            )
-            .padding(.leading, Theme.Space.l)
-            .padding(.trailing, Theme.Space.xs)
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelected
+                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+                )
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .padding(.leading, Theme.Space.l)
+        .padding(.trailing, Theme.Space.xs)
+        .padding(.vertical, 1)
     }
 }
 #endif

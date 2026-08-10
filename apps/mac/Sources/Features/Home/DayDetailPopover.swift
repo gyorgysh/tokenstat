@@ -148,7 +148,7 @@ struct DayDetailPopover: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.22), radius: 18, y: 6)
+        .shadow(color: Theme.shadow(0.22), radius: 18, y: 6)
     }
 
     private static let maxRows = 8
@@ -241,7 +241,7 @@ struct DayDetailPopover: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.22), radius: 18, y: 6)
+        .shadow(color: Theme.shadow(0.22), radius: 18, y: 6)
     }
 
     // MARK: - Helpers

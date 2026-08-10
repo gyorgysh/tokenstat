@@ -483,9 +483,14 @@ struct TerminalPane: View {
 /// The close control on a tab.
 ///
 /// Shown whenever the tab is selected or the pointer is over it, not only when
-/// selected: closing a background tab should not mean selecting it first. Sized
-/// as a real target with its own hover background, because an 8pt glyph with no
-/// affordance is something people miss and then click the tab instead.
+/// selected: closing a background tab should not mean selecting it first.
+///
+/// It lives *inside* the tab's own chrome, which is what every tab in every
+/// browser does and what this did not. It used to be a 44pt square sibling of
+/// the tab, so the tab's rounded panel ended and then an unattached x floated
+/// after it, reading as its own control rather than as part of the tab. The
+/// target is 20pt now, still comfortably clickable, with its own hover circle
+/// so the affordance does not depend on the glyph alone.
 private struct TabCloseButton: View {
     let help: String
     let action: () -> Void
@@ -495,14 +500,13 @@ private struct TabCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(isHovering ? Color.primary : .secondary)
-                .frame(width: 18, height: 18)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .frame(width: 20, height: 20)
                 .background(
-                    Circle().fill(isHovering ? Theme.rowHighlight : .clear)
+                    Circle().fill(isHovering ? Theme.controlSeat : .clear)
                 )
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -538,13 +542,6 @@ private struct SessionChip: View {
                         .truncationMode(.tail)
                 }
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, 3)
-                .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
-                )
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -552,8 +549,21 @@ private struct SessionChip: View {
 
             if isSelected || isHovering {
                 TabCloseButton(help: "Close this session", action: onClose)
+            } else {
+                // Holds the width the button would take, so a tab does not
+                // change size when the pointer crosses it and shove every tab
+                // after it sideways.
+                Color.clear.frame(width: 20, height: 20)
             }
         }
+        .padding(.leading, Theme.Space.s)
+        .padding(.trailing, 3)
+        .padding(.vertical, 3)
+        .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
+        )
         .onHover { isHovering = $0 }
     }
 
@@ -602,13 +612,6 @@ private struct FileChip: View {
                     }
                 }
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-                .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, 3)
-                .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
-                )
                 .contentShape(.rect)
             }
             .buttonStyle(.plain)
@@ -616,8 +619,18 @@ private struct FileChip: View {
 
             if isSelected || isHovering {
                 TabCloseButton(help: "Close this file", action: onClose)
+            } else {
+                Color.clear.frame(width: 20, height: 20)
             }
         }
+        .padding(.leading, Theme.Space.s)
+        .padding(.trailing, 3)
+        .padding(.vertical, 3)
+        .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
+        )
         .onHover { isHovering = $0 }
     }
 }
@@ -969,7 +982,7 @@ private struct LaunchTile: View {
                 .background(
                     Circle()
                         .fill(Theme.sidebar)
-                        .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
+                        .shadow(color: Theme.shadow(0.35), radius: 3, x: 0, y: 1)
                 )
                 .overlay(alignment: .topTrailing) {
                     if showPath {
@@ -1010,7 +1023,7 @@ private struct LaunchTile: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.28), radius: 12, x: 0, y: 4)
+            .shadow(color: Theme.shadow(0.28), radius: 12, x: 0, y: 4)
             .offset(x: 4, y: -8)
             .alignmentGuide(.top) { $0[.bottom] }
             .allowsHitTesting(false)
