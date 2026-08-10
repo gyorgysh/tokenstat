@@ -3,11 +3,21 @@
 
 use std::fs;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tokenstat_core::PriceTable;
 
 use crate::snapshot::{self, Fetched, moved_over_half, validate_effective_from};
+
+/// Local book age after which a >50% rate move is accepted without `--force`.
+///
+/// The guard still blocks a same-day rewrite of the book (a bad feed must not
+/// silently reprice everything). After a day of failed auto-refresh, though,
+/// rejecting forever is worse: hostd and the app would keep pricing against an
+/// outdated snapshot until someone typed `tokenstat pricing --refresh --force`.
+/// That is what pinned machines on the 2026-07-28 book after the feed rewrite.
+const STALE_ACCEPT_LARGE_MOVES: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -37,13 +47,18 @@ pub struct PricingRefresh {
     /// Patterns whose input or output rate moved more than 50% vs the prior
     /// local snapshot. Empty on a first fetch.
     pub large_moves: Vec<String>,
+    /// True when large moves were written because the local book was older
+    /// than a day, not because the caller passed `force`.
+    pub accepted_stale: bool,
 }
 
 /// Download the hosted list-rate snapshot and write `pricing/current.json`.
 ///
 /// When an existing snapshot is present, rates that jump more than 50% are
-/// rejected unless `force` is true, so a bad feed entry cannot silently rewrite
-/// every dollar column.
+/// rejected unless `force` is true **or** the local book is older than a day.
+/// Same-day rewrites stay guarded so a bad feed cannot silently reprice
+/// everything. Auto-refresh (hostd, the Mac app timer) never passes `force`,
+/// so the age path is what keeps "Rates from" moving without a manual CLI run.
 pub fn refresh(force: bool) -> anyhow::Result<PricingRefresh> {
     refresh_from_url(&pricing_url()?, force)
 }
@@ -69,15 +84,19 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
                 models: snapshot.models.len(),
                 effective_from: snapshot.effective_from,
                 large_moves: Vec::new(),
+                accepted_stale: false,
             });
         }
         Fetched::Body { text, etag } => (text, etag),
     };
     let snapshot = parse_snapshot(&body)?;
     let large_moves = detect_large_moves(path, &snapshot);
-    if !large_moves.is_empty() && !force {
+    // Age is measured before the write, against the book we are about to replace.
+    let accepted_stale =
+        !large_moves.is_empty() && !force && age_allows_large_moves(local_age(path));
+    if !large_moves.is_empty() && !force && !accepted_stale {
         anyhow::bail!(
-            "pricing snapshot moved >50% for {} model(s), e.g. {}. Re-run with --force to accept.",
+            "pricing snapshot moved >50% for {} model(s), e.g. {}. Re-run with --force to accept, or wait until the local book is a day old (auto-refresh accepts then).",
             large_moves.len(),
             large_moves
                 .iter()
@@ -94,7 +113,27 @@ fn refresh_from_url_at(url: &str, path: &Path, force: bool) -> anyhow::Result<Pr
         models: snapshot.models.len(),
         effective_from: snapshot.effective_from,
         large_moves,
+        accepted_stale,
     })
+}
+
+/// How long the local snapshot has been on disk, if it exists.
+fn local_age(path: &Path) -> Option<Duration> {
+    let modified = fs::metadata(path).ok()?.modified().ok()?;
+    SystemTime::now().duration_since(modified).ok()
+}
+
+/// Whether a large rate move may be written without an explicit `--force`.
+///
+/// Pure so the age policy is unit-tested without touching the network.
+fn age_allows_large_moves(local_age: Option<Duration>) -> bool {
+    match local_age {
+        // No prior book: detect_large_moves returns empty, so this branch is
+        // not the write gate in practice. Treat as accept so a missing file
+        // never blocks.
+        None => true,
+        Some(age) => age >= STALE_ACCEPT_LARGE_MOVES,
+    }
 }
 
 fn load_snapshot(path: &Path) -> anyhow::Result<OutSnapshot> {
@@ -346,5 +385,28 @@ mod tests {
         assert!(!moved_over_half(10.0, 14.0));
         assert!(moved_over_half(10.0, 16.0));
         assert!(moved_over_half(10.0, 4.0));
+    }
+
+    #[test]
+    fn large_moves_are_accepted_once_the_local_book_is_a_day_old() {
+        assert!(
+            age_allows_large_moves(None),
+            "missing book must not block a first write"
+        );
+        assert!(
+            !age_allows_large_moves(Some(Duration::from_secs(60 * 60))),
+            "a same-day book still guards against a bad feed"
+        );
+        assert!(
+            !age_allows_large_moves(Some(STALE_ACCEPT_LARGE_MOVES - Duration::from_secs(1))),
+            "just under a day stays guarded"
+        );
+        assert!(
+            age_allows_large_moves(Some(STALE_ACCEPT_LARGE_MOVES)),
+            "a day-old book must be free to accept large moves"
+        );
+        assert!(age_allows_large_moves(Some(Duration::from_secs(
+            7 * 24 * 60 * 60
+        ))));
     }
 }

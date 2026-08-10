@@ -42,12 +42,24 @@ pub fn start(session: Arc<Mutex<Session>>) {
 /// readable, and the next pass retries.
 fn refresh_pricing(session: &Mutex<Session>) {
     match tokenstat_sync::pricing::refresh(false) {
-        Ok(_) => {
+        Ok(refreshed) => {
             // The fetch wrote a new file; the session still prices from the
             // book it opened with. Reload it, or every report keeps pricing
             // against the empty book a fresh install opened with.
             if let Ok(mut guard) = session.lock() {
                 crate::pricing::reload(&mut guard);
+            }
+            if !refreshed.large_moves.is_empty() {
+                let why = if refreshed.accepted_stale {
+                    "local book was older than a day"
+                } else {
+                    "force"
+                };
+                eprintln!(
+                    "pricing: accepted {} large rate move(s) ({why}); effective from {}",
+                    refreshed.large_moves.len(),
+                    refreshed.effective_from
+                );
             }
         }
         Err(error) => eprintln!("pricing: refresh failed: {error}"),

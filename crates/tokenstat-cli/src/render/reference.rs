@@ -28,10 +28,17 @@ pub fn pricing(refresh: bool, force: bool, json: bool) -> Result<()> {
         println!("  effective from {}", r.effective_from);
         if !r.large_moves.is_empty() {
             let w = warn();
-            println!(
-                "  {w}accepted {} large rate move(s) with --force{w:#}",
-                r.large_moves.len()
-            );
+            if r.accepted_stale {
+                println!(
+                    "  {w}accepted {} large rate move(s); local book was older than a day{w:#}",
+                    r.large_moves.len()
+                );
+            } else {
+                println!(
+                    "  {w}accepted {} large rate move(s) with --force{w:#}",
+                    r.large_moves.len()
+                );
+            }
         }
         println!();
         return Ok(());
