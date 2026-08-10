@@ -51,21 +51,18 @@ struct HomeView: View {
         .background(Theme.background)
         .toolbar {
             // Window toolbar is always present (traffic lights). Only add our
-            // controls once the splash has finished.
+            // controls once the splash has finished. Same circular seat as the
+            // sidebar mark so the pair share one radius.
             if hostReady {
                 ToolbarItem {
-                    Button {
+                    ToolbarIconButton(
+                        systemImage: "arrow.clockwise",
+                        help: "Re-read the archive for this machine's activity and plan usage",
+                        isBusy: model.isRefreshing,
+                        isEnabled: !model.isLoading && !model.isRefreshing
+                    ) {
                         Task { await model.refresh() }
-                    } label: {
-                        if model.isRefreshing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
                     }
-                    .labelStyle(.iconOnly)
-                    .disabled(model.isLoading || model.isRefreshing)
-                    .help("Re-read the archive for this machine's activity and plan usage")
                 }
             }
         }

@@ -242,32 +242,24 @@ struct InsightsView: View {
             .pickerStyle(.segmented)
         }
         ToolbarItem {
-            Button {
+            ToolbarIconButton(
+                systemImage: "arrow.triangle.2.circlepath",
+                help: "Read new sessions from supported local tools into the archive",
+                isBusy: model.isScanning,
+                isEnabled: !model.isScanning && model.scanCooldownUntil == nil
+            ) {
                 Task { await model.scan() }
-            } label: {
-                if model.isScanning {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label("Scan", systemImage: "arrow.triangle.2.circlepath")
-                }
             }
-            .labelStyle(.iconOnly)
-            .disabled(model.isScanning || model.scanCooldownUntil != nil)
-            .help("Read new sessions from supported local tools into the archive")
         }
         ToolbarItem {
-            Button {
+            ToolbarIconButton(
+                systemImage: "arrow.down.circle",
+                help: "Fetch usage from remote vendors such as Cursor",
+                isBusy: model.isFetching,
+                isEnabled: !model.isFetching && model.fetchCooldownUntil == nil
+            ) {
                 Task { await model.fetchRemotes() }
-            } label: {
-                if model.isFetching {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Label("Fetch", systemImage: "arrow.down.circle")
-                }
             }
-            .labelStyle(.iconOnly)
-            .disabled(model.isFetching || model.fetchCooldownUntil != nil)
-            .help("Fetch usage from remote vendors such as Cursor")
         }
     }
 }

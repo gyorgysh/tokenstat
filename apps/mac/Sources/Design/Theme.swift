@@ -637,12 +637,82 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
     (length / step).rounded() * step
 }
 
+/// Circular icon mark for the window toolbar.
+///
+/// Sidebar toggle, refresh, scan and fetch all share this seat so neighbouring
+/// marks use the same diameter and border rather than mixing a custom view
+/// with the system's bordered toolbar style (those read as different radii).
+struct ToolbarIconButton: View {
+    /// Outer diameter of the circular seat. Fixed so every toolbar mark matches.
+    static let diameter: CGFloat = 30
+
+    let systemImage: String
+    var help: String = ""
+    /// Accent the glyph (open sidebar, selected state).
+    var isAccent: Bool = false
+    /// Replace the glyph with a small spinner.
+    var isBusy: Bool = false
+    /// Optional accent dot on a corner (closed-panel cue).
+    var showsBadge: Bool = false
+    var badgeAlignment: Alignment = .topLeading
+    var isEnabled: Bool = true
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: badgeAlignment) {
+                Group {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: systemImage)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(glyphColor)
+                    }
+                }
+                .frame(width: Self.diameter, height: Self.diameter)
+                .background(
+                    Circle().fill(isHovering ? Theme.rowHighlight : Theme.controlSeat)
+                )
+                .overlay(
+                    Circle().strokeBorder(
+                        Theme.border.opacity(isHovering ? 0.9 : 0.55),
+                        lineWidth: 1
+                    )
+                )
+                if showsBadge {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 6, height: 6)
+                        .offset(
+                            x: badgeAlignment == .topLeading || badgeAlignment == .bottomLeading ? 1 : -1,
+                            y: badgeAlignment == .topLeading || badgeAlignment == .topTrailing ? 1 : -1
+                        )
+                }
+            }
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled || isBusy)
+        .onHover { isHovering = $0 }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private var glyphColor: Color {
+        if isAccent { return Theme.accent }
+        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph
+    }
+}
+
 /// Left or right chrome toggle for toolbars and in-content chips.
 ///
 /// Built from the system `sidebar.left` / `sidebar.right` symbols so the mark
-/// always paints in a macOS toolbar (hand-drawn shapes inside `.plain` buttons
-/// were rendering empty). Open = accent tint. Closed = quiet glyph + accent
-/// dot (the "panel is hidden" cue).
+/// always paints in a macOS toolbar. Open = accent tint. Closed = quiet glyph
+/// + accent dot (the "panel is hidden" cue). Same circular seat as refresh.
 struct SidebarToggleButton: View {
     enum Edge {
         case leading
@@ -656,39 +726,16 @@ struct SidebarToggleButton: View {
     /// Full help string, including the shortcut (e.g. "Hide Sidebar (⌘B)").
     var help: String = ""
 
-    @State private var isHovering = false
-
     var body: some View {
-        Button(action: action) {
-            ZStack(alignment: edge == .leading ? .topLeading : .topTrailing) {
-                Image(systemName: edge == .leading ? "sidebar.left" : "sidebar.right")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(glyphColor)
-                    .frame(width: 24, height: 20)
-                if !isOpen {
-                    // Closed cue: accent dot on the outer corner.
-                    Circle()
-                        .fill(Theme.accent)
-                        .frame(width: 6, height: 6)
-                        .offset(
-                            x: edge == .leading ? -1 : 1,
-                            y: -1
-                        )
-                }
-            }
-            .frame(width: 28, height: 22)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .onHover { isHovering = $0 }
-        .help(help)
-        .accessibilityLabel(help)
+        ToolbarIconButton(
+            systemImage: edge == .leading ? "sidebar.left" : "sidebar.right",
+            help: help,
+            isAccent: isOpen,
+            showsBadge: !isOpen,
+            badgeAlignment: edge == .leading ? .topLeading : .topTrailing,
+            action: action
+        )
         .accessibilityAddTraits(isOpen ? .isSelected : [])
-    }
-
-    private var glyphColor: Color {
-        if isOpen { return Theme.accent }
-        return isHovering ? Theme.controlGlyphHover : Theme.controlGlyph
     }
 }
 
