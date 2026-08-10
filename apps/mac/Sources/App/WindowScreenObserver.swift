@@ -90,6 +90,11 @@ struct WindowScreenObserver: NSViewRepresentable {
         /// Last chrome mode applied. Avoids re-entry when notifications fire
         /// more than once for the same transition.
         private var lastChromeFullScreen: Bool?
+        /// Keeps the toolbar on icon-only. Our marks are circular custom views
+        /// with hover help strings; "Icon and Text" has nothing to show and
+        /// blanked the controls. Observation snaps the mode back if the
+        /// system context menu is used.
+        private var toolbarDisplayModeObservation: NSKeyValueObservation?
         /// Where the measured width goes. Refreshed from `updateNSView` so a
         /// rebuilt representable never writes through a stale binding.
         var contentWidth: Binding<CGFloat>?
@@ -126,15 +131,44 @@ struct WindowScreenObserver: NSViewRepresentable {
             // whenever we attach or the toolbar changes.
             stripSystemSidebarToggle(in: window)
             scheduleSidebarToggleStrip(for: window)
+            lockToolbarDisplayMode(in: window)
         }
 
         private func detach() {
             observers.forEach(NotificationCenter.default.removeObserver)
             observers.removeAll()
+            toolbarDisplayModeObservation?.invalidate()
+            toolbarDisplayModeObservation = nil
             sidebarGapPatch?.removeFromSuperview()
             sidebarGapPatch = nil
             lastChromeFullScreen = nil
             window = nil
+        }
+
+        /// Icon-only only. Labels live in the hover help, not under the glyph.
+        ///
+        /// The system toolbar menu still offers "Icon and Text"; our custom
+        /// circular marks have no title to show in that mode, so the control
+        /// vanished. Force icon-only and re-assert if the menu is used.
+        private func lockToolbarDisplayMode(in window: NSWindow) {
+            guard let toolbar = window.toolbar else { return }
+            toolbar.displayMode = .iconOnly
+            // No Customize sheet either: the bar is fixed app chrome, not a
+            // user-assembled palette.
+            toolbar.allowsUserCustomization = false
+            toolbarDisplayModeObservation?.invalidate()
+            toolbarDisplayModeObservation = toolbar.observe(
+                \.displayMode,
+                options: [.new]
+            ) { toolbar, _ in
+                guard toolbar.displayMode != .iconOnly else { return }
+                // Snap back on the next turn so we are not inside KVO.
+                DispatchQueue.main.async {
+                    if toolbar.displayMode != .iconOnly {
+                        toolbar.displayMode = .iconOnly
+                    }
+                }
+            }
         }
 
         /// Switch between the windowed transparent-titlebar look and the
@@ -650,6 +684,8 @@ struct WindowScreenObserver: NSViewRepresentable {
                     guard let self, let window, self.window === window else { return }
                     self.stripSystemSidebarToggle(in: window)
                     self.hideSystemSidebarToggle(in: window)
+                    // Toolbar can appear after first attach; re-lock mode.
+                    self.lockToolbarDisplayMode(in: window)
                 }
             }
         }
