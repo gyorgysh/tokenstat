@@ -79,6 +79,12 @@ final class ConnectivityModel {
         started = false
     }
 
+    /// Immediate egress check from a "Try now" control, without waiting for
+    /// the offline retry timer.
+    func checkNow() {
+        scheduleProbe()
+    }
+
     /// The path changed. A satisfied path does not prove egress, so confirm
     /// with a probe before announcing online. An unsatisfied path is
     /// definitive.

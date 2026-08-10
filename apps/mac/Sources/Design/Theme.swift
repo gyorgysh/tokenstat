@@ -721,7 +721,9 @@ func quantised(_ length: CGFloat, step: CGFloat = 1) -> CGFloat {
 /// with the system's bordered toolbar style (those read as different radii).
 struct ToolbarIconButton: View {
     /// Outer diameter of the circular seat. Fixed so every toolbar mark matches.
-    static let diameter: CGFloat = 30
+    /// 36pt is still under the 44pt HIG floor but matches dense chrome; the
+    /// content shape is expanded where the control sits alone.
+    static let diameter: CGFloat = 36
 
     let systemImage: String
     var help: String = ""

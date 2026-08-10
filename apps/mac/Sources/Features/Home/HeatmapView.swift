@@ -167,7 +167,11 @@ struct HeatmapView: View {
                     }
                 }
                 .onTapGesture { onSelect?(day) }
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isButton)
                 .accessibilityLabel("\(day.date): \(formatSpend(day.value)) at list rates")
+                .accessibilityHint("Shows day detail and filters Insights")
+                .accessibilityAction { onSelect?(day) }
                 // The popover is anchored to this cell's window-space frame.
                 // Only the hovered cell reports, so the preference never
                 // carries more than one frame and moving between cells swaps

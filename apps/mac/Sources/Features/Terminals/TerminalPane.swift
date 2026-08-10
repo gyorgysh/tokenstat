@@ -501,6 +501,7 @@ private struct TabCloseButton: View {
                 .background(
                     Circle().fill(isHovering ? Theme.rowHighlight : .clear)
                 )
+                .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

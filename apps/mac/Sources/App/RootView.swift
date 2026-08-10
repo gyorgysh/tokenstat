@@ -142,6 +142,7 @@ struct RootView: View {
     @State private var windowSize: CGSize = .zero
     #if os(macOS)
     @State private var terminals = TerminalsModel()
+    @State private var workspacePendingRemove: WorkspaceFolder?
     @State private var collapsedWorkspaces: Set<String> = []
     #endif
     /// Logo splash until the host answers; then wireframes and data take over.
@@ -281,6 +282,26 @@ struct RootView: View {
         }
         // Returning to Home after work elsewhere: quiet re-read if the last
         // load is older than the stale window (see HomeModel.refreshIfStale).
+        .confirmationDialog(
+            "Remove from tokenstat?",
+            isPresented: Binding(
+                get: { workspacePendingRemove != nil },
+                set: { if !$0 { workspacePendingRemove = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let folder = workspacePendingRemove {
+                    Task { await workspaces.remove(folder) }
+                }
+                workspacePendingRemove = nil
+            }
+            Button("Keep it", role: .cancel) { workspacePendingRemove = nil }
+        } message: {
+            if let folder = workspacePendingRemove {
+                Text("Remove \(folder.name) from the sidebar? The folder on disk is not deleted.")
+            }
+        }
         .onChange(of: destination) { _, next in
             guard next == .home else { return }
             Task { await home.refreshIfStale() }
@@ -1041,8 +1062,8 @@ struct RootView: View {
                             }
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat") {
-                                Task { await workspaces.remove(folder) }
+                            Button("Remove from tokenstat", role: .destructive) {
+                                workspacePendingRemove = folder
                             }
                         }
                         #else
@@ -1057,8 +1078,8 @@ struct RootView: View {
                         .contextMenu {
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat") {
-                                Task { await workspaces.remove(folder) }
+                            Button("Remove from tokenstat", role: .destructive) {
+                                workspacePendingRemove = folder
                             }
                         }
                         #endif

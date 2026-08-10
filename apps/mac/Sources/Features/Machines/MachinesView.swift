@@ -19,7 +19,10 @@ import SwiftUI
 /// compare, and one code to paste. The raw facts stay one disclosure away for
 /// whoever is debugging their own network.
 struct MachinesView: View {
-    @Bindable var model: MachinesModel
+        @State private var confirmForget: Peer?
+    @State private var confirmRevoke: Peer?
+
+@Bindable var model: MachinesModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
     /// The account machine waiting on a Remove confirmation. Destructive on
@@ -308,6 +311,42 @@ struct MachinesView: View {
                 .transition(.smoothIn(reduceMotion: reduceMotion))
             }
         }
+        .confirmationDialog(
+            "Forget this device?",
+            isPresented: Binding(
+                get: { confirmForget != nil },
+                set: { if !$0 { confirmForget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Forget", role: .destructive) {
+                if let peer = confirmForget {
+                    Task { await model.forget(peer) }
+                }
+                confirmForget = nil
+            }
+            Button("Keep it", role: .cancel) { confirmForget = nil }
+        } message: {
+            Text("It is removed from this machine's peer list. You can approve it again later if it connects.")
+        }
+        .confirmationDialog(
+            "Revoke access?",
+            isPresented: Binding(
+                get: { confirmRevoke != nil },
+                set: { if !$0 { confirmRevoke = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Revoke", role: .destructive) {
+                if let peer = confirmRevoke {
+                    Task { await model.revoke(peer) }
+                }
+                confirmRevoke = nil
+            }
+            Button("Keep access", role: .cancel) { confirmRevoke = nil }
+        } message: {
+            Text("That device can no longer reach this machine until you approve it again.")
+        }
         .animation(.easeOut(duration: 0.22), value: model.status != nil)
     }
 
@@ -322,7 +361,7 @@ struct MachinesView: View {
                         HStack(spacing: Theme.Space.s) {
                             Button("Approve") { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
-                            Button("Forget") { Task { await model.forget(peer) } }
+                            Button("Forget", role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
@@ -342,13 +381,13 @@ struct MachinesView: View {
                     PeerRow(peer: peer, resolvedName: model.accountName(for: peer)) {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
-                                Button("Revoke") { Task { await model.revoke(peer) } }
+                                Button("Revoke", role: .destructive) { confirmRevoke = peer }
                                     .buttonStyle(SecondaryButtonStyle())
                             } else {
                                 Button("Approve") { Task { await model.approve(peer) } }
                                     .buttonStyle(SecondaryButtonStyle())
                             }
-                            Button("Forget") { Task { await model.forget(peer) } }
+                            Button("Forget", role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
@@ -478,7 +517,7 @@ struct MachinesView: View {
         case .approved:
             Button("Connect") { Task { await model.connect(peer) } }
                 .buttonStyle(AccentButtonStyle())
-            Button("Revoke") { Task { await model.revoke(peer) } }
+            Button("Revoke", role: .destructive) { confirmRevoke = peer }
                 .buttonStyle(SecondaryButtonStyle())
         case .revoked:
             Button("Approve") { Task { await model.approve(peer) } }
@@ -506,6 +545,7 @@ private struct StatusDot: View {
     /// that blinks.
     var online: Bool?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
     private var ready: Bool { online == true }
@@ -522,9 +562,9 @@ private struct StatusDot: View {
         Circle()
             .fill(color)
             .frame(width: 8, height: 8)
-            .opacity(ready ? 1 : (pulsing ? 0.3 : 1))
+            .opacity(ready || reduceMotion ? 1 : (pulsing ? 0.3 : 1))
             .onAppear {
-                guard !ready else { return }
+                guard !ready, !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
                     pulsing = true
                 }

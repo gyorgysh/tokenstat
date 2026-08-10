@@ -610,6 +610,8 @@ private struct AutomationRow: View {
             ))
             .toggleStyle(.switch)
             .labelsHidden()
+            .accessibilityLabel("Enabled")
+            .accessibilityValue(job.enabled ? "On" : "Off")
             .help(job.enabled ? "Running on its schedule" : "Paused. It will not fire.")
         }
     }

@@ -226,6 +226,7 @@ struct TodoView: View {
 // MARK: - One card
 
 private struct CardView: View {
+    @State private var confirmingDelete = false
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
@@ -418,13 +419,23 @@ private struct CardView: View {
                     Task { await model.delegate(card) }
                 }
             }
-            Button("Delete", role: .destructive) { Task { await model.remove(card) } }
+            Button("Delete", role: .destructive) { confirmingDelete = true }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .foregroundStyle(.secondary)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .confirmationDialog(
+            "Delete this card?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { Task { await model.remove(card) } }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text("The card is removed from the board. This cannot be undone.")
+        }
     }
 }
 

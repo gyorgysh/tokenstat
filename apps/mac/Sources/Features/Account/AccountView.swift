@@ -387,7 +387,7 @@ struct AccountView: View {
                 Button {
                     openAccountDeletion()
                 } label: {
-                    Label("Delete account", systemImage: "trash")
+                    Label("Delete on website…", systemImage: "trash")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.danger)

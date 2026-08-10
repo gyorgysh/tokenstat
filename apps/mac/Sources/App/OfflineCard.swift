@@ -27,6 +27,12 @@ struct OfflineCard: View {
                         .lineLimit(2)
                 }
                 Spacer(minLength: Theme.Space.s)
+                Button("Try now") {
+                    Task { await connectivity.checkNow() }
+                }
+                .buttonStyle(.borderless)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.accent)
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.vertical, Theme.Space.s)
