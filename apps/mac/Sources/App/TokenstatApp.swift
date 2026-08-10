@@ -77,6 +77,12 @@ struct TokenstatApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(Self.initialWindowSize)
         .commands {
+            // Replace AppKit's standard about panel with the app's own window.
+            // The panel has room for an icon, a version and a copyright line,
+            // which leaves out who made this and how to reach them.
+            CommandGroup(replacing: .appInfo) {
+                AboutMenuItem()
+            }
             // Adding a folder is the app's "open", so it belongs in the File
             // menu with the shortcut people already try. The model that does
             // the work belongs to the window, so this posts and the window
@@ -104,9 +110,23 @@ struct TokenstatApp: App {
             // the hover tooltip teaches the shortcut without opening the menu.
         }
         #endif
+
+        #if os(macOS)
+        Window("About tokenstat", id: Self.aboutWindowID) {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        // Nothing outside the app opens this, and without the empty match a
+        // URL or a document open can be routed to it instead of the main
+        // window.
+        .handlesExternalEvents(matching: [])
+        #endif
     }
 
     #if os(macOS)
+    /// Scene id shared with the About menu item.
+    static let aboutWindowID = "about"
+
     /// The window's opening size, clamped to the display it opens on.
     ///
     /// 1260×825, a slightly wider-than-4:3 window in the shape of the other
@@ -126,3 +146,20 @@ struct TokenstatApp: App {
     }
     #endif
 }
+
+#if os(macOS)
+/// The application menu's About item.
+///
+/// Its own view because `openWindow` is an environment value, and a
+/// `CommandGroup` closure is not a view body that can read one.
+private struct AboutMenuItem: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("About tokenstat") {
+            openWindow(id: TokenstatApp.aboutWindowID)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+}
+#endif

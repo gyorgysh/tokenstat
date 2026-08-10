@@ -118,6 +118,11 @@ struct InsightsView: View {
                             monospaced: model.tab != .harnesses,
                             isHarness: model.tab == .harnesses
                         )
+                        // A fresh page window per breakdown and per period.
+                        // Without the id the table is the same view across
+                        // tabs, so "showing 80 of 3000 sessions" would carry
+                        // over to a models list with nine rows in it.
+                        .id("\(model.tab.rawValue)-\(model.period.rawValue)")
                         .transition(.smoothIn(reduceMotion: reduceMotion))
                     }
                 }
@@ -273,6 +278,24 @@ private struct BreakdownTable: View {
     var monospaced: Bool
     var isHarness: Bool = false
 
+    /// How many rows the table draws before the reveal button.
+    ///
+    /// An archive holds every session that ever ran, and by the second month
+    /// that is thousands of them. SwiftUI builds a `VStack`'s children all at
+    /// once, so the whole list was laid out on every hover and the window went
+    /// unresponsive on the Sessions tab. Page it. The first page is deep
+    /// enough that models, projects and harnesses never reach the button.
+    private static let firstPage = 50
+    /// Rows added per press of the reveal button.
+    private static let pageStep = 30
+
+    @State private var visible = BreakdownTable.firstPage
+
+    /// The rows actually drawn.
+    private var page: ArraySlice<Bucket> { rows.prefix(visible) }
+
+    private var hidden: Int { max(0, rows.count - visible) }
+
     var body: some View {
         if rows.isEmpty {
             EmptyHint(
@@ -283,7 +306,7 @@ private struct BreakdownTable: View {
         } else {
             VStack(spacing: 0) {
                 header
-                ForEach(rows) { row in
+                ForEach(page) { row in
                     BreakdownRow(
                         row: row,
                         share: share(row),
@@ -296,6 +319,9 @@ private struct BreakdownTable: View {
                     .onTapGesture { selected = selected?.key == row.key ? nil : row }
                     Divider().opacity(0.3)
                 }
+                if hidden > 0 {
+                    revealMore
+                }
             }
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(
@@ -303,6 +329,36 @@ private struct BreakdownTable: View {
                     .strokeBorder(Theme.border, lineWidth: 1)
             )
         }
+    }
+
+    /// The footer that hands out the next page.
+    ///
+    /// Two choices on purpose. The step is the one to press, and "Show all" is
+    /// there for the rare read of a whole archive, with its cost written on it
+    /// rather than hidden behind a scroll that never ends.
+    private var revealMore: some View {
+        HStack(spacing: Theme.Space.m) {
+            Button("Show \(min(Self.pageStep, hidden)) more") {
+                visible += Self.pageStep
+            }
+            .buttonStyle(.plain)
+            .font(.callout.weight(.medium))
+            .foregroundStyle(Theme.accent)
+
+            Text("\(hidden) more hidden")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            Spacer()
+
+            Button("Show all") { visible = rows.count }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help("Draws every remaining row. A long list takes a moment to lay out.")
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
     }
 
     private var header: some View {
