@@ -80,6 +80,13 @@ pub struct SessionInfo {
     pub exit_code: Option<i32>,
     /// Total bytes ever produced. A client's read offset is against this.
     pub total_bytes: u64,
+    /// When the process last produced output, epoch milliseconds. `None`
+    /// until the first output, so "nothing seen yet" is not the same as
+    /// "idle since launch".
+    pub last_activity_at_ms: Option<u64>,
+    /// The child's process id, which is the root of the subtree an activity
+    /// detector measures. `None` once the process is gone.
+    pub pid: Option<u32>,
 }
 
 /// Output that was waiting.
@@ -189,6 +196,15 @@ struct Session {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
+    last_activity: Arc<Mutex<Option<u64>>>,
+}
+
+/// Epoch milliseconds, for activity timestamps.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// What to launch.
@@ -202,6 +218,9 @@ pub struct Spawn {
     pub cols: u16,
     /// The user asked for no colour: NO_COLOR=1 and nothing that overrides it.
     pub no_color: bool,
+    /// The emulator is painting a dark background. `None` when the client did
+    /// not say, which keeps an older front end's spawns exactly as they were.
+    pub dark: Option<bool>,
 }
 
 /// The process-wide manager.
@@ -342,11 +361,13 @@ impl Manager {
         let buffer = Arc::new(Mutex::new(Buffer::new()));
         let alive = Arc::new(AtomicBool::new(true));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
+        let last_activity = Arc::new(Mutex::new(None));
         let writer = Arc::new(Mutex::new(writer));
 
         {
             let buffer = Arc::clone(&buffer);
             let alive = Arc::clone(&alive);
+            let last_activity = Arc::clone(&last_activity);
             let writer = Arc::clone(&writer);
             std::thread::spawn(move || {
                 let mut chunk = [0u8; 8 * 1024];
@@ -366,6 +387,8 @@ impl Manager {
                                 .lock()
                                 .unwrap_or_else(PoisonError::into_inner)
                                 .push(bytes);
+                            *last_activity.lock().unwrap_or_else(PoisonError::into_inner) =
+                                Some(now_ms());
                         }
                         Err(_) => break,
                     }
@@ -376,6 +399,7 @@ impl Manager {
 
         let info = SessionInfo {
             id: id.clone(),
+            pid: None,
             command: req.command.clone(),
             cwd: req.cwd.display().to_string(),
             workspace_id: req.workspace_id.clone(),
@@ -384,6 +408,7 @@ impl Manager {
             alive: true,
             exit_code: None,
             total_bytes: 0,
+            last_activity_at_ms: None,
         };
 
         let session = Arc::new(Session {
@@ -394,6 +419,7 @@ impl Manager {
             child: Mutex::new(child),
             alive,
             exit_code,
+            last_activity,
         });
 
         Ok((session, info))
@@ -487,6 +513,12 @@ impl Manager {
                 info.workspace_id = req.workspace_id.clone();
                 info.rows = size.rows;
                 info.cols = size.cols;
+                // The handoff itself counts as activity: the shell has just
+                // answered and is about to print its prompt.
+                *shell
+                    .last_activity
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(now_ms());
             }
             self.sessions
                 .lock()
@@ -533,6 +565,7 @@ impl Manager {
             rows: 24,
             cols: 80,
             no_color: false,
+            dark: None,
         };
         let (session, _) = self.build_session(&req, self.next_session_id()).ok()?;
         if !prove_shell_ready(&session, POOL_READY_TIMEOUT) {
@@ -666,6 +699,15 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .total;
+        info.pid = s
+            .child
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .process_id();
+        info.last_activity_at_ms = *s
+            .last_activity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         info
     }
 
@@ -1016,6 +1058,17 @@ fn apply_terminal_environment(cmd: &mut CommandBuilder, req: &Spawn) {
         // future launcher might smuggle in.
         cmd.env_remove("NO_COLOR");
         cmd.env("FORCE_COLOR", "3");
+    }
+    // Which way round the background is.
+    //
+    // A TUI has two ways to find out: query the emulator with OSC 11 and wait
+    // for a reply, or read COLORFGBG. With neither answered, every one of them
+    // assumes a dark terminal, which is why a light-themed window still opened
+    // agents drawn for a black background: nothing had ever told them
+    // otherwise. The value is the xterm convention, foreground;background as
+    // ANSI colour indices.
+    if let Some(dark) = req.dark {
+        cmd.env("COLORFGBG", if dark { "15;0" } else { "0;15" });
     }
 }
 
@@ -1459,6 +1512,7 @@ mod tests {
             rows: 30,
             cols: 100,
             no_color: false,
+            dark: None,
         }
     }
 
@@ -1676,6 +1730,7 @@ mod tests {
             rows: 24,
             cols: 80,
             no_color: false,
+            dark: None,
         })
         .expect("spawn")
     }
@@ -1705,6 +1760,21 @@ mod tests {
         let second = m.read(&s.id, first.next_offset).unwrap();
         assert!(!String::from_utf8_lossy(&second.bytes).contains("hello-from-pty"));
         assert_eq!(second.dropped, 0);
+    }
+
+    #[test]
+    fn activity_time_is_reported_once_output_arrives() {
+        let m = Manager::new();
+        let s = spawn(&m, "echo activity", "echo activity");
+        assert!(
+            wait_for(|| {
+                m.info(&s.id)
+                    .map(|i| i.last_activity_at_ms.is_some())
+                    .unwrap_or(false)
+            }),
+            "a process that printed is not reported as recently active"
+        );
+        m.close(&s.id).unwrap();
     }
 
     #[test]

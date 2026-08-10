@@ -36,6 +36,7 @@
 //! - [`server`] is the socket listener.
 
 pub mod account_activity;
+pub mod activity;
 pub mod automations;
 pub mod base64;
 pub mod dispatch;

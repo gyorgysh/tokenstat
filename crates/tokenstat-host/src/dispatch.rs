@@ -157,6 +157,42 @@ struct PtySpawnParams {
     /// The user opted out of colour in settings.
     #[serde(default)]
     no_color: bool,
+    /// The client is painting a dark background. Absent from an older client,
+    /// which then spawns exactly as it did before.
+    #[serde(default)]
+    dark: Option<bool>,
+}
+
+/// Fold the activity sampler's verdict into a serialized session.
+///
+/// Added here rather than on `SessionInfo` itself: the pty crate owns
+/// processes and buffers and has no business measuring CPU, and the detector
+/// wants a sampling thread the pty crate should not own either. A session the
+/// sampler has not reached yet simply carries no verdict, which a client
+/// reads as "not known" rather than as "idle".
+fn add_activity(item: &mut Value) {
+    // Started here rather than at daemon boot: a host that never lists a
+    // terminal never needs a sampling thread, and this is idempotent. The
+    // first verdict lands a tick later, which is why an unknown session
+    // carries no field instead of a made-up one.
+    crate::activity::start();
+    let Some(pid) = item.get("pid").and_then(|v| v.as_u64()) else {
+        return;
+    };
+    let Some(reading) = crate::activity::reading(pid as u32) else {
+        return;
+    };
+    let Some(map) = item.as_object_mut() else {
+        return;
+    };
+    map.insert("activity".into(), json!(reading.activity.as_str()));
+    // Rounded to a tenth: this is a smoothed average of a noisy sample and
+    // printing it to six decimals would claim a precision it does not have.
+    map.insert(
+        "cpuPercent".into(),
+        json!((reading.cpu_percent * 10.0).round() / 10.0),
+    );
+    map.insert("memoryMb".into(), json!(reading.memory_mb.round()));
 }
 
 fn default_rows() -> u16 {
@@ -1249,6 +1285,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     "rows": p.rows,
                     "cols": p.cols,
                     "noColor": p.no_color,
+                    "dark": p.dark,
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
@@ -1268,6 +1305,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     rows: p.rows,
                     cols: p.cols,
                     no_color: p.no_color,
+                    dark: p.dark,
                 })
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(info).map_err(|e| e.to_string())
@@ -1378,11 +1416,16 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 Ok(_) => return Some(Err("pty.list returned a non-array".into())),
                 Err(e) => return Some(Err(e.to_string())),
             };
+            for item in &mut items {
+                add_activity(item);
+            }
             if include_remote {
                 // One level deep on purpose: each peer is asked with
                 // includeRemote=false, so the account cannot recurse A→B→A,
                 // and cached so the app's parity poll does not dial every
-                // peer on every tick.
+                // peer on every tick. Remote items already carry the peer's
+                // own reading, measured on the machine the process is on,
+                // which is the only machine that can measure it.
                 items.extend(crate::remote_stream::remote_pty_lists());
             }
             Ok(Value::Array(items))
@@ -1396,7 +1439,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 let info = tokenstat_pty::manager()
                     .info(&p.id)
                     .map_err(|e| e.to_string())?;
-                serde_json::to_value(info).map_err(|e| e.to_string())
+                let mut value = serde_json::to_value(info).map_err(|e| e.to_string())?;
+                add_activity(&mut value);
+                Ok(value)
             })
         }
 

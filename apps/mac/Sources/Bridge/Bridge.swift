@@ -910,7 +910,8 @@ extension Bridge {
         args: [String],
         rows: Int,
         cols: Int,
-        noColor: Bool = false
+        noColor: Bool = false,
+        dark: Bool
     ) async throws -> PtySessionInfo {
         // Urgent: a person clicked Shell and is watching this round trip. It
         // must not queue behind sessions already polling when the pool is
@@ -922,6 +923,10 @@ extension Bridge {
             "rows": rows,
             "cols": cols,
             "noColor": noColor,
+            // Which way round the background is. A TUI that cannot ask the
+            // emulator assumes dark, which is how a light window ended up
+            // full of agents drawn for a black terminal.
+            "dark": dark,
         ], as: PtySessionInfo.self)
     }
 

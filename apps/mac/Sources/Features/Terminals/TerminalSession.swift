@@ -12,6 +12,33 @@ import Observation
 import SwiftTerm
 import SwiftUI
 
+/// What a session is doing right now, for the sidebar and session rows.
+///
+/// Derived at transition points rather than recomputed in the view, so a row
+/// only redraws when the state actually changes.
+enum SessionState: Equatable {
+    /// No process, or the session is gone.
+    case none
+    /// A spawn is in flight but the host has not answered yet.
+    case starting
+    /// The process is alive and produced output recently.
+    case working
+    /// The process is alive but has been quiet for a while.
+    case idle
+    /// The process has exited.
+    case stopped
+
+    var label: String {
+        switch self {
+        case .none: return "Idle"
+        case .starting: return "Starting"
+        case .working: return "Working"
+        case .idle: return "Idle"
+        case .stopped: return "Stopped"
+        }
+    }
+}
+
 /// Terminal preferences, stored as user defaults and read by the terminal
 /// strip and by the spawn path (which sends the colour choice to the daemon).
 enum TerminalPreferences {
@@ -122,6 +149,46 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// instead of an empty blinking terminal for that whole boot.
     private(set) var hasOutput = false
 
+    /// When the process last produced output. `nil` until the first output,
+    /// or when the host predates the activity field, so "unknown" is not the
+    /// same as "idle".
+    ///
+    /// **Not observed.** This is written on every packet the process emits,
+    /// which for a busy agent is hundreds of times a second, and an observed
+    /// write there invalidates every view that has ever read it: the sidebar
+    /// was being rebuilt at the rate the terminal was printing. The one view
+    /// that reads it, the idle clock, is rebuilt when `state` changes, which
+    /// is exactly when the value it wants has settled.
+    @ObservationIgnored private(set) var lastOutputAt: Date?
+
+    /// What the session is doing right now. Updated at transition points, so
+    /// a sidebar row only redraws when the state changes.
+    private(set) var state: SessionState = .none
+
+    /// Smoothed CPU of the session's process subtree, percent of one core,
+    /// as measured by the host. `nil` until the sampler has a reading.
+    private(set) var cpuPercent: Double?
+
+    /// Resident memory of the session's process subtree, in megabytes.
+    private(set) var memoryMb: Double?
+
+    /// True once the host has answered with a real verdict.
+    ///
+    /// While this is false the app falls back to its own "did bytes arrive
+    /// recently" guess. That guess is wrong in both directions, which is why
+    /// it is only ever a stand-in for the first second of a session's life
+    /// and for a daemon too old to have the detector: an agent redrawing a
+    /// spinner produces bytes forever and looks eternally busy, and one
+    /// waiting on a model produces none and looks idle mid-thought.
+    private var hostReportedActivity = false
+
+    /// Flips a working session to idle after silence. Cancelled whenever
+    /// output resumes, so transitions cannot pile up.
+    private var idleCheckTask: Task<Void, Never>?
+
+    /// Seconds of silence after which a live session reads as idle.
+    private static let idleThreshold: TimeInterval = 20
+
     /// The SwiftTerm view, created on first use after attach. Pending sessions
     /// have none: there is nothing to draw yet.
     @ObservationIgnored private var terminalView: TerminalView?
@@ -204,6 +271,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         rows = info.rows
         cols = info.cols
         reportedSize = (info.rows, info.cols)
+        applyState(
+            alive: info.alive,
+            exitCode: info.exitCode,
+            lastActivityAtMs: info.lastActivityAtMs,
+            activity: info.activity,
+            cpuPercent: info.cpuPercent,
+            memoryMb: info.memoryMb
+        )
         // Adopted from the host: the process already exists, so the emulator
         // is built now and polling starts immediately.
         _ = view
@@ -226,6 +301,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         self.rows = rows
         self.cols = cols
         reportedSize = (rows, cols)
+        state = .starting
         isPending = true
     }
 
@@ -254,6 +330,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         cols = info.cols
         reportedSize = (info.rows, info.cols)
         isPending = false
+        applyState(
+            alive: info.alive,
+            exitCode: info.exitCode,
+            lastActivityAtMs: info.lastActivityAtMs,
+            activity: info.activity,
+            cpuPercent: info.cpuPercent,
+            memoryMb: info.memoryMb
+        )
         // Build the emulator now that a process exists. Before this there was
         // nothing to draw.
         _ = view
@@ -262,6 +346,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
     private static func makeTerminalView(delegate: TerminalViewDelegate) -> TerminalView {
         let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+        // Colour it before SwiftUI's first layout pass, not after.
+        //
+        // A TUI asks the emulator what its background is (OSC 11) within
+        // milliseconds of starting, and SwiftTerm answers from the colour the
+        // view is currently carrying. Waiting for `updateNSView` meant the
+        // answer could still be the default black while the window was in
+        // light mode, and an agent only asks once: it then drew for a dark
+        // terminal for the rest of the session.
+        applyAppearance(NSApp.effectiveAppearance, to: view)
         view.font = TerminalMetrics.font
         // Option-as-meta is how every terminal worth using behaves on a Mac,
         // and the agent CLIs are written assuming it.
@@ -284,12 +377,27 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     func applyColors(scheme: ColorScheme, to view: TerminalView) {
         guard scheme != colorSchemeApplied else { return }
         colorSchemeApplied = scheme
-        // Same two surfaces as the rest of the app, so the terminal reads as
-        // part of the pane rather than as a white block in a dark window.
-        let background: UInt32 = scheme == .dark ? 0x0A0A0B : 0xF7F7F8
-        let foreground: UInt32 = scheme == .dark ? 0xDCDCE0 : 0x1C1C1F
-        view.nativeBackgroundColor = Self.nsColor(background)
-        view.nativeForegroundColor = Self.nsColor(foreground)
+        Self.paint(dark: scheme == .dark, to: view)
+    }
+
+    /// The same, from an `NSAppearance`, for the moment before SwiftUI has
+    /// had a chance to say what the scheme is.
+    private static func applyAppearance(_ appearance: NSAppearance, to view: TerminalView) {
+        paint(dark: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua, to: view)
+    }
+
+    /// Same two surfaces as the rest of the app, so the terminal reads as part
+    /// of the pane rather than as a white block in a dark window.
+    ///
+    /// Setting `nativeBackgroundColor` also sets the emulator's own background,
+    /// which is what a program's OSC 11 query is answered from. That is the
+    /// only channel a running TUI has for asking, so it has to be right before
+    /// the process draws anything.
+    private static func paint(dark: Bool, to view: TerminalView) {
+        let background: UInt32 = dark ? 0x0A0A0B : 0xF7F7F8
+        let foreground: UInt32 = dark ? 0xDCDCE0 : 0x1C1C1F
+        view.nativeBackgroundColor = nsColor(background)
+        view.nativeForegroundColor = nsColor(foreground)
         view.caretColor = NSColor(Theme.accent)
         view.setNeedsDisplay(view.bounds)
     }
@@ -338,6 +446,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// Stop polling. Called when the session is closed.
     func stop() {
         removed = true
+        idleCheckTask?.cancel()
+        idleCheckTask = nil
+        state = .none
         pollTask?.cancel()
         pollTask = nil
         writerTask?.cancel()
@@ -375,9 +486,24 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     // an unguarded write is a sidebar rebuild for nothing.
                     if rows != info.rows { rows = info.rows }
                     if cols != info.cols { cols = info.cols }
-                    if alive != info.alive { alive = info.alive }
+                    if alive != info.alive {
+                        alive = info.alive
+                        if !info.alive {
+                            idleCheckTask?.cancel()
+                            state = info.exitCode != nil ? .stopped : .none
+                        }
+                    }
+                    if info.alive {
+                        applyActivity(
+                            info.activity,
+                            cpuPercent: info.cpuPercent,
+                            memoryMb: info.memoryMb
+                        )
+                    }
                     if let code = info.exitCode {
                         exitCode = code
+                        idleCheckTask?.cancel()
+                        state = .stopped
                         // One last read in case output arrived right at exit.
                         if let final = try? await Bridge.ptyRead(id: id, offset: offset) {
                             if final.dropped > 0 { droppedOutput = true }
@@ -408,9 +534,89 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         if !hasOutput {
             hasOutput = true
         }
+        lastOutputAt = Date()
+        // Bytes only decide the state until the host's detector has spoken.
+        // After that they are just a clock for "idle for how long".
+        if alive, !hostReportedActivity {
+            state = .working
+            scheduleIdleCheck()
+        }
         view.feed(byteArray: ArraySlice(bytes))
         if TerminalPreferences.exposesToVoiceOver {
             publishAccessibilityValue()
+        }
+    }
+
+    /// Set the session state from a host report.
+    ///
+    /// A process that just started, or whose last output is unknown, reads as
+    /// working until the first idle check: the alternative, labelling a
+    /// freshly launched agent "Idle" until it prints, is wrong in the
+    /// direction that matters. A known activity age flips to idle on adopt
+    /// when the session genuinely is quiet.
+    private func applyState(
+        alive: Bool,
+        exitCode: Int?,
+        lastActivityAtMs: Int64?,
+        activity: String? = nil,
+        cpuPercent: Double? = nil,
+        memoryMb: Double? = nil
+    ) {
+        idleCheckTask?.cancel()
+        if !alive {
+            state = exitCode != nil ? .stopped : .none
+            return
+        }
+        if activity != nil {
+            applyActivity(activity, cpuPercent: cpuPercent, memoryMb: memoryMb)
+            return
+        }
+        if let last = lastActivityAtMs {
+            let ageMs = Date().timeIntervalSince1970 * 1000 - Double(last)
+            state = ageMs <= Self.idleThreshold * 1000 ? .working : .idle
+        } else {
+            state = .working
+        }
+        scheduleIdleCheck()
+    }
+
+    /// Take the host's verdict.
+    ///
+    /// The host measures the process subtree's CPU against a level each
+    /// session teaches it, folds in the agent's own lifecycle hooks and its
+    /// transcript writes, and answers with one word. That is a far better
+    /// answer than this side can compute, so once it arrives the local timer
+    /// is cancelled and never runs again for this session.
+    private func applyActivity(_ activity: String?, cpuPercent: Double?, memoryMb: Double? = nil) {
+        guard let activity else { return }
+        hostReportedActivity = true
+        idleCheckTask?.cancel()
+        idleCheckTask = nil
+        // Store what is displayed, not what was measured. These arrive four
+        // times a second and never repeat exactly, so writing the raw value
+        // rebuilt the sidebar on every poll to redraw the same text. Rounded
+        // first, the write happens when the number on screen actually
+        // changes, which is the rule the rest of this poll loop follows.
+        let cpu = cpuPercent.map { ($0).rounded() }
+        let memory = memoryMb.map { ($0).rounded() }
+        if self.cpuPercent != cpu { self.cpuPercent = cpu }
+        if self.memoryMb != memory { self.memoryMb = memory }
+        let next: SessionState = activity == "working" ? .working : .idle
+        if state != next { state = next }
+    }
+
+    /// Arrange the working-to-idle transition, replacing any previous one.
+    private func scheduleIdleCheck() {
+        idleCheckTask?.cancel()
+        idleCheckTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.idleThreshold))
+            guard let self, !Task.isCancelled, self.alive else { return }
+            if let last = self.lastOutputAt,
+               Date().timeIntervalSince(last) >= Self.idleThreshold,
+               self.state == .working
+            {
+                self.state = .idle
+            }
         }
     }
 

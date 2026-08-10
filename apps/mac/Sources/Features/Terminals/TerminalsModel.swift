@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 #if os(macOS)
+import AppKit
 import Foundation
 import Observation
 
@@ -23,6 +24,20 @@ final class TerminalsModel {
     /// Client id of the selected session (stable; never the host's `pty-N`).
     var selectedID: String?
     var errorMessage: String?
+
+    /// Whether the app is painting dark right now, so a spawning agent can be
+    /// told which background it is drawing on.
+    ///
+    /// Read from the effective appearance rather than from a SwiftUI
+    /// environment: this runs at spawn time, in a model, and the effective
+    /// appearance also accounts for an appearance the app forces on itself.
+    ///
+    /// Only ever read at spawn. A program that reads its background does so
+    /// once at startup, so switching the system theme under a running agent
+    /// cannot repaint it, and pretending otherwise would be a lie in the UI.
+    static var isDarkAppearance: Bool {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
     private var selectedByWorkspace: [String: String] = [:]
 
     init() {
@@ -217,7 +232,8 @@ final class TerminalsModel {
                 args: args,
                 rows: rows,
                 cols: cols,
-                noColor: TerminalPreferences.disablesColor
+                noColor: TerminalPreferences.disablesColor,
+                dark: Self.isDarkAppearance
             )
             session.attach(info: info)
             dedupe(hostID: info.id, keeping: session)

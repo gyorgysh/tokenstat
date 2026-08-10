@@ -743,6 +743,7 @@ impl Store {
                 rows: 24,
                 cols: 120,
                 no_color: false,
+                dark: None,
             })
             .map_err(|e| e.to_string())?;
 
@@ -1203,6 +1204,7 @@ mod tests {
                 rows: 24,
                 cols: 80,
                 no_color: false,
+                dark: None,
             })
             .unwrap();
         let pty_id = info.id.clone();
@@ -1291,6 +1293,7 @@ mod tests {
                 rows: 24,
                 cols: 80,
                 no_color: false,
+                dark: None,
             })
             .unwrap();
         let pty_id = info.id.clone();

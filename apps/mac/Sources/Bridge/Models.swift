@@ -1014,6 +1014,23 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
         return git.partial ? "\(plus)\(minus)+" : "\(plus)\(minus)"
     }
 
+    /// One-line git summary for the sidebar: branch, ahead/behind, diff stat.
+    ///
+    /// Nil when there is nothing worth saying, so a plain folder does not
+    /// pretend to be a repository.
+    var subtitle: String? {
+        guard exists else { return "Folder missing" }
+        guard let git, git.isRepo else { return "Not a git repo" }
+        var parts: [String] = []
+        if let branch = git.branch, !branch.isEmpty {
+            parts.append(branch)
+        }
+        if git.ahead > 0 { parts.append("⇡\(git.ahead)") }
+        if git.behind > 0 { parts.append("⇣\(git.behind)") }
+        if let stat = diffStat { parts.append(stat) }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
     var isRemote: Bool { machineID != nil }
 }
 
@@ -1294,6 +1311,18 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var exitCode: Int?
     /// Total bytes ever produced. A client's read offset is against this.
     var totalBytes: UInt64
+    /// When the process last produced output, epoch milliseconds. Absent
+    /// when the host predates the field or nothing has been read yet.
+    var lastActivityAtMs: Int64?
+    /// What the host's detector says this session is doing: `working` or
+    /// `idle`. Absent when the sampler has not reached it yet, which is not
+    /// the same as idle and must not be shown as idle.
+    var activity: String?
+    /// Smoothed CPU of the process subtree, percent of one core. The number
+    /// behind the verdict, so a row can show its working.
+    var cpuPercent: Double?
+    /// Resident memory of the process subtree, in megabytes.
+    var memoryMb: Double?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1307,6 +1336,10 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case alive
         case exitCode
         case totalBytes
+        case lastActivityAtMs
+        case activity
+        case cpuPercent
+        case memoryMb
     }
 }
 
