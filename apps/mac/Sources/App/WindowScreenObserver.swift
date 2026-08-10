@@ -44,6 +44,10 @@ struct WindowScreenObserver: NSViewRepresentable {
     /// Whether the window is currently full screen. Published for SwiftUI;
     /// chrome itself is applied only when this bit flips, not every frame.
     @Binding var isFullScreen: Bool
+    /// Height of the titlebar band above `contentLayoutRect`, in points.
+    /// Detail chrome uses this to sit in that band (same row as traffic
+    /// lights) instead of under an empty second row.
+    @Binding var titlebarInset: CGFloat
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -56,7 +60,8 @@ struct WindowScreenObserver: NSViewRepresentable {
                 coordinator?.attach(
                     to: window,
                     contentWidth: $contentWidth,
-                    isFullScreen: $isFullScreen
+                    isFullScreen: $isFullScreen,
+                    titlebarInset: $titlebarInset
                 )
             }
         }
@@ -69,6 +74,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         MainActor.assumeIsolated {
             context.coordinator.contentWidth = $contentWidth
             context.coordinator.isFullScreen = $isFullScreen
+            context.coordinator.titlebarInset = $titlebarInset
             // Do **not** call applyChrome on every SwiftUI pass. Re-setting
             // titlebar flags every frame fights the toolbar's own layout and
             // is what left the navigation mark unpositioned until a mouse
@@ -99,6 +105,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         /// rebuilt representable never writes through a stale binding.
         var contentWidth: Binding<CGFloat>?
         var isFullScreen: Binding<Bool>?
+        var titlebarInset: Binding<CGFloat>?
 
         /// Attaches to whatever window the view reports, detaching from any
         /// previous one first.
@@ -113,13 +120,15 @@ struct WindowScreenObserver: NSViewRepresentable {
         func attach(
             to window: NSWindow?,
             contentWidth: Binding<CGFloat>,
-            isFullScreen: Binding<Bool>
+            isFullScreen: Binding<Bool>,
+            titlebarInset: Binding<CGFloat>
         ) {
             guard let window else { return }
             detach()
             self.window = window
             self.contentWidth = contentWidth
             self.isFullScreen = isFullScreen
+            self.titlebarInset = titlebarInset
             observe(window)
             apply(window)
             publishWidth(from: window)
@@ -132,6 +141,7 @@ struct WindowScreenObserver: NSViewRepresentable {
             stripSystemSidebarToggle(in: window)
             scheduleSidebarToggleStrip(for: window)
             lockToolbarDisplayMode(in: window)
+            publishTitlebarInset(from: window)
         }
 
         private func detach() {
@@ -190,10 +200,13 @@ struct WindowScreenObserver: NSViewRepresentable {
                 applyWindowedChrome(on: window)
             }
             revealTrafficLights(on: window)
-            if let toolbar = window.toolbar {
-                toolbar.isVisible = true
-            }
+            // App controls live in DetailChromeBar, not NSToolbar. An empty
+            // toolbar host still steals a content band; hide the host. Traffic
+            // lights stay on the titlebar (standardWindowButton), not the
+            // toolbar. This is not a compact-chrome height trick.
+            hideEmptyAppToolbar(on: window)
             updateSidebarTopGap(in: window)
+            publishTitlebarInset(from: window)
         }
 
         private func revealTrafficLights(on window: NSWindow) {
@@ -204,6 +217,37 @@ struct WindowScreenObserver: NSViewRepresentable {
                     button.alphaValue = 1
                 }
             }
+        }
+
+        /// Hide the system toolbar when it has no app items left.
+        ///
+        /// Visibility only: do not change window toolbar style or titlebar
+        /// height to "match" DetailChromeBar. After hide, re-check lights.
+        private func hideEmptyAppToolbar(on window: NSWindow) {
+            guard let toolbar = window.toolbar else { return }
+            // Stock sidebar toggle may still be mid-strip; treat only real
+            // remaining items as reason to keep the host.
+            let hasAppItem = toolbar.items.contains { item in
+                !Self.isSystemSidebarToggle(item)
+            }
+            toolbar.isVisible = hasAppItem
+            revealTrafficLights(on: window)
+        }
+
+        /// Titlebar band height above the content layout rect, in points.
+        ///
+        /// With fullSizeContentView the content view extends under the
+        /// titlebar; contentLayoutRect does not. The difference is the blank
+        /// band DetailChromeBar was sitting under.
+        private func publishTitlebarInset(from window: NSWindow) {
+            guard let contentView = window.contentView else { return }
+            // contentLayoutRect is in window coordinates; contentView origin
+            // matches with fullSizeContentView.
+            let inset = max(0, contentView.bounds.maxY - window.contentLayoutRect.maxY)
+            // Quantise so sub-point jitter does not thrash SwiftUI layout.
+            let next = (inset * 2).rounded() / 2
+            guard let titlebarInset, titlebarInset.wrappedValue != next else { return }
+            titlebarInset.wrappedValue = next
         }
 
         /// Windowed: content draws under a transparent titlebar so the sidebar
@@ -402,8 +446,9 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.applyFullScreenChrome(on: window)
                         self?.lastChromeFullScreen = true
                         self?.revealTrafficLights(on: window)
-                        if let toolbar = window.toolbar { toolbar.isVisible = true }
+                        self?.hideEmptyAppToolbar(on: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.publishTitlebarInset(from: window)
                     }
                 }
             )
@@ -418,17 +463,20 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.applyFullScreenChrome(on: window)
                         self?.lastChromeFullScreen = true
                         self?.revealTrafficLights(on: window)
+                        self?.hideEmptyAppToolbar(on: window)
                         self?.stripSystemSidebarToggle(in: window)
                         self?.updateSidebarTopGap(in: window)
-                        // One follow-up strip after AppKit finishes the
-                        // full-screen toolbar. No style-mask thrash, no
-                        // toolbar reassignment.
+                        self?.publishTitlebarInset(from: window)
+                        // One follow-up after AppKit finishes full-screen
+                        // layout. Inset can change when the toolbar host goes.
                         try? await Task.sleep(for: .milliseconds(100))
                         guard self?.window === window else { return }
                         self?.stripSystemSidebarToggle(in: window)
+                        self?.hideEmptyAppToolbar(on: window)
                         self?.revealTrafficLights(on: window)
                         self?.updateSidebarTopGap(in: window)
                         self?.flattenFullScreenContent(in: window)
+                        self?.publishTitlebarInset(from: window)
                     }
                 }
             )
@@ -443,7 +491,9 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.applyWindowedChrome(on: window)
                         self?.lastChromeFullScreen = false
                         self?.revealTrafficLights(on: window)
+                        self?.hideEmptyAppToolbar(on: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.publishTitlebarInset(from: window)
                     }
                 }
             )
@@ -458,9 +508,11 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.applyWindowedChrome(on: window)
                         self?.lastChromeFullScreen = false
                         self?.revealTrafficLights(on: window)
+                        self?.hideEmptyAppToolbar(on: window)
                         self?.stripSystemSidebarToggle(in: window)
                         self?.scheduleSidebarToggleStrip(for: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.publishTitlebarInset(from: window)
                     }
                 }
             )
@@ -469,6 +521,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         private func windowResized(_ window: NSWindow) {
             publish(quantised(window.contentLayoutRect.width, step: 4))
             updateSidebarTopGap(in: window)
+            publishTitlebarInset(from: window)
             // Full screen layout can reintroduce corner masks on resize.
             if window.styleMask.contains(.fullScreen) {
                 flattenFullScreenContent(in: window)
@@ -480,6 +533,7 @@ struct WindowScreenObserver: NSViewRepresentable {
             // resize notification was dropped.
             publish(quantised(window.contentLayoutRect.width, step: 4))
             updateSidebarTopGap(in: window)
+            publishTitlebarInset(from: window)
         }
 
         /// Fill the gap above the sidebar column so the titlebar band shows
@@ -686,6 +740,9 @@ struct WindowScreenObserver: NSViewRepresentable {
                     self.hideSystemSidebarToggle(in: window)
                     // Toolbar can appear after first attach; re-lock mode.
                     self.lockToolbarDisplayMode(in: window)
+                    self.hideEmptyAppToolbar(on: window)
+                    // contentLayoutRect settles after strip/hide; re-measure.
+                    self.publishTitlebarInset(from: window)
                 }
             }
         }

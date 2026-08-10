@@ -128,6 +128,9 @@ struct RootView: View {
     /// Full screen switches to an opaque titlebar; windowed stays transparent.
     /// Owned by `WindowScreenObserver`. Not used for toolbar background flips.
     @State private var isFullScreen = false
+    /// Measured titlebar band above contentLayoutRect. Detail chrome pulls up
+    /// by this amount so it shares the traffic-light row.
+    @State private var titlebarInset: CGFloat = 0
     #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
     /// consumed by the Automations screen once its runs have loaded.
@@ -226,7 +229,8 @@ struct RootView: View {
             #if os(macOS)
             WindowScreenObserver(
                 contentWidth: $windowContentWidth,
-                isFullScreen: $isFullScreen
+                isFullScreen: $isFullScreen,
+                titlebarInset: $titlebarInset
             )
             #else
             Color.clear
@@ -392,18 +396,18 @@ struct RootView: View {
         } detail: {
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
-                // Without this, an empty unified toolbar still reserves a full
-                // titlebar band above DetailChromeBar, so the real chrome looks
-                // like a second row. Draw the bar into that band (windowed
-                // fullSizeContentView + transparent titlebar).
-                .ignoresSafeArea(edges: .top)
+                // Pull DetailChromeBar into the measured titlebar band (same
+                // vertical row as traffic lights). Value comes from AppKit
+                // contentLayoutRect, not a faked compact chrome height.
+                .padding(.top, -titlebarInset)
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
         // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help, and live
         // in DetailChromeBar rather than here.
         .toolbar(removing: .sidebarToggle)
-        // Always hidden. AppKit owns bar opacity via titlebarAppearsTransparent.
+        // No app items. Background hidden; AppKit also hides the empty host
+        // so it does not own a content band (WindowScreenObserver).
         .toolbarBackground(.hidden, for: .windowToolbar)
     }
 
