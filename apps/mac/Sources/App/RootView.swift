@@ -382,10 +382,10 @@ struct RootView: View {
 
     /// Shared chrome: NavigationSplitView with the window toolbar.
     ///
-    /// Toolbar items sit on the split view (not only the detail column) so
-    /// the leading mark is hosted with the titlebar traffic lights in both
-    /// windowed and full screen. Windowed blends under a transparent
-    /// titlebar; full screen keeps the same item host with an opaque bar.
+    /// The window toolbar only carries the sidebar and inspector marks.
+    /// Destination actions (refresh, scan, new, period) live in each screen's
+    /// `DetailChromeBar` so Home and Insights share one fixed-bar layout and
+    /// nothing floats over the scrolling content.
     private var mainChrome: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
             sidebar
@@ -397,9 +397,6 @@ struct RootView: View {
         // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help.
         .toolbar(removing: .sidebarToggle)
         .toolbar {
-            // Leading mark next to the traffic lights. Kept on the split view
-            // (not only the detail column) so full-screen titlebar layout sees
-            // it in the same host as windowed mode.
             ToolbarItem(placement: .navigation) {
                 leftSidebarToolbarButton
             }
@@ -409,8 +406,7 @@ struct RootView: View {
                 }
             }
         }
-        // Always hidden. Do not flip with full screen (late rebuild, stale
-        // leading mark). AppKit owns bar opacity via titlebarAppearsTransparent.
+        // Always hidden. AppKit owns bar opacity via titlebarAppearsTransparent.
         .toolbarBackground(.hidden, for: .windowToolbar)
     }
 

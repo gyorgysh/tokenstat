@@ -26,35 +26,12 @@ struct HomeView: View {
     var onShowAccount: () -> Void
 
     var body: some View {
-        ScrollView {
-            WidthReader { width in
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    if let message = model.errorMessage {
-                        Banner(text: message, severity: .warning)
-                    }
-
-                    profile
-                    activity
-
-                    panels(width: width)
-
-                    if limitsPending {
-                        panelPlaceholder
-                    }
-                }
-            }
-            // Tighter than the old inset all round. This screen is a stack of
-            // cards, and a card already carries its own padding, so the gutter
-            // outside it only has to separate the stack from the window edge.
-            .padding(Theme.Space.s)
-        }
-        .background(Theme.background)
-        .toolbar {
-            // Window toolbar is always present (traffic lights). Only add our
-            // controls once the splash has finished. Same circular seat as the
-            // sidebar mark so the pair share one radius.
-            if hostReady {
-                ToolbarItem {
+        // Same chrome shape as Insights: a fixed bar above the scrolling
+        // content. Refresh lives here, not in the window toolbar, so it is
+        // not a floating mark over the heatmap.
+        VStack(spacing: 0) {
+            DetailChromeBar {
+                if hostReady {
                     ToolbarIconButton(
                         systemImage: "arrow.clockwise",
                         help: "Re-read the archive for this machine's activity and plan usage",
@@ -65,7 +42,30 @@ struct HomeView: View {
                     }
                 }
             }
+            ScrollView {
+                WidthReader { width in
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        if let message = model.errorMessage {
+                            Banner(text: message, severity: .warning)
+                        }
+
+                        profile
+                        activity
+
+                        panels(width: width)
+
+                        if limitsPending {
+                            panelPlaceholder
+                        }
+                    }
+                }
+                // Tighter than the old inset all round. This screen is a stack of
+                // cards, and a card already carries its own padding, so the gutter
+                // outside it only has to separate the stack from the window edge.
+                .padding(Theme.Space.s)
+            }
         }
+        .background(Theme.background)
         // Launch flow: app splash (logo) → these wireframes with a light pulse
         // → real content fades in. The splash is owned by RootView.
         // Leaving the screen while a cell is under the pointer: the popover

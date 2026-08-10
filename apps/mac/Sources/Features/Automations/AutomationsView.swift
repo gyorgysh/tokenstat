@@ -32,69 +32,71 @@ struct AutomationsView: View {
     @FocusState private var searchFocused: Bool
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let error = model.errorMessage {
-                    Banner(text: error, severity: .warning)
-                }
-                intro
-                templatesRow
-                // A search box, not a rounded text field with the icon glued
-                // on top: the overlay sat on the field's leading edge and
-                // overlapped the placeholder and the first typed characters.
-                // The icon lives inside the box now, so the text can never
-                // collide with it.
-                HStack(spacing: Theme.Space.s) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.tertiary)
-                    TextField("Search automations", text: $search)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                        .focused($searchFocused)
-                }
-                .padding(.horizontal, Theme.Space.s)
-                .padding(.vertical, 6)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Space.s)
-                        .strokeBorder(
-                            searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
-                            lineWidth: searchFocused ? 1.5 : 1
-                        )
-                )
-                .padding(.leading, 4)
-                if isWarming {
-                    // "Nothing yet" is an answer, and it must not be given
-                    // before the question has been asked. Sharp grey job rows
-                    // say the daemon is being read; real cards replace them.
-                    VStack(alignment: .leading, spacing: Theme.Space.s) {
-                        Skeleton.CardPlaceholder(rows: 2)
-                        Skeleton.CardPlaceholder(rows: 2)
-                    }
-                    .transition(.opacity)
-                } else if filteredJobs.isEmpty {
-                    nothingYet
-                } else {
-                    taskSection("Active", jobs: filteredJobs.filter(\.enabled))
-                    taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
-                }
-                if !model.runs.isEmpty {
-                    recentRuns
+        VStack(spacing: 0) {
+            DetailChromeBar {
+                ToolbarIconButton(
+                    systemImage: "plus",
+                    help: "Set up an agent to run on a schedule"
+                ) {
+                    creating = true
                 }
             }
-            .padding(Theme.Space.m)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let error = model.errorMessage {
+                        Banner(text: error, severity: .warning)
+                    }
+                    intro
+                    templatesRow
+                    // A search box, not a rounded text field with the icon glued
+                    // on top: the overlay sat on the field's leading edge and
+                    // overlapped the placeholder and the first typed characters.
+                    // The icon lives inside the box now, so the text can never
+                    // collide with it.
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        TextField("Search automations", text: $search)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .focused($searchFocused)
+                    }
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.vertical, 6)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Space.s)
+                            .strokeBorder(
+                                searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
+                                lineWidth: searchFocused ? 1.5 : 1
+                            )
+                    )
+                    .padding(.leading, 4)
+                    if isWarming {
+                        // "Nothing yet" is an answer, and it must not be given
+                        // before the question has been asked. Sharp grey job rows
+                        // say the daemon is being read; real cards replace them.
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Skeleton.CardPlaceholder(rows: 2)
+                            Skeleton.CardPlaceholder(rows: 2)
+                        }
+                        .transition(.opacity)
+                    } else if filteredJobs.isEmpty {
+                        nothingYet
+                    } else {
+                        taskSection("Active", jobs: filteredJobs.filter(\.enabled))
+                        taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
+                    }
+                    if !model.runs.isEmpty {
+                        recentRuns
+                    }
+                }
+                .padding(Theme.Space.m)
+            }
         }
         .navigationTitle("Automations")
         .background(Theme.background)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { creating = true } label: {
-                    Label("New automation", systemImage: "plus")
-                }
-                .help("Set up an agent to run on a schedule")
-            }
-        }
         .sheet(isPresented: $creating) {
             NewAutomationSheet(model: model, folders: folders, onNavigate: onNavigate)
         }

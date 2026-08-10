@@ -22,6 +22,49 @@ struct InsightsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Actions in a fixed bar (same as Home), not the window toolbar.
+            // Period, scan and fetch stay put while the report scrolls under.
+            DetailChromeBar(
+                leading: {
+                    if model.focusedDay != nil {
+                        ToolbarIconButton(
+                            systemImage: "chevron.left",
+                            help: "Back to Home"
+                        ) {
+                            onBackToHome?()
+                        }
+                    }
+                },
+                trailing: {
+                    Picker("Period", selection: $model.period) {
+                        ForEach(InsightsModel.Period.allCases) { p in
+                            Text(p.rawValue).tag(p)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .help("Report period")
+
+                    ToolbarIconButton(
+                        systemImage: "arrow.triangle.2.circlepath",
+                        help: "Read new sessions from supported local tools into the archive",
+                        isBusy: model.isScanning,
+                        isEnabled: !model.isScanning && model.scanCooldownUntil == nil
+                    ) {
+                        Task { await model.scan() }
+                    }
+                    ToolbarIconButton(
+                        systemImage: "arrow.down.circle",
+                        help: "Fetch usage from remote vendors such as Cursor",
+                        isBusy: model.isFetching,
+                        isEnabled: !model.isFetching && model.fetchCooldownUntil == nil
+                    ) {
+                        Task { await model.fetchRemotes() }
+                    }
+                }
+            )
             TabStrip(tabs: tabs, selection: $model.tab)
             content
         }
@@ -30,7 +73,6 @@ struct InsightsView: View {
             TransientToast(message: $model.actionMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .toolbar { toolbar }
     }
 
     @ViewBuilder
@@ -221,47 +263,6 @@ struct InsightsView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        if model.focusedDay != nil {
-            ToolbarItem(placement: .navigation) {
-                Button {
-                    onBackToHome?()
-                } label: {
-                    Label("Home", systemImage: "chevron.left")
-                }
-                .help("Back to Home")
-            }
-        }
-        ToolbarItem {
-            Picker("Period", selection: $model.period) {
-                ForEach(InsightsModel.Period.allCases) { p in
-                    Text(p.rawValue).tag(p)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-        ToolbarItem {
-            ToolbarIconButton(
-                systemImage: "arrow.triangle.2.circlepath",
-                help: "Read new sessions from supported local tools into the archive",
-                isBusy: model.isScanning,
-                isEnabled: !model.isScanning && model.scanCooldownUntil == nil
-            ) {
-                Task { await model.scan() }
-            }
-        }
-        ToolbarItem {
-            ToolbarIconButton(
-                systemImage: "arrow.down.circle",
-                help: "Fetch usage from remote vendors such as Cursor",
-                isBusy: model.isFetching,
-                isEnabled: !model.isFetching && model.fetchCooldownUntil == nil
-            ) {
-                Task { await model.fetchRemotes() }
-            }
-        }
-    }
 }
 
 // MARK: - Table

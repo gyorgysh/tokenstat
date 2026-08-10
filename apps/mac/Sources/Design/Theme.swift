@@ -360,6 +360,45 @@ struct SectionLabel: View {
     }
 }
 
+/// Fixed action strip under the window titlebar.
+///
+/// Destination controls (refresh, scan, new, period) live here rather than in
+/// the system toolbar. Every screen then shares one layout: a bar pinned above
+/// the scrolling content, and the window toolbar only carries the sidebar and
+/// inspector marks. That also keeps the system "Icon and Text" mode off our
+/// content actions (those marks have hover help, not titles).
+struct DetailChromeBar<Leading: View, Trailing: View>: View {
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var trailing: () -> Trailing
+
+    init(
+        @ViewBuilder leading: @escaping () -> Leading = { EmptyView() },
+        @ViewBuilder trailing: @escaping () -> Trailing
+    ) {
+        self.leading = leading
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            leading()
+            Spacer(minLength: 0)
+            trailing()
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.height)
+        .background(Theme.tabStrip)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+
+    /// Tall enough for a 30pt circular mark with a little breathing room, and
+    /// for a compact segmented period picker on Insights.
+    static var height: CGFloat { 40 }
+}
+
 /// A flat tab strip, in place of the reference layout's row of agent tabs.
 ///
 /// Not a segmented `Picker`: those are capsule shaped and centred, and this has
