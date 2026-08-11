@@ -47,7 +47,7 @@ struct DayDetailSheet: View {
                 .padding(Theme.Space.m)
             }
             .background(Theme.background)
-            .navigationTitle(Self.title(for: day.date))
+            .navigationTitle(spokenDate(day.date))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -98,33 +98,18 @@ struct DayDetailSheet: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Space.s)
-            Text(row.tokens.formatted())
+            Text(formatTokens(row.tokens))
                 .font(ClientType.rowFigure)
                 .foregroundStyle(.secondary)
         }
         .padding(Theme.Space.s)
+        .frame(minHeight: 44)
         .cardSurface()
         .accessibilityElement(children: .combine)
-    }
-
-    /// "11 August 2026" from `2026-08-11`, in the reader's own locale.
-    ///
-    /// Falls back to the raw string rather than to today's date: a sheet
-    /// confidently titled with the wrong day is worse than one titled with an
-    /// ISO string.
-    private static func title(for date: String) -> String {
-        guard let parsed = isoDayFormatter.date(from: date) else { return date }
-        return parsed.formatted(.dateTime.day().month(.wide).year())
+        .accessibilityLabel(
+            "\(row.model) on \(harnessName(row.src)), \(formatTokens(row.tokens)) tokens"
+        )
     }
 }
-
-private let isoDayFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.calendar = Calendar(identifier: .gregorian)
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.timeZone = .current
-    f.dateFormat = "yyyy-MM-dd"
-    return f
-}()
 
 #endif

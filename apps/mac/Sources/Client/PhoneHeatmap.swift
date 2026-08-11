@@ -74,7 +74,10 @@ struct PhoneHeatmap: View {
 
     private var summary: String {
         "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at list rates, "
-            + "\(calendar.first) to \(calendar.last)"
+            + "\(spokenDate(calendar.first)) to \(spokenDate(calendar.last)). "
+            // Says what is inside, because what is inside is not every square.
+            // See `accessibleDays`.
+            + "Days with activity are listed."
     }
 
     /// The activity ramp, with a quiet day that can actually be seen.
@@ -168,7 +171,11 @@ struct PhoneHeatmap: View {
                 Button {
                     onSelect?(day)
                 } label: {
-                    Text("\(day.date): \(formatSpend(day.value)) at list rates")
+                    // A spoken date, not an ISO string: "twenty twenty six
+                    // dash zero eight dash eleven" is not a date anybody
+                    // hears. The amount is in the label too, so intensity is
+                    // never carried by colour alone.
+                    Text("\(spokenDate(day.date)), \(formatSpend(day.value)) at list rates")
                 }
             }
         }
@@ -184,8 +191,18 @@ struct PhoneHeatmap: View {
         return cells[column] ?? nil
     }
 
+    /// The days a screen reader can reach: the ones something happened on.
+    ///
+    /// A year is 365 focusable squares, and three hundred of them would say
+    /// "nothing". Walking that to find last Tuesday is a maze, which is the
+    /// thing the accessibility notes in `docs/ios-client-ui.md` name outright.
+    /// The quiet days are not hidden information: the summary above carries the
+    /// span and the active-day count, and the day sheet gives exact figures for
+    /// any day at all.
     private var accessibleDays: [HeatCell] {
         calendar.rows.flatMap { $0.compactMap { $0 } }
+            .filter { $0.value > 0 }
+            .sorted { $0.date > $1.date }
     }
 
     private static func rowLabel(_ row: Int) -> String {

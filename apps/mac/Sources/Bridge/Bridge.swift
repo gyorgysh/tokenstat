@@ -583,6 +583,38 @@ enum Bridge {
         )
     }
 
+    /// The account's breakdown by one dimension, across every machine that
+    /// syncs.
+    ///
+    /// The sibling of `report`, which reads this device's archive. A client has
+    /// no archive, so this is the only way it can answer "which model ate the
+    /// month". `group` is `"model"`, `"source"` or `"day"`: the account holds
+    /// no project keys and no session ids, so there is nothing else to ask for.
+    static func accountReport(group: String, weeks: Int = 53) async throws -> AccountReport {
+        try await background(
+            "account.report",
+            ["group": group, "weeks": weeks],
+            // A network call on the host's side, same as the account grid.
+            patience: Patience.long,
+            as: AccountReport.self
+        )
+    }
+
+    /// What each device contributed over a window of days.
+    ///
+    /// The ids come from `account()`, because the caller already has them and
+    /// asking the service for the same list twice to answer one question is a
+    /// round trip nobody needs. One request per device on the host's side, so
+    /// this belongs to a screen somebody opened rather than to a warm-up pass.
+    static func machineUsage(machines: [String], days: Int = 30) async throws -> [MachineUsage] {
+        try await background(
+            "account.machineUsage",
+            ["machines": machines, "days": days],
+            patience: Patience.long,
+            as: [MachineUsage].self
+        )
+    }
+
     static func blocks(_ query: Query = Query()) async throws -> [Block] {
         try await background("blocks", ["query": query.payload], as: [Block].self)
     }

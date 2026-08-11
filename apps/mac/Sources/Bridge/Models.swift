@@ -87,6 +87,46 @@ struct Bucket: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// An account-plane breakdown and the moment it was fetched.
+///
+/// The date travels with the rows because a figure and its age are one fact.
+/// The client shows it on any screen built from this, so a remembered answer
+/// never poses as a current one.
+struct AccountReport: Codable, Sendable, Hashable {
+    var rows: [Bucket]
+    /// Which dimension these are folded by, echoed back by the host so an
+    /// answer that lands after the reader switched tabs can be discarded.
+    var group: String
+    var fetchedAtMs: Int64
+    /// Served from cache because the refresh failed. The numbers are real, they
+    /// are just old.
+    var stale: Bool
+
+    var fetchedAt: Date { Date(timeIntervalSince1970: Double(fetchedAtMs) / 1000) }
+}
+
+/// What one device contributed to the account over a window.
+///
+/// `sessions` is deliberately absent everywhere in this shape: the account
+/// receives no session identifiers, so there is no honest number to show.
+struct MachineUsage: Codable, Sendable, Hashable, Identifiable {
+    /// The account's machine id, which is what a device row matches on.
+    var machine: String
+    var valueMicros: Int64
+    var events: UInt64
+    var activeDays: Int
+    /// The window this covers, in days, so the screen labels it rather than
+    /// assuming one.
+    var days: Int
+
+    var id: String { machine }
+
+    /// List rates, never money charged. Same rule as `Bucket.value`.
+    var value: Money {
+        Money(micros: valueMicros, estimated: false, complete: true)
+    }
+}
+
 struct Totals: Codable, Sendable, Hashable {
     var counters: Counters
     var events: UInt64

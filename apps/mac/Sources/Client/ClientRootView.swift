@@ -172,8 +172,8 @@ enum ClientTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: ClientHomeView()
         case .workspaces: ClientWorkspacesView()
-        case .insights: ClientPlaceholderView(tab: self)
-        case .machines: ClientPlaceholderView(tab: self)
+        case .insights: ClientInsightsView()
+        case .machines: ClientDevicesView()
         }
     }
 }
@@ -203,32 +203,6 @@ private extension View {
                         .accessibilityAddTraits(.isHeader)
                 }
             }
-    }
-}
-
-/// Placeholder while each screen is built, in the order `docs/ios-client-ui.md`
-/// sets out. Deliberately plain: a fake chart here would make the shell look
-/// finished and hide which screens are real.
-private struct ClientPlaceholderView: View {
-    let tab: ClientTab
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: Theme.Space.s) {
-                Image(systemName: tab.symbol)
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundStyle(Theme.accent)
-                Text(tab.label)
-                    .font(ClientType.screenTitle)
-                Text("Not built yet.")
-                    .font(ClientType.label)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.top, 120)
-            .accessibilityElement(children: .combine)
-        }
-        .background(Theme.background)
     }
 }
 
