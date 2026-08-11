@@ -53,8 +53,12 @@ enum ClientRefresh {
             try? await Task.sleep(for: .milliseconds(450))
             return
         }
-        lastRun[key] = now
         await work()
+        // Stamped on the way out, not on the way in. A slow fetch would
+        // otherwise spend most of its window running, and the pull somebody
+        // makes right after it finishes (because it finished badly) would be
+        // the one that gets swallowed.
+        lastRun[key] = Date()
     }
 }
 

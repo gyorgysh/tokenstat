@@ -21,6 +21,8 @@ struct ClientHomeView: View {
     /// The day whose detail sheet is open. A sheet rather than the Mac's hover
     /// popover, because a finger has no hover.
     @State private var selectedDay: HeatCell?
+    /// A finger is holding the heatmap, so this page does not scroll.
+    @State private var pickingADay = false
 
     var body: some View {
         ScrollView {
@@ -80,6 +82,7 @@ struct ClientHomeView: View {
         // refresh gesture quietly disappeared exactly when the page was empty,
         // which is when somebody most wants to pull it.
         .scrollBounceBehavior(.always, axes: .vertical)
+        .scrollDisabled(pickingADay)
         .refreshable {
             await ClientRefresh.pull("home") { await model.refresh() }
         }
@@ -123,9 +126,14 @@ struct ClientHomeView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
-            PhoneHeatmap(calendar: calendar) { day in
-                selectedDay = day
-            }
+            PhoneHeatmap(
+                calendar: calendar,
+                onSelect: { day in selectedDay = day },
+                // The page holds still while a day is being picked. A grid
+                // scrubbed with a finger inside a page that scrolls under it
+                // is two gestures fighting over one touch.
+                onScrub: { pickingADay = $0 }
+            )
         }
         .padding(Theme.Space.m)
         .cardSurface()

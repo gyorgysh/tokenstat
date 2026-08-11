@@ -19,7 +19,7 @@ import UIKit
 /// answered "iPhone" for every app without the entitlement since iOS 16, and
 /// the host's own fallback cannot do better from Rust: iOS has no `scutil` and
 /// a sandboxed process cannot spawn `hostname`. So the app reads the model
-/// identifier the kernel reports and turns it into the name on the box.
+/// identifier the kernel reports and turns it into the model's own name.
 ///
 /// Unknown identifiers fall back to the family rather than to the raw code. A
 /// device list that says "iPhone" is worse than one that says "iPhone 17 Pro
@@ -57,20 +57,14 @@ enum ClientDeviceName {
     static func publish() async {
         guard let identity = try? await Bridge.machineIdentity() else { return }
         let current = identity.label.trimmingCharacters(in: .whitespacesAndNewlines)
-        let chosen = identity.labelIsChosen == true
-        // A name somebody typed wins over the one on the box. Ours counts as
-        // chosen too, so this is also what stops a rename every launch.
-        if chosen, !current.isEmpty, !isGeneric(current) { return }
+        // A name somebody typed wins, whatever it says. Somebody who renames
+        // their phone to "iPhone" meant it, and this used to overwrite them on
+        // every launch because the name matched the placeholder. Our own
+        // rename counts as chosen too, which is what stops this running twice.
+        if identity.labelIsChosen == true, !current.isEmpty { return }
         let wanted = marketing
         guard current != wanted else { return }
         _ = try? await Bridge.renameMachine(wanted)
-    }
-
-    /// Names the host writes when it has nothing better, which this replaces.
-    private static func isGeneric(_ name: String) -> Bool {
-        let lower = name.lowercased()
-        return lower == "iphone" || lower == "ipad" || lower == "this machine"
-            || lower == "localhost"
     }
 
     /// Only the generations this build can meet. Anything newer falls back to

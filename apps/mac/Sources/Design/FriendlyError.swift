@@ -67,18 +67,10 @@ struct FriendlyError {
                 raw: raw
             )
         }
-        if lower.contains("sign in") || lower.contains("signed out")
-            || lower.contains("not logged in") || lower.contains("token") && lower.contains("revoked")
-        {
-            return FriendlyError(
-                title: "Sign in again",
-                message: "This device's login is no longer valid. Signing in again puts it back, "
-                    + "and nothing local is lost.",
-                symbol: "person.crop.circle.badge.exclamationmark",
-                actionTitle: "Sign in",
-                raw: raw
-            )
-        }
+        // Before the sign-in case, and deliberately: a refused tunnel
+        // credential repairs itself, and its sentence used to contain the
+        // words "sign in again", which sent people to fix something that was
+        // already being fixed.
         if lower.contains("credential") || lower.contains("tunnel token")
             || lower.contains("key does not match")
         {
@@ -88,6 +80,18 @@ struct FriendlyError {
                     + "one. It usually comes back on its own within a minute.",
                 symbol: "arrow.triangle.2.circlepath",
                 actionTitle: "Retry now",
+                raw: raw
+            )
+        }
+        if lower.contains("sign in") || lower.contains("signed out")
+            || lower.contains("not logged in") || lower.contains("token") && lower.contains("revoked")
+        {
+            return FriendlyError(
+                title: "Sign in again",
+                message: "This device's login is no longer valid. Signing in again puts it back, "
+                    + "and nothing local is lost.",
+                symbol: "person.crop.circle.badge.exclamationmark",
+                actionTitle: "Sign in",
                 raw: raw
             )
         }

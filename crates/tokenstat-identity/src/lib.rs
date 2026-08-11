@@ -267,7 +267,7 @@ pub fn machine_label() -> String {
     }
     // iOS / iPadOS have no scutil, and a sandboxed app cannot spawn `hostname`
     // at all. The family is the honest answer from here; the app replaces it
-    // with the name on the box at launch. See `ClientDeviceName` in the client.
+    // with the model's own name at launch. See `ClientDeviceName` in the client.
     #[cfg(target_os = "ios")]
     {
         return "iPhone".into();

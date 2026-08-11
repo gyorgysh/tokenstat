@@ -582,10 +582,17 @@ fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
     let want = tokenstat_identity::hex(peer);
     let status = tokenstat_sync::sync_status(None).ok()?;
     for machine in &status.machines {
-        let key = machine
+        // `continue`, not `?`. One machine in the directory without a key (a
+        // computer that only ever synced) would otherwise end the search for
+        // every machine after it, and which ones those are depends on the
+        // order the server happened to answer in.
+        let Some(key) = machine
             .get("public_identity")
             .or_else(|| machine.get("identity"))
-            .and_then(|v| v.as_str())?;
+            .and_then(|v| v.as_str())
+        else {
+            continue;
+        };
         if !key.eq_ignore_ascii_case(&want) {
             continue;
         }

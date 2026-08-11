@@ -680,9 +680,18 @@ pub fn authorize_with(
             Ok(store) => store,
             Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
         };
-        let known = store.get(&peer).is_some();
-        let prior = store.get(&peer).map(|p| p.trust);
+        let prior_peer = store.get(&peer);
+        let known = prior_peer.is_some();
+        let prior = prior_peer.map(|p| p.trust);
+        // Whether the peer arrived carrying a name this store does not have.
+        // A first contact and a rename are both worth a write; a machine
+        // saying the same thing again is not.
+        let named_differently = store
+            .get(&peer)
+            .map(|existing| !label.is_empty() && existing.label != label)
+            .unwrap_or(false);
         let mut trust = store.seen(&peer, &label, Some(address), &crate::now());
+        let mut approved_now = false;
         // Auto-approve only when still pending (never when revoked).
         if trust == Trust::Pending && prior != Some(Trust::Revoked) {
             if let Some(hook) = auto_approve {
@@ -694,10 +703,17 @@ pub fn authorize_with(
                     };
                     store.add_approved(&peer, &name, Some(address), &crate::now());
                     trust = Trust::Approved;
+                    approved_now = true;
                 }
             }
         }
-        let _ = store.save();
+        // Written back only when something changed. A phone opens a channel
+        // per workspace, per terminal and per port, and rewriting peers.json
+        // on each of them is the disk churn the original code avoided by
+        // saving new peers only.
+        if !known || approved_now || named_differently {
+            let _ = store.save();
+        }
         (
             known,
             trust,

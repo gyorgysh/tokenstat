@@ -34,6 +34,10 @@ struct PhoneHeatmap: View {
     let calendar: ActivityCalendar
     /// Tapped day, for the detail sheet. Nil while nothing is selected.
     var onSelect: ((HeatCell) -> Void)?
+    /// A hold started or ended. The page above uses it to hold still: while a
+    /// finger is picking a day out of a grid, any movement of the page under
+    /// it is the page fighting the finger.
+    var onScrub: ((Bool) -> Void)?
 
     /// The day under the finger right now.
     ///
@@ -43,8 +47,6 @@ struct PhoneHeatmap: View {
     /// same gesture whether it lasted a moment or a second, with the answer
     /// visible for as long as the finger is down.
     @State private var focus: Focus?
-    /// The last point a finger touched, kept so the hold knows where it began.
-    @State private var touch: CGPoint = .zero
     /// A hold is in progress: the grid stops scrolling and follows the finger.
     @State private var scrubbing = false
     /// Set for a moment after a hold, so the lift that ended it does not also
@@ -66,13 +68,70 @@ struct PhoneHeatmap: View {
     private var gridWidth: CGFloat { step * CGFloat(calendar.weeks) - gap }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            caption
+            gridRow
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Activity calendar")
+        // The grid's own summary, so VoiceOver does not have to walk a year of
+        // cells to learn what it is looking at.
+        .accessibilityValue(summary)
+        .accessibilityHint("Hold a day to read its date and amount, lift to open it")
+    }
+
+    /// The line above the grid: what the finger is on, or how to use it.
+    ///
+    /// **The readout lives here rather than beside the square it names.** A
+    /// bubble by the cell is a bubble under the hand pointing at it, and one
+    /// placed high enough to clear a thumb is outside the scroll view's bounds
+    /// and gets clipped. Above the whole grid it is always visible, always in
+    /// the same place, and never behind a finger.
+    ///
+    /// When nothing is held it says what can be done, which is the other half
+    /// of the problem: a grid that scrolls sideways inside a page that scrolls
+    /// down does not announce itself, and a year that looks like a season is a
+    /// year nobody scrolls.
+    private var caption: some View {
+        HStack(spacing: 6) {
+            if let focus {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 7, height: 7)
+                Text(shortDate(focus.day.date))
+                    .font(.system(size: 13, weight: .semibold))
+                Text(focus.day.value == 0
+                    ? "nothing spent"
+                    : "\(formatSpend(focus.day.value)) at list rates")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            } else {
+                Image(systemName: "hand.draw")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text("Swipe for the whole year, hold a day to read it")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+        .frame(height: 18)
+        .animation(.easeOut(duration: 0.12), value: focus?.day.id)
+        .accessibilityHidden(true)
+    }
+
+    private var gridRow: some View {
         HStack(alignment: .top, spacing: 6) {
             weekdayLabels
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 6) {
                     monthLabels
                     grid
                 }
+                // Room for the indicator, so it sits under the grid rather
+                // than across the bottom row of squares.
+                .padding(.bottom, 6)
             }
             // Opens on the most recent week, which is the part anybody wants
             // first.
@@ -87,13 +146,7 @@ struct PhoneHeatmap: View {
             // leading third of the grid.
             .scrollEdgeEffectHidden(true, for: .all)
         }
-        .frame(height: monthRow + 6 + gridHeight)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Activity calendar")
-        // The grid's own summary, so VoiceOver does not have to walk a year of
-        // cells to learn what it is looking at.
-        .accessibilityValue(summary)
-        .accessibilityHint("Hold a day to read its date and amount, lift to open it")
+        .frame(height: monthRow + 6 + gridHeight + 6)
     }
 
     private var summary: String {
@@ -194,42 +247,39 @@ struct PhoneHeatmap: View {
         }
         .frame(width: gridWidth, height: gridHeight, alignment: .topLeading)
         .contentShape(.rect)
-        .overlay(alignment: .topLeading) { readout }
-        // Three gestures, all simultaneous, because a composed one had to be
-        // resolved before anything happened and that resolution never came
-        // inside a scroll view: the press was swallowed and neither the hold
-        // nor the tap fired.
+        // A real long-press recognizer, not a SwiftUI gesture.
         //
-        // Instead: the drag only *records* where the finger is (it never
-        // resolves against the scroll), the long press flips scrubbing on, and
-        // the scroll is disabled for as long as it is on. See `body`.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { event in
-                    touch = event.location
-                    guard scrubbing else { return }
-                    guard let hit = hit(at: event.location), hit.day.id != focus?.day.id else {
-                        return
-                    }
+        // The SwiftUI attempts both failed, in opposite ways. A composed
+        // `LongPressGesture.sequenced(before:)` never resolved inside the
+        // scroll view, so nothing fired at all. A `DragGesture` with zero
+        // minimum distance did fire, and took one-finger scrolling with it:
+        // the year could only be moved with two fingers, which nobody would
+        // discover. `UILongPressGestureRecognizer` yields to the scroll view's
+        // pan until the press is actually held, reports its location the whole
+        // time it is held, and, unlike a `DragGesture`, tells us when the
+        // system takes the touch away. See `PressTracker`.
+        .overlay {
+            PressTracker(
+                onBegan: { point in
+                    scrubbing = true
+                    onScrub?(true)
+                    focus = hit(at: point)
+                    Self.tick()
+                },
+                onMoved: { point in
+                    guard let hit = hit(at: point), hit.day.id != focus?.day.id else { return }
                     focus = hit
                     Self.tick()
-                }
-                .onEnded { event in
-                    guard scrubbing else { return }
-                    let landed = hit(at: event.location) ?? focus
+                },
+                onEnded: { point in
+                    let landed = hit(at: point) ?? focus
                     endScrub()
                     guard let landed else { return }
                     onSelect?(landed.day)
-                }
-        )
-        .simultaneousGesture(
-            LongPressGesture(minimumDuration: 0.2, maximumDistance: 24)
-                .onEnded { _ in
-                    scrubbing = true
-                    focus = hit(at: touch)
-                    Self.tick()
-                }
-        )
+                },
+                onCancelled: { endScrub() }
+            )
+        }
         .simultaneousGesture(
             SpatialTapGesture().onEnded { event in
                 // A hold that ended already opened its day. Without this the
@@ -256,12 +306,83 @@ struct PhoneHeatmap: View {
         }
     }
 
+    /// A transparent view whose only job is to report a press and where it is.
+    ///
+    /// `UILongPressGestureRecognizer` is used rather than a SwiftUI gesture
+    /// because it has the two properties this needs and SwiftUI's does not
+    /// expose: it coexists with a scroll view's pan without claiming ordinary
+    /// drags, and it reports `.cancelled`. Without that last one a hold
+    /// interrupted by a call banner or Control Center left the grid stuck in
+    /// scrub mode, unscrollable, with a label pinned to it.
+    private struct PressTracker: UIViewRepresentable {
+        var onBegan: (CGPoint) -> Void
+        var onMoved: (CGPoint) -> Void
+        var onEnded: (CGPoint) -> Void
+        var onCancelled: () -> Void
+
+        func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            view.backgroundColor = .clear
+            // Transparent and not interactive on its own: taps and scrolls
+            // pass through to the SwiftUI content underneath, and only the
+            // recognizer below sees anything.
+            view.isUserInteractionEnabled = true
+            let press = UILongPressGestureRecognizer(
+                target: context.coordinator,
+                action: #selector(Coordinator.handle(_:))
+            )
+            press.minimumPressDuration = 0.2
+            // A hold that wanders is still the same hold: this is a scrub, so
+            // the finger is expected to travel a long way once it has begun.
+            press.allowableMovement = 24
+            press.cancelsTouchesInView = false
+            press.delaysTouchesEnded = false
+            press.delegate = context.coordinator
+            view.addGestureRecognizer(press)
+            return view
+        }
+
+        func updateUIView(_ uiView: UIView, context: Context) {
+            context.coordinator.parent = self
+        }
+
+        final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+            var parent: PressTracker
+
+            init(_ parent: PressTracker) {
+                self.parent = parent
+            }
+
+            @objc func handle(_ recognizer: UILongPressGestureRecognizer) {
+                let point = recognizer.location(in: recognizer.view)
+                switch recognizer.state {
+                case .began: parent.onBegan(point)
+                case .changed: parent.onMoved(point)
+                case .ended: parent.onEnded(point)
+                case .cancelled, .failed: parent.onCancelled()
+                default: break
+                }
+            }
+
+            // The tap that opens a day lives in SwiftUI, on the same view.
+            func gestureRecognizer(
+                _ gestureRecognizer: UIGestureRecognizer,
+                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+            ) -> Bool {
+                true
+            }
+        }
+    }
+
     /// Leave scrub mode and let the grid scroll again.
     ///
     /// The tap is muted briefly because the same lift that ends a hold also
     /// completes the tap gesture, and the day has already been opened by then.
     private func endScrub() {
         scrubbing = false
+        onScrub?(false)
         focus = nil
         suppressTap = true
         Task {
@@ -274,34 +395,6 @@ struct PhoneHeatmap: View {
     private struct Focus: Equatable {
         var day: HeatCell
         var rect: CGRect
-    }
-
-    /// What the finger is on: the date, and what that day cost.
-    ///
-    /// Sits above the square when there is room and below it when the finger
-    /// is near the top row, so the label is never under the hand reading it.
-    @ViewBuilder
-    private var readout: some View {
-        if let focus {
-            // Clear of the fingertip, not just clear of the square. A label two
-            // points above the cell is a label under the same finger that is
-            // pointing at it, so it sits a row and a half up and only drops
-            // below when the top rows leave no room for that.
-            let above = focus.rect.minY >= 38
-            Text("\(shortDate(focus.day.date)) · \(formatSpend(focus.day.value))")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Theme.background)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color.primary.opacity(0.85)))
-                .fixedSize()
-                .offset(
-                    x: max(0, min(gridWidth - 120, focus.rect.midX - 60)),
-                    y: above ? focus.rect.minY - 38 : focus.rect.maxY + 8
-                )
-                .allowsHitTesting(false)
-                .transition(.opacity)
-        }
     }
 
     /// Which day a touch landed on, using the same packing the canvas drew

@@ -161,8 +161,18 @@ impl TunnelSession {
     /// Replace the HELLO credential and drop the live socket so the
     /// supervisor reconnects with the new token. Used when refreshing a
     /// short-lived `tunnel:connect` secret before it expires.
+    /// The same token again is not a change. Dropping a healthy socket for it
+    /// would take every live channel down with it, and the host calls this on
+    /// every `remote.tunnel` request, which a phone sends each time it opens a
+    /// host or pulls to refresh.
     pub fn set_token(&self, token: &str) {
-        *self.token.lock().unwrap_or_else(|e| e.into_inner()) = token.to_string();
+        {
+            let mut held = self.token.lock().unwrap_or_else(|e| e.into_inner());
+            if *held == token {
+                return;
+            }
+            *held = token.to_string();
+        }
         if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = socket.close(None);
         }
@@ -653,12 +663,6 @@ fn mark_all_channels(session: &TunnelSession, reason: &str) {
     }
 }
 
-/// Turn the relay's `DENIED <reason>` into something a person can act on.
-///
-/// The reason codes are the stable part of the contract and the sentences are
-/// not, so the mapping lives here once instead of in every screen that shows a
-/// tunnel status. An unknown code is passed through rather than swallowed: a
-/// new relay reason should read oddly, not disappear.
 /// Whether a fresh credential could plausibly fix this refusal.
 ///
 /// `key_mismatch` is in the list because minting goes through registration:
@@ -674,6 +678,12 @@ fn renewable_denial(text: &str) -> bool {
     )
 }
 
+/// Turn the relay's `DENIED <reason>` into something a person can act on.
+///
+/// The reason codes are the stable part of the contract and the sentences are
+/// not, so the mapping lives here once instead of in every screen that shows a
+/// tunnel status. An unknown code is passed through rather than swallowed: a
+/// new relay reason should read oddly, not disappear.
 fn denial_message(text: &str) -> String {
     let Some(reason) = text.strip_prefix("DENIED ") else {
         return text.to_string();
@@ -690,7 +700,10 @@ fn denial_message(text: &str) -> String {
         }
         "not_on_this_plan" => "remote reach is a paid-plan feature",
         "key_already_live" => "another machine is already on the tunnel with this key",
-        "bad_token" => "the relay rejected this machine's tunnel credential. sign in again",
+        // Not "sign in again": this machine mints a replacement and retries by
+        // itself, and telling somebody to go and fix a thing that is already
+        // fixing itself is how a transient refusal becomes a support message.
+        "bad_token" => "the relay refused this machine's tunnel credential. getting a new one",
         other => return format!("the relay refused the connection: {other}"),
     }
     .to_string()
