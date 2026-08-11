@@ -224,9 +224,24 @@ struct AccountView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                #endif
 
-                #if os(macOS)
+                // P2: plan-limit readings to the account, for the phone. Off by
+                // default. Percentages and reset times only; never credentials.
+                Toggle(isOn: Binding(
+                    get: { model.limitsSyncEnabled },
+                    set: { on in Task { await model.setLimitsSync(on) } }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Share plan limits with my devices")
+                            .font(.callout)
+                        Text("Posts how full each vendor window is, so the phone can show what is left while this Mac is asleep.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .tint(Theme.accent)
+
                 Button {
                     Task { await model.signOut() }
                 } label: {

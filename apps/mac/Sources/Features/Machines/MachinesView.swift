@@ -406,7 +406,9 @@ struct MachinesView: View {
     private var accountDevices: some View {
         Card(title: "Account-linked devices", subtitle: "Connect to any device on this account in one click, over the tunnel.") {
             VStack(spacing: 0) {
-                ForEach(model.accountMachines) { machine in
+                ForEach(model.accountMachines.filter(\.isHost)) { machine in
+                    // Clients (phones) are listed nowhere here: they do not
+                    // upload usage and are not dialable hosts (P5).
                     // "This device" can also be matched by its key: a stale
                     // record whose id no longer equals thisMachineID must not
                     // suddenly look like a stranger with Connect buttons.

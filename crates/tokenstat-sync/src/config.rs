@@ -53,6 +53,13 @@ pub struct SyncConfig {
     /// Per-host last successful sync window / timestamp.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub cursor: BTreeMap<String, SyncCursor>,
+    /// Post plan-limit readings to the account after a sync (P2).
+    ///
+    /// Opt-in. Off when omitted so an existing config never starts uploading
+    /// quota percentages until the user turns it on. Percentages and reset
+    /// times only; vendor credentials never leave the machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +186,20 @@ pub fn ensure_project_salt() -> Result<ProjectSalt, ConfigError> {
 pub fn set_sync_host(host: &str) -> Result<(), ConfigError> {
     let mut cfg = load()?;
     cfg.sync.host = Some(host.to_string());
+    save(&cfg)
+}
+
+/// Whether this machine posts plan-limit readings after a sync (P2).
+///
+/// Opt-in: missing or `false` means off.
+pub fn limits_sync_enabled() -> bool {
+    load().ok().and_then(|c| c.sync.limits).unwrap_or(false)
+}
+
+/// Turn plan-limit posting on or off.
+pub fn set_limits_sync(on: bool) -> Result<(), ConfigError> {
+    let mut cfg = load()?;
+    cfg.sync.limits = Some(on);
     save(&cfg)
 }
 

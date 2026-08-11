@@ -26,6 +26,8 @@ final class AccountModel {
     var isLoading = false
     var isSyncing = false
     var isSigningOut = false
+    /// P2: post plan-limit readings after sync / limits refresh. Opt-in.
+    var limitsSyncEnabled = false
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
@@ -102,6 +104,9 @@ final class AccountModel {
             errorMessage = nil
             authCheckError = nil
             authChecked = true
+            #if os(macOS)
+            limitsSyncEnabled = (try? await Bridge.limitsSyncEnabled()) ?? false
+            #endif
         } catch {
             // Keep any previous signed-in snapshot. A later offline refresh
             // must not wipe a working session from the screen.
@@ -113,6 +118,18 @@ final class AccountModel {
             }
         }
     }
+
+    #if os(macOS)
+    func setLimitsSync(_ on: Bool) async {
+        do {
+            try await Bridge.setLimitsSyncEnabled(on)
+            limitsSyncEnabled = on
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+    #endif
 
     /// Start the device flow, open the browser, then poll until confirmed.
     ///

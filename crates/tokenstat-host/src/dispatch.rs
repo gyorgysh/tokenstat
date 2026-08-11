@@ -1014,6 +1014,22 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             Ok(json!({"host": host}))
         }
 
+        // Opt-in plan-limits posting (P2). Stored in SyncConfig so CLI and app
+        // share one switch. Default off.
+        "config.limitsSync" => {
+            #[derive(Default, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct LimitsSyncParams {
+                #[serde(default)]
+                enabled: Option<bool>,
+            }
+            let p: LimitsSyncParams = parse(params)?;
+            if let Some(on) = p.enabled {
+                tokenstat_sync::config::set_limits_sync(on).envelope()?;
+            }
+            Ok(json!({ "enabled": tokenstat_sync::config::limits_sync_enabled() }))
+        }
+
         // Long running and it talks to the network. Same rule as `scan`: not
         // from a thread that draws.
         "sync.run" => {
@@ -1901,6 +1917,10 @@ fn terminals(_method: &str, _params: &str) -> Option<Result<Value, String>> {
 
 /// Ask every vendor what is left of its plan.
 ///
+/// On a host (Mac): live vendor reads, optional post to the account when the
+/// opt-in switch is on (P2). On a client (phone): GET the account store, which
+/// is what hosts posted.
+///
 /// One refresh at a time, and that lock is the only thing this serializes
 /// against. The session used to provide the same guarantee by accident, and it
 /// charged every other screen for it. Two screens asking at once should share
@@ -1909,53 +1929,111 @@ fn usage_limits() -> Value {
     static REFRESH: Mutex<()> = Mutex::new(());
     let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
 
-    let providers = std::thread::scope(|scope| {
-        let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
-        let cursor = scope.spawn(tokenstat_sync::cursor::limits);
-        let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
-        let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
-        let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
-        let codex = tokenstat_core::limits::codex_limits();
-        let claude = claude.join().unwrap_or_else(|_| {
-            tokenstat_core::limits::ProviderLimits::unavailable(
-                "claude_code",
-                "Reading the Claude Code limits failed unexpectedly.",
-            )
+    #[cfg(not(feature = "local-host"))]
+    {
+        return account_plane_limits();
+    }
+
+    #[cfg(feature = "local-host")]
+    {
+        let providers = std::thread::scope(|scope| {
+            let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
+            let cursor = scope.spawn(tokenstat_sync::cursor::limits);
+            let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
+            let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
+            let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
+            let codex = tokenstat_core::limits::codex_limits();
+            let claude = claude.join().unwrap_or_else(|_| {
+                tokenstat_core::limits::ProviderLimits::unavailable(
+                    "claude_code",
+                    "Reading the Claude Code limits failed unexpectedly.",
+                )
+            });
+            let cursor = cursor.join().unwrap_or_else(|_| {
+                tokenstat_core::limits::ProviderLimits::unavailable(
+                    "cursor",
+                    "Reading the Cursor limits failed unexpectedly.",
+                )
+            });
+            let grok = grok.join().unwrap_or_else(|_| {
+                tokenstat_core::limits::ProviderLimits::unavailable(
+                    "grok",
+                    "Reading the Grok limits failed unexpectedly.",
+                )
+            });
+            let opencode = opencode.join().unwrap_or_else(|_| {
+                tokenstat_core::limits::ProviderLimits::unavailable(
+                    "opencode",
+                    "Reading the OpenCode limits failed unexpectedly.",
+                )
+            });
+            let antigravity = antigravity.join().unwrap_or_else(|_| {
+                tokenstat_core::limits::ProviderLimits::unavailable(
+                    "antigravity",
+                    "Reading the Antigravity limits failed unexpectedly.",
+                )
+            });
+            vec![claude, codex, cursor, grok, opencode, antigravity]
         });
-        let cursor = cursor.join().unwrap_or_else(|_| {
-            tokenstat_core::limits::ProviderLimits::unavailable(
-                "cursor",
-                "Reading the Cursor limits failed unexpectedly.",
-            )
-        });
-        let grok = grok.join().unwrap_or_else(|_| {
-            tokenstat_core::limits::ProviderLimits::unavailable(
-                "grok",
-                "Reading the Grok limits failed unexpectedly.",
-            )
-        });
-        let opencode = opencode.join().unwrap_or_else(|_| {
-            tokenstat_core::limits::ProviderLimits::unavailable(
-                "opencode",
-                "Reading the OpenCode limits failed unexpectedly.",
-            )
-        });
-        let antigravity = antigravity.join().unwrap_or_else(|_| {
-            tokenstat_core::limits::ProviderLimits::unavailable(
-                "antigravity",
-                "Reading the Antigravity limits failed unexpectedly.",
-            )
-        });
-        vec![claude, codex, cursor, grok, opencode, antigravity]
-    });
-    // A vendor that could not be read this time is not a vendor whose quota is
-    // unknown. Remember every real reading and hand back the last one, marked
-    // stale and dated, when a refresh comes back with only a reason.
-    tokenstat_core::limits::cache::store(&providers);
-    let providers = tokenstat_core::limits::cache::backfill(providers);
-    // Every field here is plain data the vendors just returned, so the only way
-    // this fails is a bug in the DTO, and an empty list says that plainly.
-    serde_json::to_value(providers).unwrap_or_else(|_| json!([]))
+        // A vendor that could not be read this time is not a vendor whose quota is
+        // unknown. Remember every real reading and hand back the last one, marked
+        // stale and dated, when a refresh comes back with only a reason.
+        tokenstat_core::limits::cache::store(&providers);
+        let providers = tokenstat_core::limits::cache::backfill(providers);
+        // Opt-in P2 post: ride the same refresh the Mac already paid for.
+        if tokenstat_sync::config::limits_sync_enabled() {
+            let _ = tokenstat_sync::post_limits(None, Some(&providers));
+        }
+        // Every field here is plain data the vendors just returned, so the only way
+        // this fails is a bug in the DTO, and an empty list says that plainly.
+        serde_json::to_value(providers).unwrap_or_else(|_| json!([]))
+    }
+}
+
+/// Plan limits from the account store (phone / client shape).
+///
+/// Hosts post; this only reads. Multiple machines can report the same source:
+/// the newest reading wins so Home shows one row per provider.
+#[cfg(not(feature = "local-host"))]
+fn account_plane_limits() -> Value {
+    use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
+
+    let Ok(rows) = tokenstat_sync::fetch_account_limits(None, None) else {
+        return json!([]);
+    };
+    let mut best: std::collections::BTreeMap<String, ProviderLimits> =
+        std::collections::BTreeMap::new();
+    for row in rows {
+        let windows: Vec<UsageWindow> = row
+            .windows
+            .iter()
+            .map(|w| UsageWindow {
+                label: w.label.clone(),
+                percent: w.percent,
+                resets_at_ms: w.resets_at_ms,
+                severity: LimitSeverity::from_percent(w.percent),
+            })
+            .collect();
+        if windows.is_empty() {
+            continue;
+        }
+        let reading = ProviderLimits {
+            source: row.src.clone(),
+            plan: row.plan.clone(),
+            windows,
+            observed_at_ms: row.observed_at_ms,
+            note: row.machine.map(|m| format!("from {m}")),
+            stale: row.stale,
+        };
+        match best.get(&reading.source) {
+            Some(prev) if prev.observed_at_ms >= reading.observed_at_ms => {}
+            _ => {
+                best.insert(reading.source.clone(), reading);
+            }
+        }
+    }
+    let out: Vec<_> = best.into_values().collect();
+    serde_json::to_value(out).unwrap_or_else(|_| json!([]))
 }
 
 fn sync_schedule_status() -> Result<Value, String> {

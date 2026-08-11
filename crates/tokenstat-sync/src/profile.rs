@@ -566,10 +566,25 @@ pub fn register_machine_identity(
     public_identity: &str,
     label: &str,
 ) -> Result<(), ProfileError> {
+    register_machine_identity_kind(host_flag, machine_id, public_identity, label, "host")
+}
+
+/// Register a host or a client on the account.
+///
+/// `kind` is `"host"` (default, uploads usage) or `"client"` (phone: reaches
+/// hosts over the tunnel without burning a machine slot).
+pub fn register_machine_identity_kind(
+    host_flag: Option<&str>,
+    machine_id: &str,
+    public_identity: &str,
+    label: &str,
+    kind: &str,
+) -> Result<(), ProfileError> {
     let host = resolve_api_host(host_flag)?;
     let token =
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
     let client = http_client()?;
+    let kind = if kind == "client" { "client" } else { "host" };
     let resp = client
         .put(format!("{host}/api/v1/machines/me"))
         .header("authorization", format!("Bearer {token}"))
@@ -577,6 +592,7 @@ pub fn register_machine_identity(
             "machine": machine_id,
             "public_identity": public_identity,
             "label": label,
+            "kind": kind,
         }))
         .send()?;
     let status = resp.status();
@@ -980,6 +996,12 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
     let pacing = pacing_from_body(&response_text, None);
     config::record_sync_cursor(&host, &window.from, &window.to, &last_sync_at, pacing)?;
 
+    // Opt-in plan limits post (P2). Failures are not a failed sync: the
+    // counters already landed, and a vendor that is down must not block that.
+    if config::limits_sync_enabled() {
+        let _ = post_limits(Some(&host), None);
+    }
+
     Ok(SyncResult {
         host,
         window,
@@ -988,6 +1010,129 @@ fn sync_unlocked(store: &Store, opts: SyncOptions<'_>) -> Result<SyncResult, Pro
         dry_run: false,
         schema_v,
     })
+}
+
+/// One provider in a limits POST / GET (account plane, P2).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountLimitProvider {
+    pub src: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+    pub observed_at_ms: i64,
+    #[serde(default)]
+    pub stale: bool,
+    pub windows: Vec<AccountLimitWindow>,
+    /// Present on GET only: which machine posted this reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AccountLimitWindow {
+    pub label: String,
+    pub percent: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_ms: Option<i64>,
+}
+
+/// POST current plan-limit readings for this machine.
+///
+/// Only readings that have windows and are not stale. Uses the same local
+/// cache the Mac Insights card uses after a limits refresh; callers that want
+/// a fresh vendor pass should refresh first.
+pub fn post_limits(
+    host_flag: Option<&str>,
+    providers: Option<&[tokenstat_core::limits::ProviderLimits]>,
+) -> Result<u32, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let machine = config::ensure_machine_id()?;
+    let list: Vec<tokenstat_core::limits::ProviderLimits> = match providers {
+        Some(p) => p.to_vec(),
+        None => tokenstat_core::limits::cache::load()
+            .into_values()
+            .collect(),
+    };
+    let body_providers: Vec<serde_json::Value> = list
+        .iter()
+        .filter(|p| p.has_reading() && !p.stale)
+        .map(|p| {
+            serde_json::json!({
+                "src": p.source,
+                "plan": p.plan,
+                "observed_at_ms": p.observed_at_ms,
+                "stale": false,
+                "windows": p.windows.iter().map(|w| serde_json::json!({
+                    "label": w.label,
+                    "percent": w.percent,
+                    "resets_at_ms": w.resets_at_ms,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    if body_providers.is_empty() {
+        return Ok(0);
+    }
+    let observed_at = jiff::Timestamp::now()
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let body = serde_json::json!({
+        "v": 1,
+        "machine": machine,
+        "observed_at": observed_at,
+        "providers": body_providers,
+    });
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/limits"))
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "limits post failed ({status}): {text}"
+        )));
+    }
+    Ok(body_providers.len() as u32)
+}
+
+/// GET plan-limit readings for this account (every machine, or one).
+pub fn fetch_account_limits(
+    host_flag: Option<&str>,
+    machine: Option<&str>,
+) -> Result<Vec<AccountLimitProvider>, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let mut url = format!("{host}/api/v1/limits");
+    if let Some(m) = machine {
+        url.push_str(&format!("?machine={m}"));
+    }
+    let client = http_client()?;
+    let resp = client
+        .get(&url)
+        .header("authorization", format!("Bearer {token}"))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "limits request failed ({status}): {text}"
+        )));
+    }
+    let raw: Value = serde_json::from_str(&text)?;
+    let providers = raw
+        .get("providers")
+        .cloned()
+        .unwrap_or(Value::Array(vec![]));
+    Ok(serde_json::from_value(providers)?)
 }
 
 /// Pull the pacing hints out of a sync response (success or 429).

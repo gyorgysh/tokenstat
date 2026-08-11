@@ -621,6 +621,8 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     var lastSeenAt: String?
     var publicIdentity: String?
     var trustState: String?
+    /// `"host"` uploads usage; `"client"` is a phone that reaches hosts (P5).
+    var kind: String?
 
     enum CodingKeys: String, CodingKey {
         case machineID = "id"
@@ -630,7 +632,11 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case lastSeenAt
         case publicIdentity
         case trustState
+        case kind
     }
+
+    /// Hosts only; clients (phones) are not dialable from Devices.
+    var isHost: Bool { kind != "client" }
 
     /// Falls back to the label so two unnamed machines do not collapse into
     /// one row in a ForEach.

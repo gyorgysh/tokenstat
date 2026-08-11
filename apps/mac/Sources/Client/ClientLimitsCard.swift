@@ -33,12 +33,11 @@ struct ClientLimitsCard: View {
             if isLoading {
                 ClientWireframe.Rows(count: 2)
             } else if readable.isEmpty {
-                // Not an error. No machine on this account has reported a
-                // reading yet, which is the normal state until the limits
-                // endpoint ships (P2 in `docs/mobile-app.md`). Saying so beats
-                // an empty card, and beats inventing a zero.
-                Text("No readings yet. A device on your account reports these "
-                    + "while it runs, and they show up here.")
+                // Not an error. A host posts readings only when "Share plan
+                // limits with my devices" is on, and only after a limits
+                // refresh or sync. Until then the honest line is empty, not zero.
+                Text("No readings yet. On a Mac, turn on Share plan limits with "
+                    + "my devices in Account, then refresh limits or sync.")
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,17 +53,8 @@ struct ClientLimitsCard: View {
 
     /// Only providers with an actual reading.
     ///
-    /// The host answers `usage.limits` by reading vendor credentials **on the
-    /// machine it runs on**, and a phone is not that machine: it has no Claude
-    /// Code login, no Cursor session and no API key. So every provider comes
-    /// back with a note like "not signed in to Claude Code on this device",
-    /// which is true of the phone and completely misleading to read on one.
-    ///
-    /// Dropping them leaves the honest empty line until the limits endpoint
-    /// ships (P2), when readings arrive from the machines that really did take
-    /// them. The rows are kept, not deleted: the shape is what P2 fills in, and
-    /// a reading that reaches a phone through the account is worth drawing
-    /// exactly like this.
+    /// On the phone, `usage.limits` is the account plane (P2): readings hosts
+    /// posted. Local vendor notes from a Mac-shaped refresh never appear here.
     private var readable: [ProviderLimits] {
         providers.filter(\.hasWindows)
     }

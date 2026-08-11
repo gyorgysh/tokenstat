@@ -760,6 +760,21 @@ extension Bridge {
     static func usageLimits() async throws -> [ProviderLimits] {
         try await background("usage.limits", patience: Patience.long, as: [ProviderLimits].self)
     }
+
+    /// Whether this machine posts plan-limit readings after sync / refresh (P2).
+    static func limitsSyncEnabled() async throws -> Bool {
+        struct Out: Codable { var enabled: Bool }
+        return try await background("config.limitsSync", as: Out.self).enabled
+    }
+
+    static func setLimitsSyncEnabled(_ on: Bool) async throws {
+        struct Out: Codable { var enabled: Bool }
+        _ = try await background(
+            "config.limitsSync",
+            ["enabled": on],
+            as: Out.self
+        )
+    }
 }
 
 // MARK: - Workspaces
