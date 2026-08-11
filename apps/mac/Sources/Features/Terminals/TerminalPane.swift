@@ -16,6 +16,11 @@ struct TerminalPane: View {
     let folder: WorkspaceFolder
     @Bindable var terminals: TerminalsModel
     @Bindable var workspaces: WorkspacesModel
+    /// False while the workspace surface is kept mounted but another
+    /// destination (Home, Insights, …) is in front. The stack stays in the
+    /// hierarchy so paint is not lost; focus and keystroke-speed polling only
+    /// apply when this is true.
+    var isSurfaceActive: Bool = true
 
     private var sessions: [TerminalSession] {
         terminals.sessions(in: folder.id)
@@ -101,9 +106,10 @@ struct TerminalPane: View {
     }
 
     /// The session the user can actually see, which is nothing at all while a
-    /// file, a commit or the browser is over the top of it.
+    /// file, a commit or the browser is over the top of it, or while another
+    /// destination is in front of this whole surface.
     private var focusedSessionID: String? {
-        showsTerminal ? active?.id : nil
+        isSurfaceActive && showsTerminal ? active?.id : nil
     }
 
     var body: some View {
@@ -182,7 +188,10 @@ struct TerminalPane: View {
                     // Nothing is shown while a file or a commit is open, so the
                     // terminals stay mounted underneath rather than being torn
                     // down.
-                    active: showsTerminal ? active : nil
+                    active: showsTerminal ? active : nil,
+                    // Do not steal the keyboard while Home (or any other
+                    // destination) is in front of a kept-mounted surface.
+                    claimsFocus: isSurfaceActive && showsTerminal
                 )
                 .frame(width: size.width, height: size.height)
 

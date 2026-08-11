@@ -17,6 +17,10 @@ struct WorkspacesView: View {
     @Bindable var model: WorkspacesModel
     #if os(macOS)
     @Bindable var terminals: TerminalsModel
+    /// True when this is the front destination. Root keeps the view mounted
+    /// while the user is on Home or elsewhere so terminals are not torn down;
+    /// when false the pane must not claim keyboard focus or poll as focused.
+    var isActive: Bool = true
     #endif
 
     var body: some View {
@@ -34,7 +38,12 @@ struct WorkspacesView: View {
                 // owns the folder, so sessions spawn, stream and close there
                 // and only the rendering happens here.
                 #if os(macOS)
-                TerminalPane(folder: folder, terminals: terminals, workspaces: model)
+                TerminalPane(
+                    folder: folder,
+                    terminals: terminals,
+                    workspaces: model,
+                    isSurfaceActive: isActive
+                )
                 #else
                 terminalPlaceholder(folder)
                 #endif

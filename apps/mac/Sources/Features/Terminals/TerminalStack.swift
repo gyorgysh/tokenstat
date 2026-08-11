@@ -28,6 +28,9 @@ struct TerminalStack: NSViewRepresentable {
     /// The session to show, or nil to show none, which is what happens while a
     /// file is open over the top.
     let active: TerminalSession?
+    /// Whether this stack may claim first responder. False while the workspace
+    /// surface is kept mounted under another destination (Home, Insights, …).
+    var claimsFocus: Bool = true
 
     func makeNSView(context: Context) -> TerminalStackView {
         TerminalStackView()
@@ -38,7 +41,7 @@ struct TerminalStack: NSViewRepresentable {
         // view on purpose: the pane draws a starting state over them instead.
         let loaded = sessions.compactMap(\.terminalViewIfLoaded)
         let activeView = active.flatMap(\.terminalViewIfLoaded)
-        nsView.sync(views: loaded, active: activeView)
+        nsView.sync(views: loaded, active: activeView, claimsFocus: claimsFocus)
     }
 }
 
@@ -47,14 +50,19 @@ final class TerminalStackView: NSView {
     /// rather than on every update. Claiming it every time would pull the
     /// keyboard out of whatever else the user was typing in.
     private weak var shown: NSView?
+    /// Last value of `claimsFocus` seen by `sync`. Falling edge clears
+    /// `shown` so rising edge reclaims the keyboard when the surface returns.
+    private var lastClaimsFocus = false
+    /// Full buffer paint waiting for a non-zero layout. Re-parent can run
+    /// while the stack still has a zero frame (fresh `makeNSView`); painting
+    /// then marks an empty rect and the buffer never appears.
+    private var needsFullPaint = false
 
-    func sync(views: [TerminalView], active: TerminalView?) {
+    func sync(views: [TerminalView], active: TerminalView?, claimsFocus: Bool) {
         // Views just re-parented into this stack need a repaint even when they
-        // stay visible: makeNSView can hand us a fresh TerminalStackView after
-        // a workspace switch, and the already-drawn emulator's buffer is older
-        // than the new hierarchy. Without an explicit setNeedsDisplay the
-        // screen shows only a caret until the process prints again ("tty logs
-        // go away").
+        // stay visible: a fresh TerminalStackView after a folder switch hands
+        // the same emulator instance into a new hierarchy, and without a
+        // display the screen shows only a caret until the process prints.
         var reparented = Set<ObjectIdentifier>()
         for view in views where view.superview !== self {
             view.frame = bounds
@@ -67,22 +75,35 @@ final class TerminalStackView: NSView {
             sub.removeFromSuperview()
         }
 
+        var requestPaint = !reparented.isEmpty
         for view in views {
             let visible = view === active
             // isHidden and visible disagree when the view needs to flip.
             let needsFlip = view.isHidden == visible
             if needsFlip {
                 view.isHidden = !visible
-            }
-            // Repaint when becoming visible (output may have arrived while
-            // hidden) or when re-parented while already visible (hierarchy is
-            // new, buffer is not). Do not repaint on every updateNSView.
-            if visible, needsFlip || reparented.contains(ObjectIdentifier(view)) {
-                view.setNeedsDisplay(view.bounds)
+                if visible { requestPaint = true }
             }
         }
+        if requestPaint {
+            scheduleFullPaint()
+        }
 
-        if let active, shown !== active {
+        if !claimsFocus {
+            // Surface is mounted but not in front. Do not steal first
+            // responder from Home (or any other destination). Clear `shown`
+            // so the next claimsFocus rising edge reclaims the keyboard.
+            if lastClaimsFocus {
+                shown = nil
+            }
+            lastClaimsFocus = false
+            return
+        }
+
+        let focusReturning = !lastClaimsFocus
+        lastClaimsFocus = true
+
+        if let active, focusReturning || shown !== active {
             shown = active
             // Hiding a view makes AppKit drop first responder, so the one now in
             // front has to take it back or the terminal accepts no keystrokes
@@ -101,12 +122,33 @@ final class TerminalStackView: NSView {
         }
     }
 
+    /// Mark every visible terminal for a full redraw once bounds are real.
+    private func scheduleFullPaint() {
+        needsFullPaint = true
+        if bounds.width > 1, bounds.height > 1 {
+            paintVisibleTerminals()
+        }
+    }
+
+    private func paintVisibleTerminals() {
+        needsFullPaint = false
+        for sub in subviews where !sub.isHidden {
+            sub.setNeedsDisplay(sub.bounds)
+        }
+    }
+
     override func layout() {
         super.layout()
         // Every terminal is the full pane, visible or not. Same size for all of
         // them is what makes switching free: nothing resizes, so nothing repaints.
         for sub in subviews {
             if sub.frame != bounds { sub.frame = bounds }
+        }
+        // Paint after a real size exists. Re-parent often lands while the
+        // stack is still 0×0; setNeedsDisplay then was a no-op and the buffer
+        // never recovered.
+        if needsFullPaint, bounds.width > 1, bounds.height > 1 {
+            paintVisibleTerminals()
         }
     }
 }

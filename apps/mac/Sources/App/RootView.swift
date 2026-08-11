@@ -1367,13 +1367,47 @@ struct RootView: View {
 
     @ViewBuilder
     private var detail: some View {
+        #if os(macOS)
+        // Keep WorkspacesView mounted for the life of the window. Destination
+        // used to be a switch that destroyed the whole tree on every leave:
+        // Home (or Insights, Account, …) then back left every TerminalView
+        // re-parented into a fresh TerminalStack, and SwiftTerm does not
+        // reliably redraw its buffer after that (blank pane, only a caret,
+        // until the process prints again). Switching sessions *inside*
+        // workspaces stayed solid because TerminalStack never tore them
+        // down. Same rule at this level: hide the surface, do not destroy it.
+        ZStack {
+            WorkspacesView(
+                model: workspaces,
+                terminals: terminals,
+                isActive: destination == .workspaces
+            )
+            .opacity(destination == .workspaces ? 1 : 0)
+            .allowsHitTesting(destination == .workspaces)
+            .accessibilityHidden(destination != .workspaces)
+            .zIndex(destination == .workspaces ? 1 : 0)
+
+            if destination != .workspaces {
+                nonWorkspaceDetail
+                    .zIndex(1)
+            }
+        }
+        #else
+        if destination == .workspaces {
+            WorkspacesView(model: workspaces)
+        } else {
+            nonWorkspaceDetail
+        }
+        #endif
+    }
+
+    /// Every destination except the workspace surface. On macOS the workspace
+    /// surface is kept mounted separately so its terminals are not destroyed.
+    @ViewBuilder
+    private var nonWorkspaceDetail: some View {
         switch destination {
         case .workspaces:
-            #if os(macOS)
-            WorkspacesView(model: workspaces, terminals: terminals)
-            #else
-            WorkspacesView(model: workspaces)
-            #endif
+            EmptyView()
         case .home:
             HomeView(
                 model: home,
