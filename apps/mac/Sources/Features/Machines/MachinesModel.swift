@@ -305,7 +305,12 @@ final class MachinesModel {
     }
 
     func revoke(_ peer: Peer) async {
+        // Revoke ends trust and any workspace listing for this peer. Leaving
+        // Connected set after revoke made the row offer Disconnect for a
+        // machine that could no longer answer.
         await change(peer) { try await Bridge.revoke(key: peer.key) }
+        connectedPeerKeys.remove(peer.key)
+        NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
         showNotice("\(peer.label) can no longer reach this device.")
     }
 
@@ -318,7 +323,15 @@ final class MachinesModel {
         // One transport: the tunnel. It works from any network, which is the
         // point; there is no direct path to prefer.
         guard status?.tunnel == true else {
-            errorMessage = "\(peer.label) is reachable through the tunnel. Turn on Reach devices from anywhere first."
+            errorMessage = "Turn on Reach devices from anywhere before connecting to \(peer.label)."
+            return
+        }
+        // Presence can lag; still refuse a hard offline so Connect is not a
+        // button that only produces a failure toast.
+        if let machine = accountMachines.first(where: { self.peer(for: $0)?.key == peer.key }),
+           machine.online == false
+        {
+            errorMessage = "\(peer.label) is offline. Connect when it is awake."
             return
         }
         await dial(peer)
@@ -374,13 +387,17 @@ final class MachinesModel {
     }
 
     private func dial(_ peer: Peer) async {
-            do {
-                connectedPeerKeys.insert(peer.key)
-                _ = try await Bridge.remoteWorkspaces(peer: peer)
-                errorMessage = nil
-                showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
-                NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
+        // Only mark Connected after the dial works. Inserting the key first
+        // left Disconnect on a row that never finished connecting, and a
+        // failed dial under an offline machine looked like a stuck connection.
+        do {
+            _ = try await Bridge.remoteWorkspaces(peer: peer)
+            connectedPeerKeys.insert(peer.key)
+            errorMessage = nil
+            showNotice("Connected to \(peer.label). Its workspaces are now available in the sidebar.")
+            NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
         } catch {
+            connectedPeerKeys.remove(peer.key)
             // First contact always ends with the far end being asked to
             // approve this machine. That is the point, not a failure to
             // present as one: the other screen shows this machine waiting.
@@ -388,17 +405,21 @@ final class MachinesModel {
             if text.contains("has not approved") || text.contains("not approved") {
                 showNotice("\(peer.label) has been asked to let this device in. Approve it on the other device and its workspaces will appear here.")
                 errorMessage = nil
-            } else {
+            } else if text.contains("closed before the answer arrived") {
                 // A drop mid-answer is the peer's daemon swapping its tunnel
                 // listener or a connection that died between two machines that
                 // are both retrying. It resolves itself; naming it as a hard
                 // failure would send somebody down a debugging rabbit hole.
-                if text.contains("closed before the answer arrived") {
-                    showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically. Try again in a moment.")
-                    errorMessage = nil
-                } else {
-                    errorMessage = text
-                }
+                showNotice("The connection to \(peer.label) dropped mid-answer. It reconnects automatically. Try again in a moment.")
+                errorMessage = nil
+            } else if text.localizedCaseInsensitiveContains("offline")
+                || text.localizedCaseInsensitiveContains("not reachable")
+                || text.localizedCaseInsensitiveContains("timed out")
+                || text.localizedCaseInsensitiveContains("timeout")
+            {
+                errorMessage = "\(peer.label) is offline or not reachable right now. Wait until it is awake, then try Connect again."
+            } else {
+                errorMessage = text
             }
         }
     }
@@ -409,8 +430,23 @@ final class MachinesModel {
     /// appearing as connected here.
     func disconnect(_ peer: Peer) {
         connectedPeerKeys.remove(peer.key)
+        // One broadcast: RootView drops workspaces (and suppresses re-dial),
+        // and this screen's own listener clears any stale Connected mark.
         NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: peer.key)
         showNotice("Disconnected from \(peer.label). Its workspaces are no longer in the sidebar.")
+    }
+
+    /// Whether Connect is honest for this account machine right now.
+    ///
+    /// Offline machines cannot answer a dial. Offering Connect there is a
+    /// button whose only outcome is a failure notice. Unknown presence still
+    /// allows Connect: presence can lag behind a machine that just woke.
+    func canConnect(_ machine: Machine) -> Bool {
+        if machine.machineID == account?.thisMachineID { return false }
+        if machine.publicIdentity == identity?.key { return false }
+        if machine.online == false { return false }
+        if status?.tunnel != true { return false }
+        return true
     }
 
     private func change(_ peer: Peer, _ action: () async throws -> Void) async {

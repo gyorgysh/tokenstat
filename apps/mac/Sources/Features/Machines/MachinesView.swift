@@ -116,6 +116,11 @@ struct MachinesView: View {
                 model.markDisconnected(key)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .remotePeerBecameUnreachable)) { note in
+            if let key = note.object as? String {
+                model.markDisconnected(key)
+            }
+        }
         .sheet(isPresented: $addingDevice) {
             VStack(spacing: 0) {
                 HStack {
@@ -472,12 +477,17 @@ struct MachinesView: View {
                                     .buttonStyle(SecondaryButtonStyle(small: true))
                                     .help("Removes this device's workspaces from the sidebar")
                                 } else {
-                                    accountPeerActions(peer)
+                                    accountPeerActions(peer, machine: machine)
                                 }
                             } else if let key = machine.publicIdentity, !key.isEmpty {
-                                Button("Connect") { Task { await model.connect(machine) } }
-                                    .buttonStyle(AccentButtonStyle(small: true))
-                                    .help("Connects through the tunnel from anywhere")
+                                // Offline machines cannot answer a dial. Showing
+                                // Connect here was a button whose only outcome
+                                // was a failure.
+                                if model.canConnect(machine) {
+                                    Button("Connect") { Task { await model.connect(machine) } }
+                                        .buttonStyle(AccentButtonStyle(small: true))
+                                        .help("Connects through the tunnel from anywhere")
+                                }
                             }
                             Button {
                                 pendingUnlink = machine
@@ -503,22 +513,33 @@ struct MachinesView: View {
     private func statusLine(for machine: Machine, isSelf: Bool) -> String {
         if isSelf { return "This device" }
         if machine.publicIdentity?.isEmpty != false { return "No connection key yet" }
+        if machine.online == false {
+            if let seen = formatRelativeDate(machine.lastSeenAt) {
+                return "Offline · last seen \(seen)"
+            }
+            return "Offline"
+        }
+        if model.isConnected(machine) { return "Connected · workspaces in sidebar" }
         if let seen = formatRelativeDate(machine.lastSeenAt) { return "Seen \(seen)" }
         if let sync = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(sync)" }
         return "No sync recorded"
     }
 
     @ViewBuilder
-    private func accountPeerActions(_ peer: Peer) -> some View {
+    private func accountPeerActions(_ peer: Peer, machine: Machine) -> some View {
         switch peer.trust {
         case .pending:
             Button("Approve") { Task { await model.approve(peer) } }
                 .buttonStyle(AccentButtonStyle())
         case .approved:
-            Button("Connect") { Task { await model.connect(peer) } }
-                .buttonStyle(AccentButtonStyle())
+            if model.canConnect(machine) {
+                Button("Connect") { Task { await model.connect(peer) } }
+                    .buttonStyle(AccentButtonStyle())
+                    .help("Connects through the tunnel from anywhere")
+            }
             Button("Revoke", role: .destructive) { confirmRevoke = peer }
                 .buttonStyle(SecondaryButtonStyle())
+                .help("Stops this device from reaching you; workspaces leave the sidebar")
         case .revoked:
             Button("Approve") { Task { await model.approve(peer) } }
                 .buttonStyle(SecondaryButtonStyle())

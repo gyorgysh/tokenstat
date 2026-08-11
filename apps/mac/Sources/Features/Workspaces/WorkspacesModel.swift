@@ -34,6 +34,10 @@ extension Notification.Name {
     /// A peer's workspaces were explicitly disconnected, so its folders leave
     /// the sidebar now instead of after the failure sweep notices.
     static let remotePeerDidDisconnect = Notification.Name("tokenstat.remotePeerDidDisconnect")
+    /// A previously connected peer stopped answering. UI should drop the
+    /// Connected state, but must **not** suppress re-dial the way Disconnect
+    /// does: a machine that sleeps and wakes should come back on the next sweep.
+    static let remotePeerBecameUnreachable = Notification.Name("tokenstat.remotePeerBecameUnreachable")
 }
 
 /// The tabs of the workspace inspector.
@@ -579,7 +583,17 @@ final class WorkspacesModel {
                     let failures = (remotePeerFailures[peer.key] ?? 0) + 1
                     remotePeerFailures[peer.key] = failures
                     if failures >= Self.maxPeerFailures {
-                        remoteFolders.removeValue(forKey: peer.key)
+                        let hadFolders = remoteFolders.removeValue(forKey: peer.key) != nil
+                        // Clear the Devices "Connected" mark without suppressing
+                        // re-dial. Using the Disconnect path here would hide a
+                        // machine that only went to sleep until the user pressed
+                        // Connect again.
+                        if hadFolders {
+                            NotificationCenter.default.post(
+                                name: .remotePeerBecameUnreachable,
+                                object: peer.key
+                            )
+                        }
                     }
                 }
             }
@@ -622,7 +636,10 @@ final class WorkspacesModel {
         remotePeerNextDial.removeValue(forKey: key)
         remotePeerFailures.removeValue(forKey: key)
         publishFolders()
-        NotificationCenter.default.post(name: .remotePeerDidDisconnect, object: key)
+        // Do not re-post `remotePeerDidDisconnect` here. Callers (Machines, or
+        // RootView reacting to that notification) already own the broadcast;
+        // posting again re-entered this method and made Disconnect look like a
+        // no-op when the second pass found nothing left to drop.
     }
 
     /// An explicit Connect undoes a Disconnect: the peer's folders are
