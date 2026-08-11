@@ -342,10 +342,14 @@ private struct CardView: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(card.delegate == nil ? Theme.border : tint.opacity(0.4), lineWidth: 1)
         )
+        // Escape leaves the editor. macOS only: there is no Escape key to bind
+        // on a phone, and dismissing the keyboard already ends the edit there.
+        #if os(macOS)
         .onExitCommand {
             editingTitle = false
             editingNotes = false
         }
+        #endif
         .onAppear {
             titleDraft = card.title
             notesDraft = card.notes

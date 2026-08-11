@@ -617,7 +617,12 @@ private struct MachineNameField: View {
                     draft = ""
                     commit()
                 }
+                #if os(macOS)
                 .buttonStyle(.link)
+                #else
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                #endif
                 .font(.caption)
             }
         }
