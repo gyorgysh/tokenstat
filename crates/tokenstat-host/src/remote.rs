@@ -178,7 +178,9 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
     {
         let session = Arc::new(Mutex::new(Session::open_client(None)?));
         register_session(Arc::clone(&session));
-        return Ok(session);
+        // Tail expression: on a client build the block below is compiled out
+        // and this is the end of the function.
+        Ok(session)
     }
 
     #[cfg(feature = "local-host")]

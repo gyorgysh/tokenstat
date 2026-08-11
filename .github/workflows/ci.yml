@@ -145,15 +145,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Both simulator architectures. `generic/platform=iOS Simulator` builds
+      # every architecture the SDK has, so a library holding arm64 alone fails
+      # the link on x86_64 even on an Apple Silicon runner. Installing the
+      # second target is cheaper than teaching the build to skip it, and it is
+      # the slice anyone on an Intel Mac needs anyway.
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-ios-sim
+          targets: aarch64-apple-ios-sim, x86_64-apple-ios
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: ios
 
-      # Simulator slice only. The app links whatever the xcframework holds, and
+      # Simulator slices only. The app links whatever the xcframework holds, and
       # building the macOS slices as well would double this job to prove
       # something the test matrix already proves.
       - name: Build the FFI for the simulator

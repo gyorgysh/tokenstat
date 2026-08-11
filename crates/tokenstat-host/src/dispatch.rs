@@ -1950,9 +1950,12 @@ fn usage_limits() -> Value {
     static REFRESH: Mutex<()> = Mutex::new(());
     let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
 
+    // A tail expression, not a `return`: with `local-host` off this block is
+    // the whole function body, and clippy's client-build pass rejects the
+    // early return that reads naturally when both halves are present.
     #[cfg(not(feature = "local-host"))]
     {
-        return account_plane_limits();
+        account_plane_limits()
     }
 
     #[cfg(feature = "local-host")]
