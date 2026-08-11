@@ -81,8 +81,17 @@ pub struct TunnelSession {
     /// What the relay connection is doing right now, for the screen that
     /// reports it. The supervisor owns this; the host reads it.
     status: Mutex<TunnelStatus>,
+    /// How to get a fresh HELLO credential when the relay refuses the one this
+    /// session holds. Set by the host, which is the side that can talk to the
+    /// account. None means "retry with what we have", which is what a build
+    /// without an account does.
+    renew: Mutex<Option<RenewToken>>,
     stopped: AtomicBool,
 }
+
+/// Mints a replacement HELLO credential. `None` when one cannot be had right
+/// now (offline, signed out), which leaves the supervisor retrying.
+pub type RenewToken = Box<dyn Fn() -> Option<String> + Send + Sync>;
 
 /// What the tunnel connection is doing right now.
 #[derive(Debug, Clone, Default)]
@@ -141,6 +150,7 @@ impl TunnelSession {
             channels: Mutex::new(HashMap::new()),
             socket: Mutex::new(None),
             status: Mutex::new(TunnelStatus::default()),
+            renew: Mutex::new(None),
             stopped: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&session);
@@ -155,6 +165,35 @@ impl TunnelSession {
         *self.token.lock().unwrap_or_else(|e| e.into_inner()) = token.to_string();
         if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = socket.close(None);
+        }
+    }
+
+    /// Teach this session how to replace a credential the relay refused.
+    ///
+    /// Without it a machine whose token was revoked, expired between runs, or
+    /// registered under a key the account no longer carries retries the same
+    /// dead secret until somebody notices and toggles a switch. That is the
+    /// state remote reach was found in: a relay saying "sign in again" every
+    /// thirty seconds, for hours, with a perfectly good login on the machine.
+    pub fn set_renew(&self, renew: RenewToken) {
+        *self.renew.lock().unwrap_or_else(|e| e.into_inner()) = Some(renew);
+    }
+
+    /// Ask for a fresh credential and keep it. True when one arrived.
+    fn renew_credential(&self) -> bool {
+        let minted = {
+            let guard = self.renew.lock().unwrap_or_else(|e| e.into_inner());
+            match guard.as_ref() {
+                Some(renew) => renew(),
+                None => None,
+            }
+        };
+        match minted {
+            Some(token) if !token.is_empty() => {
+                *self.token.lock().unwrap_or_else(|e| e.into_inner()) = token;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -434,7 +473,17 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
                 error: None,
             };
         }
-        Message::Text(text) => return Err(RemoteError::Tunnel(denial_message(&text))),
+        Message::Text(text) => {
+            // A refusal the machine can answer itself is answered here, before
+            // the supervisor sleeps: a stale, expired or re-registered
+            // credential is replaced so the next attempt is a different
+            // attempt. Plan and duplicate-key refusals are left alone, because
+            // minting again would only ask the account the same question.
+            if renewable_denial(&text) && session.renew_credential() {
+                eprintln!("tunnel: credential refused, minted a fresh one");
+            }
+            return Err(RemoteError::Tunnel(denial_message(&text)));
+        }
         Message::Close(_) => return Err(RemoteError::Closed),
         other => {
             return Err(RemoteError::Tunnel(format!(
@@ -610,6 +659,21 @@ fn mark_all_channels(session: &TunnelSession, reason: &str) {
 /// not, so the mapping lives here once instead of in every screen that shows a
 /// tunnel status. An unknown code is passed through rather than swallowed: a
 /// new relay reason should read oddly, not disappear.
+/// Whether a fresh credential could plausibly fix this refusal.
+///
+/// `key_mismatch` is in the list because minting goes through registration:
+/// the machine re-publishes its key and gets a token bound to it, which is
+/// exactly the repair that refusal asks for.
+fn renewable_denial(text: &str) -> bool {
+    let Some(reason) = text.strip_prefix("DENIED ") else {
+        return false;
+    };
+    matches!(
+        reason.trim(),
+        "bad_token" | "token_expired" | "key_mismatch"
+    )
+}
+
 fn denial_message(text: &str) -> String {
     let Some(reason) = text.strip_prefix("DENIED ") else {
         return text.to_string();
@@ -655,6 +719,17 @@ mod tests {
         );
         // Anything that is not a denial passes through untouched.
         assert_eq!(denial_message("READY"), "READY");
+    }
+
+    #[test]
+    fn only_credential_refusals_ask_for_a_new_token() {
+        assert!(renewable_denial("DENIED bad_token"));
+        assert!(renewable_denial("DENIED token_expired"));
+        assert!(renewable_denial("DENIED key_mismatch"));
+        // Minting again cannot buy a plan or free a key another machine holds.
+        assert!(!renewable_denial("DENIED not_on_this_plan"));
+        assert!(!renewable_denial("DENIED key_already_live"));
+        assert!(!renewable_denial("READY"));
     }
 
     #[test]

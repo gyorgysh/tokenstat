@@ -171,6 +171,9 @@ pub struct Connection {
     noise: snow::TransportState,
     /// Who is on the other end. Already checked by the time this exists.
     peer: PublicKey,
+    /// Friendly name the peer sent in the handshake (device name). Empty when
+    /// the far side is older and sent nothing.
+    intro_label: String,
 }
 
 /// Names the peer and nothing else. The keying material inside the transport
@@ -193,6 +196,11 @@ impl Connection {
 
     pub fn peer_fingerprint(&self) -> String {
         fingerprint(&self.peer)
+    }
+
+    /// Device name from the peer's handshake intro, when it sent one.
+    pub fn intro_label(&self) -> &str {
+        &self.intro_label
     }
 
     /// Send one message.
@@ -227,6 +235,7 @@ impl Connection {
             stream,
             noise,
             peer: _,
+            intro_label: _,
         } = self;
         let mut core = Core {
             noise,
@@ -539,7 +548,10 @@ pub fn handshake_initiator(
     let response = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
     handshake.read_message(&response, &mut buffer)?;
 
-    let n = handshake.write_message(&[], &mut buffer)?;
+    // Last message carries this machine's display name so the far side can
+    // show "iPhone" rather than "unnamed machine" when recording a pending peer.
+    let intro = intro_payload();
+    let n = handshake.write_message(&intro, &mut buffer)?;
     write_framed(&mut stream, &buffer[..n])?;
     stream.flush()?;
 
@@ -564,6 +576,7 @@ pub fn handshake_initiator(
         stream,
         noise: handshake.into_transport_mode()?,
         peer,
+        intro_label: String::new(),
     })
 }
 
@@ -637,35 +650,77 @@ impl Server {
 ///
 /// This is shared by direct TCP and tunnel connections. The transport used to
 /// reach a machine must not change the approval rule.
+///
+/// The peer's handshake intro label (device name) is recorded on first contact
+/// so the UI shows "iPhone" rather than "unnamed machine".
 pub fn authorize(connection: Connection, address: &str) -> Result<Connection, Refused> {
+    authorize_with(connection, address, None)
+}
+
+/// Decides whether a pending peer is one this machine already knows through
+/// the account, and what to call it. `None` leaves the peer pending.
+pub type AutoApprove<'a> = &'a dyn Fn(&PublicKey) -> Option<String>;
+
+/// Like [`authorize`], but when `auto_approve` returns a label for a pending
+/// peer the connection is approved immediately (used for same-account devices).
+pub fn authorize_with(
+    connection: Connection,
+    address: &str,
+    auto_approve: Option<AutoApprove<'_>>,
+) -> Result<Connection, Refused> {
     let Connection {
         stream,
         noise,
         peer,
+        intro_label,
     } = connection;
+    let label = intro_label.trim().to_string();
     let trust_result = {
         let mut store = match PeerStore::load() {
             Ok(store) => store,
             Err(e) => return Err(Refused::Handshake(RemoteError::Identity(e))),
         };
         let known = store.get(&peer).is_some();
-        let trust = store.seen(&peer, "", Some(address), &crate::now());
-        if !known {
-            let _ = store.save();
+        let prior = store.get(&peer).map(|p| p.trust);
+        let mut trust = store.seen(&peer, &label, Some(address), &crate::now());
+        // Auto-approve only when still pending (never when revoked).
+        if trust == Trust::Pending && prior != Some(Trust::Revoked) {
+            if let Some(hook) = auto_approve {
+                if let Some(account_label) = hook(&peer) {
+                    let name = if label.is_empty() {
+                        account_label
+                    } else {
+                        label.clone()
+                    };
+                    store.add_approved(&peer, &name, Some(address), &crate::now());
+                    trust = Trust::Approved;
+                }
+            }
         }
-        (known, trust)
+        let _ = store.save();
+        (
+            known,
+            trust,
+            if label.is_empty() {
+                address.to_string()
+            } else {
+                label
+            },
+        )
     };
     match trust_result {
-        (_, Trust::Approved) => Ok(Connection {
+        (_, Trust::Approved, _) => Ok(Connection {
             stream,
             noise,
             peer,
+            intro_label,
         }),
-        (known, _) => {
+        (known, _, display) => {
             let mut refusal = Connection {
                 stream,
                 noise,
                 peer,
+                intro_label,
             };
             let _ = refusal.send(NOT_APPROVED.as_bytes());
             refusal.close();
@@ -676,11 +731,18 @@ pub fn authorize(connection: Connection, address: &str) -> Result<Connection, Re
             } else {
                 Err(Refused::Unknown {
                     fingerprint: fingerprint(&peer),
-                    label: address.to_string(),
+                    label: display,
                 })
             }
         }
     }
+}
+
+/// UTF-8 device name carried in the last Noise XX message (max 80 bytes).
+fn intro_payload() -> Vec<u8> {
+    let name = tokenstat_identity::machine_label();
+    let bytes = name.as_bytes();
+    bytes[..bytes.len().min(80)].to_vec()
 }
 
 /// Run the responder side of the Noise handshake over any transport.
@@ -700,13 +762,19 @@ pub fn handshake_responder(
     write_framed(&mut stream, &buffer[..n])?;
     stream.flush()?;
     let third = read_framed(&mut stream, MAX_NOISE_MESSAGE, None)?;
-    handshake.read_message(&third, &mut buffer)?;
+    let payload_len = handshake.read_message(&third, &mut buffer)?;
+    let intro_label = String::from_utf8_lossy(&buffer[..payload_len])
+        .trim()
+        .chars()
+        .take(80)
+        .collect::<String>();
     let peer = remote_static(&handshake)?;
     stream.set_deadline(None)?;
     Ok(Connection {
         stream,
         noise: handshake.into_transport_mode()?,
         peer,
+        intro_label,
     })
 }
 

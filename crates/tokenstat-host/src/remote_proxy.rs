@@ -85,7 +85,9 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
             registry.remove(&key);
         }
     });
-    Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
+    // Prefer localhost over 127.0.0.1: WKWebView / ATS treat local names more
+    // kindly, and iOS App Transport "local networking" covers both.
+    Ok(json!({"url": format!("http://localhost:{port}/")}))
 }
 
 fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {

@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 #[cfg(feature = "local-host")]
 use tokenstat_identity::Trust;
 use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
-use tokenstat_remote::{Refused, authorize};
+use tokenstat_remote::{Refused, authorize_with};
 
 use crate::session::Session;
 
@@ -183,11 +183,9 @@ fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
 
     #[cfg(feature = "local-host")]
     {
-        Err(
-            "serving other machines needs the tokenstat host daemon. \
+        Err("serving other machines needs the tokenstat host daemon. \
              Install it with scripts/install-host-agent.sh."
-                .to_string(),
-        )
+            .to_string())
     }
 }
 
@@ -254,6 +252,22 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     if !settings.tunnel {
         return;
     }
+    // Already live: refresh HELLO and leave the supervisor alone.
+    if tunnel_running().load(Ordering::Acquire) {
+        if let Ok(guard) = tunnel_session().lock() {
+            if guard.is_some() {
+                // Still mint so a near-expiry token is replaced before HELLO fails.
+                if let Ok((hello_token, _)) = tunnel_hello_token() {
+                    if let Some(existing) = guard.as_ref() {
+                        existing.set_token(&hello_token);
+                    }
+                }
+                return;
+            }
+        }
+        // Marked running but no session: fall through and rebuild.
+        tunnel_running().store(false, Ordering::Release);
+    }
     if tunnel_running()
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
@@ -265,7 +279,12 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     // HELLO secret is tunnel-scoped when the server supports it.
     if let Err(error) = account_token() {
         eprintln!("remote: tunnel is enabled but unavailable: {error}");
+        set_tunnel_state(|state| {
+            state.connected = false;
+            state.error = Some(error);
+        });
         tunnel_running().store(false, Ordering::Release);
+        retry_start_later(Arc::clone(&session));
         return;
     }
     let identity = match MachineIdentity::load_or_create() {
@@ -288,6 +307,11 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 state.error = Some(error);
             });
             tunnel_running().store(false, Ordering::Release);
+            // A daemon that starts before the network is up, or while the
+            // account host is having a minute, used to stay off until somebody
+            // opened Machines and toggled the switch. Remote reach is meant to
+            // be the state of the machine, not the state of the last attempt.
+            retry_start_later(session);
             return;
         }
     };
@@ -315,6 +339,19 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                     &identity,
                     &hello_token,
                 );
+                // The repair for a refused credential, handed to the
+                // supervisor so it can fix itself between two reconnects
+                // instead of waiting for somebody to toggle a switch.
+                session.set_renew(Box::new(|| match tunnel_hello_token() {
+                    Ok((token, _)) => {
+                        set_tunnel_state(|state| state.error = None);
+                        Some(token)
+                    }
+                    Err(error) => {
+                        set_tunnel_state(|state| state.error = Some(error));
+                        None
+                    }
+                }));
                 *guard = Some(session.clone());
                 session
             }
@@ -345,7 +382,7 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                         state.connected = true;
                         state.error = None;
                     });
-                    match authorize(connection, "tunnel") {
+                    match authorize_with(connection, "tunnel", Some(&account_peer_label)) {
                         Ok(connection) => {
                             let peer_session = Arc::clone(&session);
                             std::thread::spawn(move || serve_peer(connection, &peer_session));
@@ -357,6 +394,39 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             }
         }
         tunnel_running().store(false, Ordering::Release);
+    });
+}
+
+/// Keep trying to bring remote reach up, in the background, until it is up or
+/// the user turns it off.
+///
+/// One retry thread at a time. The delay doubles from ten seconds to five
+/// minutes: a laptop opening its lid, a network coming back, or an account
+/// host that was briefly down all resolve inside that window without anybody
+/// visiting a settings screen.
+fn retry_start_later(session: Arc<Mutex<Session>>) {
+    static RETRYING: AtomicBool = AtomicBool::new(false);
+    if RETRYING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut delay = Duration::from_secs(10);
+        loop {
+            std::thread::sleep(delay);
+            let settings = load_settings();
+            if !settings.tunnel {
+                break;
+            }
+            if tunnel_running().load(Ordering::Acquire) {
+                break;
+            }
+            start_tunnel_if_enabled(Arc::clone(&session), &settings);
+            if tunnel_running().load(Ordering::Acquire) {
+                break;
+            }
+            delay = (delay * 2).min(Duration::from_secs(300));
+        }
+        RETRYING.store(false, Ordering::Release);
     });
 }
 
@@ -465,13 +535,78 @@ fn register_with_account(settings: &RemoteSettings) {
 }
 
 /// Re-register after a rename, so the account directory shows the new name on
-/// the other screens. A no-op when remote reach is off.
+/// the other screens.
+///
+/// A host publishes itself only when remote reach is on: that switch is what
+/// puts a computer in the directory, and a rename must not put it there
+/// behind the user's back. A client has no such switch. It is in the directory
+/// from the moment it signed in, so a phone that skipped this would sit in
+/// everybody else's device list as "iPhone" for good.
 pub(crate) fn register_if_tunnel_enabled() {
     let settings = load_settings();
-    if !settings.tunnel {
-        return;
+    if settings.tunnel {
+        std::thread::spawn(move || register_with_account(&settings));
+    } else {
+        #[cfg(not(feature = "local-host"))]
+        std::thread::spawn(register_client_identity);
     }
-    std::thread::spawn(move || register_with_account(&settings));
+}
+
+/// Publish this client's key and name to the account directory. Clients do not
+/// take a host slot, so this is safe to do whenever the name changes.
+#[cfg(not(feature = "local-host"))]
+fn register_client_identity() {
+    let outcome = (|| -> Result<(), String> {
+        let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+        let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
+        tokenstat_sync::profile::register_machine_identity_kind(
+            None,
+            &machine_id,
+            &identity.public_key_hex(),
+            &tokenstat_identity::machine_label(),
+            "client",
+        )
+        .map_err(|e| e.to_string())
+    })();
+    if let Err(error) = outcome {
+        // Not fatal and not shown: an unnamed phone still works, and the next
+        // sign-in or connect registers it again.
+        eprintln!("remote: could not publish this device's name: {error}");
+    }
+}
+
+/// Same-account devices on `/me` are approved without a second tap. The phone
+/// and Mac already share the login; requiring Machines → Approve for that is
+/// noise. Revoked peers never reach this path (authorize keeps them revoked).
+fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
+    let want = tokenstat_identity::hex(peer);
+    let status = tokenstat_sync::sync_status(None).ok()?;
+    for machine in &status.machines {
+        let key = machine
+            .get("public_identity")
+            .or_else(|| machine.get("identity"))
+            .and_then(|v| v.as_str())?;
+        if !key.eq_ignore_ascii_case(&want) {
+            continue;
+        }
+        let label = machine
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim();
+        let kind = machine
+            .get("kind")
+            .and_then(|v| v.as_str())
+            .unwrap_or("host");
+        if !label.is_empty() {
+            return Some(label.to_string());
+        }
+        if kind == "client" {
+            return Some("iPhone".into());
+        }
+        return Some("Account device".into());
+    }
+    None
 }
 
 fn report(refused: &Refused) {

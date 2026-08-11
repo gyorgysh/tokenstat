@@ -265,12 +265,22 @@ pub fn machine_label() -> String {
             }
         }
     }
-    std::process::Command::new("hostname")
-        .output()
-        .ok()
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "this machine".into())
+    // iOS / iPadOS have no scutil, and a sandboxed app cannot spawn `hostname`
+    // at all. The family is the honest answer from here; the app replaces it
+    // with the name on the box at launch. See `ClientDeviceName` in the client.
+    #[cfg(target_os = "ios")]
+    {
+        return "iPhone".into();
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "this machine".into())
+    }
 }
 
 /// Name this machine, or clear the name and go back to the system one.
