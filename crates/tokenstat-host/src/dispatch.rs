@@ -32,9 +32,9 @@ use crate::automations::Automation;
 #[cfg(feature = "local-host")]
 use crate::dto::WorkspaceDto;
 use crate::dto::{
-    AccountDto, BlockDto, BucketDto, CalendarDto, DayDetailDto, DayPartDto, DeviceLoginDto,
-    DevicePollDto, GroupByDto, InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto,
-    SyncResultDto, TotalsDto,
+    AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto, DayDetailDto, DayPartDto,
+    DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto, MachineDto, MachineUsageDto, QueryDto,
+    ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
 };
 use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
@@ -117,6 +117,56 @@ impl Default for DayDetailParams {
 
 fn default_weeks() -> usize {
     53
+}
+
+/// Params for `account.report`: which dimension to fold by, over how long.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountReportParams {
+    /// `"model"`, `"source"` or `"day"`. See `account_activity::Dimension` for
+    /// why there is no `"project"`.
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default = "default_weeks")]
+    weeks: usize,
+}
+
+impl Default for AccountReportParams {
+    fn default() -> Self {
+        AccountReportParams {
+            group: None,
+            weeks: default_weeks(),
+        }
+    }
+}
+
+/// Params for `account.machineUsage`: which machines, over how many days.
+///
+/// The caller passes the ids because it already has them from `account.status`,
+/// and asking the service for the same list twice to answer one question is a
+/// round trip nobody needs.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MachineUsageParams {
+    #[serde(default)]
+    machines: Vec<String>,
+    #[serde(default = "default_machine_days")]
+    days: u16,
+}
+
+impl Default for MachineUsageParams {
+    fn default() -> Self {
+        MachineUsageParams {
+            machines: Vec::new(),
+            days: default_machine_days(),
+        }
+    }
+}
+
+/// A month. Long enough to say which computer does the work, short enough that
+/// one request per machine stays cheap.
+fn default_machine_days() -> u16 {
+    30
 }
 
 #[cfg(feature = "local-host")]
@@ -726,6 +776,84 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 }
                 let dto = day_detail_dto(&p.date, &rows, &b.prices);
                 serde_json::to_value(dto).envelope()
+            })
+        }
+
+        // The account's own breakdown, across every machine that syncs.
+        //
+        // The sibling of `report`, which reads this machine's archive. A client
+        // has no archive, so without this its Insights screen could only ever
+        // say "no local archive", and a phone is exactly where somebody wants to
+        // know which model ate the month.
+        //
+        // Built from the same cached series as `activity.calendar`, so the
+        // breakdown and the grid above it cannot disagree and opening the screen
+        // costs no network call of its own.
+        "account.report" => {
+            let p: AccountReportParams = parse(params)?;
+            let group = p.group.as_deref().unwrap_or("model");
+            let dimension = crate::account_activity::Dimension::from_wire(group);
+            with_session(s, |b| {
+                let built =
+                    crate::account_activity::breakdown(&b.prices, b.timezone(), p.weeks, dimension)
+                        .map_err(|failure| {
+                            DispatchError::new(
+                                match failure.reason {
+                                    FailureReason::Authentication => "auth",
+                                    FailureReason::UpgradeRequired => "upgrade",
+                                    FailureReason::Other => "other",
+                                },
+                                match failure.reason {
+                                    FailureReason::Authentication => {
+                                        "Sign in to tokenstat.ai to see your usage.".to_string()
+                                    }
+                                    _ => failure.message.clone(),
+                                },
+                            )
+                        })?;
+                serde_json::to_value(AccountReportDto {
+                    rows: built.rows.into_iter().map(BucketDto::from).collect(),
+                    group: group.to_string(),
+                    fetched_at_ms: built.fetched_at_ms,
+                    stale: built.stale,
+                })
+                .envelope()
+            })
+        }
+
+        // What each machine on the account contributed. One request per machine,
+        // so this is asked for by a screen somebody opened rather than warmed
+        // behind one they might.
+        "account.machineUsage" => {
+            let p: MachineUsageParams = parse(params)?;
+            with_session(s, |b| {
+                let rows = crate::account_activity::machine_usage(
+                    &b.prices,
+                    b.timezone(),
+                    &p.machines,
+                    p.days,
+                )
+                .map_err(|failure| {
+                    DispatchError::new(
+                        match failure.reason {
+                            FailureReason::Authentication => "auth",
+                            FailureReason::UpgradeRequired => "upgrade",
+                            FailureReason::Other => "other",
+                        },
+                        failure.message.clone(),
+                    )
+                })?;
+                let dtos: Vec<MachineUsageDto> = rows
+                    .into_iter()
+                    .map(|r| MachineUsageDto {
+                        machine: r.machine,
+                        value_micros: r.micros,
+                        events: r.events,
+                        active_days: r.active_days,
+                        days: p.days,
+                    })
+                    .collect();
+                serde_json::to_value(dtos).envelope()
             })
         }
 

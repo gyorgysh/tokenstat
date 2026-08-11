@@ -123,6 +123,11 @@ pub fn invalidate() {
     if let Ok(mut guard) = cache().lock() {
         *guard = None;
     }
+    // The per-machine answers came from the same upload. Leaving them would
+    // show a device list that disagrees with the grid it sits under.
+    if let Ok(mut guard) = machine_cache().lock() {
+        *guard = None;
+    }
     let _ = stored::remove();
 }
 
@@ -328,6 +333,286 @@ pub fn day_detail(
 
     parts.sort_by_key(|b| std::cmp::Reverse(b.tokens()));
     Ok(parts)
+}
+
+/// Which dimension an account breakdown folds by.
+///
+/// Three, and deliberately not four. The account holds day, source and model,
+/// because that is all the sync envelope was ever allowed to carry: a project
+/// key is an opaque HMAC and a session id never leaves the machine. So a client
+/// can report by model, by harness and by day, and it must not offer a Projects
+/// tab that would only ever be empty.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    Model,
+    Source,
+    Day,
+}
+
+impl Dimension {
+    /// Parse the wire name. Unknown falls back to the model breakdown rather
+    /// than failing: a newer front end asking for something this build has not
+    /// got should see a report, not an error dialog.
+    pub fn from_wire(name: &str) -> Dimension {
+        match name {
+            "source" | "harness" | "tool" => Dimension::Source,
+            "day" | "date" => Dimension::Day,
+            _ => Dimension::Model,
+        }
+    }
+
+    fn key(self, row: &SeriesRow) -> String {
+        match self {
+            Dimension::Model => row.model.clone(),
+            Dimension::Source => row.src.clone(),
+            Dimension::Day => row.day.clone(),
+        }
+    }
+}
+
+/// The account's breakdown by one dimension, priced here.
+pub struct AccountBreakdown {
+    pub rows: Vec<tokenstat_core::engine::PricedBucket>,
+    pub fetched_at_ms: i64,
+    /// The refresh failed and these are remembered numbers. Same rule as the
+    /// calendar: a figure with no date is a quiet claim to be current.
+    pub stale: bool,
+}
+
+/// What the account spent, folded by one dimension, largest first.
+///
+/// The same cached series Home's grid is built from, so opening Insights on a
+/// phone costs no network call of its own and cannot disagree with the heatmap
+/// above it. Priced per model inside each bucket, because a rate belongs to a
+/// model: summing tokens first and pricing the total would charge everything at
+/// whichever rate came last.
+///
+/// `sessions` is zero on every row and that is not a placeholder. The account
+/// never receives session identifiers, so the honest count is "we do not know",
+/// and a front end must not render a zero there as a fact.
+pub fn breakdown(
+    prices: &PriceTable,
+    tz: &jiff::tz::TimeZone,
+    weeks: usize,
+    dimension: Dimension,
+) -> Result<AccountBreakdown, FetchError> {
+    let today = activity::today(tz);
+    let fetched = series(weeks, today)?;
+
+    // Counters fold by key. Money folds by key × model, because pricing is
+    // per model and the two cannot be done in one pass without charging one
+    // model's tokens at another's rate.
+    let mut order: Vec<String> = Vec::new();
+    let mut totals: std::collections::HashMap<String, (Counters, u64)> =
+        std::collections::HashMap::new();
+    let mut value: std::collections::HashMap<String, (i64, bool, Vec<String>)> =
+        std::collections::HashMap::new();
+
+    for row in &fetched.rows {
+        let key = dimension.key(row);
+        let counters = Counters {
+            input_fresh: Some(row.input),
+            cache_read: Some(row.cr),
+            cache_write_5m: Some(row.cw5),
+            cache_write_1h: Some(row.cw1),
+            output: Some(row.output),
+        };
+        match totals.get_mut(&key) {
+            Some(entry) => {
+                entry.0 = add_counters(entry.0, counters);
+                entry.1 = entry.1.saturating_add(row.ev);
+            }
+            None => {
+                order.push(key.clone());
+                totals.insert(key.clone(), (counters, row.ev));
+            }
+        }
+
+        let lookup = tokenstat_core::pricing::display_usage_model_id(&row.model);
+        let entry = value.entry(key).or_default();
+        match EquivalentValue::price(prices, &lookup, &counters) {
+            Some(v) => {
+                entry.0 += v.micros();
+                entry.1 |= prices.is_estimate(&lookup);
+            }
+            None => {
+                if !entry.2.contains(&lookup) {
+                    entry.2.push(lookup);
+                }
+            }
+        }
+    }
+
+    let mut rows: Vec<tokenstat_core::engine::PricedBucket> = order
+        .into_iter()
+        .map(|key| {
+            let (counters, events) = totals.remove(&key).unwrap_or_default();
+            let (micros, estimated, unpriced) = value.remove(&key).unwrap_or_default();
+            tokenstat_core::engine::PricedBucket {
+                key,
+                counters,
+                events,
+                // The account holds no session ids. See the doc comment.
+                sessions: 0,
+                value: EquivalentValue::from_micros(micros),
+                estimated,
+                unpriced_models: unpriced,
+            }
+        })
+        .collect();
+
+    // Days read best newest first, everything else biggest first. A date list
+    // sorted by size is a list nobody can scan.
+    match dimension {
+        Dimension::Day => rows.sort_by(|a, b| b.key.cmp(&a.key)),
+        _ => rows.sort_by_key(|b| std::cmp::Reverse(b.value.micros())),
+    }
+
+    Ok(AccountBreakdown {
+        rows,
+        fetched_at_ms: fetched.fetched_at_ms,
+        stale: fetched.stale,
+    })
+}
+
+/// What one machine on the account contributed, over a window of days.
+pub struct MachineUsage {
+    pub machine: String,
+    pub micros: i64,
+    pub events: u64,
+    /// Days in the window that machine recorded anything on.
+    pub active_days: usize,
+}
+
+/// How long a per-machine answer stays good. The same reasoning as the series
+/// cache, and it matters more here: this is one request per machine, so a
+/// screen that refetched on every appearance would multiply itself.
+const MACHINE_FRESH_FOR: Duration = Duration::from_secs(10 * 60);
+
+struct MachineCache {
+    days: u16,
+    rows: Vec<MachineUsage>,
+    fetched_at: Instant,
+}
+
+fn machine_cache() -> &'static Mutex<Option<MachineCache>> {
+    static CACHE: OnceLock<Mutex<Option<MachineCache>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+/// What each machine contributed, so a device list can say which computer is
+/// doing the work.
+///
+/// One request per machine, because the series endpoint answers per machine and
+/// the rows it returns carry no machine of their own. That is why the window is
+/// a month rather than a year by default, and why the answer is cached: this is
+/// the most expensive thing the client asks for and it belongs to a screen
+/// people open occasionally.
+///
+/// A machine that fails is left out rather than failing the whole list. Four
+/// devices and a shrug about the fifth beats an error card where the devices
+/// should be.
+pub fn machine_usage(
+    prices: &PriceTable,
+    tz: &jiff::tz::TimeZone,
+    machines: &[String],
+    days: u16,
+) -> Result<Vec<MachineUsage>, FetchError> {
+    if machines.is_empty() {
+        return Ok(Vec::new());
+    }
+    if let Ok(guard) = machine_cache().lock() {
+        if let Some(c) = guard.as_ref() {
+            if c.days == days
+                && c.fetched_at.elapsed() < MACHINE_FRESH_FOR
+                && machines
+                    .iter()
+                    .all(|m| c.rows.iter().any(|r| &r.machine == m))
+            {
+                return Ok(c
+                    .rows
+                    .iter()
+                    .filter(|r| machines.contains(&r.machine))
+                    .map(|r| MachineUsage {
+                        machine: r.machine.clone(),
+                        micros: r.micros,
+                        events: r.events,
+                        active_days: r.active_days,
+                    })
+                    .collect());
+            }
+        }
+    }
+
+    let today = activity::today(tz);
+    // Inclusive of both ends, so "30 days" covers thirty of them. Asking for
+    // `today - 30` returns thirty-one, and a device that reported on every one
+    // of them then reads as "31 active days" under a label saying 30.
+    let from = today
+        .checked_add(jiff::Span::new().days(-(days.clamp(1, 400) as i64 - 1)))
+        .map_err(|e| FetchError::new(e.to_string()))?
+        .to_string();
+    let to = today.to_string();
+
+    let mut out: Vec<MachineUsage> = Vec::new();
+    let mut last_error: Option<String> = None;
+    for machine in machines {
+        match profile::account_series(None, Some(&from), Some(&to), Some(machine)) {
+            Ok(result) => {
+                let mut micros: i64 = 0;
+                let mut events: u64 = 0;
+                let mut active: std::collections::BTreeSet<String> =
+                    std::collections::BTreeSet::new();
+                for row in &result.rows {
+                    let counters = Counters {
+                        input_fresh: Some(row.input),
+                        cache_read: Some(row.cr),
+                        cache_write_5m: Some(row.cw5),
+                        cache_write_1h: Some(row.cw1),
+                        output: Some(row.output),
+                    };
+                    let lookup = tokenstat_core::pricing::display_usage_model_id(&row.model);
+                    if let Some(v) = EquivalentValue::price(prices, &lookup, &counters) {
+                        micros += v.micros();
+                    }
+                    events = events.saturating_add(row.ev);
+                    active.insert(row.day.clone());
+                }
+                out.push(MachineUsage {
+                    machine: machine.clone(),
+                    micros,
+                    events,
+                    active_days: active.len(),
+                });
+            }
+            Err(e) => last_error = Some(e.to_string()),
+        }
+    }
+
+    // Every one of them failed, which is a different thing from a quiet month:
+    // report it rather than drawing five devices that all spent nothing.
+    if out.is_empty() {
+        return Err(FetchError::new(last_error.unwrap_or_else(|| {
+            "the account did not answer for any device".to_string()
+        })));
+    }
+
+    if let Ok(mut guard) = machine_cache().lock() {
+        *guard = Some(MachineCache {
+            days,
+            rows: out
+                .iter()
+                .map(|r| MachineUsage {
+                    machine: r.machine.clone(),
+                    micros: r.micros,
+                    events: r.events,
+                    active_days: r.active_days,
+                })
+                .collect(),
+            fetched_at: Instant::now(),
+        });
+    }
+    Ok(out)
 }
 
 /// Sum two counters, treating a missing field as zero.
@@ -540,6 +825,19 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_breakdown_dimension_falls_back_to_models() {
+        // A front end asking for something this build has not got should get a
+        // report rather than an error dialog, and `project` is the one it will
+        // ask for: the Mac has that breakdown and the account cannot.
+        assert_eq!(Dimension::from_wire("model"), Dimension::Model);
+        assert_eq!(Dimension::from_wire("source"), Dimension::Source);
+        assert_eq!(Dimension::from_wire("harness"), Dimension::Source);
+        assert_eq!(Dimension::from_wire("day"), Dimension::Day);
+        assert_eq!(Dimension::from_wire("project"), Dimension::Model);
+        assert_eq!(Dimension::from_wire(""), Dimension::Model);
+    }
 
     #[test]
     fn an_auth_failure_is_expected_and_actionable() {

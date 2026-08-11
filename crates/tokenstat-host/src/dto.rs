@@ -478,6 +478,39 @@ fn local_scope() -> String {
     "local".into()
 }
 
+/// An account-plane breakdown, and how current it is.
+///
+/// The date rides with the rows for the same reason it rides with the calendar:
+/// a figure and its age are one fact, and a client that could fetch the rows
+/// without the date would eventually draw them without it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountReportDto {
+    pub rows: Vec<BucketDto>,
+    /// Which dimension these are folded by, echoed back so a late answer that
+    /// arrives after the reader switched tabs can be discarded.
+    pub group: String,
+    pub fetched_at_ms: i64,
+    /// These are remembered numbers, served because the refresh failed.
+    pub stale: bool,
+}
+
+/// What one machine on the account contributed over a window.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineUsageDto {
+    /// The account's machine id, which is what the caller matches rows to
+    /// devices by.
+    pub machine: String,
+    /// List rates, never a charge. Same rule as everywhere else.
+    pub value_micros: i64,
+    pub events: u64,
+    pub active_days: usize,
+    /// The window this covers, in days, so the front end can label it rather
+    /// than assume one.
+    pub days: u16,
+}
+
 /// One day's hover detail: the totals line plus every `model × source` row.
 ///
 /// The shape the public profile page draws on hover. A client shows the
