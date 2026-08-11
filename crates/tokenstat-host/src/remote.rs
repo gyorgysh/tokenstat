@@ -141,10 +141,15 @@ fn set_tunnel_state(update: impl FnOnce(&mut TunnelState)) {
 
 /// The session a peer will be answered from.
 ///
-/// Registered by the daemon, and by nothing else. The in-process bridge inside
-/// the app deliberately never registers one, so `remote.serve` there fails with
-/// words rather than opening a port owned by a window: a machine other machines
+/// On a Mac with `local-host`, only the host daemon registers one. The
+/// in-process bridge deliberately does not, so `remote.serve` fails with words
+/// rather than opening a tunnel owned by a window: a machine other machines
 /// depend on must not stop serving because somebody quit an app.
+///
+/// On a phone (`local-host` off) there is no daemon. The process *is* the host
+/// for the client role, so [`session_for_serving`] opens a client session when
+/// none is registered yet. That is what lets Workspaces turn the tunnel on and
+/// dial a Mac.
 fn registered_session() -> &'static Mutex<Option<Arc<Mutex<Session>>>> {
     static SESSION: OnceLock<Mutex<Option<Arc<Mutex<Session>>>>> = OnceLock::new();
     SESSION.get_or_init(|| Mutex::new(None))
@@ -158,15 +163,32 @@ pub fn register_session(session: Arc<Mutex<Session>>) {
 }
 
 fn session_for_serving() -> Result<Arc<Mutex<Session>>, String> {
-    registered_session()
+    if let Some(session) = registered_session()
         .lock()
         .map_err(|e| e.to_string())?
         .clone()
-        .ok_or_else(|| {
+    {
+        return Ok(session);
+    }
+
+    // Phone / iPad: no hostd, no unix socket. A client session is enough to
+    // hold the tunnel for outbound dials; inbound is limited to what a client
+    // build can answer, which is intentional.
+    #[cfg(not(feature = "local-host"))]
+    {
+        let session = Arc::new(Mutex::new(Session::open_client(None)?));
+        register_session(Arc::clone(&session));
+        return Ok(session);
+    }
+
+    #[cfg(feature = "local-host")]
+    {
+        Err(
             "serving other machines needs the tokenstat host daemon. \
              Install it with scripts/install-host-agent.sh."
-                .to_string()
-        })
+                .to_string(),
+        )
+    }
 }
 
 /// Start serving, if the user turned it on. Called once at daemon start.
