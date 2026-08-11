@@ -324,6 +324,8 @@ struct AccountView: View {
             subtitle: "How terminal sessions behave"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                // These describe terminals, and a client has none.
+                #if os(macOS)
                 toggleRow(
                     "Expose terminal output to VoiceOver",
                     detail: "Lets VoiceOver read the terminal as a text area. Applies when a terminal appears.",
@@ -341,6 +343,7 @@ struct AccountView: View {
                         set: { TerminalPreferences.disablesColor = $0 }
                     )
                 )
+                #endif
             }
         }
     }

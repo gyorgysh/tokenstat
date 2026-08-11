@@ -5,6 +5,10 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+// Registering a folder means `NSOpenPanel`, so the whole sheet is macOS, the
+// same way `WorkspacesModel.addFolder` behind it already is. A client has no
+// folders of its own to add.
+#if os(macOS)
 import SwiftUI
 
 /// The onboarding sheet behind "Add workspace…".
@@ -112,3 +116,4 @@ struct AddWorkspaceSheet: View {
         }
     }
 }
+#endif

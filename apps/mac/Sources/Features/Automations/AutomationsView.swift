@@ -1002,9 +1002,18 @@ private struct NewAutomationSheet: View {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // `.link` is AppKit's. Plain plus the accent reads the same
+                // and is the nearest thing iOS has.
+                #if os(macOS)
                 Button(action, action: perform)
                     .buttonStyle(.link)
                     .font(.caption)
+                #else
+                Button(action, action: perform)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accent)
+                    .font(.caption)
+                #endif
             }
         }
         .padding(Theme.Space.s)
