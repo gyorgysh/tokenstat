@@ -547,7 +547,7 @@ enum Bridge {
     /// not a failure: it is the first thing a new install will ever show.
     /// The activity grid.
     ///
-    /// `scope` is `"local"` for this machine's archive or `"account"` for every
+    /// `scope` is `"local"` for this device's archive or `"account"` for every
     /// machine that syncs. The host answers with which one it actually built,
     /// because an account grid can fall back to a local one and a client that
     /// assumed otherwise would label one machine's year as everybody's.

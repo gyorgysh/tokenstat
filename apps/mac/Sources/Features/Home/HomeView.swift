@@ -34,7 +34,7 @@ struct HomeView: View {
                 if hostReady {
                     ToolbarIconButton(
                         systemImage: "arrow.clockwise",
-                        help: "Re-read the archive for this machine's activity and plan usage",
+                        help: "Re-read the archive for this device's activity and plan usage",
                         isBusy: model.isRefreshing,
                         isEnabled: !model.isLoading && !model.isRefreshing
                     ) {
@@ -396,8 +396,8 @@ struct HomeView: View {
         }
         let base = "\(formatSpend(calendar.total)) at list rates over \(calendar.activeDays) active days"
         let source = model.deliveredScope == .allMachines
-            ? ", across every machine on your account"
-            : ", on this machine"
+            ? ", across every device on your account"
+            : ", on this device"
         if let notice = model.scopeNotice, !model.needsAccountSignIn {
             return base + source + ". " + notice
         }
@@ -480,7 +480,7 @@ struct HomeView: View {
     private var accountSignInPrompt: some View {
         HStack(spacing: Theme.Space.s) {
             Label(
-                "All machines needs your tokenstat.ai account",
+                "All devices needs your tokenstat.ai account",
                 systemImage: "person.crop.circle.badge.exclamationmark"
             )
             .font(.callout)

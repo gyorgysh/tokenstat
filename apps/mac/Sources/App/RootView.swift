@@ -47,7 +47,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .todo: return "Tasks"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
-        case .machines: return "Machines"
+        case .machines: return "Devices"
         case .insights: return "Insights"
         case .account: return "Account"
         }
@@ -65,6 +65,15 @@ enum Destination: String, CaseIterable, Identifiable {
         }
     }
 }
+
+// Everything below is the desktop shell: a resizable window with two sidebars,
+// an inspector, a terminal stack and a menu bar. None of it is a phone, and a
+// phone-sized copy of it would be the wrong app rather than a smaller one, so
+// the client gets its own root in `ClientRootView`. See `docs/ios-client-ui.md`.
+//
+// `Destination` stays outside this guard: `AutomationsView` navigates by it and
+// compiles for both platforms.
+#if os(macOS)
 
 struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2147,3 +2156,5 @@ private struct ActiveSessionRow: View {
     }
 }
 #endif
+
+#endif  // os(macOS), the desktop shell

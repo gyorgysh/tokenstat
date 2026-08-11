@@ -328,7 +328,7 @@ final class WorkspacesModel {
     func openRemotePort(_ port: Int, in folder: WorkspaceFolder) async {
         let parts = folder.id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count == 3, parts[0] == "remote" else {
-            errorMessage = "Port forwarding works on a workspace on another machine."
+            errorMessage = "Port forwarding works on a workspace on another device."
             return
         }
         do {

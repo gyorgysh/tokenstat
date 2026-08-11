@@ -503,7 +503,7 @@ private struct TranscriptSheet: View {
                             .font(.caption)
                     }
                     .buttonStyle(.borderless)
-                    .help(showRaw ? "Show the readable summary" : "Show the raw machine output")
+                    .help(showRaw ? "Show the readable summary" : "Show the raw device output")
                 }
                 StatusPill(status: run.status, text: run.endedLabel)
                 Button {
@@ -927,7 +927,7 @@ private struct NewAutomationSheet: View {
                 promptEditor
             case 1:
                 if !Bridge.isHosted {
-                    setupHint("Background helper is not running. Set it up from Machines before scheduling this task.", action: "Open Machines") {
+                    setupHint("Background helper is not running. Set it up from Machines before scheduling this task.", action: "Open Devices") {
                         dismiss()
                         onNavigate?(.machines)
                     }
@@ -973,7 +973,7 @@ private struct NewAutomationSheet: View {
                         }
                     }
                 }
-                Text("The agent runs on this machine, in the selected workspace.")
+                Text("The agent runs on this device, in the selected workspace.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             default:

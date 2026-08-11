@@ -19,6 +19,12 @@ struct AccountView: View {
     var body: some View {
         VStack(spacing: 0) {
             DetailChromeBar {
+                // **Not on a client.** Sync uploads what this machine's archive
+                // recorded, and a phone has no archive: it reads the account
+                // that other devices upload to. A Sync button there offers to
+                // send nothing, and the only honest outcome of pressing it is a
+                // refusal, so it is not offered.
+                #if os(macOS)
                 if model.signedIn {
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
@@ -29,6 +35,7 @@ struct AccountView: View {
                         Task { await model.sync() }
                     }
                 }
+                #endif
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -218,13 +225,13 @@ struct AccountView: View {
 
     private func machinesCard(_ account: Account) -> some View {
         Card(
-            title: "Machines",
+            title: "Devices",
             subtitle: account.machines.isEmpty
-                ? "Every machine that has synced to this account"
+                ? "Every device that has synced to this account"
                 : "\(account.machines.count) linked"
         ) {
             if account.machines.isEmpty {
-                EmptyHint(text: "Nothing has synced yet. Sync now to link this machine.")
+                EmptyHint(text: "Nothing has synced yet. Sync now to link this device.")
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(account.machines.enumerated()), id: \.element.id) { index, machine in

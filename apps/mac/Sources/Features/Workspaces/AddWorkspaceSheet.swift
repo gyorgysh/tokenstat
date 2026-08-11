@@ -59,7 +59,7 @@ struct AddWorkspaceSheet: View {
             step(
                 number: 3,
                 title: "What happens next",
-                text: "You can open files, browse the folder, and launch any installed agent in it. The agents run as their own processes, and only usage counters ever leave the machine."
+                text: "You can open files, browse the folder, and launch any installed agent in it. The agents run as their own processes, and only usage counters ever leave the device."
             )
 
             Spacer(minLength: Theme.Space.m)

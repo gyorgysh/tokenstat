@@ -29,8 +29,8 @@ enum ActivityScope: String, CaseIterable, Identifiable, Sendable {
 
     var label: String {
         switch self {
-        case .thisMachine: return "This machine"
-        case .allMachines: return "All machines"
+        case .thisMachine: return "This device"
+        case .allMachines: return "All devices"
         }
     }
 
@@ -149,8 +149,13 @@ final class HomeModel {
         }
         do {
             async let calendar = Bridge.activityCalendar(scope: scope.wire)
-            async let daily = Bridge.report(group: .day, query: Query())
-            async let plan = Bridge.report(group: .source, query: Query(billing: "plan"))
+            // Both of these read the local archive, which the client build does
+            // not have. `archiveOnly` turns that refusal into empty rather than
+            // into an error banner over a heatmap that loaded perfectly well.
+            async let daily = Self.archiveOnly { try await Bridge.report(group: .day, query: Query()) }
+            async let plan = Self.archiveOnly {
+                try await Bridge.report(group: .source, query: Query(billing: "plan"))
+            }
 
             // Published one at a time, in the order the screen draws them,
             // rather than held back until all three have answered. The heatmap
@@ -196,6 +201,23 @@ final class HomeModel {
         } catch {
             errorMessage = error.localizedDescription
             scheduleHostRetryIfNeeded(error)
+        }
+    }
+
+    /// Run a query that only a machine with a local archive can answer, and
+    /// treat "there is no archive here" as an empty answer.
+    ///
+    /// The iOS client is that case: it has prices, a timezone and an account,
+    /// and no store. Every other failure still throws, because a host that is
+    /// down and a host that has nothing to read are not the same thing and must
+    /// not render the same.
+    private static func archiveOnly<T>(
+        _ body: () async throws -> [T]
+    ) async throws -> [T] {
+        do {
+            return try await body()
+        } catch let BridgeError.core(code, _) where code == "no_local_archive" {
+            return []
         }
     }
 

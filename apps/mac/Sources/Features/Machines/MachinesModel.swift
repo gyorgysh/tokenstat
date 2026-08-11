@@ -91,7 +91,7 @@ final class MachinesModel {
     /// is a row of strangers on a screen meant to answer "which one is my
     /// other computer". The app knows two of them by a name anyway: this
     /// machine's own identity, and any peer it has already approved. Those
-    /// resolved names are used in place of "Machine abc" / "Unnamed machine";
+    /// resolved names are used in place of "Device abc" / "Unnamed device";
     /// nil means nobody here knows it yet and the code stays the title.
     func resolvedName(for machine: Machine) -> String? {
         if let label = machine.label, !label.isEmpty {
@@ -139,7 +139,7 @@ final class MachinesModel {
         #else
         UIPasteboard.general.string = code
         #endif
-        showNotice("Invite copied. On the other machine, choose Add device and paste it there.")
+        showNotice("Invite copied. On the other device, choose Add device and paste it there.")
     }
 
     /// The two words for this machine, which is what a person compares against
@@ -244,7 +244,7 @@ final class MachinesModel {
             errorMessage = nil
             showNotice(trimmed.isEmpty
                 ? "Back to the name this computer already had."
-                : "Other machines will see this one as \(identity?.label ?? trimmed).")
+                : "Other devices will see this one as \(identity?.label ?? trimmed).")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -267,7 +267,7 @@ final class MachinesModel {
         do {
             _ = try await Bridge.setTunnel(enabled)
             showNotice(enabled
-                ? "Remote reach is on. Everything between machines goes through the tunnel."
+                ? "Remote reach is on. Everything between devices goes through the tunnel."
                 : "Remote reach is off.")
             errorMessage = nil
             await load()
@@ -279,7 +279,7 @@ final class MachinesModel {
     func pair(key: String, label: String, address: String) async {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard key != identity?.key else {
-            errorMessage = "That is this machine. It is already here and does not need to be added."
+            errorMessage = "That is this device. It is already here and does not need to be added."
             return
         }
         do {
@@ -301,12 +301,12 @@ final class MachinesModel {
 
     func approve(_ peer: Peer) async {
         await change(peer) { try await Bridge.approve(key: peer.key) }
-        showNotice("\(peer.label) may now reach this machine.")
+        showNotice("\(peer.label) may now reach this device.")
     }
 
     func revoke(_ peer: Peer) async {
         await change(peer) { try await Bridge.revoke(key: peer.key) }
-        showNotice("\(peer.label) can no longer reach this machine.")
+        showNotice("\(peer.label) can no longer reach this device.")
     }
 
     func forget(_ peer: Peer) async {
@@ -318,7 +318,7 @@ final class MachinesModel {
         // One transport: the tunnel. It works from any network, which is the
         // point; there is no direct path to prefer.
         guard status?.tunnel == true else {
-            errorMessage = "\(peer.label) is reachable through the tunnel. Turn on Reach machines from anywhere first."
+            errorMessage = "\(peer.label) is reachable through the tunnel. Turn on Reach devices from anywhere first."
             return
         }
         await dial(peer)
@@ -337,7 +337,7 @@ final class MachinesModel {
             return
         }
         guard let key = machine.publicIdentity, !key.isEmpty else {
-            errorMessage = "\(machine.displayName) has no connection key on this account record yet. Open the Machines screen on that machine so it registers one, then try again."
+            errorMessage = "\(machine.displayName) has no connection key on this account record yet. Open the Devices screen on that device so it registers one, then try again."
             return
         }
         guard key != identity?.key else { return }
@@ -386,7 +386,7 @@ final class MachinesModel {
             // present as one: the other screen shows this machine waiting.
             let text = error.localizedDescription
             if text.contains("has not approved") || text.contains("not approved") {
-                showNotice("\(peer.label) has been asked to let this machine in. Approve it on the other device and its workspaces will appear here.")
+                showNotice("\(peer.label) has been asked to let this device in. Approve it on the other device and its workspaces will appear here.")
                 errorMessage = nil
             } else {
                 // A drop mid-answer is the peer's daemon swapping its tunnel

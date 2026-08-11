@@ -64,6 +64,7 @@ struct TokenstatApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if os(macOS)
             RootView()
                 // The minimum is what the window needs *without* the
                 // inspector, not with it. Asking for more than the user can
@@ -74,6 +75,12 @@ struct TokenstatApp: App {
                     minWidth: RootView.minimumContentWidth,
                     minHeight: RootView.minimumContentHeight
                 )
+            #else
+            // The phone and the iPad get their own root, not a narrow window.
+            // A minimum size would be meaningless here: the scene is whatever
+            // the device is.
+            ClientRootView()
+            #endif
         }
         #if os(macOS)
         // Unified toolbar and a hidden title give the rounded, chrome-light

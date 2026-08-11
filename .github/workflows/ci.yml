@@ -140,7 +140,7 @@ jobs:
   # ignore. Add the `xcodebuild` step back in the same change that adds the
   # client root.
   apple-client:
-    name: ios client core
+    name: ios client
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -158,6 +158,21 @@ jobs:
       # something the test matrix already proves.
       - name: Build the FFI for the simulator
         run: scripts/build-ffi-xcframework.sh sim
+
+      # Back in, now that `ClientRootView` exists. This is the step that catches
+      # the real failure mode, which is `#if os(macOS)` rot in shared views, not
+      # signing. Unsigned on purpose: no secret is needed to prove it compiles.
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd apps/mac && xcodegen
+
+      - name: Build the app for the simulator
+        run: |
+          xcodebuild -project apps/mac/Tokenstat.xcodeproj \
+            -scheme Tokenstat \
+            -destination 'generic/platform=iOS Simulator' \
+            build
 
   audit:
     name: dependency audit

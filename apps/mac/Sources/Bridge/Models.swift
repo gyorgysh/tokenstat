@@ -533,8 +533,15 @@ struct Account: Codable, Sendable, Hashable {
     var tier: String?
     /// Profile picture URL, when the account has one.
     ///
-    /// Always nil today: `/api/v1/me` does not carry an avatar field yet, so
-    /// every surface draws the monogram. Not a bug in the app.
+    /// Absolute by the time it arrives. The API sends `/avatar/<name>`,
+    /// relative on purpose so it never hands out a third-party URL, and
+    /// `tokenstat-host` resolves it against the host the token authenticated
+    /// to. Nil means this account has not set one, which is common and is not
+    /// an error: draw a monogram.
+    ///
+    /// This comment used to say the field was always nil because the API did
+    /// not send one. It does, and believing otherwise is why the phone drew a
+    /// letter for an account with a picture.
     var avatar: String?
     /// When this account last synced, from any machine.
     ///
@@ -596,7 +603,7 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case let (_, id?):
             return id
         default:
-            return "unnamed machine"
+            return "unnamed device"
         }
     }
 

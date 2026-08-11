@@ -270,7 +270,7 @@ struct InspectorView: View {
                         .foregroundStyle(Theme.warning)
                 }
             }
-            Text("Read from this machine. Nothing left it.")
+            Text("Read from this device. Nothing left it.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)

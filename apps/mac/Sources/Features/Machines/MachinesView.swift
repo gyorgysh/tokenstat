@@ -34,7 +34,7 @@ struct MachinesView: View {
             DetailChromeBar {
                 ToolbarIconButton(
                     systemImage: "plus",
-                    help: "Paste a key from another machine to pair it"
+                    help: "Paste a key from another device to pair it"
                 ) {
                     addingDevice = true
                 }
@@ -66,7 +66,7 @@ struct MachinesView: View {
                 .padding(Theme.Space.m)
             }
         }
-        .navigationTitle("Machines")
+        .navigationTitle("Devices")
         .background(Theme.background)
         .confirmationDialog(
             "Remove from account?",
@@ -85,7 +85,7 @@ struct MachinesView: View {
             Button("Cancel", role: .cancel) { pendingUnlink = nil }
         } message: {
             Text(pendingUnlink.map {
-                "\(model.resolvedName(for: $0) ?? $0.displayName) will be removed from this account and its uploaded history deleted. Use this for a machine id that no longer exists, for example after a reinstall."
+                "\(model.resolvedName(for: $0) ?? $0.displayName) will be removed from this account and its uploaded history deleted. Use this for a device id that no longer exists, for example after a reinstall."
             } ?? "")
         }
         .overlay(alignment: .bottomTrailing) {
@@ -183,7 +183,7 @@ struct MachinesView: View {
 
     private var thisMachine: some View {
         Card(
-            title: "This machine",
+            title: "This device",
             subtitle: "One simple identity for every connection."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -252,7 +252,7 @@ struct MachinesView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Reach machines from anywhere").font(.callout)
+                            Text("Reach devices from anywhere").font(.callout)
                             Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -265,7 +265,7 @@ struct MachinesView: View {
                         .toggleStyle(.switch)
                         .tint(Theme.accent)
                         .labelsHidden()
-                        .accessibilityLabel("Reach machines from anywhere")
+                        .accessibilityLabel("Reach devices from anywhere")
                         .disabled(!allowed)
                         .fixedSize()
                     }
@@ -399,10 +399,10 @@ struct MachinesView: View {
     }
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Connect to any machine on this account in one click, over the tunnel.") {
+        Card(title: "Account-linked devices", subtitle: "Connect to any device on this account in one click, over the tunnel.") {
             VStack(spacing: 0) {
                 ForEach(model.accountMachines) { machine in
-                    // "This machine" can also be matched by its key: a stale
+                    // "This device" can also be matched by its key: a stale
                     // record whose id no longer equals thisMachineID must not
                     // suddenly look like a stranger with Connect buttons.
                     let isSelf = machine.machineID == model.account?.thisMachineID
@@ -436,12 +436,12 @@ struct MachinesView: View {
                             // An unnamed machine is still known by name when it
                             // is this one or a peer this Mac has approved: the
                             // account row keeps its code, but the title says
-                            // who it actually is instead of "Machine abc".
+                            // who it actually is instead of "Device abc".
                             if let name = resolved {
                                 Text(name)
                                     .font(.callout.weight(.medium))
                             } else {
-                                Text(machine.machineID.map { "Machine \($0)" } ?? "Unnamed machine")
+                                Text(machine.machineID.map { "Machine \($0)" } ?? "Unnamed device")
                                     .font(.callout.weight(.medium))
                             }
                             if let id = machine.machineID, machine.label?.isEmpty == false || resolved != nil {
@@ -470,7 +470,7 @@ struct MachinesView: View {
                                         model.disconnect(peer)
                                     }
                                     .buttonStyle(SecondaryButtonStyle(small: true))
-                                    .help("Removes this machine's workspaces from the sidebar")
+                                    .help("Removes this device's workspaces from the sidebar")
                                 } else {
                                     accountPeerActions(peer)
                                 }
@@ -649,7 +649,7 @@ private struct MachineNameField: View {
 private struct PeerRow<Actions: View>: View {
     var peer: Peer
     /// The account directory's name for this machine, when the peer itself
-    /// was never named. Shown in place of "Unnamed machine".
+    /// was never named. Shown in place of "Unnamed device".
     var resolvedName: String?
     @ViewBuilder var actions: Actions
 
@@ -659,7 +659,7 @@ private struct PeerRow<Actions: View>: View {
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(peer.label.isEmpty ? (resolvedName ?? "Unnamed machine") : peer.label)
+                    Text(peer.label.isEmpty ? (resolvedName ?? "Unnamed device") : peer.label)
                         .font(.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
@@ -745,10 +745,10 @@ private struct PairingForm: View {
                 TextField(
                     "Pairing code",
                     text: $link,
-                    prompt: Text("Paste the code from the other machine")
+                    prompt: Text("Paste the code from the other device")
                 )
                 .font(Theme.mono(11))
-                TextField("Name", text: $label, prompt: Text("What you call that machine (optional)"))
+                TextField("Name", text: $label, prompt: Text("What you call that device (optional)"))
 
                 HStack {
                     Spacer()

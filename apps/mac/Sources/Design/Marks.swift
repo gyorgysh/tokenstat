@@ -283,18 +283,31 @@ struct LogoMark: View {
 
 /// The mark and the name, for the top of the sidebar.
 struct Wordmark: View {
+    /// Mark height. The text scales with it, so one number sizes the lockup.
+    ///
+    /// 17 on the Mac, where this sits at the top of a sidebar full of rows and
+    /// must not shout over them. The phone passes something larger: it has one
+    /// bar, one brand in it, and room to spend, and at sidebar size the mark
+    /// read as a caption rather than as the name of the app.
+    var size: CGFloat = 17
+    /// Take the leading edge and push everything else right, which is what a
+    /// sidebar header wants and a centred toolbar item does not.
+    var fills = true
+
     var body: some View {
         // `.firstTextBaseline` would sit the mark on the text's baseline, which
         // drops a square glyph below the descender line. Centring on the text's
         // cap height is what actually looks aligned, and that is what a centred
         // stack gives once the mark's frame is its ink.
         HStack(alignment: .center, spacing: Theme.Space.s) {
-            LogoMark(size: 17)
+            LogoMark(size: size)
             Text("tokenstat")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: size * 0.88, weight: .semibold))
                 // Lowercase, always. It is the command you type.
                 .textCase(.lowercase)
-            Spacer()
+            if fills {
+                Spacer()
+            }
         }
     }
 }
