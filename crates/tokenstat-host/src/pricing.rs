@@ -57,6 +57,20 @@ pub struct Seeded {
 ///   of against the empty book the session opened with.
 pub fn seed(session: &mut Session, from: &std::path::Path) -> Result<Seeded, String> {
     let destination = PriceTable::default_path().map_err(|e| e.to_string())?;
+    seed_into(session, from, &destination)
+}
+
+/// [`seed`], against a destination the caller names.
+///
+/// Split out for the tests. The data directory is chosen by the platform (via
+/// `$HOME` on Unix and `%APPDATA%` on Windows), so a test that repointed one
+/// environment variable isolated itself on two platforms out of three and
+/// quietly shared the developer's real price book on the third.
+fn seed_into(
+    session: &mut Session,
+    from: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<Seeded, String> {
     if destination.exists() {
         return Ok(Seeded {
             adopted: false,
@@ -71,8 +85,14 @@ pub fn seed(session: &mut Session, from: &std::path::Path) -> Result<Seeded, Str
     if let Some(parent) = destination.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(&destination, &text).map_err(|e| format!("{}: {e}", destination.display()))?;
-    reload(session);
+    std::fs::write(destination, &text).map_err(|e| format!("{}: {e}", destination.display()))?;
+    // From the file just written rather than through `reload`, so this holds
+    // for a destination that is not the platform default. The catalog is
+    // attached the same way `load_with_catalog` does it: a book without one
+    // cannot mark an unknown model as an estimate.
+    session.prices = PriceTable::load_from(destination)
+        .unwrap_or_default()
+        .with_catalog(std::sync::Arc::new(tokenstat_core::catalog::Catalog::load()));
     Ok(Seeded {
         adopted: true,
         models: table.len(),
@@ -168,21 +188,35 @@ mod tests {
         );
     }
 
+    /// A directory of this test's own, with no environment variable involved.
+    ///
+    /// `temp_home` above is enough for `reload`, which reads the platform's
+    /// data directory and therefore has to be pointed somewhere. Seeding takes
+    /// its destination as an argument, so these tests name one directly and
+    /// need no lock and no `$HOME`. That also fixes them on Windows, where the
+    /// data directory follows `%APPDATA%` and repointing `HOME` isolated
+    /// nothing.
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-seed-{tag}-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn a_bundled_book_is_adopted_only_when_there_is_none() {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (home, _restore) = temp_home();
-
-        let bundled = home.join("bundled.json");
+        let dir = temp_dir("adopt");
+        let bundled = dir.join("bundled.json");
+        let book = dir.join("data").join("current.json");
         std::fs::write(&bundled, SNAPSHOT).unwrap();
 
         let mut session = Session::open_client(Some("UTC")).expect("client session");
-        assert!(
-            session.prices.is_empty(),
-            "precondition: nothing has been fetched"
-        );
+        session.prices = PriceTable::default();
 
-        let first = seed(&mut session, &bundled).expect("seed");
+        let first = seed_into(&mut session, &bundled, &book).expect("seed");
         assert!(first.adopted);
         assert_eq!(first.effective_from, "2026-08-01");
         assert_eq!(first.models, 1);
@@ -194,9 +228,8 @@ mod tests {
         // A fetched book is always newer than one a bundle carries, so a
         // second launch must leave it alone. This is the whole reason seeding
         // is safe to call unconditionally.
-        let book = PriceTable::default_path().expect("data directory");
         std::fs::write(&book, SNAPSHOT.replace("2026-08-01", "2026-09-09").as_str()).unwrap();
-        let again = seed(&mut session, &bundled).expect("seed again");
+        let again = seed_into(&mut session, &bundled, &book).expect("seed again");
         assert!(!again.adopted, "an existing book must not be replaced");
         assert!(
             std::fs::read_to_string(&book)
@@ -204,22 +237,23 @@ mod tests {
                 .contains("2026-09-09"),
             "the fetched book survived"
         );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_corrupt_bundle_leaves_no_book_at_all() {
-        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let (home, _restore) = temp_home();
-
-        let bundled = home.join("bundled.json");
+        let dir = temp_dir("corrupt");
+        let bundled = dir.join("bundled.json");
+        let book = dir.join("data").join("current.json");
         std::fs::write(&bundled, "{ this is not a price book").unwrap();
 
         let mut session = Session::open_client(Some("UTC")).expect("client session");
-        assert!(seed(&mut session, &bundled).is_err());
+        assert!(seed_into(&mut session, &bundled, &book).is_err());
         assert!(
-            !PriceTable::default_path().expect("data directory").exists(),
+            !book.exists(),
             "a book that will not parse must not be copied into place: an \
              unreadable book is worse than none, because none is refreshable"
         );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

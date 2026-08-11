@@ -1363,19 +1363,28 @@ fn limited_text(resp: reqwest::blocking::Response) -> Result<String, ProfileErro
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Hand a URL to whatever the platform opens links with.
+///
+/// Silent on a platform with no such command, which is iOS and iPadOS: opening
+/// a URL there goes through UIKit, not through a process, and the sign-in flow
+/// that calls this already prints the address for the user to open themselves.
+/// A client that cannot exec is not a client that cannot sign in.
 fn open_browser(url: &str) -> Result<(), ProfileError> {
+    // Named with a leading underscore so the platforms below can use it and
+    // the ones with no branch do not warn about it.
+    let _url = url;
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(url).status();
+        let _ = std::process::Command::new("open").arg(_url).status();
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open").arg(url).status();
+        let _ = std::process::Command::new("xdg-open").arg(_url).status();
     }
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
+            .args(["/C", "start", "", _url])
             .status();
     }
     Ok(())
