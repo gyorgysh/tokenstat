@@ -20,12 +20,18 @@ fn cell() -> &'static Mutex<Option<Session>> {
 /// in-process bridge needs the same head start: an app running without an
 /// installed host agent would otherwise pay a full shell startup inside its
 /// first `pty.spawn`, with a person watching an empty pane.
+///
+/// Nothing to warm without `local-host`. There is no shell to start on a
+/// platform that cannot start one.
 fn warm() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        tokenstat_host::warm_login_env();
-        tokenstat_host::warm_shell_pool();
-    });
+    #[cfg(feature = "local-host")]
+    {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            tokenstat_host::warm_login_env();
+            tokenstat_host::warm_shell_pool();
+        });
+    }
 }
 
 /// Handle one call, opening the default archive on first use.

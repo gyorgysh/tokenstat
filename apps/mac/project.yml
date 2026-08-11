@@ -70,6 +70,25 @@ targets:
           cd "$SRCROOT/../.."
           cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
           cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
+      # The price book the app ships with, so a fresh install prices something
+      # before its first refresh. iPhone and iPad have no CLI to run
+      # `tokenstat pricing --refresh` and no daemon to schedule it, and an
+      # unpriced heatmap is counts with no money on them.
+      #
+      # Refreshed weekly rather than per build: this downloads about a megabyte,
+      # and paying that on every incremental build to move a date that the app
+      # refreshes at runtime anyway is a poor trade. A failed download writes an
+      # empty book and says so, so a checkout still builds on a plane.
+      - name: Bundled price book
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/../.."
+          SEED="apps/mac/Resources/PriceBookSeed.json"
+          if [ -f "$SEED" ] && [ -n "$(find "$SEED" -mtime -7 2>/dev/null)" ]; then
+            echo "price book seed is less than a week old, keeping it"
+          else
+            cargo run -q -p xtask -- pricing-seed "$SEED"
+          fi
     postBuildScripts:
       # The notices file is generated during the build, so Xcode's resource
       # copy phase never saw it in the project. Drop it into the finished
@@ -78,6 +97,12 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           cp "$SRCROOT/Resources/THIRD_PARTY_NOTICES.md" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/THIRD_PARTY_NOTICES.md"
+      # Same reason as the notices above: generated during this build, so the
+      # resource phase never saw it.
+      - name: Bundle price book seed
+        basedOnDependencyAnalysis: false
+        script: |
+          cp "$SRCROOT/Resources/PriceBookSeed.json" "$BUILT_PRODUCTS_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/PriceBookSeed.json"
     sources:
       - path: Sources
       # Vendor marks for the harnesses. See TRADEMARK.md: these belong to

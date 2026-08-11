@@ -89,6 +89,21 @@ fn main() -> Result<()> {
             let root = args.next().unwrap_or_else(|| "tokenstat-cli".to_string());
             notices::generate(&root, Path::new(&out))
         }
+        // The price book that ships inside the app bundle.
+        //
+        // A desktop install fetches its own book on first launch, through the
+        // CLI or the daemon's schedule. A phone has neither, and an empty book
+        // means a heatmap with counts and no money on it. So one is downloaded
+        // at build time and the app seeds from it when it finds no local book.
+        //
+        // Generated into the bundle's Resources at build time and never
+        // committed: it is a generated file, and it goes stale.
+        Some("pricing-seed") => {
+            let out = args
+                .next()
+                .context("usage: xtask pricing-seed <output.json>")?;
+            pricing_seed(Path::new(&out))
+        }
         Some(other) => bail!("unknown task: {other}"),
         None => {
             eprintln!("tasks:");
@@ -96,6 +111,43 @@ fn main() -> Result<()> {
             eprintln!("      build a committable fixture (default 8 files)");
             eprintln!("  notices [output] [root-crate]");
             eprintln!("      write third party attribution for a shipped binary");
+            eprintln!("  pricing-seed <output.json>");
+            eprintln!("      download the price book an app bundle ships with");
+            Ok(())
+        }
+    }
+}
+
+/// Download the list-rate snapshot for an app bundle to ship.
+///
+/// A failure writes an empty but valid book rather than stopping the build. A
+/// checkout must build on a plane, and an app that starts with no rates behaves
+/// exactly as it does today: counts render, money reads as unknown, and the
+/// first refresh fixes it. Failing the build instead would trade a small,
+/// self-correcting gap for one nobody can work around.
+fn pricing_seed(out: &Path) -> Result<()> {
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match tokenstat_sync::pricing::download_to(out) {
+        Ok(refresh) => {
+            println!(
+                "pricing seed: {} models, effective {} -> {}",
+                refresh.models,
+                refresh.effective_from,
+                out.display()
+            );
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("pricing seed: could not download ({error})");
+            eprintln!("pricing seed: writing an empty book, the app refreshes on first launch");
+            let empty = serde_json::json!({
+                "effective_from": "",
+                "note": "empty seed: the download failed at build time",
+                "models": [],
+            });
+            std::fs::write(out, serde_json::to_string_pretty(&empty)?)?;
             Ok(())
         }
     }

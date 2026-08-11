@@ -52,6 +52,11 @@ struct TokenstatApp: App {
     /// different owner than the ones it ends with.
     init() {
         Bridge.connect()
+        // Before anything asks for a figure. A machine with no price book
+        // renders every value as unknown, and on a platform with no CLI and no
+        // daemon the bundled book is the only one there will be until a refresh
+        // lands. Never replaces a fetched book, so this is safe every launch.
+        Task { await Bridge.pricingSeed() }
         DesktopSyncScheduler.start()
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.

@@ -29,6 +29,57 @@ pub fn reload(session: &mut Session) {
     session.prices = PriceTable::load_with_catalog();
 }
 
+/// What seeding did, so a front end can say so rather than guess.
+pub struct Seeded {
+    /// False when a book was already there. Not a failure: the local one is
+    /// newer than anything a bundle could carry.
+    pub adopted: bool,
+    pub effective_from: String,
+    pub models: usize,
+}
+
+/// Adopt a bundled price book when this machine has none.
+///
+/// A desktop install fetches its own book: the CLI does it on demand and the
+/// daemon does it on a schedule. A phone has neither a CLI nor a daemon, so its
+/// first launch would price every model as unknown until a refresh landed, on
+/// the screen that opens first.
+///
+/// The app therefore ships a book and points this at it. Three rules make that
+/// safe to call on every launch:
+///
+/// - It never overwrites an existing book. A fetched one is always newer than
+///   anything a bundle can carry, and a build from March must not undo an
+///   August refresh.
+/// - It parses before it copies, so a corrupt resource leaves no book rather
+///   than an unreadable one.
+/// - It reloads the session, so the very first report prices against it instead
+///   of against the empty book the session opened with.
+pub fn seed(session: &mut Session, from: &std::path::Path) -> Result<Seeded, String> {
+    let destination = PriceTable::default_path().map_err(|e| e.to_string())?;
+    if destination.exists() {
+        return Ok(Seeded {
+            adopted: false,
+            effective_from: session.prices.effective_from.clone(),
+            models: 0,
+        });
+    }
+
+    let text = std::fs::read_to_string(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    let table = PriceTable::parse(&text)
+        .ok_or_else(|| format!("{} is not a price book", from.display()))?;
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    std::fs::write(&destination, &text).map_err(|e| format!("{}: {e}", destination.display()))?;
+    reload(session);
+    Ok(Seeded {
+        adopted: true,
+        models: table.len(),
+        effective_from: table.effective_from,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -114,6 +165,61 @@ mod tests {
         assert_eq!(
             session.prices.get_exact("example/model").map(|r| r.input),
             Some(3.0)
+        );
+    }
+
+    #[test]
+    fn a_bundled_book_is_adopted_only_when_there_is_none() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (home, _restore) = temp_home();
+
+        let bundled = home.join("bundled.json");
+        std::fs::write(&bundled, SNAPSHOT).unwrap();
+
+        let mut session = Session::open_client(Some("UTC")).expect("client session");
+        assert!(
+            session.prices.is_empty(),
+            "precondition: nothing has been fetched"
+        );
+
+        let first = seed(&mut session, &bundled).expect("seed");
+        assert!(first.adopted);
+        assert_eq!(first.effective_from, "2026-08-01");
+        assert_eq!(first.models, 1);
+        assert!(
+            !session.prices.is_empty(),
+            "seeding must leave the session priced, not just the disk"
+        );
+
+        // A fetched book is always newer than one a bundle carries, so a
+        // second launch must leave it alone. This is the whole reason seeding
+        // is safe to call unconditionally.
+        let book = PriceTable::default_path().expect("data directory");
+        std::fs::write(&book, SNAPSHOT.replace("2026-08-01", "2026-09-09").as_str()).unwrap();
+        let again = seed(&mut session, &bundled).expect("seed again");
+        assert!(!again.adopted, "an existing book must not be replaced");
+        assert!(
+            std::fs::read_to_string(&book)
+                .unwrap()
+                .contains("2026-09-09"),
+            "the fetched book survived"
+        );
+    }
+
+    #[test]
+    fn a_corrupt_bundle_leaves_no_book_at_all() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (home, _restore) = temp_home();
+
+        let bundled = home.join("bundled.json");
+        std::fs::write(&bundled, "{ this is not a price book").unwrap();
+
+        let mut session = Session::open_client(Some("UTC")).expect("client session");
+        assert!(seed(&mut session, &bundled).is_err());
+        assert!(
+            !PriceTable::default_path().expect("data directory").exists(),
+            "a book that will not parse must not be copied into place: an \
+             unreadable book is worse than none, because none is refreshable"
         );
     }
 }

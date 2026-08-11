@@ -9,5 +9,10 @@ license-file.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+# For `pricing-seed` only, which downloads the book an app bundle ships with.
+# xtask is a build tool and never ends up in a shipped binary, so the network
+# boundary that governs the crates does not apply here. See
+# scripts/check-no-network.sh for the ones it does govern.
+tokenstat-sync.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true

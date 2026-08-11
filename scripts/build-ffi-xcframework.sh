@@ -42,6 +42,21 @@ PLATFORMS=("${@:-macos}")
 
 installed() { rustup target list --installed | grep -qx "$1"; }
 
+# What each group compiles. macOS is the machine's own host and gets the whole
+# crate; iOS and the simulator drop `local-host`, which takes the pty and
+# workspace crates, the launcher and this machine's own archive out of the
+# binary entirely.
+#
+# This is not a size optimisation. iOS cannot fork or exec, so a mobile build
+# that could express a terminal spawn would be a build carrying code that can
+# only fail at runtime. See `docs/mobile-app.md`.
+features_for() {
+    case "$1" in
+        macos) echo "" ;;
+        *) echo "--no-default-features" ;;
+    esac
+}
+
 # Build every installed target in a group, then lipo them into one library.
 # Returns non-zero when the group has nothing installed, so the caller can skip
 # the platform rather than fail the whole run.
@@ -49,11 +64,15 @@ build_group() {
     local name="$1"; shift
     local targets=("$@")
     local built=()
+    local features
+    # Unquoted on purpose below: empty must expand to no argument at all.
+    features="$(features_for "$name")"
 
     for t in "${targets[@]}"; do
         if installed "$t"; then
-            echo "  building $t"
-            cargo build --profile release-ffi -p tokenstat-ffi --target "$t"
+            echo "  building $t ${features:-(all features)}"
+            # shellcheck disable=SC2086
+            cargo build --profile release-ffi -p tokenstat-ffi $features --target "$t"
             built+=("target/$t/release-ffi/$LIB")
         else
             echo "  skipping $t (run: rustup target add $t)"

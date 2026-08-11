@@ -82,14 +82,21 @@ fn sync_interval() -> Duration {
 fn run_once(session: &Mutex<Session>) {
     // Snapshot path and timezone under the lock, then open a separate Store for
     // the HTTP phase. Holding Session across the upload freezes Home/Insights.
-    let (tz, db_path) = {
+    let snapshot = {
         let Ok(guard) = session.lock() else {
             return;
         };
-        (
-            guard.engine.timezone().iana_name().map(str::to_string),
-            guard.engine.db_path().to_path_buf(),
-        )
+        guard.engine().ok().map(|engine| {
+            (
+                engine.timezone().iana_name().map(str::to_string),
+                engine.db_path().to_path_buf(),
+            )
+        })
+    };
+    // Nothing to upload. A host with no archive of its own is a client, and a
+    // client has no usage to sync.
+    let Some((tz, db_path)) = snapshot else {
+        return;
     };
     let store = match tokenstat_core::Store::open(&db_path) {
         Ok(store) => store,

@@ -67,6 +67,19 @@ fn pricing_url() -> anyhow::Result<String> {
     snapshot::api_url("/api/v1/pricing/current")
 }
 
+/// Download the snapshot to a path of the caller's choosing.
+///
+/// For the build, not for a machine: `xtask pricing-seed` uses it to put a book
+/// inside the app bundle, so a fresh install prices something before its first
+/// refresh. A phone has no CLI to run `tokenstat pricing --refresh`, and a
+/// heatmap with no money on it is the visible result of noticing that too late.
+///
+/// Always `force`: this writes to an empty destination, so the >50% move guard
+/// has nothing to compare against and would only ever be a false alarm.
+pub fn download_to(path: &Path) -> anyhow::Result<PricingRefresh> {
+    refresh_from_url_at(&pricing_url()?, path, true)
+}
+
 fn refresh_from_url(url: &str, force: bool) -> anyhow::Result<PricingRefresh> {
     let path = PriceTable::default_path().map_err(|e| anyhow::anyhow!("{e}"))?;
     refresh_from_url_at(url, &path, force)

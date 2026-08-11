@@ -664,7 +664,10 @@ pub fn unlink_machine(host_flag: Option<&str>, machine_id: &str) -> Result<(), P
 /// here: it hands back the grain, and the price book on this machine turns it
 /// into a figure. That is also what makes an account-wide number comparable
 /// with a local one, rather than two prices computed in two places.
-#[derive(Debug, Clone, serde::Deserialize)]
+/// `Serialize` as well, so a client can keep the last answer on disk and open
+/// on it. The wire shape and the cached shape are deliberately the same file
+/// format: a cache that re-encoded would be a second schema to keep in step.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct SeriesRow {
     pub day: String,
     pub src: String,

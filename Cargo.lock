@@ -3327,6 +3327,7 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "serde_json",
+ "tokenstat-sync",
  "walkdir",
 ]
 

@@ -136,15 +136,18 @@ pub fn bind(path: &Path) -> Result<UnixListener, String> {
 #[cfg(unix)]
 pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
     let shared = Arc::new(Mutex::new(session));
-    // Before anybody asks for a terminal. Resolving the login shell's PATH
-    // costs a full startup file read, and paying it inside the first spawn
-    // means paying it while a person waits for a window to fill.
-    tokenstat_pty::warm_login_env();
-    // Same head start for the shell pool: a started shell waits at a prompt
-    // so the first Shell click hands it over instead of starting one.
-    tokenstat_pty::warm_shell_pool();
-    crate::automations::start_scheduler();
-    crate::sync_scheduler::start(Arc::clone(&shared));
+    #[cfg(feature = "local-host")]
+    {
+        // Before anybody asks for a terminal. Resolving the login shell's PATH
+        // costs a full startup file read, and paying it inside the first spawn
+        // means paying it while a person waits for a window to fill.
+        tokenstat_pty::warm_login_env();
+        // Same head start for the shell pool: a started shell waits at a prompt
+        // so the first Shell click hands it over instead of starting one.
+        tokenstat_pty::warm_shell_pool();
+        crate::automations::start_scheduler();
+        crate::sync_scheduler::start(Arc::clone(&shared));
+    }
 
     // Only if the user turned it on. Binding a port is a decision, not a
     // default: a remote client can spawn processes and write files.
@@ -295,12 +298,22 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         // Parse can take minutes on a large archive. Open a dedicated Engine so
         // Home/Insights keep answering on the live session while this runs.
         // WAL + busy timeout allow the concurrent readers.
-        let (db_path, tz_name) = {
+        let opened = {
             let guard = session.lock().unwrap_or_else(PoisonError::into_inner);
-            (
-                guard.engine.db_path().to_path_buf(),
-                guard.engine.timezone().iana_name().map(str::to_string),
-            )
+            guard.engine().ok().map(|engine| {
+                (
+                    engine.db_path().to_path_buf(),
+                    engine.timezone().iana_name().map(str::to_string),
+                )
+            })
+        };
+        // No archive to scan. Hand it to the ordinary dispatch, which refuses
+        // in the one place that refusal is worded, and still gets its id.
+        let Some((db_path, tz_name)) = opened else {
+            let mut guard = session.lock().unwrap_or_else(PoisonError::into_inner);
+            let envelope = crate::dispatch::call(&mut guard, &request.method, &params);
+            drop(guard);
+            return with_id(envelope, request.id);
         };
         match tokenstat_core::Engine::open(Some(&db_path), tz_name.as_deref()) {
             Ok(mut engine) => match engine.scan() {
@@ -340,12 +353,18 @@ pub fn respond(line: &str, session: &Mutex<Session>) -> String {
         }
     };
 
-    // The envelope is already the right shape; the id is the only thing this
-    // transport adds. Splicing it in textually rather than re-encoding keeps
-    // the two transports byte-identical in the parts they share.
+    with_id(envelope, request.id)
+}
+
+/// Stamp a dispatch envelope with the request id this transport is tracking.
+///
+/// The envelope is already the right shape, and the id is the only thing this
+/// transport adds. Splicing it in rather than re-encoding keeps the two
+/// transports byte-identical in the parts they share.
+fn with_id(envelope: String, id: Value) -> String {
     match serde_json::from_str::<Value>(&envelope) {
         Ok(Value::Object(mut map)) => {
-            map.insert("id".into(), request.id);
+            map.insert("id".into(), id);
             Value::Object(map).to_string()
         }
         _ => envelope,

@@ -226,7 +226,17 @@ impl From<ScanReport> for ScanReportDto {
 pub struct InfoDto {
     pub protocol_version: String,
     pub core_version: String,
-    pub db_path: String,
+    /// Where this machine's archive is, and `null` on a build that keeps none.
+    ///
+    /// Null rather than an empty string: a client has no archive, which is a
+    /// different fact from an archive at a path nobody set, and a front end
+    /// that showed "" as a location would be inventing one.
+    pub db_path: Option<String>,
+    /// Whether this host can answer questions about its own machine's logs.
+    ///
+    /// The one flag a front end needs to decide whether to offer local reports
+    /// at all, instead of offering them and rendering the refusal.
+    pub has_archive: bool,
     pub timezone: String,
     /// Date the loaded price book took effect, empty when no book is present.
     pub price_book_effective_from: String,
@@ -395,6 +405,9 @@ impl From<SplitBucket> for SplitBucketDto {
 /// The archive's `project` is a display label recovered from a slug that lost
 /// the difference between `/` and `-`, so it cannot name a folder on disk, and
 /// a folder an agent touched once is not somewhere anyone wants a terminal.
+/// A registered folder. Local only: a client has no folders of its own, and
+/// another machine's folders arrive already described.
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDto {
@@ -445,10 +458,20 @@ pub struct CalendarDto {
     pub notice: Option<String>,
     /// What kind of fallback this is, so a front end can act on it rather
     /// than parse the sentence: `"auth"` (a sign-in would fix it), `"upgrade"`
-    /// (the account does not include it), `"other"`. Absent when the grid is
-    /// the one asked for.
+    /// (the account does not include it), `"stale"` (this is a remembered
+    /// answer, the refresh failed), `"other"`. Absent when the grid is the one
+    /// asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice_code: Option<String>,
+    /// When an account grid's numbers came off the service, in unix
+    /// milliseconds. Absent on a local grid, which is read from disk every time
+    /// and is never a remembered answer.
+    ///
+    /// Sent as a moment rather than as a sentence so the front end can phrase
+    /// the age in the user's own locale, and so "3 minutes ago" does not go on
+    /// growing stale inside a string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fetched_at_ms: Option<i64>,
 }
 
 fn local_scope() -> String {
@@ -567,6 +590,7 @@ impl From<tokenstat_core::activity::HeatCalendar> for CalendarDto {
             scope: local_scope(),
             notice: None,
             notice_code: None,
+            fetched_at_ms: None,
         }
     }
 }
@@ -582,6 +606,12 @@ impl CalendarDto {
         self.scope = scope.to_string();
         self.notice = notice;
         self.notice_code = notice_code.map(str::to_string);
+        self
+    }
+
+    /// Date the account's numbers, so a client can say how old they are.
+    pub fn fetched_at(mut self, at_ms: i64) -> CalendarDto {
+        self.fetched_at_ms = (at_ms > 0).then_some(at_ms);
         self
     }
 }

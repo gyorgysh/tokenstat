@@ -101,6 +101,10 @@ struct Cache {
     /// what was asked for.
     covered_from: Option<String>,
     fetched_at: Instant,
+    /// The same moment on the wall clock, which is the only one that survives
+    /// the process. `Instant` has no meaning across a restart, and on a phone a
+    /// restart is the normal case rather than the rare one.
+    fetched_at_ms: i64,
     /// Set when the last attempt failed, so the message can be shown without
     /// asking again immediately.
     last_error: Option<(String, Instant)>,
@@ -119,6 +123,96 @@ pub fn invalidate() {
     if let Ok(mut guard) = cache().lock() {
         *guard = None;
     }
+    let _ = stored::remove();
+}
+
+/// The last good answer, kept on disk beside the archive.
+///
+/// A memory cache is close to no cache where the process dies constantly, which
+/// is every mobile app and, less often, a desktop one. Without this a cold
+/// launch shows an empty grid until the network answers, on the screen that
+/// opens first. With it the grid is the previous answer, dated, and it is
+/// replaced the moment a fetch lands.
+///
+/// It holds day, source, model and counts, which is what the account already
+/// holds. No project keys, no paths, nothing that is not already in the reply
+/// this file is a copy of.
+mod stored {
+    use std::path::PathBuf;
+
+    use serde::{Deserialize, Serialize};
+    use tokenstat_sync::profile::SeriesRow;
+
+    /// Bump when the shape changes. An older file is dropped rather than
+    /// migrated: it is a cache, and the fix for a stale cache is a fetch.
+    const VERSION: u32 = 1;
+
+    /// A file older than this is not worth opening on. Beyond a fortnight the
+    /// grid it would draw is mostly a picture of a fortnight ago.
+    const KEEP_FOR_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+
+    #[derive(Serialize, Deserialize)]
+    pub(super) struct Snapshot {
+        pub v: u32,
+        pub fetched_at_ms: i64,
+        pub covered_from: Option<String>,
+        pub rows: Vec<SeriesRow>,
+    }
+
+    fn path() -> Option<PathBuf> {
+        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")?;
+        Some(dirs.data_dir().join("account-series.json"))
+    }
+
+    /// Whether a file this old is still worth opening on.
+    ///
+    /// A clock that moved backwards makes the age negative. That reads as
+    /// "unknown, use it": a wrong clock is not a reason to throw away the only
+    /// answer we have.
+    pub(super) fn worth_opening(fetched_at_ms: i64, now_ms: i64) -> bool {
+        now_ms - fetched_at_ms <= KEEP_FOR_MS
+    }
+
+    pub(super) fn load(now_ms: i64) -> Option<Snapshot> {
+        let path = path()?;
+        let text = std::fs::read_to_string(path).ok()?;
+        let snapshot: Snapshot = serde_json::from_str(&text).ok()?;
+        if snapshot.v != VERSION {
+            return None;
+        }
+        if !worth_opening(snapshot.fetched_at_ms, now_ms) {
+            return None;
+        }
+        Some(snapshot)
+    }
+
+    pub(super) fn save(snapshot: &Snapshot) {
+        let Some(path) = path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let Ok(text) = serde_json::to_string(snapshot) else {
+            return;
+        };
+        // Written beside the target and renamed, so a process that dies
+        // mid-write leaves the previous answer rather than half of a new one.
+        let temp = path.with_extension("json.tmp");
+        if std::fs::write(&temp, text).is_ok() {
+            let _ = std::fs::rename(&temp, &path);
+        }
+    }
+
+    pub(super) fn remove() -> std::io::Result<()> {
+        match path() {
+            Some(path) => match std::fs::remove_file(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+            None => Ok(()),
+        }
+    }
 }
 
 /// The account's grid, priced here and built by the core.
@@ -135,9 +229,11 @@ pub fn calendar(
     prices: &PriceTable,
     tz: &jiff::tz::TimeZone,
     weeks: usize,
-) -> Result<Option<HeatCalendar>, FetchError> {
+) -> Result<AccountCalendar, FetchError> {
     let today = activity::today(tz);
     let fetched = series(weeks, today)?;
+    let fetched_at_ms = fetched.fetched_at_ms;
+    let stale = fetched.stale;
     let rows = fetched.rows;
     let weeks = covered_weeks(weeks, today, fetched.covered_from.as_deref());
 
@@ -163,7 +259,25 @@ pub fn calendar(
     }
 
     let days: Vec<(String, u64)> = by_day.into_iter().collect();
-    Ok(activity::calendar(&days, weeks, today))
+    Ok(AccountCalendar {
+        calendar: activity::calendar(&days, weeks, today),
+        fetched_at_ms,
+        stale,
+    })
+}
+
+/// The account's grid, and how current it is.
+///
+/// The date travels with the grid rather than being fetched separately, because
+/// a figure and its age are one fact. A client that could get the grid without
+/// the date would eventually draw one without it.
+pub struct AccountCalendar {
+    /// `None` when the account has nothing in the window. An answer, and not
+    /// the same as a failure.
+    pub calendar: Option<HeatCalendar>,
+    pub fetched_at_ms: i64,
+    /// The refresh failed and this is the remembered answer.
+    pub stale: bool,
 }
 
 /// One day's `model × source` rows from the account's series, largest first.
@@ -257,28 +371,89 @@ fn covered_weeks(asked: usize, today: jiff::civil::Date, covered_from: Option<&s
     (days / 7).clamp(1, asked)
 }
 
-struct Fetched {
+pub struct Fetched {
     rows: Vec<SeriesRow>,
     covered_from: Option<String>,
+    /// When these numbers came off the service, in unix milliseconds.
+    pub fetched_at_ms: i64,
+    /// This is a remembered answer, served because the refresh failed. The
+    /// numbers are real, they are just old, and a caller must say so. Same rule
+    /// as a stale limit reading: a figure with no date is a quiet claim to be
+    /// current.
+    pub stale: bool,
+}
+
+/// Wall clock in milliseconds, or 0 if the clock is before the epoch.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Adopt the answer left on disk by an earlier run of this process.
+///
+/// Deliberately adopted as already stale: it is good enough to draw, and not
+/// good enough to skip a fetch. The first call after launch therefore paints
+/// immediately and refreshes behind it.
+fn adopt_stored(guard: &mut Option<Cache>) {
+    if guard.is_some() {
+        return;
+    }
+    if let Some(snapshot) = stored::load(now_ms()) {
+        *guard = Some(adopted(snapshot));
+    }
+}
+
+/// A stored answer, entered into the cache as already past its freshness.
+fn adopted(snapshot: stored::Snapshot) -> Cache {
+    Cache {
+        rows: snapshot.rows,
+        covered_from: snapshot.covered_from,
+        // `checked_sub` because a process younger than FRESH_FOR has no
+        // `Instant` that far back, and saturating at "now" would make an
+        // adopted answer look fresh on exactly the launches this exists for.
+        // Falling back to now is still correct there, only slower: the very
+        // first call refreshes rather than the second.
+        fetched_at: Instant::now()
+            .checked_sub(FRESH_FOR)
+            .unwrap_or_else(Instant::now),
+        fetched_at_ms: snapshot.fetched_at_ms,
+        last_error: None,
+    }
 }
 
 /// The cached series, fetched if it is stale.
 fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError> {
     {
-        let guard = cache()
+        let mut guard = cache()
             .lock()
             .map_err(|_| FetchError::new("the usage cache is poisoned".into()))?;
+        adopt_stored(&mut guard);
         if let Some(c) = guard.as_ref() {
             if c.fetched_at.elapsed() < FRESH_FOR {
                 return Ok(Fetched {
                     rows: c.rows.clone(),
                     covered_from: c.covered_from.clone(),
+                    fetched_at_ms: c.fetched_at_ms,
+                    stale: false,
                 });
             }
             // A recent failure is reported from here rather than by dialling
             // again. Nothing about being signed out changes in a second.
             if let Some((message, at)) = &c.last_error {
                 if at.elapsed() < RETRY_AFTER {
+                    // Unless there is a real answer to serve. A remembered grid
+                    // beats a blank one, and on a client there is no local
+                    // archive to fall back to.
+                    if !c.rows.is_empty() {
+                        return Ok(Fetched {
+                            rows: c.rows.clone(),
+                            covered_from: c.covered_from.clone(),
+                            fetched_at_ms: c.fetched_at_ms,
+                            stale: true,
+                        });
+                    }
                     return Err(FetchError::new(message.clone()));
                 }
             }
@@ -296,38 +471,68 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
 
     match profile::account_series(None, Some(&from), Some(&to), None) {
         Ok(result) => {
+            let fetched_at_ms = now_ms();
             if let Ok(mut guard) = cache().lock() {
                 *guard = Some(Cache {
                     rows: result.rows.clone(),
                     covered_from: result.from.clone(),
                     fetched_at: Instant::now(),
+                    fetched_at_ms,
                     last_error: None,
                 });
             }
+            // Kept for the next cold start. Best effort on purpose: a cache
+            // that cannot be written is a slower launch, not a failure, and
+            // refusing the answer in hand over it would be absurd.
+            stored::save(&stored::Snapshot {
+                v: 1,
+                fetched_at_ms,
+                covered_from: result.from.clone(),
+                rows: result.rows.clone(),
+            });
             Ok(Fetched {
                 rows: result.rows,
                 covered_from: result.from,
+                fetched_at_ms,
+                stale: false,
             })
         }
         Err(e) => {
             let message = e.to_string();
+            let mut remembered = None;
             if let Ok(mut guard) = cache().lock() {
                 match guard.as_mut() {
                     // Keep the rows that are already there. A grid that was
                     // right ten minutes ago beats an empty one, as long as the
                     // caller is told the refresh failed.
-                    Some(c) => c.last_error = Some((message.clone(), Instant::now())),
+                    Some(c) => {
+                        c.last_error = Some((message.clone(), Instant::now()));
+                        if !c.rows.is_empty() {
+                            remembered = Some(Fetched {
+                                rows: c.rows.clone(),
+                                covered_from: c.covered_from.clone(),
+                                fetched_at_ms: c.fetched_at_ms,
+                                stale: true,
+                            });
+                        }
+                    }
                     None => {
                         *guard = Some(Cache {
                             rows: Vec::new(),
                             covered_from: None,
-                            fetched_at: Instant::now() - FRESH_FOR,
+                            fetched_at: Instant::now()
+                                .checked_sub(FRESH_FOR)
+                                .unwrap_or_else(Instant::now),
+                            fetched_at_ms: 0,
                             last_error: Some((message.clone(), Instant::now())),
                         })
                     }
                 }
             }
-            Err(FetchError::new(message))
+            match remembered {
+                Some(fetched) => Ok(fetched),
+                None => Err(FetchError::new(message)),
+            }
         }
     }
 }
@@ -366,5 +571,76 @@ mod tests {
         let error = FetchError::new("usage request failed (500): boom".to_string());
         assert!(!error.expected);
         assert_eq!(error.reason, FailureReason::Other);
+    }
+
+    fn a_row(day: &str) -> SeriesRow {
+        SeriesRow {
+            day: day.to_string(),
+            src: "claude_code".into(),
+            model: "claude-sonnet-4".into(),
+            input: 1,
+            output: 2,
+            cr: 3,
+            cw5: 4,
+            cw1: 5,
+            ev: 1,
+            plan: 0,
+        }
+    }
+
+    #[test]
+    fn a_stored_answer_is_adopted_as_already_stale() {
+        // Good enough to draw on a cold launch, not good enough to skip the
+        // fetch. Both halves matter: the first is why the file exists, the
+        // second is why a phone still ends up showing this minute's numbers.
+        let cache = adopted(stored::Snapshot {
+            v: 1,
+            fetched_at_ms: now_ms() - 60_000,
+            covered_from: Some("2026-01-01".into()),
+            rows: vec![a_row("2026-08-11")],
+        });
+        assert_eq!(cache.rows.len(), 1);
+        assert!(cache.last_error.is_none());
+        assert!(
+            cache.fetched_at.elapsed() >= FRESH_FOR
+                // A process younger than the freshness window cannot name an
+                // `Instant` that far back. Adopting as "now" there is still
+                // correct, it just refreshes one call later.
+                || Instant::now().checked_sub(FRESH_FOR).is_none(),
+            "an adopted answer must not count as fresh"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_survives_a_round_trip() {
+        // The cache file is the wire shape, so a change to `SeriesRow` that
+        // broke this would also have broken the fetch it is a copy of.
+        let snapshot = stored::Snapshot {
+            v: 1,
+            fetched_at_ms: 1_786_000_000_000,
+            covered_from: Some("2026-07-01".into()),
+            rows: vec![a_row("2026-08-10"), a_row("2026-08-11")],
+        };
+        let text = serde_json::to_string(&snapshot).expect("encode");
+        let back: stored::Snapshot = serde_json::from_str(&text).expect("decode");
+        assert_eq!(back.v, 1);
+        assert_eq!(back.fetched_at_ms, snapshot.fetched_at_ms);
+        assert_eq!(back.covered_from.as_deref(), Some("2026-07-01"));
+        assert_eq!(back.rows.len(), 2);
+        assert_eq!(back.rows[0].cw1, 5, "the cache split must survive");
+        assert_eq!(back.rows[1].day, "2026-08-11");
+    }
+
+    #[test]
+    fn a_file_is_kept_for_a_fortnight_and_no_longer() {
+        // Past that the grid it would draw is a picture of a fortnight ago.
+        // Better to open empty and fetch than to open on fiction.
+        let day = 24 * 60 * 60 * 1000i64;
+        let now = 30 * day;
+        assert!(stored::worth_opening(now - day, now));
+        assert!(stored::worth_opening(now - 14 * day, now));
+        assert!(!stored::worth_opening(now - 15 * day, now));
+        // A clock that jumped backwards must not throw the answer away.
+        assert!(stored::worth_opening(now + day, now));
     }
 }

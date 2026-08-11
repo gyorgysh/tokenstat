@@ -670,6 +670,27 @@ extension Bridge {
             as: PricingRefresh.self
         )
     }
+
+    /// Adopt the price book this build ships with, if the machine has none.
+    ///
+    /// Offline, cheap, and never replaces a book that was fetched, so it is
+    /// safe on every launch. It matters most where there is no other way to get
+    /// one: iPhone and iPad have no CLI to run `tokenstat pricing --refresh`
+    /// and no daemon to schedule it, so without this a first launch draws a
+    /// heatmap with counts and no money on it.
+    ///
+    /// A missing resource is not an error worth surfacing. A build that shipped
+    /// without a seed behaves exactly as builds did before there was one.
+    @discardableResult
+    static func pricingSeed() async -> PricingSeed? {
+        guard let url = Bundle.main.url(forResource: "PriceBookSeed", withExtension: "json")
+        else { return nil }
+        return try? await background(
+            "pricing.seed",
+            ["path": url.path],
+            as: PricingSeed.self
+        )
+    }
 }
 
 /// For methods whose result is only "it worked".

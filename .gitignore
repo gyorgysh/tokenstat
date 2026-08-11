@@ -63,6 +63,12 @@ desktop.ini
 /apps/mac/Tokenstat.xcodeproj/
 /apps/mac/Vendor/
 /apps/mac/Resources/THIRD_PARTY_NOTICES.md
+# The price book an app bundle ships with. Downloaded at build time by
+# `cargo xtask pricing-seed`, and it goes stale, so it is generated and never
+# committed. Same rule as the notices above. The `.etag` beside it is the
+# conditional-request bookkeeping the downloader writes.
+/apps/mac/Resources/PriceBookSeed.json
+/apps/mac/Resources/PriceBookSeed.etag
 # Every app's build output, whatever the tool put it there. Xcode writes
 # `build/` next to the project when a scheme is built from the command line,
 # and it is hundreds of megabytes of derived data.

@@ -30,7 +30,9 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use tokenstat_identity::{MachineIdentity, PeerStore, Trust, public_key_from_hex};
+#[cfg(feature = "local-host")]
+use tokenstat_identity::Trust;
+use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
 use tokenstat_remote::{Refused, authorize};
 
 use crate::session::Session;
@@ -649,6 +651,9 @@ fn settings() -> RemoteSettings {
 /// Peers this machine may dial right now: approved, with remote reach on. The
 /// same rule the app's sidebar applies, so sweeps like `pty.list` that want
 /// "all the machines" see exactly the machines they can reach.
+///
+/// Only the terminal sweeps ask for this, and those are the local half.
+#[cfg(feature = "local-host")]
 pub(crate) fn reachable_peers() -> Vec<String> {
     let Ok(store) = PeerStore::load() else {
         return Vec::new();

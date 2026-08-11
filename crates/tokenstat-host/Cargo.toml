@@ -16,9 +16,29 @@ path = "src/lib.rs"
 
 # The daemon. Named `tokenstat-hostd` rather than `tokenstat-host` so it cannot
 # be confused with the `tokenstat` CLI on a PATH listing.
+#
+# A daemon is the local half by definition: it exists to own processes that
+# outlive a window. Without `local-host` there is nothing for it to serve, so
+# it is not built rather than built hollow.
 [[bin]]
 name = "tokenstat-hostd"
 path = "src/bin/tokenstat-hostd.rs"
+required-features = ["local-host"]
+
+# `local-host`: this build can act as the host for its own machine.
+#
+# On by default, and off for the iOS and iPadOS slices of the xcframework.
+# Those platforms cannot fork or exec, so terminals, agent launches, registered
+# folders and automations are not features they lack, they are features the
+# operating system makes impossible. Gating them here turns that from a
+# convention somebody has to remember into a compile error, and takes the pty
+# and workspace crates out of a mobile binary entirely.
+#
+# What remains without it: the account, pricing, the activity grid, machine
+# identity, and reaching a machine that does have `local-host`.
+[features]
+default = ["local-host"]
+local-host = ["dep:tokenstat-workspace", "dep:tokenstat-pty"]
 
 [dependencies]
 tokenstat-core.workspace = true
@@ -26,8 +46,8 @@ tokenstat-core.workspace = true
 # forbidden in `tokenstat-core`, which is what makes the privacy claim
 # structural. See scripts/check-no-network.sh.
 tokenstat-sync.workspace = true
-tokenstat-workspace.workspace = true
-tokenstat-pty.workspace = true
+tokenstat-workspace = { workspace = true, optional = true }
+tokenstat-pty = { workspace = true, optional = true }
 tokenstat-highlight.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-remote.workspace = true

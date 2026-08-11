@@ -336,7 +336,13 @@ struct Highlighting: Codable, Sendable, Hashable {
 struct Info: Codable, Sendable, Hashable {
     var protocolVersion: String
     var coreVersion: String
-    var dbPath: String
+    /// Nil on a host that keeps no archive of its own, which is every mobile
+    /// build. Not an empty string: "no archive" and "an archive nobody named"
+    /// are different facts and must not render the same.
+    var dbPath: String?
+    /// Whether this host can answer about its own machine's logs. False on a
+    /// client, where Insights comes from the account and nowhere else.
+    var hasArchive: Bool
     var timezone: String
     var priceBookEffectiveFrom: String
     var hasPrices: Bool
@@ -344,6 +350,16 @@ struct Info: Codable, Sendable, Hashable {
 
 /// What `pricing.refresh` fetched and loaded.
 struct PricingRefresh: Codable, Sendable, Hashable {
+    var effectiveFrom: String
+    var models: UInt64
+    var hasPrices: Bool
+}
+
+/// What `pricing.seed` did with the book this build ships with.
+struct PricingSeed: Codable, Sendable, Hashable {
+    /// False when the machine already had a book. Not a failure: a fetched
+    /// book is newer than anything a bundle can carry.
+    var adopted: Bool
     var effectiveFrom: String
     var models: UInt64
     var hasPrices: Bool

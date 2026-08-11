@@ -52,6 +52,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # The shape the mobile slices are built in. `--all-features` above never
+      # compiles it, so without this the client build breaks silently and stays
+      # broken until somebody runs an iOS build by hand. See
+      # `docs/mobile-app.md`.
+      - name: Clippy without the local half
+        run: |
+          cargo clippy -p tokenstat-host --no-default-features --all-targets -- -D warnings
+          cargo clippy -p tokenstat-ffi --no-default-features --all-targets -- -D warnings
+
   # Separate job rather than a step in `lint`, so a formatting failure never
   # hides a breach of the privacy guarantee, and so the red check names the
   # thing that actually broke.
@@ -115,6 +124,46 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --all-features --locked
+
+  # The client build, on the platform it ships to.
+  #
+  # Unsigned and simulator only: this exists to catch shared code that stopped
+  # compiling for iOS, which is the failure that actually happens, not to
+  # produce an artifact. Signing lives in the release workflow.
+  apple-client:
+    name: ios client build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      # Simulator slice only. The app links whatever the xcframework holds, and
+      # building the macOS slices as well would double this job to prove
+      # something the test matrix already proves.
+      - name: Build the FFI for the simulator
+        run: scripts/build-ffi-xcframework.sh sim
+
+      - name: Generate the Xcode project
+        run: xcodegen
+        working-directory: apps/mac
+
+      - name: Build for the simulator
+        run: |
+          xcodebuild -scheme Tokenstat \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+        working-directory: apps/mac
 
   audit:
     name: dependency audit

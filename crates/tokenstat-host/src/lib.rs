@@ -26,40 +26,60 @@
 //! There is deliberately no second implementation. A method cannot exist over
 //! one transport and be missing from the other.
 //!
+//! # The `local-host` feature
+//!
+//! On by default, and off for the mobile slices. It is the line between what a
+//! machine does for itself (terminals, agent launches, registered folders,
+//! automations, its own archive) and what a client does about an account or
+//! about somebody else's machine. A build without it cannot express a spawn,
+//! which is the only honest way to compile for a platform that has no fork.
+//!
 //! # Layout
 //!
 //! - [`dto`] is the wire contract. Change it deliberately, it is public API.
-//! - [`session`] is one open archive. A plain struct, not a global.
+//! - [`session`] is a conversation's state, with an archive only where there is
+//!   one. A plain struct, not a global.
+//! - [`error`] is the code a failed call carries.
 //! - [`dispatch`] maps a method name onto the core.
 //! - `machine` answers who this machine is and which peers it trusts.
 //! - [`remote`] serves other machines and reaches them, over the same dispatch.
 //! - [`server`] is the socket listener.
 
 pub mod account_activity;
+#[cfg(feature = "local-host")]
 pub mod activity;
+#[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
 pub mod dispatch;
 pub mod dto;
+pub mod error;
+#[cfg(feature = "local-host")]
 pub(crate) mod launcher;
 mod machine;
 pub mod pricing;
 pub mod remote;
+#[cfg(feature = "local-host")]
 pub(crate) mod remote_stream;
 pub mod server;
 pub mod session;
-#[cfg(unix)]
+#[cfg(all(unix, feature = "local-host"))]
 mod sync_scheduler;
+#[cfg(feature = "local-host")]
 mod todo;
+#[cfg(feature = "local-host")]
 pub mod workspaces;
 
 pub use dispatch::call;
+pub use error::DispatchError;
 pub use session::{OpenParams, Session};
 /// Re-exported so a transport can warm the pty before its first spawn without
 /// taking a dependency on the pty crate of its own. `server::serve` calls it;
 /// the C ABI has no `serve` to call, so it needs this.
+#[cfg(feature = "local-host")]
 pub use tokenstat_pty::warm_login_env;
 /// The warm shell pool, re-exported for the same reason as [`warm_login_env`].
+#[cfg(feature = "local-host")]
 pub use tokenstat_pty::warm_shell_pool;
 
 /// Version of the wire contract, not of the crate.

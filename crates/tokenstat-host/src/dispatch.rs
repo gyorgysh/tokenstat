@@ -12,8 +12,12 @@
 //! straight into here, so a method cannot exist over one transport and not the
 //! other, and there is no second copy to keep in step.
 
+#[cfg(feature = "local-host")]
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock, PoisonError};
+#[cfg(feature = "local-host")]
+use std::sync::OnceLock;
+use std::sync::{Mutex, PoisonError};
+#[cfg(feature = "local-host")]
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -23,12 +27,16 @@ use tokenstat_core::{DayPart, GroupBy, Query};
 
 use crate::PROTOCOL_VERSION;
 use crate::account_activity::FailureReason;
+#[cfg(feature = "local-host")]
 use crate::automations::Automation;
+#[cfg(feature = "local-host")]
+use crate::dto::WorkspaceDto;
 use crate::dto::{
     AccountDto, BlockDto, BucketDto, CalendarDto, DayDetailDto, DayPartDto, DeviceLoginDto,
     DevicePollDto, GroupByDto, InfoDto, MachineDto, QueryDto, ScanReportDto, SplitBucketDto,
-    SyncResultDto, TotalsDto, WorkspaceDto,
+    SyncResultDto, TotalsDto,
 };
+use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -111,12 +119,14 @@ fn default_weeks() -> usize {
     53
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspacePathParams {
     path: String,
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceIdParams {
@@ -142,6 +152,7 @@ struct WorkspaceIdParams {
     content: Option<String>,
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtySpawnParams {
@@ -170,6 +181,7 @@ struct PtySpawnParams {
 /// wants a sampling thread the pty crate should not own either. A session the
 /// sampler has not reached yet simply carries no verdict, which a client
 /// reads as "not known" rather than as "idle".
+#[cfg(feature = "local-host")]
 fn add_activity(item: &mut Value) {
     // Started here rather than at daemon boot: a host that never lists a
     // terminal never needs a sampling thread, and this is idempotent. The
@@ -195,14 +207,17 @@ fn add_activity(item: &mut Value) {
     map.insert("memoryMb".into(), json!(reading.memory_mb.round()));
 }
 
+#[cfg(feature = "local-host")]
 fn default_rows() -> u16 {
     24
 }
 
+#[cfg(feature = "local-host")]
 fn default_cols() -> u16 {
     80
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PtyIdParams {
@@ -220,6 +235,7 @@ struct PtyIdParams {
     cols: Option<u16>,
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct AutomationParams {
@@ -230,6 +246,7 @@ struct AutomationParams {
     offset: Option<u64>,
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct TodoParams {
@@ -291,6 +308,22 @@ fn err(code: &str, message: impl std::fmt::Display) -> String {
     .to_string()
 }
 
+/// Turn any failure into the envelope's error, under the general code.
+///
+/// Every fallible call inside [`dispatch`] ends with this. It replaced a
+/// hundred copies of `map_err(|e| e.to_string())`, which said the same thing at
+/// more length and left no room for a code. A method that has something more
+/// specific to say builds its [`DispatchError`] directly instead.
+trait IntoEnvelope<T> {
+    fn envelope(self) -> Result<T, DispatchError>;
+}
+
+impl<T, E: std::fmt::Display> IntoEnvelope<T> for Result<T, E> {
+    fn envelope(self) -> Result<T, DispatchError> {
+        self.map_err(|e| DispatchError::from(e.to_string()))
+    }
+}
+
 /// Decode params, treating absent and empty as the default.
 ///
 /// A transport that has no params to send should not have to invent `{}`.
@@ -303,6 +336,7 @@ fn parse<T: for<'de> Deserialize<'de> + Default>(params: &str) -> Result<T, Stri
 }
 
 /// Wall clock in milliseconds, or 0 if the clock is before the epoch.
+#[cfg(feature = "local-host")]
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -358,12 +392,15 @@ fn avatar_url(host: &str, raw: &Value) -> Option<String> {
 /// short enough that a save still shows up within a beat. Without this,
 /// every concurrent `workspace.list` and every 600ms refresh after a build
 /// paid three git process spawns per folder again.
+#[cfg(feature = "local-host")]
 const WORKSPACE_STATUS_TTL: Duration = Duration::from_millis(400);
 
+#[cfg(feature = "local-host")]
 struct WorkspaceStatusCache {
     entries: HashMap<String, (Instant, WorkspaceDto)>,
 }
 
+#[cfg(feature = "local-host")]
 fn workspace_status_cache() -> &'static Mutex<WorkspaceStatusCache> {
     static CACHE: OnceLock<Mutex<WorkspaceStatusCache>> = OnceLock::new();
     CACHE.get_or_init(|| {
@@ -377,6 +414,7 @@ fn workspace_status_cache() -> &'static Mutex<WorkspaceStatusCache> {
 ///
 /// Called after mutations that change what `git status` would report, so the
 /// next list is honest rather than a few hundred milliseconds behind the write.
+#[cfg(feature = "local-host")]
 fn invalidate_workspace_status(id: Option<&str>) {
     let Ok(mut cache) = workspace_status_cache().lock() else {
         return;
@@ -393,6 +431,7 @@ fn invalidate_workspace_status(id: Option<&str>) {
 ///
 /// A missing folder gets `git: None` rather than an empty status, so a caller
 /// cannot mistake "we did not look" for "nothing has changed".
+#[cfg(feature = "local-host")]
 fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
     if let Ok(cache) = workspace_status_cache().lock() {
         if let Some((at, dto)) = cache.entries.get(&ws.id) {
@@ -426,8 +465,8 @@ fn describe(ws: &tokenstat_workspace::Workspace) -> WorkspaceDto {
 /// is the seam a future per-request permission check would sit in.
 fn with_session<T>(
     s: &mut Session,
-    f: impl FnOnce(&mut Session) -> Result<T, String>,
-) -> Result<T, String> {
+    f: impl FnOnce(&mut Session) -> Result<T, DispatchError>,
+) -> Result<T, DispatchError> {
     f(s)
 }
 
@@ -480,11 +519,11 @@ fn day_detail_dto(
 pub fn call(session: &mut Session, method: &str, params: &str) -> String {
     match dispatch(session, method, params) {
         Ok(v) => ok(v),
-        Err(e) => err("call_failed", e),
+        Err(e) => err(&e.code, e.message),
     }
 }
 
-fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String> {
+fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, DispatchError> {
     match method {
         // Re-open against a different archive or timezone. Also the hook a
         // future remote transport uses to point at another machine.
@@ -498,40 +537,33 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let info = InfoDto {
                 protocol_version: PROTOCOL_VERSION.to_string(),
                 core_version: tokenstat_core::VERSION.to_string(),
-                db_path: b.engine.db_path().display().to_string(),
-                timezone: b
-                    .engine
-                    .timezone()
-                    .iana_name()
-                    .unwrap_or("unknown")
-                    .to_string(),
+                db_path: b.engine().ok().map(|e| e.db_path().display().to_string()),
+                has_archive: b.has_archive(),
+                timezone: b.timezone().iana_name().unwrap_or("unknown").to_string(),
                 price_book_effective_from: b.prices.effective_from.clone(),
                 has_prices: !b.prices.is_empty(),
             };
-            serde_json::to_value(info).map_err(|e| e.to_string())
+            serde_json::to_value(info).envelope()
         }),
 
         "totals" => {
             let p: QueryParams = parse(params)?;
             with_session(s, |b| {
-                let t = b
-                    .engine
-                    .totals(&Query::from(p.query))
-                    .map_err(|e| e.to_string())?;
-                serde_json::to_value(TotalsDto::from(t)).map_err(|e| e.to_string())
+                let t = b.engine()?.totals(&Query::from(p.query)).envelope()?;
+                serde_json::to_value(TotalsDto::from(t)).envelope()
             })
         }
 
         "report" => {
-            let p: ReportParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let p: ReportParams = serde_json::from_str(params.trim()).envelope()?;
             let group = GroupBy::from(p.group);
             with_session(s, |b| {
                 let rows = b
-                    .engine
+                    .engine()?
                     .priced_report(group, &Query::from(p.query), &b.prices)
-                    .map_err(|e| e.to_string())?;
+                    .envelope()?;
                 let dtos: Vec<BucketDto> = rows.into_iter().map(BucketDto::from).collect();
-                serde_json::to_value(dtos).map_err(|e| e.to_string())
+                serde_json::to_value(dtos).envelope()
             })
         }
 
@@ -551,24 +583,66 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 // failing: an empty Home because the network is down is a worse
                 // answer than this machine's own year with a line saying so.
                 if wants_account {
-                    let today = tokenstat_core::activity::today(b.engine.timezone());
-                    match crate::account_activity::calendar(&b.prices, b.engine.timezone(), p.weeks)
-                    {
-                        Ok(Some(calendar)) => {
+                    let today = tokenstat_core::activity::today(b.timezone());
+                    match crate::account_activity::calendar(&b.prices, b.timezone(), p.weeks) {
+                        Ok(account) if account.calendar.is_some() => {
+                            // Unwrapped rather than matched: the guard above is
+                            // the check, and `Some` is why we are here.
+                            let Some(calendar) = account.calendar else {
+                                return Ok(Value::Null);
+                            };
+                            // A remembered grid says so. The numbers are real
+                            // and they are dated, which is a different thing
+                            // from a fallback to another scope: this is still
+                            // the account's year, just not this minute's.
+                            let (notice, code) = if account.stale {
+                                (
+                                    Some(
+                                        "Showing the last usage this device fetched. \
+                                         The refresh did not go through."
+                                            .to_string(),
+                                    ),
+                                    Some("stale"),
+                                )
+                            } else {
+                                (None, None)
+                            };
                             return serde_json::to_value(
-                                CalendarDto::from(calendar).scoped("account", None, None),
+                                CalendarDto::from(calendar)
+                                    .scoped("account", notice, code)
+                                    .fetched_at(account.fetched_at_ms),
                             )
-                            .map_err(|e| e.to_string());
+                            .envelope();
                         }
                         // The account exists and has nothing in it. Not an
                         // error, and not a reason to show this machine's grid
                         // labelled as everybody's.
-                        Ok(None) => return Ok(Value::Null),
+                        Ok(_) => return Ok(Value::Null),
                         Err(failure) => {
-                            let rows = b
-                                .engine
+                            let code = match failure.reason {
+                                FailureReason::Authentication => "auth",
+                                FailureReason::UpgradeRequired => "upgrade",
+                                FailureReason::Other => "other",
+                            };
+                            // A client has no machine of its own to fall back
+                            // to, so the failure is the answer. It carries the
+                            // same code the notice would have, which is what the
+                            // front end reads to offer a sign-in, so one client
+                            // handles both shapes with one branch.
+                            let Ok(engine) = b.engine() else {
+                                return Err(DispatchError::new(
+                                    code,
+                                    match failure.reason {
+                                        FailureReason::Authentication => {
+                                            "Sign in to tokenstat.ai to see your usage.".to_string()
+                                        }
+                                        _ => failure.message.clone(),
+                                    },
+                                ));
+                            };
+                            let rows = engine
                                 .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
-                                .map_err(|e| e.to_string())?;
+                                .envelope()?;
                             let days: Vec<(String, u64)> = rows
                                 .iter()
                                 .map(|r| (r.key.clone(), r.value.micros().max(0) as u64))
@@ -580,29 +654,23 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                             // actionable sentence rather than a CLI incantation
                             // quoted at someone who is already sitting in the
                             // app; the front end offers a sign-in from the code.
-                            let (notice, code) = match failure.reason {
-                                FailureReason::Authentication => (
-                                    Some(
-                                        "Showing this machine only. Sign in to tokenstat.ai \
-                                         to see usage from every machine."
-                                            .to_string(),
-                                    ),
-                                    Some("auth"),
-                                ),
-                                FailureReason::UpgradeRequired => (
-                                    Some(format!("Showing this machine only: {}", failure.message)),
-                                    Some("upgrade"),
-                                ),
-                                FailureReason::Other => (
-                                    Some(format!("Showing this machine only: {}", failure.message)),
-                                    Some("other"),
-                                ),
+                            let notice = match failure.reason {
+                                FailureReason::Authentication => {
+                                    "Showing this machine only. Sign in to tokenstat.ai \
+                                     to see usage from every machine."
+                                        .to_string()
+                                }
+                                _ => format!("Showing this machine only: {}", failure.message),
                             };
                             return match tokenstat_core::activity::calendar(&days, p.weeks, today) {
-                                Some(calendar) => serde_json::to_value(
-                                    CalendarDto::from(calendar).scoped("local", notice, code),
-                                )
-                                .map_err(|e| e.to_string()),
+                                Some(calendar) => {
+                                    serde_json::to_value(CalendarDto::from(calendar).scoped(
+                                        "local",
+                                        Some(notice),
+                                        Some(code),
+                                    ))
+                                    .envelope()
+                                }
                                 None => Ok(Value::Null),
                             };
                         }
@@ -610,9 +678,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 }
 
                 let rows = b
-                    .engine
+                    .engine()?
                     .priced_report(GroupBy::Day, &Query::from(p.query), &b.prices)
-                    .map_err(|e| e.to_string())?;
+                    .envelope()?;
                 // Cost in microdollars: what the day's work actually spent.
                 // Token counts would favour high-volume cheap models over
                 // expensive ones; cost reflects real spend instead.
@@ -622,11 +690,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     .collect();
                 // Anchored on today rather than on the newest day with data, so
                 // a quiet week reads as a quiet week instead of vanishing.
-                let today = tokenstat_core::activity::today(b.engine.timezone());
+                let today = tokenstat_core::activity::today(b.timezone());
                 match tokenstat_core::activity::calendar(&days, p.weeks, today) {
-                    Some(calendar) => {
-                        serde_json::to_value(CalendarDto::from(calendar)).map_err(|e| e.to_string())
-                    }
+                    Some(calendar) => serde_json::to_value(CalendarDto::from(calendar)).envelope(),
                     // An empty archive is not an error. The client draws an
                     // empty grid and says the archive has nothing in it yet.
                     None => Ok(Value::Null),
@@ -646,13 +712,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let p: DayDetailParams = parse(params)?;
             with_session(s, |b| {
                 let rows = if p.scope.as_deref() == Some("account") {
-                    crate::account_activity::day_detail(&p.date, b.engine.timezone(), p.weeks)
+                    crate::account_activity::day_detail(&p.date, b.timezone(), p.weeks)
                         .map_err(|e| e.message)?
                 } else {
-                    b.engine
-                        .store()
-                        .day_detail(&p.date)
-                        .map_err(|e| e.to_string())?
+                    b.engine()?.store().day_detail(&p.date).envelope()?
                 };
                 // Nothing happened that day. An answer, not an error: the
                 // client only asks for days the grid lit up, so a miss is
@@ -662,44 +725,41 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     return Ok(Value::Null);
                 }
                 let dto = day_detail_dto(&p.date, &rows, &b.prices);
-                serde_json::to_value(dto).map_err(|e| e.to_string())
+                serde_json::to_value(dto).envelope()
             })
         }
 
         // Two-level report: "which harnesses ran in which project", and any
         // other cross-tabulation. One query, not one per key.
         "report.split" => {
-            let p: SplitParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let p: SplitParams = serde_json::from_str(params.trim()).envelope()?;
             let group = GroupBy::from(p.group);
             let split = GroupBy::from(p.split_by);
             with_session(s, |b| {
                 let rows = b
-                    .engine
+                    .engine()?
                     .store()
                     .report_split(group, split, &Query::from(p.query))
-                    .map_err(|e| e.to_string())?;
+                    .envelope()?;
                 let dtos: Vec<SplitBucketDto> =
                     rows.into_iter().map(SplitBucketDto::from).collect();
-                serde_json::to_value(dtos).map_err(|e| e.to_string())
+                serde_json::to_value(dtos).envelope()
             })
         }
 
         "blocks" => {
             let p: QueryParams = parse(params)?;
             with_session(s, |b| {
-                let rows = b
-                    .engine
-                    .blocks(&Query::from(p.query))
-                    .map_err(|e| e.to_string())?;
+                let rows = b.engine()?.blocks(&Query::from(p.query)).envelope()?;
                 let dtos: Vec<BlockDto> = rows.into_iter().map(BlockDto::from).collect();
-                serde_json::to_value(dtos).map_err(|e| e.to_string())
+                serde_json::to_value(dtos).envelope()
             })
         }
 
         // Long running. The caller must not run this on a UI thread.
         "scan" => with_session(s, |b| {
-            let r = b.engine.scan().map_err(|e| e.to_string())?;
-            serde_json::to_value(ScanReportDto::from(r)).map_err(|e| e.to_string())
+            let r = b.engine_mut()?.scan().envelope()?;
+            serde_json::to_value(ScanReportDto::from(r)).envelope()
         }),
 
         // Signed out is a state, not a failure. The bridge reports
@@ -707,8 +767,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // error path for a host that is unreachable or a token that was
         // revoked, which need different words.
         "account.status" => {
-            let host =
-                tokenstat_sync::profile::resolve_api_host(None).map_err(|e| e.to_string())?;
+            let host = tokenstat_sync::profile::resolve_api_host(None).envelope()?;
             match tokenstat_sync::sync_status(None) {
                 Ok(s) => serde_json::to_value(AccountDto {
                     signed_in: true,
@@ -730,7 +789,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     machines: s.machines.iter().map(MachineDto::from_value).collect(),
                     schema_current: s.schema_current,
                 })
-                .map_err(|e| e.to_string()),
+                .envelope(),
                 Err(e) if e.is_unauthenticated() => serde_json::to_value(AccountDto {
                     signed_in: false,
                     host,
@@ -743,8 +802,8 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     machines: Vec::new(),
                     schema_current: None,
                 })
-                .map_err(|e| e.to_string()),
-                Err(e) => Err(e.to_string()),
+                .envelope(),
+                Err(e) => Err(e.to_string().into()),
             }
         }
 
@@ -752,13 +811,13 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // open. Opening the browser is the front end's job: this crate has no
         // business deciding how a window behaves.
         "account.deviceStart" => {
-            let device = tokenstat_sync::device_start(None).map_err(|e| e.to_string())?;
+            let device = tokenstat_sync::device_start(None).envelope()?;
             let dto = DeviceLoginDto::from(&device);
             with_session(s, |b| {
                 b.pending_login = Some(device);
                 Ok(())
             })?;
-            serde_json::to_value(dto).map_err(|e| e.to_string())
+            serde_json::to_value(dto).envelope()
         }
 
         // Poll once. Never sleeps, so the caller controls the cadence and can
@@ -768,9 +827,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             let pending = with_session(s, |b| {
                 b.pending_login
                     .clone()
-                    .ok_or_else(|| "no sign-in is in progress".to_string())
+                    .ok_or_else(|| DispatchError::from("no sign-in is in progress"))
             })?;
-            match tokenstat_sync::device_poll(&pending).map_err(|e| e.to_string())? {
+            match tokenstat_sync::device_poll(&pending).envelope()? {
                 tokenstat_sync::DeviceStatus::Pending { interval } => {
                     serde_json::to_value(DevicePollDto {
                         state: "pending",
@@ -779,7 +838,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         host: None,
                         machine: None,
                     })
-                    .map_err(|e| e.to_string())
+                    .envelope()
                 }
                 tokenstat_sync::DeviceStatus::Confirmed(result) => {
                     with_session(s, |b| {
@@ -793,7 +852,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         host: Some(result.host),
                         machine: Some(result.machine),
                     })
-                    .map_err(|e| e.to_string())
+                    .envelope()
                 }
             }
         }
@@ -807,7 +866,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         }
 
         "account.logout" => {
-            let host = tokenstat_sync::logout(None).map_err(|e| e.to_string())?;
+            let host = tokenstat_sync::logout(None).envelope()?;
             with_session(s, |b| {
                 b.pending_login = None;
                 Ok(())
@@ -820,9 +879,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         "sync.run" => {
             let p: SyncParams = parse(params)?;
             with_session(s, |b| {
-                let tz = b.engine.timezone().iana_name().map(str::to_string);
+                let tz = b.timezone().iana_name().map(str::to_string);
                 let r = tokenstat_sync::sync(
-                    b.engine.store(),
+                    b.engine()?.store(),
                     tokenstat_sync::SyncOptions {
                         host_flag: None,
                         prune: p.prune,
@@ -831,7 +890,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                         tz_name: tz.as_deref(),
                     },
                 )
-                .map_err(|e| e.to_string())?;
+                .envelope()?;
                 if !r.dry_run {
                     // Same reason as the scheduled run: what the account holds
                     // just changed, and the cached grid predates it.
@@ -845,7 +904,28 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                     from: r.window.from,
                     to: r.window.to,
                 })
-                .map_err(|e| e.to_string())
+                .envelope()
+            })
+        }
+
+        // Adopt the price book an app bundle ships with, when this machine has
+        // none of its own. Cheap, offline, and safe to call on every launch:
+        // an existing book is never replaced. See `crate::pricing::seed`.
+        "pricing.seed" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SeedParams {
+                path: String,
+            }
+            let p: SeedParams = serde_json::from_str(params.trim()).envelope()?;
+            with_session(s, |b| {
+                let seeded = crate::pricing::seed(b, std::path::Path::new(&p.path))?;
+                Ok(json!({
+                    "adopted": seeded.adopted,
+                    "effectiveFrom": seeded.effective_from,
+                    "models": seeded.models,
+                    "hasPrices": !b.prices.is_empty(),
+                }))
             })
         }
 
@@ -855,7 +935,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
         // with no host agent installed has no scheduler of its own, so the
         // app asks for it.
         "pricing.refresh" => with_session(s, |b| {
-            let refreshed = tokenstat_sync::pricing::refresh(false).map_err(|e| e.to_string())?;
+            let refreshed = tokenstat_sync::pricing::refresh(false).envelope()?;
             // The session's cached book predates this fetch. Reload it here so
             // the very next report prices against the new rates instead of the
             // empty book the session opened with.
@@ -865,37 +945,68 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 "models": refreshed.models,
                 "hasPrices": !b.prices.is_empty(),
             }))
-            .map_err(|e| e.to_string())
+            .envelope()
         }),
 
         // Remote vendor usage is fetched only after an explicit user action.
         // Local log scanning remains separate and never needs the network.
         "fetch" => with_session(s, |b| {
-            let tz = b.engine.timezone().clone();
-            let reports = tokenstat_sync::fetch_remotes(b.engine.store_mut(), &tz, false)
-                .map_err(|e| e.to_string())?;
-            serde_json::to_value(reports).map_err(|e| e.to_string())
+            let tz = b.timezone().clone();
+            let reports = tokenstat_sync::fetch_remotes(b.engine_mut()?.store_mut(), &tz, false)
+                .envelope()?;
+            serde_json::to_value(reports).envelope()
         }),
 
+        other => match local_jobs(other, params) {
+            Some(result) => result,
+            None => match sessionless(other, params) {
+                Some(result) => result.map_err(DispatchError::from),
+                None => Err(DispatchError::new(
+                    "unknown_method",
+                    format!("unknown method: {other}"),
+                )),
+            },
+        },
+    }
+}
+
+/// Automations and the todo board: local work, and nothing to do with the
+/// archive.
+///
+/// Split out of the big match so the whole family carries one `cfg` rather than
+/// fifteen. Still called from `dispatch` rather than from `sessionless`,
+/// because moving it would also move it out from under the session lock, and
+/// that is a concurrency change rather than a compilation one.
+#[cfg(feature = "local-host")]
+fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
+    if !method.starts_with("automation.") && !method.starts_with("todo.") {
+        return None;
+    }
+    Some(local_job_call(method, params))
+}
+
+/// The same split `folders` and `folder_call` use: one function decides whether
+/// the method belongs here, the other answers it. That keeps `?` usable in the
+/// arms, which a function returning `Option` cannot do.
+#[cfg(feature = "local-host")]
+fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
+    match method {
         // Workspaces are registered folders, nothing to do with the archive.
-        "automation.list" => {
-            serde_json::to_value(crate::automations::shared().list()).map_err(|e| e.to_string())
-        }
+        "automation.list" => serde_json::to_value(crate::automations::shared().list()).envelope(),
         "automation.create" => {
             let mut p: AutomationParams = parse(params)?;
             let mut job = p.job.take().ok_or("automation.create needs job")?;
             if job.id.is_empty() {
                 job.id = format!("automation-{}", now_ms());
             }
-            serde_json::to_value(crate::automations::shared().create(job)?)
-                .map_err(|e| e.to_string())
+            serde_json::to_value(crate::automations::shared().create(job)?).envelope()
         }
         "automation.update" => {
             let p: AutomationParams = parse(params)?;
             serde_json::to_value(
                 crate::automations::shared().update(p.job.ok_or("automation.update needs job")?)?,
             )
-            .map_err(|e| e.to_string())
+            .envelope()
         }
         "automation.remove" => {
             let p: AutomationParams = parse(params)?;
@@ -910,18 +1021,16 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 crate::automations::shared()
                     .set_enabled(&p.id.ok_or("automation needs id")?, enabled)?,
             )
-            .map_err(|e| e.to_string())
+            .envelope()
         }
         "automation.run" => {
             let p: AutomationParams = parse(params)?;
             serde_json::to_value(
                 crate::automations::shared().run(&p.id.ok_or("automation.run needs id")?)?,
             )
-            .map_err(|e| e.to_string())
+            .envelope()
         }
-        "automation.runs" => {
-            serde_json::to_value(crate::automations::shared().runs()).map_err(|e| e.to_string())
-        }
+        "automation.runs" => serde_json::to_value(crate::automations::shared().runs()).envelope(),
         "automation.backends" => Ok(serde_json::Value::Array(crate::automations::backends())),
         "automation.transcript" => {
             let p: AutomationParams = parse(params)?;
@@ -937,9 +1046,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             Ok(json!({"killed": true}))
         }
 
-        "todo.list" => {
-            serde_json::to_value(crate::todo::shared().list()).map_err(|e| e.to_string())
-        }
+        "todo.list" => serde_json::to_value(crate::todo::shared().list()).envelope(),
         "todo.create" => {
             let p: TodoParams = parse(params)?;
             let card = crate::todo::Card {
@@ -959,7 +1066,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
                 updated_at_ms: 0,
                 delegate: None,
             };
-            serde_json::to_value(crate::todo::shared().create(card)?).map_err(|e| e.to_string())
+            serde_json::to_value(crate::todo::shared().create(card)?).envelope()
         }
         "todo.update" => {
             let p: TodoParams = parse(params)?;
@@ -978,7 +1085,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             serde_json::to_value(
                 crate::todo::shared().update(&p.id.ok_or("todo.update needs an id")?, &changes)?,
             )
-            .map_err(|e| e.to_string())
+            .envelope()
         }
         "todo.remove" => {
             let p: TodoParams = parse(params)?;
@@ -991,19 +1098,25 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
             serde_json::to_value(
                 crate::todo::shared().delegate(&p.id.ok_or("todo.delegate needs an id")?)?,
             )
-            .map_err(|e| e.to_string())
+            .envelope()
         }
         "todo.stop" => {
             let p: TodoParams = parse(params)?;
             serde_json::to_value(crate::todo::shared().stop(&p.id.ok_or("todo.stop needs an id")?)?)
-                .map_err(|e| e.to_string())
+                .envelope()
         }
 
-        other => match sessionless(other, params) {
-            Some(result) => result,
-            None => Err(format!("unknown method: {other}")),
-        },
+        other => Err(DispatchError::new(
+            "unknown_method",
+            format!("unknown method: {other}"),
+        )),
     }
+}
+
+/// Without `local-host` there is nothing here to run.
+#[cfg(not(feature = "local-host"))]
+fn local_jobs(_method: &str, _params: &str) -> Option<Result<Value, DispatchError>> {
+    None
 }
 
 /// Anything under the system temp directory is hidden from the workspace list.
@@ -1014,6 +1127,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, String
 /// about and showed every new one. A third prefix duly appeared and landed in
 /// the interface. The location is the signal, not the name, and nobody keeps a
 /// project they are working in inside a folder the system deletes.
+#[cfg(feature = "local-host")]
 fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
     let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
     ws.path.starts_with(temp)
@@ -1045,6 +1159,7 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
 ///
 /// Returns `None` for a method it does not own, the same shape as
 /// `machine::call` and `remote::call`.
+#[cfg(feature = "local-host")]
 fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
         "workspace.list" | "workspace.add" | "workspace.remove" | "workspace.rename"
@@ -1060,6 +1175,7 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
 ///
 /// Each takes the registry lock only long enough to copy the folder it needs.
 /// Nothing here runs a subprocess with a guard in hand.
+#[cfg(feature = "local-host")]
 fn folder_call(method: &str, params: &str) -> Result<Value, String> {
     match method {
         // The registered folders, and the terminals that run in them. All of
@@ -1331,7 +1447,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     }
 
     // Folders and terminals. Same reasoning: none of it reads the archive.
+    #[cfg(feature = "local-host")]
     if let Some(answer) = folders(method, params) {
+        return Some(answer);
+    }
+    if let Some(answer) = terminals(method, params) {
         return Some(answer);
     }
 
@@ -1406,6 +1526,47 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // of this reads the archive.
         "usage.limits" => Ok(usage_limits()),
 
+        "account.unlinkMachine" => {
+            #[derive(Deserialize)]
+            struct UnlinkParams {
+                id: String,
+            }
+            let p: UnlinkParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Some(Err(e.to_string())),
+            };
+            if let Err(e) = tokenstat_sync::profile::unlink_machine(None, &p.id) {
+                return Some(Err(e.to_string()));
+            }
+            crate::account_activity::invalidate();
+            Ok(json!({"removed": true}))
+        }
+
+        _ => return None,
+    })
+}
+
+/// Terminals, agent launches, and the streams and proxies that carry them.
+///
+/// One `cfg` for the whole family rather than one per arm, and the same
+/// decide-then-answer split `folders` uses so `?` still works in the arms.
+/// None of it exists without `local-host`: a platform with no fork has no
+/// terminal to list, and a client asking for one is asking the wrong machine.
+#[cfg(feature = "local-host")]
+fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
+    if !method.starts_with("pty.")
+        && !method.starts_with("launcher.")
+        && !method.starts_with("stream.")
+        && !method.starts_with("proxy.")
+    {
+        return None;
+    }
+    Some(terminal_call(method, params))
+}
+
+#[cfg(feature = "local-host")]
+fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
+    match method {
         "pty.list" => {
             let include_remote = serde_json::from_str::<PtyListParams>(params.trim())
                 .map(|p| p.include_remote)
@@ -1413,8 +1574,8 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             let mut items: Vec<Value> = match serde_json::to_value(tokenstat_pty::manager().list())
             {
                 Ok(Value::Array(items)) => items,
-                Ok(_) => return Some(Err("pty.list returned a non-array".into())),
-                Err(e) => return Some(Err(e.to_string())),
+                Ok(_) => return Err("pty.list returned a non-array".into()),
+                Err(e) => return Err(e.to_string()),
             };
             for item in &mut items {
                 add_activity(item);
@@ -1433,7 +1594,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         "pty.info" => {
             if let Some(answer) = route_remote_pty("pty.info", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 let info = tokenstat_pty::manager()
@@ -1460,11 +1621,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 if let Some(answer) =
                     crate::remote_stream::cached_pty_read(peer, session, parsed.offset)
                 {
-                    return Some(Ok(answer));
+                    return Ok(answer);
                 }
             }
             if let Some(answer) = route_remote_pty("pty.read", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 let chunk = tokenstat_pty::manager()
@@ -1485,18 +1646,15 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 && let Some((peer, session)) = split_remote(&parsed.id)
                 && let Some(data) = parsed.data
             {
-                match crate::base64::decode(&data) {
-                    Ok(bytes) => match crate::remote_stream::write_pty_input(peer, session, &bytes)
-                    {
-                        Ok(true) => return Some(Ok(json!({"written": bytes.len()}))),
-                        Ok(false) => {}
-                        Err(error) => return Some(Err(error)),
-                    },
-                    Err(error) => return Some(Err(error)),
+                let bytes = crate::base64::decode(&data)?;
+                // False means there is no live channel to that session, which
+                // is not a failure: fall through to the request round trip.
+                if crate::remote_stream::write_pty_input(peer, session, &bytes)? {
+                    return Ok(json!({"written": bytes.len()}));
                 }
             }
             if let Some(answer) = route_remote_pty("pty.write", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 let data = p.data.ok_or("pty.write needs base64 data")?;
@@ -1510,7 +1668,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         "pty.resize" => {
             if let Some(answer) = route_remote_pty("pty.resize", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 let (rows, cols) = match (p.rows, p.cols) {
@@ -1526,7 +1684,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 
         "pty.kill" => {
             if let Some(answer) = route_remote_pty("pty.kill", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 tokenstat_pty::manager()
@@ -1543,7 +1701,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                 crate::remote_stream::invalidate_pty_list(peer);
             }
             if let Some(answer) = route_remote_pty("pty.close", params) {
-                return Some(answer);
+                return answer;
             }
             pty_id(params).and_then(|p| {
                 tokenstat_pty::manager()
@@ -1562,22 +1720,6 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // Remove a machine from the account directory. The server deletes its
         // uploaded rows, so this is an explicit action for a machine id that
         // is stale (a reinstall) or otherwise holding a machine-cap slot.
-        "account.unlinkMachine" => {
-            #[derive(Deserialize)]
-            struct UnlinkParams {
-                id: String,
-            }
-            let p: UnlinkParams = match serde_json::from_str(params.trim()) {
-                Ok(p) => p,
-                Err(e) => return Some(Err(e.to_string())),
-            };
-            if let Err(e) = tokenstat_sync::profile::unlink_machine(None, &p.id) {
-                return Some(Err(e.to_string()));
-            }
-            crate::account_activity::invalidate();
-            Ok(json!({"removed": true}))
-        }
-
         // A byte stream between machines. Runs on the machine that owns the
         // resource: it reserves a stream and returns a token; the caller then
         // dials a fresh connection and claims it with `{"stream": token}` as
@@ -1589,8 +1731,14 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // the other machine's own localhost. The listener binds loopback only.
         "proxy.listen" => proxy_listen(params),
 
-        _ => return None,
-    })
+        other => Err(format!("unknown method: {other}")),
+    }
+}
+
+/// Without `local-host` there are no terminals to reach.
+#[cfg(not(feature = "local-host"))]
+fn terminals(_method: &str, _params: &str) -> Option<Result<Value, String>> {
+    None
 }
 
 /// Ask every vendor what is left of its plan.
@@ -1666,6 +1814,7 @@ fn sync_schedule_status() -> Result<Value, String> {
     }))
 }
 
+#[cfg(feature = "local-host")]
 fn pty_id(params: &str) -> Result<PtyIdParams, String> {
     serde_json::from_str(params.trim()).map_err(|e| e.to_string())
 }
@@ -1674,6 +1823,7 @@ fn pty_id(params: &str) -> Result<PtyIdParams, String> {
 /// the caller claims it with. The pump starts immediately and waits for the
 /// connection, so `proxy` and `pty.subscribe` are ready the moment the token
 /// is sent back over the call channel.
+#[cfg(feature = "local-host")]
 fn stream_open(params: &str) -> Result<Value, String> {
     let p: StreamOpenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let kind = match p.kind.as_str() {
@@ -1706,6 +1856,7 @@ fn stream_open(params: &str) -> Result<Value, String> {
 /// accepted connection to a proxy stream on the peer. Loopback only, so
 /// nothing on this machine's network is exposed; the caller (a browser tab)
 /// talks to the port as if the service were local.
+#[cfg(feature = "local-host")]
 fn proxy_listen(params: &str) -> Result<Value, String> {
     let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
@@ -1763,8 +1914,10 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
 
 /// How many loopback bridges a daemon will hold at once. Browsed ports are
 /// cheap but not free, and each one parks a thread.
+#[cfg(feature = "local-host")]
 const MAX_PROXY_LISTENERS: usize = 16;
 
+#[cfg(feature = "local-host")]
 fn proxy_listeners()
 -> &'static Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>
 {
@@ -1781,12 +1934,15 @@ fn proxy_listeners()
 /// The same prefix the app uses for remote folder ids, so a terminal spawned
 /// in a remote folder and a session listed from a peer read as one namespace
 /// and group under the remote folder in the sidebar.
+#[cfg(feature = "local-host")]
 const REMOTE_PREFIX: &str = "remote:";
 
+#[cfg(feature = "local-host")]
 fn split_remote(value: &str) -> Option<(&str, &str)> {
     value.strip_prefix(REMOTE_PREFIX)?.split_once(':')
 }
 
+#[cfg(feature = "local-host")]
 fn remote_id(peer: &str, inner: &str) -> String {
     format!("{REMOTE_PREFIX}{peer}:{inner}")
 }
@@ -1794,6 +1950,7 @@ fn remote_id(peer: &str, inner: &str) -> String {
 /// Rewrite a peer's session info so it reads as one of this machine's: the id
 /// gains the peer namespace and the workspace id becomes the same
 /// `remote:<peer>:<id>` the app's folder list uses.
+#[cfg(feature = "local-host")]
 pub(crate) fn renamespace_session(value: &mut Value, peer: &str) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -1809,6 +1966,7 @@ pub(crate) fn renamespace_session(value: &mut Value, peer: &str) {
 /// Forward a pty method whose session id belongs to another machine. Returns
 /// `None` when the id is local or unparseable, so the caller falls through to
 /// the local manager.
+#[cfg(feature = "local-host")]
 fn route_remote_pty(method: &str, params: &str) -> Option<Result<Value, String>> {
     let parsed: PtyIdParams = serde_json::from_str(params.trim()).ok()?;
     let (peer, inner) = split_remote(&parsed.id)?;
@@ -1824,12 +1982,14 @@ fn route_remote_pty(method: &str, params: &str) -> Option<Result<Value, String>>
     })())
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct PtyListParams {
     include_remote: bool,
 }
 
+#[cfg(feature = "local-host")]
 impl Default for PtyListParams {
     fn default() -> Self {
         Self {
@@ -1838,6 +1998,7 @@ impl Default for PtyListParams {
     }
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamOpenParams {
@@ -1847,6 +2008,7 @@ struct StreamOpenParams {
     port: Option<u16>,
 }
 
+#[cfg(feature = "local-host")]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProxyListenParams {
@@ -1929,11 +2091,48 @@ mod tests {
             SEQ.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        Session::open(&OpenParams {
+        // `open_local` rather than `open`, so these keep testing an archive
+        // when the crate is built without `local-host`.
+        Session::open_local(&OpenParams {
             db_path: Some(dir.join("tokenstat.db").display().to_string()),
             timezone: Some("UTC".into()),
         })
         .expect("open temp archive")
+    }
+
+    #[test]
+    fn a_client_says_which_methods_it_cannot_answer() {
+        let mut s = Session::open_client(Some("UTC")).expect("client session");
+
+        // Every archive method refuses with the same code, so one branch in a
+        // front end covers all of them, and none of them fails as if something
+        // had gone wrong.
+        for (method, params) in [
+            ("totals", "{}"),
+            ("report", r#"{"group":"day"}"#),
+            ("report.split", r#"{"group":"day","splitBy":"model"}"#),
+            ("blocks", "{}"),
+            ("scan", "{}"),
+            ("sync.run", "{}"),
+            ("activity.day", r#"{"date":"2026-08-11"}"#),
+        ] {
+            let out = call(&mut s, method, params);
+            let v: Value = serde_json::from_str(&out).expect("envelope");
+            assert_eq!(v["ok"], false, "{method} answered from nothing: {out}");
+            assert_eq!(
+                v["error"]["code"],
+                crate::error::NO_LOCAL_ARCHIVE,
+                "{method}: {out}"
+            );
+        }
+
+        // And it says so up front, rather than only when asked to do the
+        // impossible.
+        let info: Value = serde_json::from_str(&call(&mut s, "info", "{}")).expect("info envelope");
+        assert_eq!(info["ok"], true, "{info}");
+        assert_eq!(info["result"]["hasArchive"], false);
+        assert!(info["result"]["dbPath"].is_null(), "{info}");
+        assert_eq!(info["result"]["timezone"], "UTC");
     }
 
     #[test]
@@ -2005,18 +2204,21 @@ mod tests {
         // every scan and report first, and opening a terminal took tens of
         // seconds on a busy daemon. Empty params fail to parse, so this reaches
         // the envelope without starting a process.
-        let out = call_sessionless("pty.spawn", "{}")
-            .expect("pty.spawn must be answerable without a session");
-        let v: Value = serde_json::from_str(&out).expect("pty.spawn returned non-JSON");
-        assert!(v["ok"].is_boolean(), "pty.spawn lacks ok: {out}");
+        #[cfg(feature = "local-host")]
+        {
+            let out = call_sessionless("pty.spawn", "{}")
+                .expect("pty.spawn must be answerable without a session");
+            let v: Value = serde_json::from_str(&out).expect("pty.spawn returned non-JSON");
+            assert!(v["ok"].is_boolean(), "pty.spawn lacks ok: {out}");
 
-        // The folder methods are sessionless for the same reason. Not called
-        // here: `workspace.list` runs git over whatever this machine actually
-        // has registered, which is not a test's business.
-        assert!(
-            folders("workspace.list", "{}").is_some(),
-            "workspace.list must not need the session"
-        );
+            // The folder methods are sessionless for the same reason. Not
+            // called here: `workspace.list` runs git over whatever this machine
+            // actually has registered, which is not a test's business.
+            assert!(
+                folders("workspace.list", "{}").is_some(),
+                "workspace.list must not need the session"
+            );
+        }
 
         // Anything that reads the archive still does.
         // Pricing talks to the network and mutates the session's cached book,
@@ -2291,7 +2493,8 @@ mod tests {
             billing: tokenstat_core::model::BillingMode::Plan,
             confidence: Confidence::Exact,
         };
-        s.engine
+        s.engine_mut()
+            .expect("test session has an archive")
             .store_mut()
             .insert_events(
                 &[
