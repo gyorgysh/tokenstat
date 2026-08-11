@@ -107,25 +107,24 @@ struct RootView: View {
     @State private var inspectorFits = true
     /// Whether the floating inspector overlay is on screen.
     ///
-    /// Only meaningful in overlay mode (window below the fit edge); the
-    /// column mode ignores it. Hovering the detail's trailing edge shows it,
-    /// leaving starts the auto-hide, and the toolbar toggle pins it.
+    /// Written by `watchPointer`, which opens it after a dwell at the edge and
+    /// closes it when the pointer has actually left, and by the toggle on a
+    /// window too narrow to dock into. Whether it stays
+    /// without the pointer is `isOverlayPinned`, which is derived from the
+    /// toggle rather than stored.
     @State private var isOverlayVisible = false
-    /// The user pinned the overlay open, so leaving the pointer does not
-    /// dismiss it. Cleared by the close button, the toggle, or a mode change.
-    @State private var isOverlayPinned = false
-    /// Cancelled whenever the pointer comes back, so a short trip out cannot
-    /// dismiss the pane.
-    @State private var hideOverlayTask: Task<Void, Never>?
-    @State private var isOverlayEdgeHovered = false
-    @State private var isOverlayPanelHovered = false
+    /// The float is up because the toolbar toggle was pressed on a window too
+    /// narrow to hold the column, and the pointer has not reached it yet.
+    ///
+    /// Cleared the moment the pointer arrives, after which the pane behaves
+    /// like every other peek and leaves when the pointer does. A press should
+    /// not have to be undone by a second press, and a pane should not vanish
+    /// while somebody is still moving towards it.
+    @State private var overlayHeldByPress = false
     /// Whether the leading sidebar column is collapsed and its left-edge peek
     /// is available: hovering the leading edge floats the sidebar over the
     /// detail, the same way the right inspector floats when it does not fit.
     @State private var isSidebarOverlayVisible = false
-    @State private var isSidebarEdgeHovered = false
-    @State private var isSidebarPanelHovered = false
-    @State private var hideSidebarOverlayTask: Task<Void, Never>?
     /// The user explicitly reopened the sidebar below the sidebar fit edge.
     /// Honored until they close it; without the pin the fit would override
     /// the reopen on the next read.
@@ -194,43 +193,11 @@ struct RootView: View {
         .onChange(of: windowContentWidth) { _, width in
             applyWidth(for: width)
         }
-        // Hover near the trailing edge shows the floating pane; leaving hides
-        // it after a beat, so a trip across to the scrollbar does not dismiss
-        // it. A pinned pane ignores both.
-        .onChange(of: isOverlayHovered) { _, inside in
-            if inside {
-                hideOverlayTask?.cancel()
-                isOverlayVisible = true
-            } else if !isOverlayPinned {
-                hideOverlayTask?.cancel()
-                hideOverlayTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard !Task.isCancelled else { return }
-                    isOverlayVisible = false
-                }
-            }
-        }
-        // The same peek on the leading edge: a collapsed sidebar comes back as
-        // a floating pane while the pointer is near the edge, and hides again
-        // once it leaves. A pinned popup (the only open state on a narrow
-        // window) ignores the leave so the pointer can cross to the pane.
-        .onChange(of: isSidebarOverlayHovered) { _, inside in
-            if inside {
-                hideSidebarOverlayTask?.cancel()
-                isSidebarOverlayVisible = true
-            } else if !isSidebarPinned {
-                hideSidebarOverlayTask?.cancel()
-                hideSidebarOverlayTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard !Task.isCancelled else { return }
-                    isSidebarOverlayVisible = false
-                }
-            }
-        }
+        // Where the pointer is decides both peeks, and it is asked rather
+        // than waited for. See `watchPointer`.
+        .task { await watchPointer() }
         // A pending auto-hide outlives the window it was scheduled for; drop it
         // when the view goes away.
-        .onDisappear { hideOverlayTask?.cancel() }
-        .onDisappear { hideSidebarOverlayTask?.cancel() }
         .onAppear { connectivity.start() }
         .onDisappear { connectivity.stop() }
         // Track which screen the window is on so the display fit and the
@@ -292,6 +259,11 @@ struct RootView: View {
         // Returning to Home after work elsewhere: quiet re-read if the last
         // load is older than the stale window (see HomeModel.refreshIfStale).
         .onChange(of: destination) { _, next in
+            // A float belongs to the screen it was opened over. Carrying one
+            // across a navigation is how somebody who clicked a workspace ends
+            // up with a pane over it that they never asked for.
+            isOverlayVisible = false
+            overlayHeldByPress = false
             guard next == .home else { return }
             Task { await home.refreshIfStale() }
         }
@@ -469,13 +441,14 @@ struct RootView: View {
         return columnVisibilityChoice == .all
     }
 
-    /// Whether the inspector is on screen as a column or a pinned float.
+    /// Whether the inspector is on screen, as a column, a docked float or a
+    /// peek. What the toolbar mark lights up for.
     private var isRightSidebarOpen: Bool {
         guard destinationHasInspector else { return false }
         if !inspectorFits {
             return isOverlayPinned || isOverlayVisible
         }
-        return isInspectorPresented
+        return isInspectorPresented || isOverlayVisible
     }
 
     /// Toggle the leading sidebar. Same action as ⌘B and the toolbar mark.
@@ -487,8 +460,6 @@ struct RootView: View {
     private func toggleLeftSidebar() {
         // Always clear float state first so a hide never leaves a peek up.
         isSidebarOverlayVisible = false
-        isSidebarEdgeHovered = false
-        isSidebarPanelHovered = false
 
         if windowContentWidth > 0, windowContentWidth < Self.widthForSidebar {
             // Narrow: the sidebar is a floating popup only. Pin it open or
@@ -510,19 +481,51 @@ struct RootView: View {
     }
 
     /// Toggle the trailing inspector. Same action as ⌥⌘B and the toolbar mark.
+    ///
+    /// The button means docked or not docked, and nothing else. It is not a
+    /// show/hide for whatever happens to be on screen: pressing it while a peek
+    /// is open docks that peek, which is what somebody who has just hovered
+    /// their way to the pane and reached for the button wants. Pressing it
+    /// again undocks, and the pane goes back to appearing under the pointer and
+    /// leaving with it.
+    ///
+    /// Where "docked" puts the pane is the window's business rather than the
+    /// user's: a column where there is room, a float that stays where there is
+    /// not.
     private func toggleRightSidebar() {
         guard destinationHasInspector else { return }
-        if isRightSidebarOpen {
+        if isInspectorPresented {
             closeInspector()
             return
         }
         isInspectorPresented = true
-        // Narrow window: pin the float so it stays past hover.
         if !inspectorFits {
-            isOverlayPinned = true
             isOverlayVisible = true
+            overlayHeldByPress = true
         }
     }
+
+    /// How long the pointer has to rest on an edge strip before the pane
+    /// behind it opens.
+    ///
+    /// Long enough that crossing the edge does nothing, short enough that
+    /// somebody who meant it does not think the strip is broken. A second is
+    /// the number people describe when they ask for this, and it matches what
+    /// the system's own edge reveals feel like.
+    static let edgeDwell: TimeInterval = 0.4
+    /// How long the pointer has to be away before an undocked peek closes.
+    /// Short enough to feel like it follows the pointer, long enough that a
+    /// trip to a scrollbar or across a corner is not a dismissal.
+    static let edgeGrace: TimeInterval = 0.28
+    /// How close to the edge counts as asking for the pane, while it is shut.
+    ///
+    /// Wider than a hairline, and deliberately reaching **inward**. The last
+    /// few points of a window belong to the resize cursor, so a narrow strip
+    /// meant aiming at the one band of pixels that is also the window's handle:
+    /// overshoot and you are dragging the window instead of opening a pane.
+    /// Half an inch in is a place a pointer can arrive at without care, while
+    /// still being somewhere nobody rests by accident.
+    static let edgeStrip: CGFloat = 32
 
     /// The narrowest the detail column may be. `minimumContentWidth` is this
     /// plus the sidebar, and the two must be defined from one number so they
@@ -609,8 +612,6 @@ struct RootView: View {
             }
             isSidebarPinned = false
             isSidebarOverlayVisible = false
-            isSidebarEdgeHovered = false
-            isSidebarPanelHovered = false
         }
         let next = Self.fits(width)
         guard next != inspectorFits else { return }
@@ -620,8 +621,8 @@ struct RootView: View {
                 if next {
                     // Column mode is back; the floating pane has nothing to
                     // float over any more.
-                    isOverlayPinned = false
                     isOverlayVisible = false
+                    overlayHeldByPress = false
                 }
             }
         }
@@ -752,16 +753,20 @@ struct RootView: View {
         destinationHasInspector && (!isInspectorPresented || !inspectorFits)
     }
 
-    /// The pointer is near the pane: on the edge strip or on the pane itself.
-    private var isOverlayHovered: Bool {
-        isOverlayEdgeHovered || isOverlayPanelHovered
-    }
-
-    /// The pointer is near the left edge: on the edge strip or on the floated
-    /// sidebar panel itself.
-    private var isSidebarOverlayHovered: Bool {
-        isSidebarEdgeHovered || isSidebarPanelHovered
-    }
+    /// Whether the floating inspector stays put without the pointer.
+    ///
+    /// **Only ever true because somebody just pressed the button.** Docked is a
+    /// column, and a window with no room for a column has no docked state to
+    /// be in: deriving one from the toggle meant that on a narrow window every
+    /// arrival at a destination with an inspector threw a pane across the
+    /// content nobody had asked to cover.
+    ///
+    /// So the toggle records a preference for when there is room, and on a
+    /// narrow window a press means "show it now". That reveal waits for the
+    /// pointer to arrive rather than closing under a hand that is still on its
+    /// way, and once the pointer has been on the pane it leaves with it like
+    /// any other peek. See `overlayHeldByPress`.
+    private var isOverlayPinned: Bool { overlayHeldByPress }
 
     /// Whether the left-edge float is allowed.
     ///
@@ -822,9 +827,7 @@ struct RootView: View {
             // size clear scrim under the panel (ZStack) still won taps from
             // workspace file rows and the account menu. Side-by-side means
             // the panel's frame is exclusively the panel's.
-            .overlay(alignment: .leading) { sidebarHoverStrip }
             .overlay(alignment: .leading) { sidebarFloatLayer }
-            .overlay(alignment: .trailing) { inspectorHoverStrip }
             .overlay(alignment: .trailing) { inspectorFloatLayer }
             .animation(
                 reduceMotion ? nil : .easeOut(duration: 0.18),
@@ -834,16 +837,6 @@ struct RootView: View {
                 reduceMotion ? nil : .easeOut(duration: 0.18),
                 value: showsSidebarOverlay
             )
-    }
-
-    @ViewBuilder
-    private var sidebarHoverStrip: some View {
-        if usesOverlaySidebar, !showsSidebarOverlay {
-            Color.clear
-                .frame(width: 14)
-                .contentShape(Rectangle())
-                .onHover { isSidebarEdgeHovered = $0 }
-        }
     }
 
     /// Floated sidebar: panel on the leading edge, dismiss region to its right.
@@ -862,16 +855,6 @@ struct RootView: View {
                             .frame(width: 1)
                     }
                     .shadow(color: Theme.shadow(0.20), radius: 12, x: 5, y: 0)
-                    .onHover { hovering in
-                        isSidebarPanelHovered = hovering
-                        // Pin once the pointer is on the panel so a system
-                        // menu that draws outside it cannot collapse the float.
-                        if hovering {
-                            isSidebarPinned = true
-                            isSidebarOverlayVisible = true
-                            hideSidebarOverlayTask?.cancel()
-                        }
-                    }
 
                 Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -879,16 +862,6 @@ struct RootView: View {
                     .onTapGesture { dismissSidebarOverlay() }
             }
             .transition(.move(edge: .leading).combined(with: .opacity))
-        }
-    }
-
-    @ViewBuilder
-    private var inspectorHoverStrip: some View {
-        if usesOverlayInspector, !showsOverlayInspector {
-            Color.clear
-                .frame(width: 14)
-                .contentShape(Rectangle())
-                .onHover { isOverlayEdgeHovered = $0 }
         }
     }
 
@@ -913,31 +886,153 @@ struct RootView: View {
                             .frame(width: 1)
                     }
                     .shadow(color: Theme.shadow(0.20), radius: 12, x: -5, y: 0)
-                    .onHover { hovering in
-                        isOverlayPanelHovered = hovering
-                        if hovering {
-                            isOverlayPinned = true
-                            isOverlayVisible = true
-                            hideOverlayTask?.cancel()
-                        }
-                    }
             }
             .transition(.move(edge: .trailing).combined(with: .opacity))
         }
     }
 
-    /// Hides the floating pane, whether it was hover-revealed or pinned.
+    /// Open and close both edge peeks from where the pointer actually is.
+    ///
+    /// **`onHover` was the wrong source.** It reports crossings, and it misses
+    /// them: a pointer that leaves fast, leaves onto another window, or leaves
+    /// while a menu takes the mouse never produces the exit event, so a pane
+    /// that opened stayed open with nothing under the pointer. Reported as
+    /// "it does not always auto close", and it is not a timing bug that a
+    /// longer grace period fixes, it is an event that never arrives.
+    ///
+    /// Asking `NSEvent.mouseLocation` cannot miss anything. Ten times a second
+    /// is far below anything measurable and it answers both questions at once:
+    /// has the pointer rested at the edge long enough to mean it, and has it
+    /// actually left.
+    ///
+    /// **A peek that is not docked always auto-hides**, at every window size.
+    /// Pinning belongs to the toolbar toggle alone: it is the docked state, and
+    /// on a window too narrow to carry the column a pinned float is what
+    /// "docked" has to mean. Nothing else pins, so nothing can lock a pane
+    /// open behind the user's back.
+    @MainActor
+    private func watchPointer() async {
+        #if os(macOS)
+        var trailingSince: Date?
+        var trailingLeftAt: Date?
+        var leadingSince: Date?
+        var leadingLeftAt: Date?
+        let now = { Date() }
+
+        while !Task.isCancelled {
+            if usesOverlayInspector {
+                let width = showsOverlayInspector ? DisplayFit.box(400) : Self.edgeStrip
+                let inside = Self.pointerIsNear(.trailing, within: width)
+                if inside {
+                    trailingLeftAt = nil
+                    // The pointer has arrived at a pane a press put there, so
+                    // the press has done its job and the pane goes back to
+                    // following the pointer.
+                    if overlayHeldByPress { overlayHeldByPress = false }
+                    if showsOverlayInspector {
+                        trailingSince = nil
+                    } else {
+                        let since = trailingSince ?? now()
+                        trailingSince = since
+                        if now().timeIntervalSince(since) >= Self.edgeDwell {
+                            isOverlayVisible = true
+                            trailingSince = nil
+                        }
+                    }
+                } else {
+                    trailingSince = nil
+                    if isOverlayVisible, !isOverlayPinned {
+                        let left = trailingLeftAt ?? now()
+                        trailingLeftAt = left
+                        // A short trip out, to a scrollbar or across a corner,
+                        // is not a dismissal.
+                        if now().timeIntervalSince(left) >= Self.edgeGrace {
+                            isOverlayVisible = false
+                            trailingLeftAt = nil
+                        }
+                    } else {
+                        trailingLeftAt = nil
+                    }
+                }
+            } else {
+                trailingSince = nil
+                trailingLeftAt = nil
+            }
+
+            if usesOverlaySidebar {
+                let width = showsSidebarOverlay ? DisplayFit.box(240) : Self.edgeStrip
+                let inside = Self.pointerIsNear(.leading, within: width)
+                if inside {
+                    leadingLeftAt = nil
+                    if showsSidebarOverlay {
+                        leadingSince = nil
+                    } else {
+                        let since = leadingSince ?? now()
+                        leadingSince = since
+                        if now().timeIntervalSince(since) >= Self.edgeDwell {
+                            isSidebarOverlayVisible = true
+                            leadingSince = nil
+                        }
+                    }
+                } else {
+                    leadingSince = nil
+                    if isSidebarOverlayVisible, !isSidebarPinned {
+                        let left = leadingLeftAt ?? now()
+                        leadingLeftAt = left
+                        if now().timeIntervalSince(left) >= Self.edgeGrace {
+                            isSidebarOverlayVisible = false
+                            leadingLeftAt = nil
+                        }
+                    } else {
+                        leadingLeftAt = nil
+                    }
+                }
+            } else {
+                leadingSince = nil
+                leadingLeftAt = nil
+            }
+
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    /// Whether the pointer is inside `width` points of one edge of this app's
+    /// window.
+    ///
+    /// Screen coordinates on both sides, so no view has to publish a frame and
+    /// no layout pass is involved. A pointer over another app's window is not
+    /// near anything: `frame.contains` is what rules that out.
+    private static func pointerIsNear(_ edge: HorizontalEdge, within width: CGFloat) -> Bool {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, window.isVisible else {
+            return false
+        }
+        let point = NSEvent.mouseLocation
+        let frame = window.frame
+        guard frame.contains(point) else { return false }
+        switch edge {
+        case .trailing: return point.x >= frame.maxX - width
+        case .leading: return point.x <= frame.minX + width
+        }
+    }
+    #endif
+
+    /// Hides the floating pane.
+    ///
+    /// A pinned pane is pinned because the toggle is on, so dismissing one is
+    /// turning the toggle off. Anything less would leave a pane that comes
+    /// straight back on the next pointer move.
     private func dismissOverlay() {
-        isOverlayPinned = false
+        isInspectorPresented = false
         isOverlayVisible = false
+        overlayHeldByPress = false
     }
 
     /// Hides the floated sidebar, whether it was hover-revealed or pinned.
     private func dismissSidebarOverlay() {
         isSidebarPinned = false
         isSidebarOverlayVisible = false
-        isSidebarEdgeHovered = false
-        isSidebarPanelHovered = false
     }
 
     /// Shuts the pane on the user's behalf.
@@ -947,8 +1042,8 @@ struct RootView: View {
     /// for closing. Closing is always allowed.
     private func closeInspector() {
         isInspectorPresented = false
-        isOverlayPinned = false
         isOverlayVisible = false
+        overlayHeldByPress = false
     }
 
     // MARK: - Sidebar
