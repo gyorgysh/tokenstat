@@ -624,10 +624,6 @@ fn verify_candidate(
 ///
 /// Public so the CLI can prefer a Developer ID install under `~/.local/bin`
 /// over a cargo/ad-hoc binary when writing scheduler entries.
-/// Developer ID team for pueev OU. Same value as AppInstaller in the Mac app.
-#[cfg(target_os = "macos")]
-const EXPECTED_TEAM_ID: &str = "8SY98BT8RV";
-
 #[cfg(target_os = "macos")]
 pub fn has_macos_signing_authority(path: &Path) -> bool {
     has_signing_authority(path)
@@ -681,9 +677,26 @@ fn verify_signature(candidate: &Path, current: &Path) -> Result<(), UpdateError>
                 .into(),
         ));
     }
-    // Match the Mac app: any real Authority is not enough. The team must be
-    // pueev's Developer ID so a third-party signed binary cannot replace ours.
-    if !has_developer_id_team(candidate, EXPECTED_TEAM_ID) {
+    // Match the Mac app: any real Authority is not enough. The replacement has
+    // to come from the same publisher as the binary it replaces, or a validly
+    // signed build from anybody at all would pass.
+    //
+    // The team is read from the installed binary rather than written down here.
+    // Self-pinning is the stronger check and the tidier one: the rule is "never
+    // replace this with something signed by somebody else", it survives a change
+    // of publisher without an edit, and no identifier belonging to a real
+    // organisation sits in source that anybody can read.
+    let Some(team) = developer_id_team(current) else {
+        // The current binary is signed but not by a Developer ID, so there is
+        // no team to hold the replacement to. `has_signing_authority` already
+        // let ad-hoc through above, so this is an unusual build; refuse rather
+        // than guess.
+        return Err(UpdateError::Message(
+            "the installed binary is signed by an identity this updater cannot match;              install the new version by hand"
+                .into(),
+        ));
+    };
+    if !has_developer_id_team(candidate, &team) {
         return Err(UpdateError::Message(
             "the downloaded binary is not signed by the tokenstat Developer ID team;              refusing to replace a signed binary with one from another publisher"
                 .into(),
@@ -693,6 +706,34 @@ fn verify_signature(candidate: &Path, current: &Path) -> Result<(), UpdateError>
 }
 
 /// True when codesign reports Developer ID Application and the given team.
+/// The Developer ID team a binary is signed by, when it is signed by one.
+#[cfg(target_os = "macos")]
+fn developer_id_team(path: &Path) -> Option<String> {
+    let out = Command::new("codesign")
+        .args(["-dv", "--verbose=4"])
+        .arg(path)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    if !text
+        .lines()
+        .any(|l| l.starts_with("Authority=Developer ID Application:"))
+    {
+        return None;
+    }
+    text.lines()
+        .find_map(|l| l.trim().strip_prefix("TeamIdentifier="))
+        .map(str::to_string)
+        .filter(|t| !t.is_empty() && t != "not set")
+}
+
 #[cfg(target_os = "macos")]
 fn has_developer_id_team(path: &Path, team: &str) -> bool {
     let out = Command::new("codesign")

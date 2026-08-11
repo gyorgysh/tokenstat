@@ -284,6 +284,21 @@ output.
   fixture containing path-shaped strings or unexpected keys.
 - Public items get doc comments explaining why, not restating the signature.
 
+### Signing identities stay out of the source
+
+No team identifier, Apple ID, notary key, certificate name or any other
+credential belongs in this repository, in code, comments, docs or commit
+messages. They live in the release workflow's GitHub secrets, which is the only
+place that needs them.
+
+Where a build has to check who signed something, it reads the identity from the
+binary it is already running and requires the replacement to match, rather than
+comparing against a string written down here. `AppInstaller.developerIDTeam` and
+`tokenstat-sync::update::developer_id_team` are the two places that do it. That
+is the stronger check as well as the tidier one: the rule becomes "never replace
+this with something signed by somebody else", and it survives a change of
+publisher without an edit.
+
 ## Data handling rules
 
 These are product requirements, not preferences.

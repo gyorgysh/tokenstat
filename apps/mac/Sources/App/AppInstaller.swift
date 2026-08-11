@@ -130,10 +130,13 @@ enum AppInstaller {
         // identity. Without this a validly signed, validly notarized
         // application from anybody at all would pass, which is not a check, it
         // is a formality.
-        let authority = run("/usr/bin/codesign", ["-dv", "--verbose=4", app.path])
-        guard authority.errors.contains("TeamIdentifier=\(expectedTeam)"),
-              authority.errors.contains("Authority=Developer ID Application:")
-        else {
+        guard let expected = developerIDTeam(of: Bundle.main.bundleURL) else {
+            // A local build has no Developer ID to hold the download to, so
+            // there is nothing to check against and it must not pretend
+            // otherwise. Local builds are replaced by hand anyway.
+            throw Failure.unsigned("this build is not a signed release, so it cannot verify one")
+        }
+        guard let offered = developerIDTeam(of: app), offered == expected else {
             throw Failure.unsigned("it was signed by somebody else")
         }
 
@@ -145,18 +148,35 @@ enum AppInstaller {
         }
     }
 
-    /// The team the shipped builds are signed by.
+    /// The Developer ID team a bundle is signed by, when it is signed by one.
+    ///
+    /// **Read from the running app rather than written down here**, so the rule
+    /// is "never replace this app with one signed by somebody else" rather than
+    /// "trust this particular string". It is the stronger check of the two: it
+    /// cannot drift out of date, it survives a change of publisher without an
+    /// edit, and no identifier belonging to a real organisation sits in source
+    /// that anybody can read. Those live in the release workflow's secrets,
+    /// which is the only place that needs them.
     ///
     /// The team identifier rather than the certificate's display name: the name
-    /// carries a non-ASCII character and could be re-issued differently, while
-    /// this string is assigned by Apple and stays put across certificate
-    /// renewals. Verifiable by hand with the same command this runs:
-    ///
-    ///     codesign -dv --verbose=4 /Applications/Tokenstat.app
-    ///
-    /// Paired with a check that the authority is a Developer ID at all, so a
-    /// self-signed certificate that merely claims this team cannot pass.
-    private static let expectedTeam = "8SY98BT8RV"
+    /// can be re-issued differently, while this is assigned by Apple and stays
+    /// put across certificate renewals. Nil unless the authority is a Developer
+    /// ID at all, so a self-signed certificate claiming a team cannot pass.
+    private static func developerIDTeam(of bundle: URL) -> String? {
+        let out = run("/usr/bin/codesign", ["-dv", "--verbose=4", bundle.path])
+        let text = out.errors + out.output
+        guard text.contains("Authority=Developer ID Application:") else { return nil }
+        let team = text
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("TeamIdentifier=") else { return nil }
+                return String(trimmed.dropFirst("TeamIdentifier=".count))
+            }
+            .first
+        guard let team, !team.isEmpty, team != "not set" else { return nil }
+        return team
+    }
 
     // MARK: - Putting it in place
 
