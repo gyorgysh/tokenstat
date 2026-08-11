@@ -81,6 +81,7 @@ private struct ClientAccountContent: View {
                         .padding(Theme.Space.xl)
                 }
 
+                legalCard
                 licensesCard
                 deleteAccountCard
                 privacyNote
@@ -289,6 +290,45 @@ private struct ClientAccountContent: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+    }
+
+    /// Terms and privacy, reachable from inside the app.
+    ///
+    /// Required rather than decorative: App Review expects an app that creates
+    /// accounts to link its privacy policy, and one that sells anything to link
+    /// its terms, from somewhere in the app and not only from the store page.
+    /// They open in the browser because they are the same documents the website
+    /// serves, and a copy in the bundle is a copy that goes stale.
+    private var legalCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Terms and privacy")
+                .font(ClientType.sectionTitle)
+            legalLink("Privacy policy", url: "https://tokenstat.ai/privacy")
+            Divider()
+            legalLink("Terms of service", url: "https://tokenstat.ai/terms")
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    @ViewBuilder
+    private func legalLink(_ title: String, url: String) -> some View {
+        if let destination = URL(string: url) {
+            Link(destination: destination) {
+                HStack {
+                    Text(title)
+                        .font(ClientType.label)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(minHeight: 44)
+                .contentShape(.rect)
+            }
+        }
     }
 
     private var licensesCard: some View {

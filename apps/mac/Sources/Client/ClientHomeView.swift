@@ -56,7 +56,7 @@ struct ClientHomeView: View {
                         title: connectivity.isOffline ? "You are offline" : "Could not load your activity",
                         message: connectivity.isOffline
                             ? "This updates by itself when the connection is back."
-                            : message,
+                            : FriendlyError.from(message).message,
                         actionTitle: connectivity.isOffline ? nil : "Try again",
                         action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
                     )
@@ -76,7 +76,10 @@ struct ClientHomeView: View {
         }
         .background(Theme.background)
         .scrollBounceBehavior(.basedOnSize)
-        .refreshable { await model.refresh() }
+        .refreshable {
+            ClientRefresh.began()
+            await model.refresh()
+        }
         .task {
             // Account scope always. There is no local archive to fall back to,
             // and asking for one would only produce a refusal to render.

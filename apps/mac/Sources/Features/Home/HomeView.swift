@@ -51,7 +51,7 @@ struct HomeView: View {
                     // year of squares.
                     LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
                         if let message = model.errorMessage {
-                            Banner(text: message, severity: .warning)
+                            ErrorBanner(message: message)
                         }
 
                         profile

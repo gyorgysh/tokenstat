@@ -37,7 +37,7 @@ struct AccountView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = model.errorMessage {
-                        Banner(text: message, severity: .warning)
+                        ErrorBanner(message: message)
                     }
                     if let device = model.pendingLogin {
                         SignInCode(device: device) { model.cancelSignIn() }

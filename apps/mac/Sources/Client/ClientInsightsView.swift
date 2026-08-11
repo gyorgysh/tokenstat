@@ -38,7 +38,10 @@ struct ClientInsightsView: View {
         }
         .background(Theme.background)
         .scrollBounceBehavior(.basedOnSize)
-        .refreshable { await model.refresh() }
+        .refreshable {
+            ClientRefresh.began()
+            await model.refresh()
+        }
         // On iOS 26 this lands in the bottom bar beside the tabs, which is the
         // half of the screen a thumb reaches. Long model identifiers are
         // exactly the thing worth filtering.
@@ -102,7 +105,7 @@ struct ClientInsightsView: View {
                 title: connectivity.isOffline ? "You are offline" : "Could not load your usage",
                 message: connectivity.isOffline
                     ? "This updates by itself when the connection is back."
-                    : message,
+                    : FriendlyError.from(message).message,
                 actionTitle: connectivity.isOffline ? nil : "Try again",
                 action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
             )

@@ -35,12 +35,9 @@ struct ClientWorkspaceDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let errorMessage {
-                    Text(errorMessage)
-                        .font(ClientType.body)
-                        .foregroundStyle(Theme.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Theme.Space.m)
-                        .cardSurface()
+                    ClientErrorCard(message: errorMessage) {
+                        Task { await reload() }
+                    }
                 }
 
                 headerCard
@@ -55,7 +52,10 @@ struct ClientWorkspaceDetailView: View {
         .background(Theme.background)
         .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await reload() }
+        .refreshable {
+            ClientRefresh.began()
+            await reload()
+        }
         .task { await reload() }
         .fullScreenCover(item: $openSession) { session in
             ClientTerminalScreen(session: session)
@@ -472,6 +472,7 @@ struct ClientBrowserScreen: View {
     let url: String
     var onClose: () -> Void
     @State private var address: String
+    @State private var loadError: String?
 
     init(url: String, onClose: @escaping () -> Void) {
         self.url = url
@@ -489,11 +490,27 @@ struct ClientBrowserScreen: View {
                     .padding(Theme.Space.s)
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
+                Button("Reload") {
+                    loadError = nil
+                    // Force WebView identity change via address nudge is
+                    // unnecessary; ClientWebView reloads when urlString matches.
+                    let current = address
+                    address = ""
+                    DispatchQueue.main.async { address = current }
+                }
+                .font(ClientType.caption.weight(.semibold))
                 Button("Done", action: onClose)
                     .font(ClientType.caption.weight(.semibold))
             }
             .padding(Theme.Space.m)
-            ClientWebView(urlString: address)
+            if let loadError {
+                Text(loadError)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.danger)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.m)
+            }
+            ClientWebView(urlString: address, onError: { loadError = $0 })
         }
         .background(Theme.background)
     }
@@ -501,9 +518,15 @@ struct ClientBrowserScreen: View {
 
 struct ClientWebView: UIViewRepresentable {
     let urlString: String
+    var onError: (String) -> Void = { _ in }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onError: onError)
+    }
 
     func makeUIView(context: Context) -> WKWebView {
         let view = WKWebView()
+        view.navigationDelegate = context.coordinator
         if let url = URL(string: urlString) {
             view.load(URLRequest(url: url))
         }
@@ -511,8 +534,36 @@ struct ClientWebView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        if let url = URL(string: urlString), uiView.url?.absoluteString != urlString {
+        context.coordinator.onError = onError
+        if let url = URL(string: urlString),
+           uiView.url?.absoluteString != urlString,
+           !urlString.isEmpty
+        {
             uiView.load(URLRequest(url: url))
+        }
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var onError: (String) -> Void
+
+        init(onError: @escaping (String) -> Void) {
+            self.onError = onError
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            onError(error.localizedDescription)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFail navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            onError(error.localizedDescription)
         }
     }
 }

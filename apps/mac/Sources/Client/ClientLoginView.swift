@@ -75,6 +75,19 @@ struct ClientLoginView: View {
                 Button("What is tokenstat?") { hasOnboarded = false }
                     .font(ClientType.label)
                     .padding(.top, Theme.Space.xs)
+
+                // Signing in creates the account, so the two documents that
+                // govern it belong on this screen and not only in Settings.
+                HStack(spacing: 4) {
+                    Text("By signing in you accept the")
+                    legal("Terms", url: "https://tokenstat.ai/terms")
+                    Text("and")
+                    legal("Privacy policy", url: "https://tokenstat.ai/privacy")
+                }
+                .font(ClientType.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .padding(.top, Theme.Space.xs)
             }
             .tint(Theme.accent)
             .padding(.horizontal, Theme.Space.l)
@@ -83,6 +96,14 @@ struct ClientLoginView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+    }
+
+    @ViewBuilder
+    private func legal(_ title: String, url: String) -> some View {
+        if let destination = URL(string: url) {
+            Link(title, destination: destination)
+                .foregroundStyle(Theme.accent)
+        }
     }
 
     /// The approval is happening in the browser sheet.

@@ -146,5 +146,8 @@ targets:
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        # Cleartext HTTP to 127.0.0.1 for the remote port proxy browser. Without
+        # this WKWebView paints a white page for every Browse port URL.
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

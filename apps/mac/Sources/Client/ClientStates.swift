@@ -77,6 +77,70 @@ struct ClientEmptyState: View {
     }
 }
 
+/// A failure, drawn like part of the app rather than like a crash log.
+///
+/// One component for every error surface in the client, so a device that is
+/// asleep, a plan that does not include something and a helper that is not
+/// running are told apart by their icon and their sentence rather than by
+/// three shades of the same red paragraph. The machine's own words stay one
+/// tap away: they are useless to most people and the only useful thing to
+/// somebody reporting a bug.
+struct ClientErrorCard: View {
+    let message: String
+    /// Shown as the card's action when the caller has something to retry.
+    var retry: (() -> Void)?
+    @State private var showingDetail = false
+
+    private var friendly: FriendlyError { FriendlyError.from(message) }
+
+    var body: some View {
+        let error = friendly
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .top, spacing: Theme.Space.s) {
+                Image(systemName: error.symbol)
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(Theme.danger)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(error.title)
+                        .font(ClientType.label.weight(.semibold))
+                    Text(error.message)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: Theme.Space.m) {
+                if let retry, let actionTitle = error.actionTitle {
+                    Button(actionTitle, action: retry)
+                        .font(ClientType.caption.weight(.semibold))
+                        .tint(Theme.accent)
+                }
+                if error.raw != error.message, !error.raw.isEmpty {
+                    Button(showingDetail ? "Hide details" : "Details") {
+                        showingDetail.toggle()
+                    }
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            if showingDetail {
+                Text(error.raw)
+                    .font(ClientType.caption.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Space.m)
+        .cardSurface()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(error.title). \(error.message)")
+    }
+}
+
 /// A wireframe shaped like the content that is coming.
 ///
 /// Shaped, not generic: a placeholder whose layout matches the real thing means

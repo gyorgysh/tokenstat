@@ -236,6 +236,10 @@ struct LogoMark: View {
     var animated: Bool = false
 
     @State private var raised = false
+    /// One run of the same rise, for a refresh somebody pulled. Not the
+    /// repeating launch animation: a spinner already says "working", and the
+    /// mark's job here is only to acknowledge the pull.
+    @State private var pulse = false
 
     /// Ink bounds inside the 64 unit artboard.
     private static let inkOrigin = CGPoint(x: 11, y: 10)
@@ -260,7 +264,10 @@ struct LogoMark: View {
                     // Anchored at the foot, so a bar grows out of the baseline
                     // it shares with the other two rather than shrinking in
                     // place. Each starts a beat after the one before it.
-                    .scaleEffect(y: animated && !raised ? 0.35 : 1, anchor: .bottom)
+                    .scaleEffect(
+                        y: (animated && !raised) || pulse ? 0.35 : 1,
+                        anchor: .bottom
+                    )
                     .animation(
                         animated
                             ? .easeInOut(duration: 0.62)
@@ -268,6 +275,10 @@ struct LogoMark: View {
                                 .delay(Double(index) * 0.14)
                             : nil,
                         value: raised
+                    )
+                    .animation(
+                        .easeInOut(duration: 0.26).delay(Double(index) * 0.07),
+                        value: pulse
                     )
                     .offset(
                         x: (11 + CGFloat(index) * 15 - Self.inkOrigin.x) * unit,
@@ -278,8 +289,36 @@ struct LogoMark: View {
         .frame(width: size, height: size)
         .accessibilityLabel("tokenstat")
         .onAppear { if animated { raised = true } }
+        #if !os(macOS)
+        // A pull to refresh anywhere in the client dips the bars and lets them
+        // back up, once. The mark is already the only thing in the top bar, so
+        // it is the honest place to acknowledge a refresh nobody else answers.
+        .onReceive(NotificationCenter.default.publisher(for: .clientRefreshing)) { _ in
+            guard !animated, !pulse else { return }
+            pulse = true
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                pulse = false
+            }
+        }
+        #endif
     }
 }
+
+#if !os(macOS)
+extension Notification.Name {
+    /// A screen in the client started a pull to refresh.
+    static let clientRefreshing = Notification.Name("ai.tokenstat.client.refreshing")
+}
+
+/// One call for the screens that refresh, so the top bar can answer.
+@MainActor
+enum ClientRefresh {
+    static func began() {
+        NotificationCenter.default.post(name: .clientRefreshing, object: nil)
+    }
+}
+#endif
 
 /// The mark and the name, for the top of the sidebar.
 struct Wordmark: View {
@@ -299,7 +338,11 @@ struct Wordmark: View {
         // drops a square glyph below the descender line. Centring on the text's
         // cap height is what actually looks aligned, and that is what a centred
         // stack gives once the mark's frame is its ink.
-        HStack(alignment: .center, spacing: Theme.Space.s) {
+        // The gap scales with the mark rather than sitting on the spacing
+        // scale. A lockup is one shape: 8 points beside a 17 point mark is
+        // right and beside a 22 point one is tight, which is what made the
+        // phone's larger wordmark read as mark-jammed-into-text.
+        HStack(alignment: .center, spacing: size * 0.5) {
             LogoMark(size: size)
             Text("tokenstat")
                 .font(.system(size: size * 0.88, weight: .semibold))

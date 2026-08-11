@@ -77,7 +77,7 @@ struct InsightsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let message = model.errorMessage {
-                    Banner(text: message, severity: .warning)
+                    ErrorBanner(message: message)
                 }
                 // A day arrived from Home's heatmap. It has to be visible and
                 // dismissable, or every figure on the screen is quietly about
