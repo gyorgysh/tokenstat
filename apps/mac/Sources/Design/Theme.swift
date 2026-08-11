@@ -421,9 +421,18 @@ extension EnvironmentValues {
 /// Fixed action strip under the window titlebar.
 ///
 /// One row on every destination:
-/// - **Leading:** sidebar toggle, inspector toggle (when that screen has one),
-///   then optional extras (e.g. Insights back).
-/// - **Trailing:** destination actions (refresh, period, scan, new, …).
+/// - **Leading:** the screen's own navigation (e.g. Insights back), then the
+///   sidebar toggle.
+/// - **Trailing:** destination actions (refresh, period, scan, new, …), then
+///   the inspector toggle at the far right when that screen has one.
+///
+/// **Each mark sits on the side of the window it acts on.** The inspector
+/// toggle used to sit second from the left, beside the sidebar toggle, next to
+/// a back button, pointing at a pane on the opposite edge. Two controls that
+/// look alike and open opposite sides of the window, stacked together in one
+/// corner, is a coin toss every time. Leading is the leading column and
+/// whatever navigates within this screen; trailing is this screen's actions
+/// and the trailing column.
 ///
 /// Toggles no longer live in the system toolbar, so Home and Insights share
 /// the same chrome shape and the window titlebar stays traffic lights only.
@@ -447,16 +456,24 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
         // horizontal group each.
         HStack(spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
-                if let toggles {
-                    toggles.leftSidebar
-                    if let right = toggles.rightInspector {
-                        right
-                    }
-                }
+                // Back first. A back control is the one thing on a screen that
+                // leaves it, and the top left corner is where a hand goes for
+                // that without reading anything. The sidebar toggle is chrome
+                // and can move over by one; on the screens with nothing to go
+                // back from it is still the first control in the row.
                 leading()
+                toggles?.leftSidebar
             }
             Spacer(minLength: 0)
-            HStack(spacing: Theme.Space.s) { trailing() }
+            HStack(spacing: Theme.Space.s) {
+                trailing()
+                // Last, so it is the control nearest the edge it opens, and so
+                // a destination's own actions keep their order regardless of
+                // whether that destination has an inspector at all.
+                if let right = toggles?.rightInspector {
+                    right
+                }
+            }
         }
         .padding(.horizontal, Theme.Space.m)
         .frame(maxWidth: .infinity)
