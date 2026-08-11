@@ -51,6 +51,7 @@ struct TokenstatApp: App {
     /// the daemon, so the terminals a session starts with would belong to a
     /// different owner than the ones it ends with.
     init() {
+        Self.adoptPreferencesFromPreviousBundleID()
         Bridge.connect()
         // Before anything asks for a figure. A machine with no price book
         // renders every value as unknown, and on a platform with no CLI and no
@@ -60,6 +61,36 @@ struct TokenstatApp: App {
         DesktopSyncScheduler.start()
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.
+    }
+
+    /// Carry preferences over from `ai.tokenstat.Tokenstat`.
+    ///
+    /// The bundle id was lowercased to match the data directory, the launch
+    /// agent and every other identifier this product uses. To the system that
+    /// is a different app, so `UserDefaults.standard` moved to a new domain and
+    /// took the workspace list, the per-workspace bypass switches and every
+    /// window preference with it. Losing those on an update nobody asked for is
+    /// not an acceptable cost of a rename.
+    ///
+    /// Copy, not move: the old domain is left alone, so a person running the
+    /// previous build alongside this one finds it as they left it. Runs once,
+    /// and only fills keys the new domain does not already have, so it can
+    /// never overwrite a choice made since.
+    private static func adoptPreferencesFromPreviousBundleID() {
+        let defaults = UserDefaults.standard
+        let marker = "prefs.adoptedFromCapitalizedBundleID"
+        guard !defaults.bool(forKey: marker) else { return }
+        defaults.set(true, forKey: marker)
+        guard let previous = UserDefaults(suiteName: "ai.tokenstat.Tokenstat") else { return }
+        for (key, value) in previous.dictionaryRepresentation() {
+            // Skip the global domain's own keys, which every suite reports and
+            // none of which belong to this app.
+            guard !key.hasPrefix("Apple"), !key.hasPrefix("NS"), !key.hasPrefix("com.apple.") else {
+                continue
+            }
+            guard defaults.object(forKey: key) == nil else { continue }
+            defaults.set(value, forKey: key)
+        }
     }
 
     var body: some Scene {

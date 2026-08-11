@@ -272,15 +272,29 @@ enum AppInstaller {
     /// icon in the Dock or Launchpad.
     private static func refreshLaunchServices(bundle: URL) {
         let tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: tool)
-        task.arguments = ["-f", bundle.path]
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            // The cache refresh is a nicety; a failed one must not fail the
-            // update that already succeeded.
+        // Unregister the path before registering it again.
+        //
+        // The bundle at this path was `ai.tokenstat.Tokenstat` and is now
+        // `ai.tokenstat.tokenstat`. LaunchServices keys its records by
+        // identifier as well as by path, so registering alone can leave the old
+        // identifier's record pointing at a bundle that no longer claims it,
+        // which is how one app starts appearing twice in Spotlight, the Dock
+        // and Open With. There is one application here and the database should
+        // say so.
+        //
+        // Harmless when the identifier has not changed: `-u` on a path that is
+        // about to be registered again is exactly a refresh.
+        for arguments in [["-u", bundle.path], ["-f", bundle.path]] {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: tool)
+            task.arguments = arguments
+            do {
+                try task.run()
+                task.waitUntilExit()
+            } catch {
+                // The cache refresh is a nicety; a failed one must not fail the
+                // update that already succeeded.
+            }
         }
     }
 

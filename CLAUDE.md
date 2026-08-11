@@ -136,6 +136,26 @@ cargo run -p tokenstat-cli -- --help
 
 ### The Mac app
 
+**The bundle identifier is `ai.tokenstat.tokenstat`, lowercase.** Every other
+identifier this product owns is lowercase (`ai.tokenstat.hostd`, the data
+directory, the keychain service), the product is written "tokenstat" everywhere
+a person reads it, and `ai.tokenstat.Tokenstat` was the odd one out. Do not
+capitalize it back, and do not introduce a second identifier for a variant: the
+app in `/Applications` is one application, and both paths that put it there
+replace what is at that path rather than adding a copy beside it.
+
+- `AppInstaller` replaces `Bundle.main.bundleURL` in place after verifying the
+  download, so an auto-update overwrites `/Applications/Tokenstat.app` whatever
+  identifier it used to carry. It unregisters the path with `lsregister -u`
+  before re-registering it, because
+  LaunchServices keys records by identifier as well as by path and a rename
+  otherwise leaves a stale second entry in Spotlight and the Dock.
+- `AppRelocator` finds an already-running copy at the destination **by path**,
+  never by identifier, for the same reason.
+- `TokenstatApp.adoptPreferencesFromPreviousBundleID` copies the old domain's
+  UserDefaults across once. Renaming an app moves its preferences domain, and
+  losing somebody's workspace list to a rename is not an acceptable cost.
+
 The Xcode project is generated from `apps/mac/project.yml` and is git ignored,
 so both steps are needed on a fresh checkout. The build script must run first:
 the app links the xcframework it produces.

@@ -130,7 +130,7 @@ targets:
       - package: SwiftTerm
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.Tokenstat
+        PRODUCT_BUNDLE_IDENTIFIER: ai.tokenstat.tokenstat
         PRODUCT_NAME: Tokenstat
         # Synthesized from the INFOPLIST_KEY_* settings below, so there is no
         # Info.plist to keep in sync by hand.

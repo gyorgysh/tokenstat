@@ -124,12 +124,18 @@ enum AppRelocator {
             && bundle.path.contains("/AppTranslocation/")
     }
 
+    /// Another copy of this app already running from the destination.
+    ///
+    /// Matched by path, not by bundle identifier. The identifier was
+    /// `ai.tokenstat.Tokenstat` and is now `ai.tokenstat.tokenstat`, so a build
+    /// from before the rename running out of /Applications is a different
+    /// identifier and asking for our own would not have found it. What matters
+    /// is that something is running from the folder we are about to replace.
     private static func runningCopy(at destination: URL) -> NSRunningApplication? {
-        guard let identifier = Bundle.main.bundleIdentifier else { return nil }
-        return NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
-            .first { other in
-                other != .current && other.bundleURL?.standardizedFileURL == destination.standardizedFileURL
-            }
+        NSWorkspace.shared.runningApplications.first { other in
+            other != .current
+                && other.bundleURL?.standardizedFileURL == destination.standardizedFileURL
+        }
     }
 
     // MARK: - Asking
