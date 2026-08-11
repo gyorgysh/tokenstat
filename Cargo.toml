@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.85"
 authors = ["tokenstat contributors"]
@@ -33,19 +33,19 @@ license-file = "LICENSE"
 publish = false
 
 [workspace.dependencies]
-tokenstat-core = { path = "crates/tokenstat-core", version = "0.3.1" }
-tokenstat-sync = { path = "crates/tokenstat-sync", version = "0.3.1" }
-tokenstat-mcp = { path = "crates/tokenstat-mcp", version = "0.3.1" }
+tokenstat-core = { path = "crates/tokenstat-core", version = "0.3.2" }
+tokenstat-sync = { path = "crates/tokenstat-sync", version = "0.3.2" }
+tokenstat-mcp = { path = "crates/tokenstat-mcp", version = "0.3.2" }
 # `default-features = false` here so a member can opt in to the local half
 # rather than opt out of it: a workspace dependency's default cannot be
 # overridden downstream, and the mobile slices need it off. Every member that
 # wants terminals and folders asks for `local-host` explicitly.
-tokenstat-host = { path = "crates/tokenstat-host", version = "0.3.1", default-features = false }
-tokenstat-workspace = { path = "crates/tokenstat-workspace", version = "0.3.1" }
-tokenstat-pty = { path = "crates/tokenstat-pty", version = "0.3.1" }
-tokenstat-highlight = { path = "crates/tokenstat-highlight", version = "0.3.1" }
-tokenstat-identity = { path = "crates/tokenstat-identity", version = "0.3.1" }
-tokenstat-remote = { path = "crates/tokenstat-remote", version = "0.3.1" }
+tokenstat-host = { path = "crates/tokenstat-host", version = "0.3.2", default-features = false }
+tokenstat-workspace = { path = "crates/tokenstat-workspace", version = "0.3.2" }
+tokenstat-pty = { path = "crates/tokenstat-pty", version = "0.3.2" }
+tokenstat-highlight = { path = "crates/tokenstat-highlight", version = "0.3.2" }
+tokenstat-identity = { path = "crates/tokenstat-identity", version = "0.3.2" }
+tokenstat-remote = { path = "crates/tokenstat-remote", version = "0.3.2" }
 
 # Core. Deliberately no network stack here: the privacy guarantee is that the
 # crate reading your logs cannot send them anywhere.
