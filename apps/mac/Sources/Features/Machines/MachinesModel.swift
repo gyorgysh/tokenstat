@@ -6,8 +6,15 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import Foundation
-import AppKit
 import Observation
+// The pasteboard is the only platform API this model touches, and the two
+// frameworks spell it differently. Guarded rather than abstracted: one call
+// site does not earn a wrapper.
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// This machine, the machines it knows, and whether it can be reached.
 ///
@@ -125,9 +132,13 @@ final class MachinesModel {
     /// action, and the other machine's Add device box accepts it as pasted.
     func copyInvite() {
         guard let code = pairingCode else { return }
+        #if os(macOS)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(code, forType: .string)
+        #else
+        UIPasteboard.general.string = code
+        #endif
         showNotice("Invite copied. On the other machine, choose Add device and paste it there.")
     }
 
