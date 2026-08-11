@@ -405,6 +405,33 @@ fn write_key(path: &std::path::Path, seed: &[u8; 32]) -> Result<(), IdentityErro
 mod tests {
     use super::*;
 
+    /// A stored seed must keep deriving the same public key, for ever.
+    ///
+    /// The key file holds the seed, so the identity a peer pinned is whatever
+    /// the x25519 crate makes of those 32 bytes. A version of it that clamped
+    /// on construction rather than at use would change every machine's
+    /// identity, silently, and every pinned peer would refuse a machine that
+    /// had done nothing but take an update. Two vectors: one flat seed, one
+    /// with bits set where clamping would show.
+    #[test]
+    fn a_seed_always_derives_the_same_public_key() {
+        let mut varied = [0u8; 32];
+        for (i, b) in varied.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(7).wrapping_add(3);
+        }
+        assert_eq!(
+            MachineIdentity::from_secret([1u8; 32]).public_key_hex(),
+            "a4e09292b651c278b9772c569f5fa9bb13d906b46ab68c9df9dc2b4409f8a209"
+        );
+        assert_eq!(
+            MachineIdentity::from_secret(varied).public_key_hex(),
+            "bb50ff9e82a574cfbf820e97f60fb9c143ec7415cf514f8cfd98eff59e059614"
+        );
+        // The handshake hands these bytes to snow, so the seed has to come
+        // back out exactly as it went in, unclamped.
+        assert_eq!(MachineIdentity::from_secret(varied).secret_bytes(), varied);
+    }
+
     #[test]
     fn a_fingerprint_is_readable_and_stable() {
         let key = [7u8; 32];
