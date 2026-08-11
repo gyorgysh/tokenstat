@@ -59,6 +59,10 @@ pub(crate) mod launcher;
 mod machine;
 pub mod pricing;
 pub mod remote;
+/// Loopback proxy for phones that dial a host service (no full stream stack).
+/// Host builds use `remote_stream` instead.
+#[cfg(not(feature = "local-host"))]
+pub(crate) mod remote_proxy;
 #[cfg(feature = "local-host")]
 pub(crate) mod remote_stream;
 pub mod server;

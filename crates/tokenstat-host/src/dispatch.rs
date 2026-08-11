@@ -1913,10 +1913,27 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
-/// Without `local-host` there are no terminals to reach.
+/// Client builds: no local pty, but a phone can still bridge a loopback port
+/// to a service on a host (Browse port in the mobile workspace UI).
 #[cfg(not(feature = "local-host"))]
-fn terminals(_method: &str, _params: &str) -> Option<Result<Value, String>> {
-    None
+fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
+    match method {
+        "proxy.listen" => Some(client_proxy_listen(params)),
+        _ => None,
+    }
+}
+
+#[cfg(not(feature = "local-host"))]
+fn client_proxy_listen(params: &str) -> Result<Value, String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Params {
+        peer: String,
+        host: Option<String>,
+        port: u16,
+    }
+    let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    crate::remote_proxy::listen(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
 /// Ask every vendor what is left of its plan.

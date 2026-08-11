@@ -13,77 +13,107 @@ import SwiftUI
 /// Folders and running sessions on a host that is awake (P5 machine plane).
 ///
 /// Account plane answers spend and limits while every laptop is asleep. This
-/// tab is the opposite: it needs a live tunnel to a host, and says so when
-/// none is reachable. Mutations only happen on a button press.
+/// tab is the opposite: it needs a live tunnel to a host. Once connected,
+/// folders open into a Terminus-style surface: sessions, files, ports, tty.
 struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @State private var model = ClientWorkspacesModel()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let message = model.errorMessage {
-                    Text(message)
-                        .font(ClientType.body)
-                        .foregroundStyle(Theme.danger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(Theme.Space.m)
-                        .cardSurface()
-                }
+        @Bindable var model = model
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let message = model.errorMessage {
+                        Text(message)
+                            .font(ClientType.body)
+                            .foregroundStyle(Theme.danger)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(Theme.Space.m)
+                            .cardSurface()
+                    }
 
-                if model.hosts.isEmpty {
-                    ClientEmptyState(
-                        kind: .nothingYet,
-                        title: "No host devices yet",
-                        message: "Install tokenstat on a computer, turn on Reach devices "
-                            + "from anywhere, and sign in. Hosts appear here so this phone "
-                            + "can open their folders and sessions."
-                    )
-                } else {
-                    Text("Hosts on your account")
-                        .font(ClientType.sectionTitle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
+                    if model.hosts.isEmpty {
+                        ClientEmptyState(
+                            kind: .nothingYet,
+                            title: "No host devices yet",
+                            message: "Install tokenstat on a computer, turn on Reach devices "
+                                + "from anywhere, and sign in. Hosts appear here so this phone "
+                                + "can open their folders and sessions."
+                        )
+                    } else {
+                        Text("Hosts on your account")
+                            .font(ClientType.sectionTitle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 2)
 
-                    ForEach(model.hosts) { host in
-                        hostCard(host)
+                        ForEach(model.hosts) { host in
+                            hostCard(host)
+                        }
+                    }
+
+                    if model.connectedKey != nil {
+                        if !model.folders.isEmpty {
+                            Text("Folders")
+                                .font(ClientType.sectionTitle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+                                .padding(.top, Theme.Space.s)
+                            ForEach(model.folders) { folder in
+                                NavigationLink {
+                                    if let peer = model.connectedKey,
+                                       let host = model.hosts.first(where: { $0.peerKey == peer })
+                                    {
+                                        ClientWorkspaceDetailView(
+                                            peer: peer,
+                                            hostName: host.name,
+                                            folder: folder
+                                        )
+                                    }
+                                } label: {
+                                    folderRow(folder)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        if !model.sessions.isEmpty {
+                            Text("All sessions")
+                                .font(ClientType.sectionTitle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 2)
+                                .padding(.top, Theme.Space.s)
+                            ForEach(model.sessions) { session in
+                                Button {
+                                    model.openSession(session)
+                                } label: {
+                                    sessionRow(session)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                     }
                 }
-
-                if !model.folders.isEmpty {
-                    Text("Folders")
-                        .font(ClientType.sectionTitle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                        .padding(.top, Theme.Space.s)
-                    ForEach(model.folders) { folder in
-                        folderRow(folder)
-                    }
-                }
-
-                if !model.sessions.isEmpty {
-                    Text("Sessions")
-                        .font(ClientType.sectionTitle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
-                        .padding(.top, Theme.Space.s)
-                    ForEach(model.sessions) { session in
-                        sessionRow(session)
-                    }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.top, Theme.Space.s)
+                .padding(.bottom, 96)
+            }
+            .background(Theme.background)
+            .navigationTitle("Workspaces")
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await model.refresh(account: account.account) }
+            .task {
+                await model.refresh(account: account.account)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+                Task { await model.refresh(account: account.account) }
+            }
+            .fullScreenCover(item: $model.activeTerminal) { session in
+                ClientTerminalScreen(session: session) {
+                    model.activeTerminal = nil
                 }
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-            .padding(.bottom, 96)
-        }
-        .background(Theme.background)
-        .refreshable { await model.refresh(account: account.account) }
-        .task {
-            await model.refresh(account: account.account)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-            Task { await model.refresh(account: account.account) }
         }
     }
 
@@ -114,7 +144,7 @@ struct ClientWorkspacesView: View {
                 }
             }
             if model.connectedKey == host.peerKey {
-                Text("Connected. Folders and sessions below are from this host.")
+                Text("Connected. Tap a folder for sessions, files and ports.")
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -125,14 +155,26 @@ struct ClientWorkspacesView: View {
     }
 
     private func folderRow(_ folder: WorkspaceFolder) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(folder.name)
-                .font(ClientType.label.weight(.medium))
-            Text(folder.path)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(folder.name)
+                    .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(folder.path)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let subtitle = folder.subtitle {
+                    Text(subtitle)
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,14 +184,19 @@ struct ClientWorkspacesView: View {
     private func sessionRow(_ session: PtySessionInfo) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.command)
+                Text(URL(fileURLWithPath: session.command).lastPathComponent)
                     .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
-                Text(session.alive ? "Running" : "Stopped")
+                Text(session.alive ? "Running · \(session.cwd)" : "Stopped")
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             Spacer()
+            Image(systemName: "terminal")
+                .foregroundStyle(Theme.accent)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,6 +222,8 @@ final class ClientWorkspacesModel {
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
     private(set) var errorMessage: String?
+    /// Full-screen terminal currently shown from the all-sessions list.
+    var activeTerminal: ClientTerminalSession?
 
     func refresh(account: Account?) async {
         errorMessage = nil
@@ -182,7 +231,6 @@ final class ClientWorkspacesModel {
         let machines = account?.machines ?? []
         hosts = machines.compactMap { machine -> ClientHost? in
             guard machine.isHost else { return nil }
-            // Never list this phone as a dialable host.
             if let thisID, let mid = machine.machineID, mid == thisID { return nil }
             guard let key = machine.publicIdentity, !key.isEmpty else { return nil }
             let name: String = {
@@ -197,8 +245,6 @@ final class ClientWorkspacesModel {
                 machineID: machine.machineID
             )
         }
-        // Tunnel stays off until Connect: refresh must not register this device
-        // or open a socket just from opening the tab.
         if let key = connectedKey {
             await reloadRemote(peerKey: key)
         }
@@ -212,7 +258,6 @@ final class ClientWorkspacesModel {
         isConnecting = host.peerKey
         defer { isConnecting = nil }
         do {
-            // Pin the host as a peer (typed key = approved), then dial.
             let peer = try await Bridge.pair(
                 key: host.peerKey,
                 label: host.name,
@@ -220,11 +265,7 @@ final class ClientWorkspacesModel {
             )
             _ = try await Bridge.setTunnel(true)
             folders = try await Bridge.remoteWorkspaces(peer: peer)
-            sessions = (try? await Bridge.onPeer(
-                peer.key,
-                "pty.list",
-                as: [PtySessionInfo].self
-            )) ?? []
+            sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
             connectedKey = host.peerKey
             errorMessage = nil
         } catch {
@@ -236,9 +277,16 @@ final class ClientWorkspacesModel {
     }
 
     func disconnect() {
+        activeTerminal?.stop()
+        activeTerminal = nil
         connectedKey = nil
         folders = []
         sessions = []
+    }
+
+    func openSession(_ info: PtySessionInfo) {
+        guard let peer = connectedKey else { return }
+        activeTerminal = ClientTerminalSession(peer: peer, info: info)
     }
 
     private func reloadRemote(peerKey: String) async {
@@ -246,11 +294,7 @@ final class ClientWorkspacesModel {
             return
         }
         folders = (try? await Bridge.remoteWorkspaces(peer: peer)) ?? folders
-        sessions = (try? await Bridge.onPeer(
-            peer.key,
-            "pty.list",
-            as: [PtySessionInfo].self
-        )) ?? sessions
+        sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? sessions
     }
 }
 
