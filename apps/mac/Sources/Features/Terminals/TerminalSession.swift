@@ -247,6 +247,16 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     }
     /// Milliseconds of polling since the last liveness check.
     private var sinceInfo = 0
+    /// When the last loop pass ran, so elapsed time can be measured rather than
+    /// assumed from the delay that was scheduled.
+    private var lastLoopAt = Date()
+    /// How long the host may hold a read open for the focused session.
+    ///
+    /// A quarter second: long enough that an idle terminal costs four round
+    /// trips a second instead of sixty, short enough that a connection is never
+    /// parked for a noticeable time and a session that loses focus stops
+    /// holding one almost at once.
+    private static let readHold = 250
 
     /// Keystrokes and resizes land here in the order the UI produced them,
     /// then a single writer task sends them to the pty one at a time. Without
@@ -428,6 +438,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                         do {
                             try await Bridge.ptyWrite(id: bridgeID, bytes: bytes)
                             transportError = nil
+                            // The byte has landed, so the echo is on its way.
+                            // Read now rather than on whatever the loop's next
+                            // scheduled read happened to be: `send` already
+                            // woke the loop, but that was before the write
+                            // crossed the bridge.
+                            wake()
                         } catch {
                             transportError = error.localizedDescription
                         }
@@ -451,6 +467,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         state = .none
         pollTask?.cancel()
         pollTask = nil
+        // A cancelled task still sitting in a nap would never return from it.
+        endNap()
         writerTask?.cancel()
         writerTask = nil
     }
@@ -458,13 +476,30 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     private func poll(id: String) async {
         while !Task.isCancelled {
             do {
-                let chunk = try await Bridge.ptyRead(id: id, offset: offset)
+                // The focused session asks the host to hold the call open, so
+                // the answer leaves the instant the bytes exist. That is the
+                // difference between a terminal and a screen refreshing at some
+                // interval: no schedule sits between the echo and the reader.
+                //
+                // Only the focused one. A held call parks a socket and a host
+                // thread, and nobody is waiting on a background session's
+                // bytes: those keep their cheap interval poll.
+                let chunk = try await Bridge.ptyRead(
+                    id: id,
+                    offset: offset,
+                    waitMs: isFocused ? Self.readHold : 0
+                )
                 if chunk.dropped > 0 { droppedOutput = true }
                 if !chunk.bytes.isEmpty {
                     feed(chunk.bytes)
                     offset = chunk.nextOffset
                     // Output is flowing, so stay at the floor: this is where
                     // typing latency comes from.
+                    pollDelay = pollFloor
+                } else if Date() < hotUntil {
+                    // Nothing came back yet, but somebody is typing. Backing
+                    // off here is what made the first character after a quiet
+                    // moment feel late.
                     pollDelay = pollFloor
                 } else {
                     pollDelay = min(max(pollDelay, pollFloor) * 2, Self.maxPollDelay)
@@ -477,8 +512,16 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             // Liveness a few times a second, not on every poll: an info call is
             // a reaping opportunity, and the process needs to be reaped for its
             // exit code to be known.
-            sinceInfo += pollDelay
-            if sinceInfo >= 250 {
+            //
+            // Counted in real milliseconds rather than in scheduled delay: a
+            // held read returns when it returns, so adding the delay that was
+            // never waited would stop the liveness check from ever coming due.
+            sinceInfo += max(pollDelay, Int(Date().timeIntervalSince(lastLoopAt) * 1000))
+            lastLoopAt = Date()
+            // Not while somebody is typing: an info call is a second round
+            // trip inside the loop that the echo is waiting on. It resumes a
+            // fraction of a second after the typing stops.
+            if sinceInfo >= 250, Date() >= hotUntil {
                 sinceInfo = 0
                 if let info = try? await Bridge.ptyInfo(id: id) {
                     // Guarded. These are observed, this runs several times a
@@ -519,7 +562,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 }
             }
 
-            try? await Task.sleep(for: .milliseconds(pollDelay))
+            // The focused session never sleeps between reads. The held call is
+            // the pacing: it returns the moment there is output and otherwise
+            // costs four round trips a second. Napping on top of it would put
+            // back the very interval that holding the call exists to remove,
+            // and an idle terminal that had backed off to 400 ms would show the
+            // first line of a waking agent that late.
+            if !isFocused {
+                await nap(pollDelay)
+            }
         }
         pollTask = nil
     }
@@ -672,6 +723,52 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// stretch does not wait out a backed-off delay.
     func wake() {
         pollDelay = pollFloor
+        // Keep reading fast for a moment. An echo does not come back on the
+        // same millisecond as the keystroke: the write crosses the bridge, the
+        // process runs, and the reply is buffered on the host. Without this
+        // window the read that follows a keystroke comes back empty, the loop
+        // doubles its delay, and the character lands a fifth of a second later
+        // on a terminal that was idle right before you typed.
+        hotUntil = Date().addingTimeInterval(Self.hotWindow)
+        // A delay that was already being waited out is the other half of the
+        // lag, and setting `pollDelay` does nothing about it. Cut the nap
+        // short instead.
+        endNap()
+    }
+
+    /// While this is in the future the poll stays at its floor, whatever the
+    /// reads return.
+    private var hotUntil = Date.distantPast
+    /// How long typing keeps the read loop fast. Long enough to cover the
+    /// bridge round trip and the process, short enough that a session nobody
+    /// is typing in goes quiet again immediately.
+    private static let hotWindow: TimeInterval = 0.4
+
+    /// The current nap, if the loop is in one. Resumed early by `wake`.
+    private var napper: CheckedContinuation<Void, Never>?
+
+    /// Sleep, but wake early when there is a reason to read now.
+    ///
+    /// `Task.sleep` cannot be cut short, so a keystroke arriving one
+    /// millisecond into a 400 millisecond back-off used to wait out all 400 of
+    /// them before the echo could even be asked for.
+    private func nap(_ milliseconds: Int) async {
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(milliseconds))
+            await self?.endNap()
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            napper = continuation
+        }
+        timer.cancel()
+    }
+
+    /// End the current nap, whether the timer ran out or something woke it.
+    /// Resumes at most once: a continuation resumed twice is a crash.
+    func endNap() {
+        guard let continuation = napper else { return }
+        napper = nil
+        continuation.resume()
     }
 
     // MARK: - TerminalViewDelegate

@@ -998,10 +998,17 @@ extension Bridge {
 
     /// Output after `offset`. Returns immediately, empty when there is none.
     /// Poll, do not push.
-    static func ptyRead(id: String, offset: UInt64) async throws -> PtyChunk {
+    /// Output since `offset`.
+    ///
+    /// `waitMs` lets the host hold the call open until there is something to
+    /// send. Zero is a plain poll, which is what a session nobody is looking at
+    /// wants. The focused session asks the host to wait instead, so a keystroke
+    /// echo comes back on the round trip it is ready on rather than on the next
+    /// scheduled read.
+    static func ptyRead(id: String, offset: UInt64, waitMs: Int = 0) async throws -> PtyChunk {
         try await background(
             "pty.read",
-            ["id": id, "offset": offset],
+            ["id": id, "offset": offset, "waitMs": waitMs],
             patience: Patience.interactive,
             as: PtyChunk.self
         )

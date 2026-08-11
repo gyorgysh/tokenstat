@@ -283,6 +283,18 @@ struct PtyIdParams {
     rows: Option<u16>,
     #[serde(default)]
     cols: Option<u16>,
+    /// `pty.read` only: how long the host may hold the call open waiting for
+    /// output, in milliseconds. Zero is the old behaviour, answer with whatever
+    /// is there.
+    ///
+    /// This is what makes a terminal feel like a terminal. A client that polls
+    /// meets its own interval on every keystroke: the echo is ready a
+    /// millisecond after the write and sits in the buffer until the next
+    /// scheduled read asks for it. Holding the call open instead means the
+    /// answer leaves the moment the bytes exist, so the round trip is the only
+    /// delay left.
+    #[serde(default)]
+    wait_ms: Option<u64>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1756,9 +1768,27 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 return answer;
             }
             pty_id(params).and_then(|p| {
-                let chunk = tokenstat_pty::manager()
-                    .read(&p.id, p.offset)
-                    .map_err(|e| e.to_string())?;
+                let manager = tokenstat_pty::manager();
+                let mut chunk = manager.read(&p.id, p.offset).map_err(|e| e.to_string())?;
+                // Hold the call open until there is something to say, or the
+                // caller's patience runs out. Capped so a connection is never
+                // parked for long: this occupies one socket and one thread, and
+                // only the session somebody is looking at asks for it.
+                //
+                // Polled rather than woken by the buffer, because the buffer has
+                // no condition variable and giving it one reaches into every
+                // writer. At three milliseconds the wait costs a few hundred
+                // cheap lock-and-look passes a second on one session, and it
+                // buys back the interval a client would otherwise wait on every
+                // single keystroke.
+                if let Some(wait) = p.wait_ms.filter(|w| *w > 0) {
+                    let deadline =
+                        std::time::Instant::now() + Duration::from_millis(wait.min(1_000));
+                    while chunk.bytes.is_empty() && std::time::Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(3));
+                        chunk = manager.read(&p.id, p.offset).map_err(|e| e.to_string())?;
+                    }
+                }
                 Ok(json!({
                     "data": crate::base64::encode(&chunk.bytes),
                     "nextOffset": chunk.next_offset,
