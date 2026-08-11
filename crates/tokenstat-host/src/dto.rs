@@ -354,6 +354,8 @@ pub struct MachineDto {
     pub last_seen_at: Option<String>,
     pub public_identity: Option<String>,
     pub trust_state: Option<String>,
+    /// `"host"` uploads usage; `"client"` is a phone (P5). Missing means host.
+    pub kind: Option<String>,
 }
 
 impl MachineDto {
@@ -370,6 +372,7 @@ impl MachineDto {
             last_seen_at: field("last_seen_at").or_else(|| field("last_seen")),
             public_identity: field("public_identity").or_else(|| field("identity")),
             trust_state: field("trust_state").or_else(|| field("trust")),
+            kind: field("kind"),
         }
     }
 }

@@ -589,7 +589,8 @@ pub fn machine_usage(
                                 };
                                 let lookup =
                                     tokenstat_core::pricing::display_usage_model_id(&row.model);
-                                if let Some(v) = EquivalentValue::price(prices, &lookup, &counters) {
+                                if let Some(v) = EquivalentValue::price(prices, &lookup, &counters)
+                                {
                                     micros += v.micros();
                                 }
                                 events = events.saturating_add(row.ev);
@@ -607,9 +608,11 @@ pub fn machine_usage(
                 }));
             }
             for handle in batch {
-                handles.push(handle.join().unwrap_or_else(|_| {
-                    Err("device spend worker failed".to_string())
-                }));
+                handles.push(
+                    handle
+                        .join()
+                        .unwrap_or_else(|_| Err("device spend worker failed".to_string())),
+                );
             }
         }
         handles

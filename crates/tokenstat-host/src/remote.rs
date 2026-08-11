@@ -199,11 +199,18 @@ fn account_token() -> Result<String, String> {
 fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    tokenstat_sync::profile::register_machine_identity(
+    // Phones (no local-host) register as clients so they do not burn a host
+    // machine slot. Macs remain hosts.
+    #[cfg(feature = "local-host")]
+    let kind = "host";
+    #[cfg(not(feature = "local-host"))]
+    let kind = "client";
+    tokenstat_sync::profile::register_machine_identity_kind(
         None,
         &machine_id,
         &identity.public_key_hex(),
         &tokenstat_identity::machine_label(),
+        kind,
     )
     .map_err(|e| e.to_string())?;
     set_tunnel_state(|state| state.registered = true);
@@ -413,11 +420,16 @@ fn register_with_account(settings: &RemoteSettings) {
     let outcome = (|| -> Result<(), String> {
         let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
         let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
-        tokenstat_sync::profile::register_machine_identity(
+        #[cfg(feature = "local-host")]
+        let kind = "host";
+        #[cfg(not(feature = "local-host"))]
+        let kind = "client";
+        tokenstat_sync::profile::register_machine_identity_kind(
             None,
             &machine_id,
             &identity.public_key_hex(),
             &tokenstat_identity::machine_label(),
+            kind,
         )
         .map_err(|e| e.to_string())
     })();

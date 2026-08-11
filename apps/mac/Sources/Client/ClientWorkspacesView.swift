@@ -178,9 +178,12 @@ final class ClientWorkspacesModel {
 
     func refresh(account: Account?) async {
         errorMessage = nil
+        let thisID = account?.thisMachineID
         let machines = account?.machines ?? []
         hosts = machines.compactMap { machine -> ClientHost? in
             guard machine.isHost else { return nil }
+            // Never list this phone as a dialable host.
+            if let thisID, let mid = machine.machineID, mid == thisID { return nil }
             guard let key = machine.publicIdentity, !key.isEmpty else { return nil }
             let name: String = {
                 if let label = machine.label, !label.isEmpty { return label }
@@ -194,8 +197,8 @@ final class ClientWorkspacesModel {
                 machineID: machine.machineID
             )
         }
-        // Bring the connect-side tunnel up so HELLO can run when we dial.
-        _ = try? await Bridge.setTunnel(true)
+        // Tunnel stays off until Connect: refresh must not register this device
+        // or open a socket just from opening the tab.
         if let key = connectedKey {
             await reloadRemote(peerKey: key)
         }

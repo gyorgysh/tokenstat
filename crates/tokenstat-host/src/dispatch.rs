@@ -951,7 +951,11 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         // open. Opening the browser is the front end's job: this crate has no
         // business deciding how a window behaves.
         "account.deviceStart" => {
+            // Phones declare client so approve/poll do not burn a host slot.
+            #[cfg(feature = "local-host")]
             let device = tokenstat_sync::device_start(None).envelope()?;
+            #[cfg(not(feature = "local-host"))]
+            let device = tokenstat_sync::device_start_kind(None, "client").envelope()?;
             let dto = DeviceLoginDto::from(&device);
             with_session(s, |b| {
                 b.pending_login = Some(device);

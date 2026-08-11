@@ -313,10 +313,18 @@ pub enum DeviceStatus {
 /// Split from the polling half so a GUI can show the user code in its own
 /// window and stay responsive. [`login`] composes the two for the CLI.
 pub fn device_start(host_flag: Option<&str>) -> Result<DeviceLogin, ProfileError> {
+    device_start_kind(host_flag, "host")
+}
+
+/// Begin device login, declaring whether this is a host or a phone client.
+///
+/// Clients do not burn a host machine slot when the code is approved.
+pub fn device_start_kind(host_flag: Option<&str>, kind: &str) -> Result<DeviceLogin, ProfileError> {
     let host = resolve_api_host(host_flag)?;
     let machine = config::ensure_machine_id()?;
     let _salt = config::ensure_project_salt()?;
     let client = http_client()?;
+    let kind = if kind == "client" { "client" } else { "host" };
 
     // Learn the server range early so a hopeless mismatch fails before the
     // browser dance.
@@ -326,7 +334,7 @@ pub fn device_start(host_flag: Option<&str>) -> Result<DeviceLogin, ProfileError
     let resp = client
         .post(format!("{host}/api/v1/device/code"))
         .header("content-type", "application/json")
-        .json(&serde_json::json!({ "machine": machine }))
+        .json(&serde_json::json!({ "machine": machine, "kind": kind }))
         .send()?;
 
     if !resp.status().is_success() {
