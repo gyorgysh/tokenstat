@@ -26,12 +26,21 @@ struct ClientWorkspacesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = model.errorMessage {
-                        Text(message)
-                            .font(ClientType.body)
-                            .foregroundStyle(Theme.danger)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(Theme.Space.m)
-                            .cardSurface()
+                        ClientErrorCard(message: message) {
+                            Task { await model.refresh(account: account.account) }
+                        }
+                    }
+                    if let message = model.infoMessage {
+                        HStack(alignment: .top, spacing: Theme.Space.s) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(Theme.accent)
+                            Text(message)
+                                .font(ClientType.body)
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(Theme.Space.m)
+                        .cardSurface()
                     }
 
                     if model.hosts.isEmpty {
@@ -52,6 +61,14 @@ struct ClientWorkspacesView: View {
                             hostCard(host)
                         }
                     }
+
+                    thisDeviceRow
+
+                    // What the connection is, on the screen that makes them.
+                    ClientSecurityCard(
+                        peerKey: model.connectedKey,
+                        peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
+                    )
 
                     if model.connectedKey != nil {
                         if !model.folders.isEmpty {
@@ -102,7 +119,10 @@ struct ClientWorkspacesView: View {
             .background(Theme.background)
             .navigationTitle("Workspaces")
             .navigationBarTitleDisplayMode(.inline)
-            .refreshable { await model.refresh(account: account.account) }
+            .refreshable {
+                ClientRefresh.began()
+                await model.refresh(account: account.account)
+            }
             .task {
                 await model.refresh(account: account.account)
             }
@@ -117,12 +137,46 @@ struct ClientWorkspacesView: View {
         }
     }
 
+    /// This phone, on the screen that lists the devices it can reach.
+    ///
+    /// It has no Connect button because a phone cannot dial itself, and it is
+    /// never drawn as offline: the app asking the question is running on it.
+    @ViewBuilder
+    private var thisDeviceRow: some View {
+        if let name = model.thisDeviceName {
+            HStack(spacing: Theme.Space.s) {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 9, height: 9)
+                Image(systemName: "iphone")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(ClientType.label.weight(.medium))
+                    Text("This device")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("Online")
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.accent)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     private func hostCard(_ host: ClientHost) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack {
                 Circle()
                     .fill(host.online == true ? Theme.accent : Color.secondary.opacity(0.35))
                     .frame(width: 9, height: 9)
+                Image(systemName: ClientDeviceIcon.symbol(name: host.name, isHost: true))
+                    .foregroundStyle(.secondary)
                 Text(host.name)
                     .font(ClientType.label.weight(.medium))
                 Spacer()
@@ -222,6 +276,9 @@ final class ClientWorkspacesModel {
     private(set) var connectedKey: String?
     private(set) var isConnecting: String?
     private(set) var errorMessage: String?
+    /// What this phone is called. It is never in the host list (it cannot dial
+    /// itself), so it gets one line of its own.
+    private(set) var thisDeviceName: String?
     /// Full-screen terminal currently shown from the all-sessions list.
     var activeTerminal: ClientTerminalSession?
 
@@ -229,9 +286,20 @@ final class ClientWorkspacesModel {
         errorMessage = nil
         let thisID = account?.thisMachineID
         let machines = account?.machines ?? []
+        // Who this phone is, from the host rather than from the account. A
+        // record registered before the server knew about client machines still
+        // carries no kind and would otherwise list this phone as a host that
+        // is asleep, which is the one device on the list that certainly is not.
+        let identity = try? await Bridge.machineIdentity()
+        let selfKey = identity?.key.lowercased()
+        thisDeviceName = {
+            let label = identity?.label.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return label.isEmpty ? ClientDeviceName.marketing : label
+        }()
         hosts = machines.compactMap { machine -> ClientHost? in
             guard machine.isHost else { return nil }
             if let thisID, let mid = machine.machineID, mid == thisID { return nil }
+            if let selfKey, machine.publicIdentity?.lowercased() == selfKey { return nil }
             guard let key = machine.publicIdentity, !key.isEmpty else { return nil }
             let name: String = {
                 if let label = machine.label, !label.isEmpty { return label }
@@ -250,30 +318,57 @@ final class ClientWorkspacesModel {
         }
     }
 
+    /// Soft guidance (approve on host), not a hard failure banner.
+    private(set) var infoMessage: String?
+
     func connect(_ host: ClientHost) async {
         guard host.online != false else {
             errorMessage = "\(host.name) is offline."
+            infoMessage = nil
             return
         }
         isConnecting = host.peerKey
         defer { isConnecting = nil }
+        errorMessage = nil
+        infoMessage = nil
         do {
+            // Make sure the host sees a named device and not "iPhone", even if
+            // the naming at launch happened before this phone had a host.
+            await ClientDeviceName.publish()
             let peer = try await Bridge.pair(
                 key: host.peerKey,
                 label: host.name,
                 address: ""
             )
+            // Keep the tunnel up: reconnect supervisor owns the socket.
             _ = try await Bridge.setTunnel(true)
             folders = try await Bridge.remoteWorkspaces(peer: peer)
             sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
             connectedKey = host.peerKey
             errorMessage = nil
+            infoMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            let text = error.localizedDescription
+            if Self.isApprovalNeeded(text) {
+                // Same-account auto-approve should cover most cases; if the
+                // host is offline from the directory or older, guide the user.
+                infoMessage = "Approve this phone on \(host.name): open Machines "
+                    + "and tap Approve next to this device. Then Connect again."
+                errorMessage = nil
+            } else {
+                errorMessage = text
+            }
             connectedKey = nil
             folders = []
             sessions = []
         }
+    }
+
+    private static func isApprovalNeeded(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("not approved")
+            || lower.contains("waiting for someone to allow")
+            || lower.contains("not_approved")
     }
 
     func disconnect() {

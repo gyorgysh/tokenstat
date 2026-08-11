@@ -19,10 +19,10 @@ import SwiftUI
 ///
 /// Levels 3 to 5 (that device's folders, the sessions running in them, and
 /// attaching to a terminal) need the machine plane and a device that is awake.
-/// They are not here, and the detail screen says so in one line rather than
-/// leaving somebody hunting for a button that does not exist. A screen that
-/// says "not yet, and here is what it needs" is worth more than no screen,
-/// which reads as no.
+/// The detail screen links into them through `ClientHostWorkspacesView` when
+/// the device has a key to dial, and says nothing when it has not: a phone on
+/// this account is not a host, and a computer without remote reach is already
+/// explained one card above.
 struct ClientDevicesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
@@ -81,6 +81,7 @@ struct ClientDevicesView: View {
         .background(Theme.background)
         .scrollBounceBehavior(.basedOnSize)
         .refreshable {
+            ClientRefresh.began()
             await account.load()
             await model.load(
                 machines: machines,
@@ -170,7 +171,16 @@ private struct DeviceRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: Theme.Space.s) {
-                AwakeDot(online: machine.online)
+                // The device in your hand is awake whatever the directory last
+                // recorded: the app asking the question is running on it.
+                AwakeDot(online: isThisDevice ? true : machine.online)
+                Image(systemName: ClientDeviceIcon.symbol(
+                    name: machine.label,
+                    isHost: machine.isHost
+                ))
+                .font(.system(size: 13))
+                .foregroundStyle(isThisDevice ? Theme.accent : .secondary)
+                .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(DeviceCopy.name(machine))
@@ -183,7 +193,7 @@ private struct DeviceRow: View {
                                 .foregroundStyle(Theme.accent)
                         }
                     }
-                    Text(DeviceCopy.caption(machine))
+                    Text(DeviceCopy.caption(machine, isThisDevice: isThisDevice))
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -243,14 +253,16 @@ struct ClientDeviceDetailView: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 spend
                 reach
+                work
                 identity
-                // Level 3 and up need the machine plane and a device that is
-                // awake. Saying so is the honest version of an empty section.
-                ClientEmptyState(
-                    kind: .nothingYet,
-                    title: "Folders and sessions are not here yet",
-                    message: "Seeing what this device is working on needs a live connection to it. That is coming."
-                )
+                // The same explanation the Workspaces tab carries, with this
+                // machine's key beside it: somebody reading a device page is
+                // asking what a connection to it actually is.
+                if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty {
+                    ClientSecurityCard(peerKey: key, peerName: DeviceCopy.name(machine))
+                } else {
+                    ClientSecurityCard()
+                }
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
@@ -302,7 +314,7 @@ struct ClientDeviceDetailView: View {
             Text("Reach")
                 .font(ClientType.sectionTitle)
             HStack(spacing: Theme.Space.s) {
-                AwakeDot(online: machine.online)
+                AwakeDot(online: isThisDevice ? true : machine.online)
                 Text(DeviceCopy.reach(machine, isThisDevice: isThisDevice))
                     .font(ClientType.label)
                     .foregroundStyle(.secondary)
@@ -313,6 +325,44 @@ struct ClientDeviceDetailView: View {
         .padding(Theme.Space.m)
         .cardSurface()
         .accessibilityElement(children: .combine)
+    }
+
+    /// Levels 3 to 5: that device's folders, its sessions, and attaching to
+    /// one. A live connection is what they need, so the link is offered when
+    /// there is a key to dial and withheld, with the reason, when there is not.
+    @ViewBuilder
+    private var work: some View {
+        if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Work")
+                    .font(ClientType.sectionTitle)
+                NavigationLink {
+                    ClientHostWorkspacesView(peerKey: key, hostName: DeviceCopy.name(machine))
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Folders and sessions")
+                                .font(ClientType.label.weight(.medium))
+                                .foregroundStyle(.primary)
+                            Text(machine.online == true
+                                ? "Open what this device is working on."
+                                : "It is asleep. Opening this will wake nothing, but it will try.")
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(Theme.Space.m)
+            .cardSurface()
+        }
     }
 
     private var identity: some View {
@@ -406,11 +456,11 @@ private enum DeviceCopy {
 
     /// The second line: enough to tell two unnamed devices apart, then when it
     /// was last heard from.
-    static func caption(_ machine: Machine) -> String {
+    static func caption(_ machine: Machine, isThisDevice: Bool = false) -> String {
         guard machine.label?.isEmpty != false, let id = machine.machineID else {
-            return lastSeen(machine)
+            return lastSeen(machine, isThisDevice: isThisDevice)
         }
-        return "\(shortID(id)) · \(lastSeen(machine))"
+        return "\(shortID(id)) · \(lastSeen(machine, isThisDevice: isThisDevice))"
     }
 
     /// `m_c982…872c`. Long enough to be unique in a list of five, short enough
@@ -420,8 +470,8 @@ private enum DeviceCopy {
         return "\(id.prefix(6))…\(id.suffix(4))"
     }
 
-    static func lastSeen(_ machine: Machine) -> String {
-        if machine.online == true { return "Awake now" }
+    static func lastSeen(_ machine: Machine, isThisDevice: Bool = false) -> String {
+        if isThisDevice || machine.online == true { return "Awake now" }
         if let seen = formatRelativeDate(machine.lastSeenAt) { return "Last seen \(seen)" }
         if let synced = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(synced)" }
         return "Has not reported in yet"
@@ -447,7 +497,7 @@ private enum DeviceCopy {
     static func rowLabel(_ machine: Machine, usage: MachineUsage?, isThisDevice: Bool) -> String {
         var parts = [name(machine)]
         if isThisDevice { parts.append("this device") }
-        parts.append(lastSeen(machine))
+        parts.append(lastSeen(machine, isThisDevice: isThisDevice))
         if let usage {
             parts.append(
                 "\(usage.value.formatted) at list rates, \(DeviceHistory.windowPhrase(days: usage.days))"

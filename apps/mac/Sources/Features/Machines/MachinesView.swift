@@ -42,7 +42,7 @@ struct MachinesView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = model.errorMessage {
-                        Banner(text: message, severity: .warning)
+                        ErrorBanner(message: message) { Task { await model.load() } }
                     }
                     if !Bridge.isHosted {
                         hostSetup
@@ -61,7 +61,7 @@ struct MachinesView: View {
                         knownMachines
                     }
                     addDeviceAction
-                    privacyNote
+                    encryptionNote
                 }
                 .padding(Theme.Space.m)
             }
@@ -383,7 +383,11 @@ struct MachinesView: View {
         Card(title: "Your devices", subtitle: "Manage connections you have already approved.") {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.known) { peer in
-                    PeerRow(peer: peer, resolvedName: model.accountName(for: peer)) {
+                    PeerRow(
+                        peer: peer,
+                        resolvedName: model.accountName(for: peer),
+                        symbol: model.peerSymbol(for: peer)
+                    ) {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
                                 Button("Revoke", role: .destructive) { confirmRevoke = peer }
@@ -404,11 +408,12 @@ struct MachinesView: View {
     }
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Connect to any device on this account in one click, over the tunnel.") {
+        Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.") {
             VStack(spacing: 0) {
-                ForEach(model.accountMachines.filter(\.isHost)) { machine in
-                    // Clients (phones) are listed nowhere here: they do not
-                    // upload usage and are not dialable hosts (P5).
+                ForEach(model.listedAccountMachines) { machine in
+                    // Phones are shown but never dialled: a client reaches a
+                    // host, not the reverse (P5). Hiding them made a device
+                    // somebody had signed in on look like it was not there.
                     // "This device" can also be matched by its key: a stale
                     // record whose id no longer equals thisMachineID must not
                     // suddenly look like a stranger with Connect buttons.
@@ -420,8 +425,11 @@ struct MachinesView: View {
                     // subtitle either way, so a resolved title never hides
                     // which machine the row is.
                     let resolved = model.resolvedName(for: machine)
+                    let symbol = machine.isHost
+                        ? (isSelf ? "laptopcomputer" : "desktopcomputer")
+                        : "iphone"
                     HStack(spacing: Theme.Space.s) {
-                        Image(systemName: isSelf ? "laptopcomputer" : "desktopcomputer")
+                        Image(systemName: symbol)
                             .foregroundStyle(isSelf ? Theme.accent : .secondary)
                             .frame(width: 24)
                         if isSelf {
@@ -465,10 +473,12 @@ struct MachinesView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if isSelf {
+                        if isSelf || !machine.isHost {
                             // The machine you are sitting at has no Connect and
                             // no revoke; "This device" under the name is the
-                            // whole mark.
+                            // whole mark. A phone has none either: it is the
+                            // side that dials, and approving it happens in
+                            // "Your devices" when it knocks.
                             EmptyView()
                         } else {
                             if let peer = model.peer(for: machine) {
@@ -502,7 +512,7 @@ struct MachinesView: View {
                         }
                     }
                     .padding(.vertical, Theme.Space.s)
-                    if machine.id != model.accountMachines.last?.id { Divider() }
+                    if machine.id != model.listedAccountMachines.last?.id { Divider() }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -514,6 +524,13 @@ struct MachinesView: View {
     /// quick read; this carries the detail, and the two never collide.
     private func statusLine(for machine: Machine, isSelf: Bool) -> String {
         if isSelf { return "This device" }
+        if !machine.isHost {
+            // A phone holds the tunnel only while somebody is using it, so
+            // "offline" here means "not in the app right now", not "broken".
+            if machine.online == true { return "Phone · in the app now" }
+            if let seen = formatRelativeDate(machine.lastSeenAt) { return "Phone · last used \(seen)" }
+            return "Phone · signed in on this account"
+        }
         if machine.publicIdentity?.isEmpty != false { return "No connection key yet" }
         if machine.online == false {
             if let seen = formatRelativeDate(machine.lastSeenAt) {
@@ -548,16 +565,74 @@ struct MachinesView: View {
         }
     }
 
-    private var privacyNote: some View {
-        Text("""
-        A connection between two machines carries terminal output, file \
-        contents and diffs. It is encrypted end to end. The tunnel relays the \
-        encrypted bytes and cannot read them, and only aggregate counters are \
-        ever eligible for sync.
-        """)
-        .font(.caption)
-        .foregroundStyle(.tertiary)
-        .padding(.top, Theme.Space.xs)
+    /// What protects a connection, with the keys it actually runs on.
+    ///
+    /// The paragraph used to sit at the foot of this screen as grey text, which
+    /// is where a claim goes to be skipped. It is the product, so it gets a
+    /// card, and it carries the fingerprints somebody can compare against the
+    /// other machine rather than asking them to take the sentence on trust.
+    private var encryptionNote: some View {
+        Card(
+            title: "End to end encrypted",
+            subtitle: "Only the two machines can read what passes between them."
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("""
+                A connection between two machines carries terminal output, file \
+                contents and diffs. It is encrypted on one machine and \
+                decrypted on the other, with keys that never leave them. The \
+                tunnel relays the encrypted bytes and cannot read them, and \
+                neither can tokenstat. Only aggregate counters are ever \
+                eligible for sync.
+                """)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if let identity = model.identity {
+                    keyLine(
+                        title: "This machine",
+                        words: identity.words,
+                        fingerprint: identity.fingerprint
+                    )
+                }
+                ForEach(model.known.filter { $0.trust == .approved }) { peer in
+                    keyLine(
+                        title: peer.label.isEmpty
+                            ? (model.accountName(for: peer) ?? "Approved device")
+                            : peer.label,
+                        words: peer.words,
+                        fingerprint: peer.fingerprint
+                    )
+                }
+
+                Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
+                    + "Two machines showing the same words for each other are talking "
+                    + "to each other and to nothing in between.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func keyLine(title: String, words: String?, fingerprint: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Text(title)
+                .font(.callout)
+                .frame(width: 160, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(words ?? fingerprint)
+                .font(.callout.weight(.medium))
+            Spacer(minLength: Theme.Space.s)
+            Text(fingerprint)
+                .font(Theme.mono(11))
+                .foregroundStyle(.tertiary)
+                .textSelection(.enabled)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
     }
 }
 
@@ -674,11 +749,13 @@ private struct PeerRow<Actions: View>: View {
     /// The account directory's name for this machine, when the peer itself
     /// was never named. Shown in place of "Unnamed device".
     var resolvedName: String?
+    /// SF Symbol: phone for iOS clients, desktop otherwise.
+    var symbol: String = "desktopcomputer"
     @ViewBuilder var actions: Actions
 
     var body: some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
-            Image(systemName: "desktopcomputer")
+            Image(systemName: symbol)
                 .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {

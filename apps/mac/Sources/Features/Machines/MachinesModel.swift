@@ -121,6 +121,31 @@ final class MachinesModel {
         }?.label
     }
 
+    /// Account machines in the order the screen shows them: computers first,
+    /// then phones. A phone cannot be dialled, so it belongs under the rows
+    /// that can, rather than interleaved with them by whatever order the
+    /// directory returned.
+    var listedAccountMachines: [Machine] {
+        accountMachines.filter(\.isHost) + accountMachines.filter { !$0.isHost }
+    }
+
+    /// Phone vs computer icon for a peer row. Uses the account `kind` when
+    /// known, otherwise a name heuristic (iPhone / iPad in the label).
+    func peerSymbol(for peer: Peer) -> String {
+        if let machine = accountMachines.first(where: {
+            let identity = $0.publicIdentity ?? $0.machineID
+            return identity == peer.key || identity == peer.fingerprint
+        }), !machine.isHost {
+            return "iphone"
+        }
+        let name = (peer.label.isEmpty ? accountName(for: peer) : peer.label) ?? ""
+        let lower = name.lowercased()
+        if lower.contains("iphone") || lower.contains("ipad") || lower.contains("ios") {
+            return "iphone"
+        }
+        return "desktopcomputer"
+    }
+
     /// The one string to move to the other machine: the key. Everything rides
     /// the tunnel now, so there is no address to carry; the far end's Add
     /// device box accepts the key as pasted.

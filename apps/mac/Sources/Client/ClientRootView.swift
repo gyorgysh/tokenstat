@@ -99,6 +99,9 @@ struct ClientRootView: View {
             // has already signed in behind it.
             account.signInDismisser = { ClientWebAuth.shared.cancel() }
             await launch.prepare()
+            // Name this phone before anything asks the account who is on it.
+            // See `ClientDeviceName`.
+            await ClientDeviceName.publish()
             await account.load()
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
