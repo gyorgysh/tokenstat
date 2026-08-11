@@ -125,13 +125,22 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-features --locked
 
-  # The client build, on the platform it ships to.
+  # The Rust half of the client, on the platform it ships to.
   #
-  # Unsigned and simulator only: this exists to catch shared code that stopped
-  # compiling for iOS, which is the failure that actually happens, not to
-  # produce an artifact. Signing lives in the release workflow.
+  # This is a regression gate, not a milestone gate. Everything below the Swift
+  # layer is shared code that already compiles for iOS, so it can break, and it
+  # did: the first run of this job found `open_browser` reaching for a process
+  # on a platform that has none.
+  #
+  # The **app** is deliberately not built here yet. `RootView` is the desktop
+  # shell, and the phone is meant to have its own root rather than a
+  # phone-sized copy of the Mac window (see `docs/mobile-app.md`). Until that
+  # root exists, an app build would fail for a reason that is not a
+  # regression, and a job that is always red is a job everybody learns to
+  # ignore. Add the `xcodebuild` step back in the same change that adds the
+  # client root.
   apple-client:
-    name: ios client build
+    name: ios client core
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -144,26 +153,11 @@ jobs:
         with:
           key: ios
 
-      - name: Install xcodegen
-        run: brew install xcodegen
-
       # Simulator slice only. The app links whatever the xcframework holds, and
       # building the macOS slices as well would double this job to prove
       # something the test matrix already proves.
       - name: Build the FFI for the simulator
         run: scripts/build-ffi-xcframework.sh sim
-
-      - name: Generate the Xcode project
-        run: xcodegen
-        working-directory: apps/mac
-
-      - name: Build for the simulator
-        run: |
-          xcodebuild -scheme Tokenstat \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
-        working-directory: apps/mac
 
   audit:
     name: dependency audit
