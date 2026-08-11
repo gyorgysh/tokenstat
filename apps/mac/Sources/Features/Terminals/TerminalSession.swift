@@ -445,6 +445,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         // Capture the host id once: it is stable after attach, and the writer
         // must not chase a changing value mid-stream.
         let bridgeID = hostID
+        // A running session is a reason to keep the app out of App Nap. See
+        // TerminalActivity: napped, this loop cannot drain the host's bounded
+        // buffer at the rate a printing agent fills it.
+        if !holdsActivity {
+            holdsActivity = true
+            TerminalActivity.retain()
+        }
         if writerTask == nil {
             // Detached, and deliberately so. This class is a MainActor class,
             // so a plain `Task` here runs its body on the main actor: every
@@ -495,9 +502,22 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         }
     }
 
+    /// True while this session holds the process-wide App Nap assertion.
+    @ObservationIgnored private var holdsActivity = false
+
+    /// Give up the App Nap assertion. Called when the process is gone, not
+    /// only when the session is closed: an exited session is not a reason to
+    /// keep the app awake behind another window.
+    private func releaseActivity() {
+        guard holdsActivity else { return }
+        holdsActivity = false
+        TerminalActivity.release()
+    }
+
     /// Stop polling. Called when the session is closed.
     func stop() {
         removed = true
+        releaseActivity()
         idleCheckTask?.cancel()
         idleCheckTask = nil
         state = .none
@@ -511,7 +531,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
     private func poll(id: String) async {
         while !Task.isCancelled {
+            // Set when a focused read came back empty and came back at once,
+            // which means the host did not hold the call open. See the pacing
+            // at the bottom of the loop.
+            var unheld = false
             do {
+                let askedAt = ContinuousClock.now
                 // The focused session asks the host to hold the call open, so
                 // the answer leaves the instant the bytes exist. That is the
                 // difference between a terminal and a screen refreshing at some
@@ -541,8 +566,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     // off here is what made the first character after a quiet
                     // moment feel late.
                     pollDelay = pollFloor
+                    unheld = isFocused && ContinuousClock.now - askedAt < Self.heldFloor
                 } else {
                     pollDelay = min(max(pollDelay, pollFloor) * 2, Self.maxPollDelay)
+                    unheld = isFocused && ContinuousClock.now - askedAt < Self.heldFloor
                 }
             } catch {
                 // The session is gone on the host side; nothing more to read.
@@ -610,9 +637,19 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             // first line of a waking agent that late.
             if !isFocused {
                 await nap(pollDelay)
+            } else if unheld {
+                // The host answered an empty held read immediately, so it is a
+                // daemon without `waitMs` and nothing is pacing this loop.
+                // Left alone it spins bridge calls as fast as the socket pool
+                // allows, on the actor that also parses and draws, which is a
+                // terminal that renders at whatever is left over. One frame
+                // between empty reads costs nothing the hold was not already
+                // costing.
+                await nap(Self.minPollDelay)
             }
         }
         pollTask = nil
+        releaseActivity()
     }
 
     /// Hand output to the terminal.
@@ -656,9 +693,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         var start = 0
         while start < all.count {
             let end = min(start + Self.feedSlice, all.count)
+            let began = ContinuousClock.now
             view.feed(byteArray: all[start..<end])
+            spentThisFrame += ContinuousClock.now - began
             start = end
-            if start < all.count { await Task.yield() }
+            if start < all.count { await pace() }
         }
         if TerminalPreferences.exposesToVoiceOver {
             publishAccessibilityValue()
@@ -669,6 +708,61 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// loop. Around 2 ms of parsing at the worst rate measured, which is under
     /// a display frame and far under anything a person feels as a stuck key.
     private static let feedSlice = 24 * 1024
+
+    /// One display frame on this Mac's main screen, so the pacing below is a
+    /// frame on a 120 Hz panel and a frame on a 60 Hz one rather than a fixed
+    /// 16 ms that means something different on each.
+    private static let frameInterval: Duration = {
+        let hz = NSScreen.main?.maximumFramesPerSecond ?? 60
+        return .seconds(1.0 / Double(min(max(hz, 30), 240)))
+    }()
+
+    /// How much of each frame the emulator may spend parsing before the run
+    /// loop gets the rest of it.
+    ///
+    /// Slicing the feed stopped a single chunk from blocking the main thread,
+    /// but nothing stopped the *next* slice, or the next chunk, from following
+    /// it straight back onto the actor: `Task.yield` only goes to the back of a
+    /// queue this loop is the only real producer for. Under a stream that is a
+    /// main thread parsing nearly full time, and drawing, hit testing and key
+    /// handling get whatever is left, which is a terminal that renders in
+    /// lurches. A fixed share per frame is what makes the frame rate a floor
+    /// instead of a by-product: the emulator gets most of the frame, the run
+    /// loop always gets the rest.
+    private static let frameBudget: Duration = frameInterval * 0.6
+
+    /// When the current frame's parse budget started counting.
+    @ObservationIgnored private var frameOpenedAt = ContinuousClock.now
+    /// Main-thread parse time already spent inside the current frame. Carried
+    /// across `feed` calls: several chunks can land in one frame, and a budget
+    /// that reset per call would not be a budget.
+    @ObservationIgnored private var spentThisFrame: Duration = .zero
+
+    /// Hand the frame back once this frame's parse budget is spent.
+    ///
+    /// A plain `Task.yield` while there is budget left, because that is
+    /// cheaper and the run loop does get its turn. A real sleep to the frame
+    /// edge once the budget is gone, because that is the only thing that
+    /// actually reserves time for drawing.
+    private func pace() async {
+        let now = ContinuousClock.now
+        let elapsed = now - frameOpenedAt
+        if elapsed >= Self.frameInterval {
+            // A new frame started while we were parsing. Fresh budget.
+            frameOpenedAt = now
+            spentThisFrame = .zero
+            await Task.yield()
+            return
+        }
+        guard spentThisFrame >= Self.frameBudget else {
+            await Task.yield()
+            return
+        }
+        let remaining = Self.frameInterval - elapsed
+        frameOpenedAt = now + remaining
+        spentThisFrame = .zero
+        try? await Task.sleep(for: remaining)
+    }
 
     /// Set the session state from a host report.
     ///
@@ -801,6 +895,30 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         endNap()
     }
 
+    /// The user is back: the app was activated, or the window came out from
+    /// behind something.
+    ///
+    /// The read loop already wakes when a session gains focus inside the app,
+    /// but nothing told it about the window itself. Coming back to a covered
+    /// window meant a session that had backed off to 400 ms, with a frame
+    /// budget last touched however many minutes ago, showing its first line
+    /// that late and then catching up in lurches. This is the other half of
+    /// keeping App Nap off: the assertion stops the app falling behind, and
+    /// this puts it back on the fast path the moment somebody is looking.
+    func resume() {
+        guard !isPending, exitCode == nil else { return }
+        wake()
+        // Longer than a keystroke's window. Somebody who just came back to the
+        // window is about to read or type, and the first thing they do must
+        // not be the thing that wakes the loop.
+        hotUntil = Date().addingTimeInterval(Self.returnWindow)
+        // The pacing counters are stale by however long the app was away, and
+        // a stale frame start would spend the first slice's budget on a frame
+        // that ended minutes ago.
+        frameOpenedAt = ContinuousClock.now
+        spentThisFrame = .zero
+    }
+
     /// While this is in the future the poll stays at its floor, whatever the
     /// reads return.
     private var hotUntil = Date.distantPast
@@ -808,6 +926,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// bridge round trip and the process, short enough that a session nobody
     /// is typing in goes quiet again immediately.
     private static let hotWindow: TimeInterval = 0.4
+    /// The same, for coming back to the window rather than for a keystroke.
+    private static let returnWindow: TimeInterval = 2
+    /// Under this, an empty read did not wait: the host answered at once, so
+    /// it has no `waitMs` to hold the call with.
+    private static let heldFloor: Duration = .milliseconds(readHold / 4)
 
     /// The current nap, if the loop is in one. Resumed early by `wake`.
     private var napper: CheckedContinuation<Void, Never>?

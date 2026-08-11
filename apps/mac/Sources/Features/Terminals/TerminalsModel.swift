@@ -44,6 +44,61 @@ final class TerminalsModel {
         // The wheel is a terminal-wide concern, not a per-session one, so it is
         // wired up once here rather than by whichever session appears first.
         TerminalWheelForwarder.install()
+        observeReturn()
+    }
+
+    /// Notification tokens for the return observers.
+    ///
+    /// Kept rather than discarded so it is visible that they are never
+    /// removed, which is correct here: this model is created once and lives as
+    /// long as the app, and the blocks hold `self` weakly, so there is nothing
+    /// to break and nothing kept alive by the registration.
+    private var returnObservers: [NSObjectProtocol] = []
+
+    /// Put every session back on the fast path when the user comes back to the
+    /// app or uncovers the window.
+    ///
+    /// In-app focus already drives the read loop: switching sessions, opening a
+    /// file over the terminal, leaving for Home. None of that fires when the
+    /// user Cmd-Tabs away, or puts another window in front, which is the far
+    /// more common way to leave a terminal and come back to it. Without this
+    /// the app learned it was in front again only when something happened to
+    /// touch the pane.
+    private func observeReturn() {
+        let center = NotificationCenter.default
+        let appIsBack = [
+            NSApplication.didBecomeActiveNotification,
+            NSApplication.didUnhideNotification,
+        ]
+        for name in appIsBack {
+            returnObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.resumeAll() }
+                }
+            )
+        }
+        // Occlusion fires in both directions and for every window. Only a
+        // window that just became visible is a return.
+        returnObservers.append(
+            center.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                guard let window = note.object as? NSWindow,
+                      window.occlusionState.contains(.visible)
+                else { return }
+                MainActor.assumeIsolated { self?.resumeAll() }
+            }
+        )
+    }
+
+    /// Wake every live session. Cheap: a session with nothing to say goes back
+    /// to its own floor within a couple of reads.
+    func resumeAll() {
+        for session in sessions {
+            session.resume()
+        }
     }
 
     var selected: TerminalSession? {
