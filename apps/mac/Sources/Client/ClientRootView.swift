@@ -50,7 +50,10 @@ struct ClientRootView: View {
 
     var body: some View {
         Group {
-            if !launch.hostReady {
+            // Splash covers host warm-up *and* the first account check. Without
+            // the second half, a phone that already has a token paints Sign in
+            // for a beat and then swaps to Home, which reads as a bug.
+            if !launch.hostReady || !account.authChecked {
                 LaunchSplashView()
                     .transition(.opacity)
             } else if !account.signedIn {
@@ -59,11 +62,6 @@ struct ClientRootView: View {
                 // out phone that can reach the tabs is four empty screens and a
                 // sign-in card repeated on each of them. One door instead: the
                 // intro on a first run, the sign-in screen after that.
-                //
-                // `account.account` is nil until the first load answers, and
-                // `signedIn` is false while it is nil, so this waits behind the
-                // splash rather than flashing the sign-in screen at somebody who
-                // is already signed in.
                 if hasOnboarded {
                     ClientLoginView()
                         .transition(.opacity)
@@ -77,16 +75,10 @@ struct ClientRootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.28), value: account.signedIn)
+        .animation(.easeInOut(duration: 0.28), value: account.authChecked)
         .tint(Theme.accent)
         .environment(account)
         .environment(connectivity)
-        // Signing in is the one moment in this app worth a haptic: something
-        // happened on a website, in a sheet that just closed, and the screen
-        // underneath changed while nobody was looking at it.
-        .onChange(of: account.signedIn) { _, signedIn in
-            guard signedIn else { return }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-        }
         .task {
             connectivity.start()
             // Sign-in presents over the app rather than handing the URL to

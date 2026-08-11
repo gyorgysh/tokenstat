@@ -82,14 +82,36 @@ struct ClientDevicesView: View {
         .scrollBounceBehavior(.basedOnSize)
         .refreshable {
             await account.load()
-            await model.load(machines: machines, force: true)
+            await model.load(
+                machines: machines,
+                days: DeviceHistory.days(for: account.account?.tier),
+                force: true
+            )
         }
         .task {
             if account.account == nil { await account.load() }
-            await model.load(machines: machines)
+            await model.load(
+                machines: machines,
+                days: DeviceHistory.days(for: account.account?.tier)
+            )
+        }
+        .onChange(of: account.account?.tier) { _, _ in
+            Task {
+                await model.load(
+                    machines: machines,
+                    days: DeviceHistory.days(for: account.account?.tier),
+                    force: true
+                )
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-            Task { await model.load(machines: machines, force: true) }
+            Task {
+                await model.load(
+                    machines: machines,
+                    days: DeviceHistory.days(for: account.account?.tier),
+                    force: true
+                )
+            }
         }
     }
 
@@ -246,7 +268,7 @@ struct ClientDeviceDetailView: View {
                 .foregroundStyle(Theme.accent)
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
-            Text(usage.map { "at list rates, last \($0.days) days" }
+            Text(usage.map { "at list rates, \(DeviceHistory.windowPhrase(days: $0.days))" }
                 ?? "This device's share has not been fetched.")
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -427,9 +449,36 @@ private enum DeviceCopy {
         if isThisDevice { parts.append("this device") }
         parts.append(lastSeen(machine))
         if let usage {
-            parts.append("\(usage.value.formatted) at list rates over \(usage.days) days")
+            parts.append(
+                "\(usage.value.formatted) at list rates, \(DeviceHistory.windowPhrase(days: usage.days))"
+            )
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Device spend window by account tier. Free of MainActor so row labels can
+/// format without hopping into the model.
+enum DeviceHistory {
+    /// How far back this tier's device spend should look.
+    ///
+    /// Matches the account history product: free a month, supporter a year,
+    /// patron everything the series still holds. The host clamps the upper
+    /// bound; the server still enforces each account's own depth.
+    static func days(for tier: String?) -> Int {
+        switch tier?.lowercased() {
+        case "patron": return 3650
+        case "supporter": return 365
+        default: return 30
+        }
+    }
+
+    /// Human window for labels: "the last 30 days", "the last year", "all time".
+    static func windowPhrase(days: Int) -> String {
+        if days >= 1000 { return "all time" }
+        if days >= 360 { return "the last year" }
+        if days == 1 { return "the last day" }
+        return "the last \(days) days"
     }
 }
 
@@ -437,6 +486,10 @@ private enum DeviceCopy {
 ///
 /// One request per device on the host's side, so this is asked for when the
 /// screen opens and not warmed behind one somebody might never visit.
+///
+/// The window follows the account tier's history depth: free 30 days,
+/// supporter a year, patron all-time. Asking every tier for a month left a
+/// paid account looking like it only spent a slice of what it really had.
 @Observable
 @MainActor
 final class ClientDevicesModel {
@@ -444,6 +497,7 @@ final class ClientDevicesModel {
     private(set) var errorMessage: String?
     private(set) var isLoading = false
     private var loadedIDs: Set<String> = []
+    private var loadedDays: Int = 0
 
     func usage(for machine: Machine) -> MachineUsage? {
         guard let id = machine.machineID else { return nil }
@@ -459,18 +513,19 @@ final class ClientDevicesModel {
 
     var windowDescription: String {
         guard let days = rows.first?.days else { return "Across this account" }
-        return "Share of the last \(days) days, at list rates"
+        return "Share of \(DeviceHistory.windowPhrase(days: days)), at list rates"
     }
 
-    func load(machines: [Machine], force: Bool = false) async {
+    func load(machines: [Machine], days: Int = 30, force: Bool = false) async {
         let ids = machines.compactMap(\.machineID)
         guard !ids.isEmpty else { return }
-        if !force, Set(ids) == loadedIDs, !rows.isEmpty { return }
+        if !force, Set(ids) == loadedIDs, loadedDays == days, !rows.isEmpty { return }
         isLoading = true
         defer { isLoading = false }
         do {
-            rows = try await Bridge.machineUsage(machines: ids)
+            rows = try await Bridge.machineUsage(machines: ids, days: days)
             loadedIDs = Set(ids)
+            loadedDays = days
             errorMessage = nil
         } catch {
             // The device list itself came from the account and is already on

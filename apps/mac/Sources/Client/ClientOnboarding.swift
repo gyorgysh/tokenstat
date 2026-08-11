@@ -16,14 +16,14 @@ import SwiftUI
 /// that: one card on an empty screen, asking for a sign-in before saying what
 /// the app was for. Nobody signs into a product they have not been told about.
 ///
-/// So: three pages, swipeable, then a button. Deliberately three. It is enough
-/// to say what this is, what it costs you, and what to do next, and it is few
-/// enough that people reach the end.
+/// So: three pages, swipeable, then Get started. Deliberately three. It is
+/// enough to say what this is, what it costs you, and what to do next, and it
+/// is few enough that people reach the end. Signing in is not this screen's
+/// job: that is the next door, and it waits for a deliberate tap.
 ///
 /// Shown once. `hasOnboarded` is `@AppStorage`, so the second launch goes
 /// straight to the sign-in card, and a signed-in phone never sees this at all.
 struct ClientOnboarding: View {
-    @Environment(AccountModel.self) private var account
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
 
     @State private var page = 0
@@ -111,13 +111,13 @@ struct ClientOnboarding: View {
                 }
                 .buttonStyle(.glassProminent)
             } else {
-                Button("Sign in") {
-                    finish()
-                    account.signIn()
-                }
-                .buttonStyle(.glassProminent)
-                Button("Not now") { finish() }
-                    .font(ClientType.label)
+                // Get started only marks the intro done. Sign-in is a separate
+                // choice on the next screen: opening the browser from here made
+                // finishing the welcome feel like an auto-login, and a second
+                // "Not now" next to "Sign in" was too close: two opposing
+                // actions with no real space between them.
+                Button("Get started") { finish() }
+                    .buttonStyle(.glassProminent)
             }
         }
         .tint(Theme.accent)

@@ -61,6 +61,13 @@ final class AccountModel {
     /// waiting, and the two must not read the same.
     private(set) var signInNotice: String?
 
+    /// True after the first `load()` finishes, success or failure.
+    ///
+    /// The client root keeps the splash up until this is set, so a phone that
+    /// already has a token never flashes the sign-in door while the first
+    /// `account.status` is still in flight.
+    private(set) var authChecked = false
+
     var signedIn: Bool { account?.signedIn == true }
 
     /// Whether the last sync was refused by the plan's rate gate, which is a
@@ -73,7 +80,10 @@ final class AccountModel {
 
     func load() async {
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            authChecked = true
+        }
         do {
             account = try await Bridge.account()
             errorMessage = nil
@@ -173,6 +183,11 @@ final class AccountModel {
                 // app closes the window it opened.
                 signInDismisser?()
                 await load()
+                #if !os(macOS)
+                // One haptic for a real sign-in, not for discovering an
+                // existing session on cold launch.
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                #endif
                 return
             }
             // The server can widen the interval when it wants less traffic.
@@ -199,6 +214,24 @@ final class AccountModel {
         do {
             try await Bridge.signOut()
             lastSyncSummary = nil
+            errorMessage = nil
+            // Drop the signed-in snapshot immediately so the client root can
+            // swap to the login door without waiting on a second network call.
+            // load() still runs to refresh host defaults and clear any cache.
+            if let host = account?.host {
+                account = Account(
+                    signedIn: false,
+                    host: host,
+                    handle: nil,
+                    displayName: nil,
+                    tier: nil,
+                    avatar: nil,
+                    lastSyncAt: nil,
+                    thisMachineID: nil,
+                    machines: [],
+                    schemaCurrent: nil
+                )
+            }
             await load()
         } catch {
             errorMessage = error.localizedDescription

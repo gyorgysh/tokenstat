@@ -548,8 +548,13 @@ pub fn machine_usage(
     // Inclusive of both ends, so "30 days" covers thirty of them. Asking for
     // `today - 30` returns thirty-one, and a device that reported on every one
     // of them then reads as "31 active days" under a label saying 30.
+    //
+    // Cap is a decade, not a month: free accounts ask for 30, supporter for a
+    // year, patron for all-time, and the series endpoint already enforces the
+    // account's own history depth. Clamping to 400 used to silently truncate
+    // a patron year-and-change to a little over a year.
     let from = today
-        .checked_add(jiff::Span::new().days(-(days.clamp(1, 400) as i64 - 1)))
+        .checked_add(jiff::Span::new().days(-(days.clamp(1, 3650) as i64 - 1)))
         .map_err(|e| FetchError::new(e.to_string()))?
         .to_string();
     let to = today.to_string();

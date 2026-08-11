@@ -456,9 +456,25 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
     }
 }
 
-/// Delete the keychain entry for the resolved host. No server call.
+/// Sign out of the resolved host.
+///
+/// Revokes the bearer on the server first, then deletes the local keychain
+/// entry. A local-only delete left the credential valid for its whole life,
+/// so "signed out" on a phone someone was handing on did nothing online.
+///
+/// The server call is best-effort: a dead network still clears the keychain so
+/// this device is signed out. An already-revoked or expired token is treated
+/// the same as success (the outcome the caller asked for).
 pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
     let host = resolve_api_host(host_flag)?;
+    if let Some(token) = keychain::load_token(&host)? {
+        if let Ok(client) = http_client() {
+            let _ = client
+                .post(format!("{host}/api/v1/logout"))
+                .header("authorization", format!("Bearer {token}"))
+                .send();
+        }
+    }
     keychain::delete_token(&host)?;
     Ok(host)
 }

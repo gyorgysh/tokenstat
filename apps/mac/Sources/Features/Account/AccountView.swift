@@ -18,13 +18,10 @@ struct AccountView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Mac detail chrome only. The phone sheet already has a navigation
+            // bar with Done, and Sync now is not offered there (no archive).
+            #if os(macOS)
             DetailChromeBar {
-                // **Not on a client.** Sync uploads what this machine's archive
-                // recorded, and a phone has no archive: it reads the account
-                // that other devices upload to. A Sync button there offers to
-                // send nothing, and the only honest outcome of pressing it is a
-                // refusal, so it is not offered.
-                #if os(macOS)
                 if model.signedIn {
                     ToolbarIconButton(
                         systemImage: "arrow.triangle.2.circlepath",
@@ -35,8 +32,8 @@ struct AccountView: View {
                         Task { await model.sync() }
                     }
                 }
-                #endif
             }
+            #endif
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = model.errorMessage {
@@ -54,7 +51,9 @@ struct AccountView: View {
                         ProgressView().frame(maxWidth: .infinity)
                     }
 
+                    #if os(macOS)
                     terminalCard
+                    #endif
                     licensesCard
                     deleteAccountCard
                     privacyNote
@@ -177,48 +176,74 @@ struct AccountView: View {
     }
 
     private func syncCard(_ account: Account) -> some View {
-        Card(title: "Sync", subtitle: "Only aggregate counters are eligible") {
-            HStack(alignment: .center, spacing: Theme.Space.l) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("LAST SYNC")
-                        .font(Theme.sectionHeader)
-                        .foregroundStyle(.tertiary)
-                    // Relative, with the exact time on hover. "12 minutes ago"
-                    // is the answer to the question; a date and a clock time
-                    // makes you work it out.
-                    Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
-                        .font(.system(size: 17, weight: .medium))
-                        .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
-                }
-
-                Spacer()
-
-                Button {
-                    Task { await model.sync() }
-                } label: {
-                    if model.isSyncing {
-                        HStack(spacing: Theme.Space.xs) {
-                            ProgressView().controlSize(.small)
-                            Text("Syncing…")
-                        }
-                    } else {
-                        Label("Sync now", systemImage: "arrow.up.circle")
+        // **Sync is a desktop act.** It uploads this machine's archive. A phone
+        // has no archive: it only reads what other devices published. Offering
+        // Sync now there is a button whose honest outcome is a refusal.
+        Card(
+            title: "Sync",
+            subtitle: "Only aggregate counters are eligible"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(alignment: .center, spacing: Theme.Space.l) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("LAST SYNC")
+                            .font(Theme.sectionHeader)
+                            .foregroundStyle(.tertiary)
+                        // Relative, with the exact time on hover. "12 minutes ago"
+                        // is the answer to the question; a date and a clock time
+                        // makes you work it out.
+                        Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
+                            .font(.system(size: 17, weight: .medium))
+                            .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
                     }
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .disabled(model.isSyncing || model.syncCooldownUntil != nil)
 
+                    Spacer()
+
+                    #if os(macOS)
+                    Button {
+                        Task { await model.sync() }
+                    } label: {
+                        if model.isSyncing {
+                            HStack(spacing: Theme.Space.xs) {
+                                ProgressView().controlSize(.small)
+                                Text("Syncing…")
+                            }
+                        } else {
+                            Label("Sync now", systemImage: "arrow.up.circle")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .disabled(model.isSyncing || model.syncCooldownUntil != nil)
+                    #endif
+                }
+
+                #if os(macOS)
+                if model.syncCooldownUntil != nil {
+                    Text("Syncing again is available shortly.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                #endif
+
+                #if os(macOS)
                 Button("Sign out") {
                     Task { await model.signOut() }
                 }
+                .buttonStyle(SecondaryButtonStyle())
                 .disabled(model.isSyncing)
-            }
-
-            if model.syncCooldownUntil != nil {
-                Text("Syncing again is available shortly.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                #else
+                // Phone account UI lives in `ClientAccountSheet`. Keep a
+                // non-system control here if this view is ever shown on iOS.
+                Button {
+                    Task { await model.signOut() }
+                } label: {
+                    Text("Sign out")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(model.isSyncing)
+                #endif
             }
         }
     }
@@ -231,7 +256,11 @@ struct AccountView: View {
                 : "\(account.machines.count) linked"
         ) {
             if account.machines.isEmpty {
+                #if os(macOS)
                 EmptyHint(text: "Nothing has synced yet. Sync now to link this device.")
+                #else
+                EmptyHint(text: "No devices have linked yet. Install tokenstat on a computer and sign in there.")
+                #endif
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(account.machines.enumerated()), id: \.element.id) { index, machine in
@@ -448,7 +477,11 @@ struct AccountView: View {
 }
 
 /// The third-party notices sheet: every bundled dependency and its licence
-/// text, in the same monospaced reading pane the automation transcript uses.
+/// text, in a monospaced reading pane that sizes lines lazily.
+///
+/// A single SwiftUI `Text` of this file freezes layout (half a megabyte). The
+/// Mac path uses `NSTextView`; the iOS path is the phone-native sheet in
+/// `ClientAccountSheet` and should not open this one.
 private struct LicensesSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -485,13 +518,10 @@ private struct LicensesSheet: View {
                     #if os(macOS)
                     NoticesTextPane(text: text)
                     #else
-                    ScrollView {
-                        Text(text)
-                            .font(Theme.mono(11))
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Text("Open licenses from the account sheet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     #endif
                 } else if loadFailed {
                     // A development build that ran without the generating
@@ -514,7 +544,11 @@ private struct LicensesSheet: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(Theme.Space.m)
+        #if os(macOS)
         .frame(width: 620, height: 520)
+        #else
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
         .background(Theme.panel)
         .task {
             text = await Self.loadNotices()
