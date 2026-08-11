@@ -53,8 +53,7 @@ struct ClientWorkspaceDetailView: View {
         .navigationTitle(folder.name)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            ClientRefresh.began()
-            await reload()
+            await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
         }
         .task { await reload() }
         .fullScreenCover(item: $openSession) { session in

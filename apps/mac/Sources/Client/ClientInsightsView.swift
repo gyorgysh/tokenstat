@@ -37,10 +37,13 @@ struct ClientInsightsView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .scrollBounceBehavior(.basedOnSize)
+        // Always, not based on size. `basedOnSize` stops a short screen from
+        // bouncing, and a screen that cannot bounce cannot be pulled: the
+        // refresh gesture quietly disappeared exactly when the page was empty,
+        // which is when somebody most wants to pull it.
+        .scrollBounceBehavior(.always, axes: .vertical)
         .refreshable {
-            ClientRefresh.began()
-            await model.refresh()
+            await ClientRefresh.pull("insights") { await model.refresh() }
         }
         // On iOS 26 this lands in the bottom bar beside the tabs, which is the
         // half of the screen a thumb reaches. Long model identifiers are

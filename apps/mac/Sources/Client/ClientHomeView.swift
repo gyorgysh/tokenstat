@@ -75,10 +75,13 @@ struct ClientHomeView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .scrollBounceBehavior(.basedOnSize)
+        // Always, not based on size. `basedOnSize` stops a short screen from
+        // bouncing, and a screen that cannot bounce cannot be pulled: the
+        // refresh gesture quietly disappeared exactly when the page was empty,
+        // which is when somebody most wants to pull it.
+        .scrollBounceBehavior(.always, axes: .vertical)
         .refreshable {
-            ClientRefresh.began()
-            await model.refresh()
+            await ClientRefresh.pull("home") { await model.refresh() }
         }
         .task {
             // Account scope always. There is no local archive to fall back to,

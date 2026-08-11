@@ -96,8 +96,9 @@ struct ClientHostWorkspacesView: View {
         .navigationTitle(hostName)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            ClientRefresh.began()
-            await model.connect(peerKey: peerKey, name: hostName)
+            await ClientRefresh.pull("host-\(peerKey)") {
+                await model.connect(peerKey: peerKey, name: hostName)
+            }
         }
         .task { await model.connect(peerKey: peerKey, name: hostName) }
         .fullScreenCover(item: $model.activeTerminal) { session in

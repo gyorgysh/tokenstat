@@ -307,16 +307,8 @@ struct LogoMark: View {
 
 #if !os(macOS)
 extension Notification.Name {
-    /// A screen in the client started a pull to refresh.
+    /// A screen in the client started a pull to refresh. See `ClientRefresh`.
     static let clientRefreshing = Notification.Name("ai.tokenstat.client.refreshing")
-}
-
-/// One call for the screens that refresh, so the top bar can answer.
-@MainActor
-enum ClientRefresh {
-    static func began() {
-        NotificationCenter.default.post(name: .clientRefreshing, object: nil)
-    }
 }
 #endif
 

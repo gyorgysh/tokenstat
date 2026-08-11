@@ -146,6 +146,17 @@ struct FriendlyError {
                 raw: raw
             )
         }
+        if lower.contains("too many requests") || lower.contains("rate limit")
+            || lower.contains("429")
+        {
+            return FriendlyError(
+                title: "Asked too often",
+                message: "The account is answering fewer requests for a moment. What is on screen "
+                    + "is still good, and the next refresh will go through.",
+                symbol: "hourglass",
+                raw: raw
+            )
+        }
         if lower.contains("device limit") || lower.contains("machine_limit") {
             return FriendlyError(
                 title: "Device limit reached",

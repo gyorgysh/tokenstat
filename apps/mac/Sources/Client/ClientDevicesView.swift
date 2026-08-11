@@ -79,15 +79,20 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .scrollBounceBehavior(.basedOnSize)
+        // Always, not based on size. `basedOnSize` stops a short screen from
+        // bouncing, and a screen that cannot bounce cannot be pulled: the
+        // refresh gesture quietly disappeared exactly when the page was empty,
+        // which is when somebody most wants to pull it.
+        .scrollBounceBehavior(.always, axes: .vertical)
         .refreshable {
-            ClientRefresh.began()
-            await account.load()
-            await model.load(
-                machines: machines,
-                days: DeviceHistory.days(for: account.account?.tier),
-                force: true
-            )
+            await ClientRefresh.pull("devices") {
+                await account.load()
+                await model.load(
+                    machines: machines,
+                    days: DeviceHistory.days(for: account.account?.tier),
+                    force: true
+                )
+            }
         }
         .task {
             if account.account == nil { await account.load() }

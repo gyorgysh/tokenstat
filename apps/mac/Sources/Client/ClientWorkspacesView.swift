@@ -120,8 +120,9 @@ struct ClientWorkspacesView: View {
             .navigationTitle("Workspaces")
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
-                ClientRefresh.began()
-                await model.refresh(account: account.account)
+                await ClientRefresh.pull("workspaces") {
+                    await model.refresh(account: account.account)
+                }
             }
             .task {
                 await model.refresh(account: account.account)
