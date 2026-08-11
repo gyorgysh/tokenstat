@@ -255,11 +255,37 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// host's buffer fills, so no output is lost. Raised from 150 so several
     /// idle agents do not saturate the 16-connection socket pool.
     private static let backgroundPollDelay = 200
+    /// While the app is not active, every session must still drain the host.
+    /// 200 ms left a full-screen game filling the 512 KB ring; 50 ms keeps
+    /// several buried sessions ahead of a printing agent without matching
+    /// the focused floor.
+    private static let inactivePollDelay = 50
     private static let maxPollDelay = 400
+    /// Short hold for buried sessions: enough that an idle agent costs a
+    /// handful of round trips a second, short enough that a covered app still
+    /// drains when something wakes up.
+    private static let inactiveReadHold = 100
 
     /// The fastest this session polls right now.
+    ///
+    /// While the app is buried under a full-screen game every live session
+    /// must still drain the host, so the background floor is much tighter
+    /// than when the user is simply looking at another tab inside the app.
     private var pollFloor: Int {
-        isFocused ? Self.minPollDelay : Self.backgroundPollDelay
+        if isFocused { return Self.minPollDelay }
+        if !appIsActive { return Self.inactivePollDelay }
+        return Self.backgroundPollDelay
+    }
+
+    /// How long the host may hold a read for this session right now.
+    ///
+    /// Focused sessions always hold. While the app itself is inactive every
+    /// session holds briefly too: without that, a background agent under
+    /// Godot only gets a poll every 200 ms and the 512 KB host ring fills.
+    private var readWaitMs: Int {
+        if isFocused { return Self.readHold }
+        if !appIsActive { return Self.inactiveReadHold }
+        return 0
     }
     /// Milliseconds of polling since the last liveness check.
     private var sinceInfo = 0
@@ -497,7 +523,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             }
         }
         guard pollTask == nil else { return }
-        pollTask = Task { [weak self] in
+        // Detached on purpose. The class is a MainActor class, so a plain
+        // `Task` would park every read on the actor that also parses and
+        // draws. After a full-screen game that actor is busy for a long time,
+        // and a poll that waits on it cannot drain the host, so the 512 KB
+        // ring fills and the return is a dead terminal. Reading off the actor
+        // and only hopping on for feed keeps the host empty while the screen
+        // catches up.
+        pollTask = Task.detached(priority: .userInitiated) { [weak self] in
             await self?.poll(id: bridgeID)
         }
     }
@@ -529,130 +562,254 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         writerTask = nil
     }
 
-    private func poll(id: String) async {
+    /// Detached read loop. Marked `nonisolated` so a `Task.detached` caller
+    /// does not hop onto MainActor for the whole body (which would put every
+    /// `ptyRead` back behind feed and undo the reason this is detached).
+    nonisolated private func poll(id: String) async {
         while !Task.isCancelled {
-            // Set when a focused read came back empty and came back at once,
+            // Snapshot on the actor, then read off it. Holding MainActor across
+            // a held `ptyRead` was fine (await releases it), but applying a
+            // large feed on the same task kept the next read behind the parse
+            // budget. Snapshot → read → accept (queue) → nap keeps the host
+            // draining while the view catches up.
+            guard let plan = await makePollPlan() else { break }
+
+            // Set when a held read came back empty and came back at once,
             // which means the host did not hold the call open. See the pacing
             // at the bottom of the loop.
             var unheld = false
             do {
                 let askedAt = ContinuousClock.now
-                // The focused session asks the host to hold the call open, so
-                // the answer leaves the instant the bytes exist. That is the
-                // difference between a terminal and a screen refreshing at some
-                // interval: no schedule sits between the echo and the reader.
-                //
-                // Only the focused one. A held call parks a socket and a host
-                // thread, and nobody is waiting on a background session's
-                // bytes: those keep their cheap interval poll.
                 let chunk = try await Bridge.ptyRead(
                     id: id,
-                    offset: offset,
-                    waitMs: isFocused ? Self.readHold : 0
+                    offset: plan.offset,
+                    waitMs: plan.waitMs
                 )
-                // Guarded. This is observed, and a session the reader cannot
-                // keep up with reports a drop on every single poll: an
-                // unguarded write there rebuilds the pane at poll rate, on the
-                // one thread that is already behind.
-                if chunk.dropped > 0, !droppedOutput { droppedOutput = true }
-                if !chunk.bytes.isEmpty {
-                    await feed(chunk.bytes)
-                    offset = chunk.nextOffset
-                    // Output is flowing, so stay at the floor: this is where
-                    // typing latency comes from.
-                    pollDelay = pollFloor
-                } else if Date() < hotUntil {
-                    // Nothing came back yet, but somebody is typing. Backing
-                    // off here is what made the first character after a quiet
-                    // moment feel late.
-                    pollDelay = pollFloor
-                    unheld = isFocused && ContinuousClock.now - askedAt < Self.heldFloor
-                } else {
-                    pollDelay = min(max(pollDelay, pollFloor) * 2, Self.maxPollDelay)
-                    unheld = isFocused && ContinuousClock.now - askedAt < Self.heldFloor
-                }
+                let shouldStop = await applyChunk(chunk, plan: plan)
+                if shouldStop { break }
+                unheld = plan.focused
+                    && chunk.bytes.isEmpty
+                    && ContinuousClock.now - askedAt < Self.heldFloor
             } catch {
                 // The session is gone on the host side; nothing more to read.
                 break
             }
 
-            // Liveness a few times a second, not on every poll: an info call is
-            // a reaping opportunity, and the process needs to be reaped for its
-            // exit code to be known.
-            //
-            // Counted in real milliseconds rather than in scheduled delay: a
-            // held read returns when it returns, so adding the delay that was
-            // never waited would stop the liveness check from ever coming due.
-            sinceInfo += max(pollDelay, Int(Date().timeIntervalSince(lastLoopAt) * 1000))
-            lastLoopAt = Date()
-            // Not while somebody is typing: an info call is a second round
-            // trip inside the loop that the echo is waiting on. It resumes a
-            // fraction of a second after the typing stops.
-            if sinceInfo >= 250, Date() >= hotUntil {
-                sinceInfo = 0
-                if let info = try? await Bridge.ptyInfo(id: id) {
-                    // Guarded. These are observed, this runs several times a
-                    // second per session, and the values almost never change:
-                    // an unguarded write is a sidebar rebuild for nothing.
-                    if rows != info.rows { rows = info.rows }
-                    if cols != info.cols { cols = info.cols }
-                    if alive != info.alive {
-                        alive = info.alive
-                        if !info.alive {
-                            idleCheckTask?.cancel()
-                            idleCheckTask = nil
-                            state = info.exitCode != nil ? .stopped : .none
-                        }
-                    }
-                    if info.alive {
-                        applyActivity(
-                            info.activity,
-                            cpuPercent: info.cpuPercent,
-                            memoryMb: info.memoryMb
-                        )
-                    }
-                    if let code = info.exitCode {
-                        exitCode = code
-                        idleCheckTask?.cancel()
-                        idleCheckTask = nil
-                        state = .stopped
-                        // One last read in case output arrived right at exit.
-                        if let final = try? await Bridge.ptyRead(id: id, offset: offset) {
-                            if final.dropped > 0, !droppedOutput { droppedOutput = true }
-                            if !final.bytes.isEmpty {
-                                offset = final.nextOffset
-                                await feed(final.bytes)
-                            }
-                        }
-                        break
-                    }
-                }
-            }
-
-            // The focused session never sleeps between reads. The held call is
-            // the pacing: it returns the moment there is output and otherwise
-            // costs four round trips a second. Napping on top of it would put
-            // back the very interval that holding the call exists to remove,
-            // and an idle terminal that had backed off to 400 ms would show the
-            // first line of a waking agent that late.
-            if !isFocused {
-                await nap(pollDelay)
-            } else if unheld {
-                // The host answered an empty held read immediately, so it is a
-                // daemon without `waitMs` and nothing is pacing this loop.
-                // Left alone it spins bridge calls as fast as the socket pool
-                // allows, on the actor that also parses and draws, which is a
-                // terminal that renders at whatever is left over. One frame
-                // between empty reads costs nothing the hold was not already
-                // costing.
-                await nap(Self.minPollDelay)
+            guard let napMs = await afterPollNapMilliseconds(unheld: unheld) else { break }
+            if napMs > 0 {
+                await nap(napMs)
             }
         }
+        await finishPoll()
+    }
+
+    @MainActor
+    private func makePollPlan() -> PollPlan? {
+        guard !removed else { return nil }
+        return PollPlan(
+            offset: offset,
+            waitMs: readWaitMs,
+            floor: pollFloor,
+            focused: isFocused || !appIsActive,
+            hot: Date() < hotUntil,
+            delay: pollDelay
+        )
+    }
+
+    @MainActor
+    private func finishPoll() {
         pollTask = nil
         releaseActivity()
     }
 
-    /// Hand output to the terminal.
+    /// What the detached poll needs for one bridge call.
+    private struct PollPlan: Sendable {
+        var offset: UInt64
+        var waitMs: Int
+        var floor: Int
+        /// True when this session should not back off between empty reads.
+        var focused: Bool
+        var hot: Bool
+        var delay: Int
+    }
+
+    /// Apply one read on the main actor. Returns true when the poll loop
+    /// should stop (process exited).
+    @MainActor
+    private func applyChunk(_ chunk: PtyChunk, plan: PollPlan) -> Bool {
+        // Guarded. This is observed, and a session the reader cannot
+        // keep up with reports a drop on every single poll: an
+        // unguarded write there rebuilds the pane at poll rate, on the
+        // one thread that is already behind.
+        if chunk.dropped > 0, !droppedOutput { droppedOutput = true }
+        if !chunk.bytes.isEmpty {
+            offset = chunk.nextOffset
+            // Output is flowing, so stay at the floor: this is where
+            // typing latency comes from.
+            pollDelay = plan.floor
+            // Queue, do not await the feed. Awaiting put the next host read
+            // behind the parse budget and was the "return from Godot, terminal
+            // is dead" path: the ring filled while the view was still catching
+            // up. Accept kicks a pump that runs beside the poll loop.
+            acceptBytes(chunk.bytes)
+        } else if plan.hot {
+            // Nothing came back yet, but somebody is typing or just returned.
+            pollDelay = plan.floor
+        } else {
+            pollDelay = min(max(pollDelay, plan.floor) * 2, Self.maxPollDelay)
+        }
+        return false
+    }
+
+    /// Liveness check and nap decision after a successful poll. Nil means the
+    /// session is gone and the loop should stop. Zero means no nap.
+    @MainActor
+    private func afterPollNapMilliseconds(unheld: Bool) async -> Int? {
+        guard !removed else { return nil }
+
+        // Liveness a few times a second, not on every poll: an info call is
+        // a reaping opportunity, and the process needs to be reaped for its
+        // exit code to be known.
+        //
+        // Counted in real milliseconds rather than in scheduled delay: a
+        // held read returns when it returns, so adding the delay that was
+        // never waited would stop the liveness check from ever coming due.
+        sinceInfo += max(pollDelay, Int(Date().timeIntervalSince(lastLoopAt) * 1000))
+        lastLoopAt = Date()
+        // Not while somebody is typing: an info call is a second round
+        // trip inside the loop that the echo is waiting on. It resumes a
+        // fraction of a second after the typing stops.
+        if sinceInfo >= 250, Date() >= hotUntil {
+            sinceInfo = 0
+            if let info = try? await Bridge.ptyInfo(id: hostID) {
+                // Guarded. These are observed, this runs several times a
+                // second per session, and the values almost never change:
+                // an unguarded write is a sidebar rebuild for nothing.
+                if rows != info.rows { rows = info.rows }
+                if cols != info.cols { cols = info.cols }
+                if alive != info.alive {
+                    alive = info.alive
+                    if !info.alive {
+                        idleCheckTask?.cancel()
+                        idleCheckTask = nil
+                        state = info.exitCode != nil ? .stopped : .none
+                    }
+                }
+                if info.alive {
+                    applyActivity(
+                        info.activity,
+                        cpuPercent: info.cpuPercent,
+                        memoryMb: info.memoryMb
+                    )
+                }
+                if let code = info.exitCode {
+                    exitCode = code
+                    idleCheckTask?.cancel()
+                    idleCheckTask = nil
+                    state = .stopped
+                    // One last read in case output arrived right at exit.
+                    if let final = try? await Bridge.ptyRead(id: hostID, offset: offset) {
+                        if final.dropped > 0, !droppedOutput { droppedOutput = true }
+                        if !final.bytes.isEmpty {
+                            offset = final.nextOffset
+                            acceptBytes(final.bytes)
+                        }
+                    }
+                    return nil
+                }
+            }
+        }
+
+        // Focused (or app-inactive drain) sessions never sleep between reads
+        // except when the host answered an empty held read immediately.
+        let drainingHard = isFocused || !appIsActive
+        if !drainingHard {
+            return pollDelay
+        }
+        if unheld {
+            // The host answered an empty held read immediately, so it is a
+            // daemon without `waitMs` and nothing is pacing this loop.
+            return Self.minPollDelay
+        }
+        return 0
+    }
+
+    /// Whether the app is frontmost enough that drawing the emulator is
+    /// useful. Set by `TerminalsModel` from activation notifications.
+    ///
+    /// While a full-screen game owns the screen this is false: the poll still
+    /// drains the host into `pendingFeed` so the 512 KB ring does not drop,
+    /// but main-thread parse work is deferred until somebody can see it.
+    @ObservationIgnored var appIsActive = true
+
+    /// Bytes read from the host that have not been fed into SwiftTerm yet.
+    /// Only grows while the app is inactive, or while a catch-up pump is still
+    /// chewing through a backlog after return.
+    @ObservationIgnored private var pendingFeed = Data()
+    /// Cap on deferred bytes. Above this the oldest pending output is dropped
+    /// the same way the host ring trims, and `droppedOutput` is set.
+    private static let maxPendingFeed = 2 * 1024 * 1024
+    /// True while `pumpFeed` is on the main actor eating `pendingFeed`.
+    @ObservationIgnored private var feedInFlight = false
+    /// Until this date, feed uses the catch-up budget so a return from a
+    /// full-screen game clears the backlog instead of crawling at the normal
+    /// 60 % frame share.
+    @ObservationIgnored private var catchUpUntil = Date.distantPast
+
+    private var isCatchingUp: Bool {
+        Date() < catchUpUntil || !pendingFeed.isEmpty
+    }
+
+    /// Queue host output for the emulator without waiting for it to parse.
+    ///
+    /// The poll loop must not await feed: that serialised host drain behind
+    /// main-thread parse and is why a terminal under Godot came back empty or
+    /// minutes behind. Accept is cheap; `pumpFeed` does the real work beside
+    /// the next read.
+    private func acceptBytes(_ bytes: Data) {
+        guard !bytes.isEmpty else { return }
+        if !hasOutput { hasOutput = true }
+        lastOutputAt = Date()
+        if alive, !hostReportedActivity {
+            if state != .working { state = .working }
+            ensureIdleCheck()
+        }
+        if appIsActive, pendingFeed.isEmpty, !feedInFlight, !isCatchingUp {
+            // Fast path when we are live and caught up: feed immediately in a
+            // task so the caller (poll) can schedule the next read.
+            pendingFeed.append(bytes)
+            Task { await pumpFeed() }
+            return
+        }
+        pendingFeed.append(bytes)
+        trimPendingFeed()
+        if appIsActive {
+            Task { await pumpFeed() }
+        }
+    }
+
+    private func trimPendingFeed() {
+        guard pendingFeed.count > Self.maxPendingFeed else { return }
+        let excess = pendingFeed.count - Self.maxPendingFeed
+        pendingFeed.removeFirst(excess)
+        if !droppedOutput { droppedOutput = true }
+    }
+
+    /// Feed whatever is queued, as long as the app is active.
+    private func pumpFeed() async {
+        guard !feedInFlight else { return }
+        feedInFlight = true
+        defer { feedInFlight = false }
+        while appIsActive, !pendingFeed.isEmpty {
+            let sliceSize = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
+            let take = min(sliceSize, pendingFeed.count)
+            let slice = pendingFeed.prefix(take)
+            pendingFeed.removeFirst(take)
+            await feedToView(Data(slice))
+        }
+    }
+
+    /// Hand output to the terminal view.
     ///
     /// `view.feed`, never `view.terminal.feed`. They look interchangeable and
     /// are not: the emulator's own `feed` updates the buffer and stops there,
@@ -660,22 +817,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// `feedFinish` that asks for a repaint. Feeding the emulator directly
     /// leaves a terminal that takes input, runs the command, and shows nothing
     /// until an unrelated click or resize happens to invalidate the view.
-    private func feed(_ bytes: Data) async {
-        if !hasOutput {
-            hasOutput = true
-        }
-        lastOutputAt = Date()
-        // Bytes only decide the state until the host's detector has spoken.
-        // After that they are just a clock for "idle for how long".
-        // Write only on transition: an unguarded assignment on every packet
-        // rebuilds the sidebar at print rate until the host's first verdict.
-        if alive, !hostReportedActivity {
-            if state != .working {
-                state = .working
-            }
-            // One long-lived timer, not a cancel/recreate per packet.
-            ensureIdleCheck()
-        }
+    private func feedToView(_ bytes: Data) async {
         // In slices, with a turn of the run loop between them.
         //
         // Parsing is main-thread work and it is not cheap: measured against
@@ -689,10 +831,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         // a chunk. The parser is a state machine that already survives a
         // sequence cut in half by a read boundary, so this changes nothing
         // about what is drawn.
+        let slice = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
         let all = [UInt8](bytes)
         var start = 0
         while start < all.count {
-            let end = min(start + Self.feedSlice, all.count)
+            let end = min(start + slice, all.count)
             let began = ContinuousClock.now
             view.feed(byteArray: all[start..<end])
             spentThisFrame += ContinuousClock.now - began
@@ -708,6 +851,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// loop. Around 2 ms of parsing at the worst rate measured, which is under
     /// a display frame and far under anything a person feels as a stuck key.
     private static let feedSlice = 24 * 1024
+    /// Larger slices while catching up after the app was buried: the user is
+    /// staring at a backlog, not typing into a live stream, and smaller slices
+    /// just lengthen the crawl.
+    private static let feedSliceCatchUp = 64 * 1024
 
     /// One display frame on this Mac's main screen, so the pacing below is a
     /// frame on a 120 Hz panel and a frame on a 60 Hz one rather than a fixed
@@ -730,6 +877,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// instead of a by-product: the emulator gets most of the frame, the run
     /// loop always gets the rest.
     private static let frameBudget: Duration = frameInterval * 0.6
+    /// Catch-up after a full-screen game: give the emulator most of the frame
+    /// so the backlog clears, still leave a slice for keystrokes and chrome.
+    private static let frameBudgetCatchUp: Duration = frameInterval * 0.9
 
     /// When the current frame's parse budget started counting.
     @ObservationIgnored private var frameOpenedAt = ContinuousClock.now
@@ -745,6 +895,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// edge once the budget is gone, because that is the only thing that
     /// actually reserves time for drawing.
     private func pace() async {
+        let budget = isCatchingUp ? Self.frameBudgetCatchUp : Self.frameBudget
         let now = ContinuousClock.now
         let elapsed = now - frameOpenedAt
         if elapsed >= Self.frameInterval {
@@ -754,7 +905,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             await Task.yield()
             return
         }
-        guard spentThisFrame >= Self.frameBudget else {
+        guard spentThisFrame >= budget else {
             await Task.yield()
             return
         }
@@ -899,24 +1050,33 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// behind something.
     ///
     /// The read loop already wakes when a session gains focus inside the app,
-    /// but nothing told it about the window itself. Coming back to a covered
-    /// window meant a session that had backed off to 400 ms, with a frame
-    /// budget last touched however many minutes ago, showing its first line
-    /// that late and then catching up in lurches. This is the other half of
-    /// keeping App Nap off: the assertion stops the app falling behind, and
-    /// this puts it back on the fast path the moment somebody is looking.
+    /// but nothing told it about the window itself. Coming back from a
+    /// full-screen game is the sharp case: host output was queued into
+    /// `pendingFeed` without painting, and this kicks catch-up so the backlog
+    /// clears at most of each frame instead of the normal 60 % crawl.
     func resume() {
         guard !isPending, exitCode == nil else { return }
+        appIsActive = true
         wake()
-        // Longer than a keystroke's window. Somebody who just came back to the
-        // window is about to read or type, and the first thing they do must
-        // not be the thing that wakes the loop.
-        hotUntil = Date().addingTimeInterval(Self.returnWindow)
+        // Longer than a keystroke's window. A return from Godot can leave
+        // megabytes to paint; two seconds was not enough and the loop dropped
+        // back to the normal budget mid-catch-up.
+        let until = Date().addingTimeInterval(Self.returnWindow)
+        hotUntil = until
+        catchUpUntil = until
         // The pacing counters are stale by however long the app was away, and
         // a stale frame start would spend the first slice's budget on a frame
         // that ended minutes ago.
         frameOpenedAt = ContinuousClock.now
         spentThisFrame = .zero
+        Task { await pumpFeed() }
+    }
+
+    /// The app is no longer frontmost. Keep draining the host into
+    /// `pendingFeed`, but stop spending main-thread time on an emulator nobody
+    /// can see.
+    func noteAppInactive() {
+        appIsActive = false
     }
 
     /// While this is in the future the poll stays at its floor, whatever the
@@ -926,8 +1086,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// bridge round trip and the process, short enough that a session nobody
     /// is typing in goes quiet again immediately.
     private static let hotWindow: TimeInterval = 0.4
-    /// The same, for coming back to the window rather than for a keystroke.
-    private static let returnWindow: TimeInterval = 2
+    /// Coming back from another app, especially a full-screen game. Long
+    /// enough to clear a multi-megabyte deferred backlog at catch-up pace.
+    private static let returnWindow: TimeInterval = 12
     /// Under this, an empty read did not wait: the host answered at once, so
     /// it has no `waitMs` to hold the call with.
     private static let heldFloor: Duration = .milliseconds(readHold / 4)
@@ -940,15 +1101,30 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// `Task.sleep` cannot be cut short, so a keystroke arriving one
     /// millisecond into a 400 millisecond back-off used to wait out all 400 of
     /// them before the echo could even be asked for.
-    private func nap(_ milliseconds: Int) async {
-        let timer = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(milliseconds))
-            await self?.endNap()
-        }
+    ///
+    /// `nonisolated` so the detached poll loop can await it without forcing
+    /// the whole body onto MainActor; the continuation itself is still stored
+    /// on the actor.
+    nonisolated private func nap(_ milliseconds: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            napper = continuation
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    continuation.resume()
+                    return
+                }
+                // Replace any stale napper so a double-nap cannot leak a
+                // continuation (resume twice is a crash).
+                if let previous = self.napper {
+                    self.napper = nil
+                    previous.resume()
+                }
+                self.napper = continuation
+                Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(milliseconds))
+                    await self?.endNap()
+                }
+            }
         }
-        timer.cancel()
     }
 
     /// End the current nap, whether the timer ran out or something woke it.

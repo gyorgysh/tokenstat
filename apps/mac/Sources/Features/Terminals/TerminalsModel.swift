@@ -73,7 +73,18 @@ final class TerminalsModel {
         for name in appIsBack {
             returnObservers.append(
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.resumeAll() }
+                    MainActor.assumeIsolated { self?.noteAppActive(true) }
+                }
+            )
+        }
+        let appIsAway = [
+            NSApplication.willResignActiveNotification,
+            NSApplication.didHideNotification,
+        ]
+        for name in appIsAway {
+            returnObservers.append(
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.noteAppActive(false) }
                 }
             )
         }
@@ -88,9 +99,46 @@ final class TerminalsModel {
                 guard let window = note.object as? NSWindow,
                       window.occlusionState.contains(.visible)
                 else { return }
-                MainActor.assumeIsolated { self?.resumeAll() }
+                // Full-screen games often leave the app "active" in AppKit's
+                // sense while our window is fully covered. Occlusion is the
+                // signal that somebody can see us again.
+                MainActor.assumeIsolated { self?.noteAppActive(true) }
             }
         )
+        // Also when any of our windows is fully occluded (Godot exclusive
+        // fullscreen): stop painting, keep draining.
+        returnObservers.append(
+            center.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] note in
+                guard let window = note.object as? NSWindow,
+                      !window.occlusionState.contains(.visible),
+                      NSApp.windows.contains(window)
+                else { return }
+                MainActor.assumeIsolated {
+                    // Only go inactive when no tokenstat window is visible.
+                    let anyVisible = NSApp.windows.contains {
+                        $0.isVisible && $0.occlusionState.contains(.visible)
+                    }
+                    if !anyVisible {
+                        self?.noteAppActive(false)
+                    }
+                }
+            }
+        )
+    }
+
+    /// Propagate app active/inactive to every session and resume on return.
+    func noteAppActive(_ active: Bool) {
+        if active {
+            resumeAll()
+        } else {
+            for session in sessions {
+                session.noteAppInactive()
+            }
+        }
     }
 
     /// Wake every live session. Cheap: a session with nothing to say goes back

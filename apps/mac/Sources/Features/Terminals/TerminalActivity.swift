@@ -13,16 +13,17 @@ import Foundation
 /// macOS naps an app whose windows are all hidden or covered by something
 /// else: timers are coalesced towards a second, and the process drops to
 /// background CPU and I/O priority. The read loop then drains the host's
-/// output buffer far slower than a printing agent fills it, and that buffer is
+/// bounded buffer far slower than a printing agent fills it, and that buffer is
 /// bounded at 512 KB, so a build log that runs while the window is behind
 /// another one loses its middle and the terminal spends the first seconds
-/// after the user comes back catching up on what survived. That is the "leave
-/// it, come back, everything crawls" report: the app was not slow when the
-/// user returned, it was asleep while they were away.
+/// after the user comes back catching up on what survived.
 ///
-/// `.userInitiatedAllowingIdleSystemSleep` is the narrow option on purpose. It
-/// lifts the nap and leaves the Mac free to sleep when nobody is at it: a
-/// terminal must not be the reason a laptop stays awake in a bag.
+/// Full-screen games (Godot and friends) are the sharp case: they own the
+/// GPU and the window server for minutes. `userInitiated` alone was not
+/// enough under that pressure. `latencyCritical` is the option Apple documents
+/// for continuous interactive work that cannot tolerate coalescing, and
+/// `userInitiatedAllowingIdleSystemSleep` still leaves the Mac free to sleep
+/// when nobody is at it, so a terminal is not why a laptop stays awake in a bag.
 ///
 /// Reference counted, because the assertion belongs to "some session is
 /// running" rather than to whichever session started first.
@@ -35,7 +36,10 @@ enum TerminalActivity {
         holders += 1
         guard holders == 1, token == nil else { return }
         token = ProcessInfo.processInfo.beginActivity(
-            options: .userInitiatedAllowingIdleSystemSleep,
+            options: [
+                .userInitiatedAllowingIdleSystemSleep,
+                .latencyCritical,
+            ],
             reason: "draining terminal session output"
         )
     }
