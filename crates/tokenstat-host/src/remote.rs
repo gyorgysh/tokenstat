@@ -187,9 +187,13 @@ fn account_token() -> Result<String, String> {
 }
 
 /// Register the machine on the account directory, then mint a short-lived
-/// tunnel:connect token for HELLO. Falls back to the long-lived login bearer
-/// only if minting fails (older server, or plan/registration error already
-/// logged). Prefer tunnel tokens so a leaked HELLO secret is not a forever key.
+/// tunnel:connect token for HELLO.
+///
+/// The long-lived login bearer is used only against an account host that has
+/// no mint route at all. The relay refuses it otherwise, and falling back on a
+/// plan or registration refusal would turn a message the user can act on
+/// ("register this machine", "remote reach is a paid feature") into a generic
+/// tunnel denial minutes later.
 fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
@@ -204,14 +208,14 @@ fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
 
     match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
         Ok(tok) => Ok((tok.token, Some(tok.expires_in))),
-        Err(error) => {
-            // Older hosts without POST /api/v1/tunnel/token still accept the
-            // sync bearer on HELLO. Log and fall back so remote reach keeps
-            // working until both ends are upgraded.
-            eprintln!("remote: tunnel token mint failed ({error}); falling back to login bearer");
+        Err(tokenstat_sync::profile::ProfileError::Unsupported(reason)) => {
+            // An account host from before tunnel tokens still accepts the sync
+            // bearer on HELLO, if its relay has the legacy path open.
+            eprintln!("remote: {reason}; falling back to the login bearer");
             let legacy = account_token()?;
             Ok((legacy, None))
         }
+        Err(error) => Err(format!("could not mint a tunnel credential: {error}")),
     }
 }
 
@@ -245,7 +249,13 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         Ok(pair) => pair,
         Err(error) => {
             eprintln!("remote: tunnel is enabled but unavailable: {error}");
-            set_tunnel_state(|state| state.registered = false);
+            // The panel shows `error`, so a refusal the user can act on has to
+            // land there rather than only in the daemon's log.
+            set_tunnel_state(|state| {
+                state.registered = false;
+                state.connected = false;
+                state.error = Some(error);
+            });
             tunnel_running().store(false, Ordering::Release);
             return;
         }
@@ -319,15 +329,27 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     });
 }
 
+/// Doubling retry delay for a failed mint, one minute up to fifteen.
+fn next_retry(previous: Option<u64>) -> u64 {
+    match previous {
+        None => 60,
+        Some(secs) => (secs * 2).min(900),
+    }
+}
+
 /// Re-mint the tunnel token before it expires and push it into the session.
 fn tunnel_token_refresh_loop(
     tunnel: Arc<tokenstat_remote::tunnel::TunnelSession>,
     initial_ttl_secs: u64,
 ) {
     let mut ttl = initial_ttl_secs.max(300);
+    // Set after a failed mint. Retrying at half-life again would put the next
+    // attempt exactly at expiry, so a single hiccup would drop remote reach
+    // until the daemon restarts. Back off from a minute to a quarter-hour.
+    let mut retry_secs: Option<u64> = None;
     while tunnel_running().load(Ordering::Acquire) {
         // Refresh at half-life, never sooner than 2 minutes (local testing TTLs).
-        let sleep_secs = (ttl / 2).max(120);
+        let sleep_secs = retry_secs.unwrap_or((ttl / 2).max(120));
         let mut waited = 0u64;
         while waited < sleep_secs && tunnel_running().load(Ordering::Acquire) {
             std::thread::sleep(Duration::from_secs(1));
@@ -340,6 +362,7 @@ fn tunnel_token_refresh_loop(
             Ok(id) => id,
             Err(e) => {
                 eprintln!("remote: tunnel token refresh skipped: {e}");
+                retry_secs = Some(next_retry(retry_secs));
                 continue;
             }
         };
@@ -347,8 +370,16 @@ fn tunnel_token_refresh_loop(
             Ok(tok) => {
                 tunnel.set_token(&tok.token);
                 ttl = tok.expires_in.max(300);
+                retry_secs = None;
+                set_tunnel_state(|state| state.error = None);
             }
-            Err(e) => eprintln!("remote: tunnel token refresh failed: {e}"),
+            Err(e) => {
+                eprintln!("remote: tunnel token refresh failed: {e}");
+                set_tunnel_state(|state| {
+                    state.error = Some(format!("tunnel credential renewal failed: {e}"));
+                });
+                retry_secs = Some(next_retry(retry_secs));
+            }
         }
     }
 }
@@ -444,6 +475,10 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
         // Includes the ordinary case of the peer hanging up.
         Err(_) => return,
     };
+    // Only a build that can own a terminal can hand one over. Without
+    // `local-host` there are no reservations, so a stream claim is just an
+    // unrecognized first message and the connection carries on as a request.
+    #[cfg(feature = "local-host")]
     if let Some(token) = crate::remote_stream::parse_handshake(&String::from_utf8_lossy(&first)) {
         // `accept` hands the connection to the pump, or closes it when the
         // token is not a live reservation: nobody gets a stream this machine

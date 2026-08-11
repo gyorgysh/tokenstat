@@ -44,6 +44,14 @@ pub enum ProfileError {
         retry_after: Option<u64>,
         next_allowed_at: Option<String>,
     },
+    /// The account host does not implement this route at all (404/405).
+    ///
+    /// Separated from every other refusal because it is the only failure a
+    /// caller may answer by falling back to an older protocol. A 400 or a 402
+    /// means the request was understood and refused, and a fallback there
+    /// hides a real problem behind a path that still happens to work.
+    #[error("{0}")]
+    Unsupported(String),
     #[error("{0}")]
     Message(String),
 }
@@ -599,6 +607,13 @@ pub fn mint_tunnel_token(
     let text = limited_text(resp)?;
     if status.as_u16() == 401 {
         return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    // Only a missing route means "this host predates tunnel tokens". Every
+    // other refusal is a real answer and must reach the caller intact.
+    if status.as_u16() == 404 || status.as_u16() == 405 {
+        return Err(ProfileError::Unsupported(format!(
+            "this account host has no tunnel token endpoint ({status})"
+        )));
     }
     if !status.is_success() {
         return Err(refusal_error(&text, status.as_u16()));

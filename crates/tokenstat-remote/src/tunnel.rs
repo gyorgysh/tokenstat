@@ -434,7 +434,7 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
                 error: None,
             };
         }
-        Message::Text(text) => return Err(RemoteError::Tunnel(text.to_string())),
+        Message::Text(text) => return Err(RemoteError::Tunnel(denial_message(&text))),
         Message::Close(_) => return Err(RemoteError::Closed),
         other => {
             return Err(RemoteError::Tunnel(format!(
@@ -604,6 +604,34 @@ fn mark_all_channels(session: &TunnelSession, reason: &str) {
     }
 }
 
+/// Turn the relay's `DENIED <reason>` into something a person can act on.
+///
+/// The reason codes are the stable part of the contract and the sentences are
+/// not, so the mapping lives here once instead of in every screen that shows a
+/// tunnel status. An unknown code is passed through rather than swallowed: a
+/// new relay reason should read oddly, not disappear.
+fn denial_message(text: &str) -> String {
+    let Some(reason) = text.strip_prefix("DENIED ") else {
+        return text.to_string();
+    };
+    match reason.trim() {
+        "legacy_token_rejected" => {
+            "this version is too old for the tunnel: it offered a login token where a tunnel \
+             credential is required. update tokenstat"
+        }
+        "token_expired" => "the tunnel credential expired before it could be renewed",
+        "key_mismatch" => {
+            "this machine's key does not match the one registered on the account. turn remote \
+             reach off and on again to re-register it"
+        }
+        "not_on_this_plan" => "remote reach is a paid-plan feature",
+        "key_already_live" => "another machine is already on the tunnel with this key",
+        "bad_token" => "the relay rejected this machine's tunnel credential. sign in again",
+        other => return format!("the relay refused the connection: {other}"),
+    }
+    .to_string()
+}
+
 fn tunnel_error(error: tungstenite::Error) -> RemoteError {
     match error {
         tungstenite::Error::Io(error) => RemoteError::Io(error),
@@ -614,6 +642,20 @@ fn tunnel_error(error: tungstenite::Error) -> RemoteError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn denial_codes_become_sentences() {
+        assert!(denial_message("DENIED legacy_token_rejected").contains("update tokenstat"));
+        assert!(denial_message("DENIED not_on_this_plan").contains("paid-plan"));
+        // An unknown code still carries its wire form so a new relay reason is
+        // debuggable from a screenshot.
+        assert_eq!(
+            denial_message("DENIED brand_new"),
+            "the relay refused the connection: brand_new"
+        );
+        // Anything that is not a denial passes through untouched.
+        assert_eq!(denial_message("READY"), "READY");
+    }
 
     #[test]
     fn channel_frames_are_big_endian_and_length_prefixed() {
