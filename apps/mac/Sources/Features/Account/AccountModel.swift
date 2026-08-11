@@ -25,6 +25,7 @@ final class AccountModel {
     var pendingLogin: DeviceLogin?
     var isLoading = false
     var isSyncing = false
+    var isSigningOut = false
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
@@ -61,14 +62,26 @@ final class AccountModel {
     /// waiting, and the two must not read the same.
     private(set) var signInNotice: String?
 
-    /// True after the first `load()` finishes, success or failure.
+    /// True only after a definitive account answer: signed in, or honestly
+    /// signed out (`account.status` returned `signedIn: false`).
     ///
-    /// The client root keeps the splash up until this is set, so a phone that
-    /// already has a token never flashes the sign-in door while the first
-    /// `account.status` is still in flight.
+    /// A network failure does **not** set this. Collapsing "could not check"
+    /// into "signed out" was the cold-start bug: a phone with a valid token
+    /// offline flashed the Sign in door and never recovered without a retry.
     private(set) var authChecked = false
 
+    /// Why the last check failed, when it was not a clean signed-out answer.
+    /// Nil while loading or after a successful check. The root uses this to
+    /// show a retry surface instead of the login door.
+    private(set) var authCheckError: String?
+
     var signedIn: Bool { account?.signedIn == true }
+
+    /// First check still in flight, or waiting for the host. Splash territory.
+    var authPending: Bool { !authChecked && authCheckError == nil }
+
+    /// First check failed (usually offline). Show retry, not Sign in.
+    var authNeedsRetry: Bool { !authChecked && authCheckError != nil }
 
     /// Whether the last sync was refused by the plan's rate gate, which is a
     /// warning rather than a failure: the sync machinery works, the account
@@ -79,16 +92,25 @@ final class AccountModel {
     }
 
     func load() async {
+        // A second load while one is in flight (connectivity restored + manual
+        // retry) would race two writes into `account`. One at a time.
+        guard !isLoading else { return }
         isLoading = true
-        defer {
-            isLoading = false
-            authChecked = true
-        }
+        defer { isLoading = false }
         do {
             account = try await Bridge.account()
             errorMessage = nil
+            authCheckError = nil
+            authChecked = true
         } catch {
-            errorMessage = error.localizedDescription
+            // Keep any previous signed-in snapshot. A later offline refresh
+            // must not wipe a working session from the screen.
+            authCheckError = error.localizedDescription
+            if authChecked {
+                errorMessage = error.localizedDescription
+            } else {
+                errorMessage = nil
+            }
         }
     }
 
@@ -211,10 +233,14 @@ final class AccountModel {
     }
 
     func signOut() async {
+        guard !isSigningOut else { return }
+        isSigningOut = true
+        defer { isSigningOut = false }
         do {
             try await Bridge.signOut()
             lastSyncSummary = nil
             errorMessage = nil
+            authCheckError = nil
             // Drop the signed-in snapshot immediately so the client root can
             // swap to the login door without waiting on a second network call.
             // load() still runs to refresh host defaults and clear any cache.
@@ -231,6 +257,9 @@ final class AccountModel {
                     machines: [],
                     schemaCurrent: nil
                 )
+            } else {
+                // Still mark checked signed-out so we do not re-enter splash.
+                authChecked = true
             }
             await load()
         } catch {

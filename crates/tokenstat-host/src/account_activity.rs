@@ -559,38 +559,68 @@ pub fn machine_usage(
         .to_string();
     let to = today.to_string();
 
+    // Parallel, bounded. One series call per machine used to run end-to-end
+    // in order; a patron window over several devices felt like a freeze on
+    // first open. Cap concurrency so a five-device account does not open five
+    // full decade series at once against a phone's radio.
+    let results: Vec<Result<MachineUsage, String>> = std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(machines.len());
+        let from = from.as_str();
+        let to = to.as_str();
+        // Chunk so at most four series requests are in flight together.
+        for chunk in machines.chunks(4) {
+            let mut batch = Vec::with_capacity(chunk.len());
+            for machine in chunk {
+                let machine = machine.as_str();
+                batch.push(scope.spawn(move || {
+                    match profile::account_series(None, Some(from), Some(to), Some(machine)) {
+                        Ok(result) => {
+                            let mut micros: i64 = 0;
+                            let mut events: u64 = 0;
+                            let mut active: std::collections::BTreeSet<String> =
+                                std::collections::BTreeSet::new();
+                            for row in &result.rows {
+                                let counters = Counters {
+                                    input_fresh: Some(row.input),
+                                    cache_read: Some(row.cr),
+                                    cache_write_5m: Some(row.cw5),
+                                    cache_write_1h: Some(row.cw1),
+                                    output: Some(row.output),
+                                };
+                                let lookup =
+                                    tokenstat_core::pricing::display_usage_model_id(&row.model);
+                                if let Some(v) = EquivalentValue::price(prices, &lookup, &counters) {
+                                    micros += v.micros();
+                                }
+                                events = events.saturating_add(row.ev);
+                                active.insert(row.day.clone());
+                            }
+                            Ok(MachineUsage {
+                                machine: machine.to_string(),
+                                micros,
+                                events,
+                                active_days: active.len(),
+                            })
+                        }
+                        Err(e) => Err(e.to_string()),
+                    }
+                }));
+            }
+            for handle in batch {
+                handles.push(handle.join().unwrap_or_else(|_| {
+                    Err("device spend worker failed".to_string())
+                }));
+            }
+        }
+        handles
+    });
+
     let mut out: Vec<MachineUsage> = Vec::new();
     let mut last_error: Option<String> = None;
-    for machine in machines {
-        match profile::account_series(None, Some(&from), Some(&to), Some(machine)) {
-            Ok(result) => {
-                let mut micros: i64 = 0;
-                let mut events: u64 = 0;
-                let mut active: std::collections::BTreeSet<String> =
-                    std::collections::BTreeSet::new();
-                for row in &result.rows {
-                    let counters = Counters {
-                        input_fresh: Some(row.input),
-                        cache_read: Some(row.cr),
-                        cache_write_5m: Some(row.cw5),
-                        cache_write_1h: Some(row.cw1),
-                        output: Some(row.output),
-                    };
-                    let lookup = tokenstat_core::pricing::display_usage_model_id(&row.model);
-                    if let Some(v) = EquivalentValue::price(prices, &lookup, &counters) {
-                        micros += v.micros();
-                    }
-                    events = events.saturating_add(row.ev);
-                    active.insert(row.day.clone());
-                }
-                out.push(MachineUsage {
-                    machine: machine.clone(),
-                    micros,
-                    events,
-                    active_days: active.len(),
-                });
-            }
-            Err(e) => last_error = Some(e.to_string()),
+    for result in results {
+        match result {
+            Ok(row) => out.push(row),
+            Err(e) => last_error = Some(e),
         }
     }
 

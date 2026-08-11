@@ -50,12 +50,21 @@ struct ClientRootView: View {
 
     var body: some View {
         Group {
-            // Splash covers host warm-up *and* the first account check. Without
-            // the second half, a phone that already has a token paints Sign in
-            // for a beat and then swaps to Home, which reads as a bug.
-            if !launch.hostReady || !account.authChecked {
+            // Three doors after the host is up, not two: still checking,
+            // could not check (usually offline), and a definitive answer.
+            // Folding a failed check into "signed out" was the cold-start bug
+            // that flashed Sign in for a phone that still had a token.
+            if !launch.hostReady || account.authPending {
                 LaunchSplashView()
                     .transition(.opacity)
+            } else if account.authNeedsRetry {
+                ClientAuthRetryView(
+                    message: account.authCheckError,
+                    isLoading: account.isLoading
+                ) {
+                    Task { await account.load() }
+                }
+                .transition(.opacity)
             } else if !account.signedIn {
                 // **The app is behind the sign-in, not beside it.** Every
                 // screen here answers a question about an account, so a signed
@@ -76,6 +85,7 @@ struct ClientRootView: View {
         }
         .animation(.easeInOut(duration: 0.28), value: account.signedIn)
         .animation(.easeInOut(duration: 0.28), value: account.authChecked)
+        .animation(.easeInOut(duration: 0.28), value: account.authNeedsRetry)
         .tint(Theme.accent)
         .environment(account)
         .environment(connectivity)
@@ -90,6 +100,11 @@ struct ClientRootView: View {
             account.signInDismisser = { ClientWebAuth.shared.cancel() }
             await launch.prepare()
             await account.load()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            // Cold start offline leaves authNeedsRetry. Signed-in screens also
+            // want a fresh me after the network returns.
+            Task { await account.load() }
         }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
@@ -167,6 +182,55 @@ enum ClientTab: String, CaseIterable, Identifiable {
         case .insights: ClientInsightsView()
         case .machines: ClientDevicesView()
         }
+    }
+}
+
+/// Could not finish the first account check (almost always offline).
+///
+/// Separate from the login door on purpose: Sign in is for "we know you are
+/// out". This is for "we could not ask". A Retry is the honest control.
+private struct ClientAuthRetryView: View {
+    let message: String?
+    let isLoading: Bool
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: Theme.Space.m) {
+                LogoMark(size: 46)
+                Text("Could not reach your account")
+                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(message ?? "Check the connection and try again.")
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+            Spacer()
+            VStack(spacing: Theme.Space.m) {
+                Button {
+                    onRetry()
+                } label: {
+                    if isLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Try again").frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+                .disabled(isLoading)
+            }
+            .tint(Theme.accent)
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.bottom, Theme.Space.xl)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+        .accessibilityElement(children: .contain)
     }
 }
 

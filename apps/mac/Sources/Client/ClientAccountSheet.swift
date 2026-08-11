@@ -242,22 +242,29 @@ private struct ClientAccountContent: View {
         Button {
             Task { await model.signOut() }
         } label: {
-            Text("Sign out")
-                .font(ClientType.label.weight(.semibold))
-                .foregroundStyle(Theme.danger)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.danger.opacity(0.10))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Theme.danger.opacity(0.22), lineWidth: 1)
-                )
+            Group {
+                if model.isSigningOut {
+                    ProgressView()
+                        .tint(Theme.danger)
+                } else {
+                    Text("Sign out")
+                        .font(ClientType.label.weight(.semibold))
+                }
+            }
+            .foregroundStyle(Theme.danger)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Theme.danger.opacity(0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Theme.danger.opacity(0.22), lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
-        .disabled(model.isSyncing)
+        .disabled(model.isSyncing || model.isSigningOut)
         .accessibilityHint("Signs out of this device and ends the online session")
     }
 
@@ -429,6 +436,9 @@ private struct ClientLicensesSheet: View {
 /// Lazy monospaced reader for the notices file.
 private struct ClientNoticesTextView: UIViewRepresentable {
     let text: String
+    /// Observed so a Dynamic Type change re-runs `updateUIView` and rescales
+    /// the monospaced body. Trait collection alone does not always do that.
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -436,19 +446,30 @@ private struct ClientNoticesTextView: UIViewRepresentable {
         view.isSelectable = true
         view.backgroundColor = .clear
         view.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 32, right: 12)
-        view.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         view.textColor = .label
         view.alwaysBounceVertical = true
         view.adjustsFontForContentSizeCategory = true
         // Find is useful in a 500 KB notices file.
         view.isFindInteractionEnabled = true
+        view.font = Self.scaledFont(for: view.traitCollection)
         return view
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
+        let _ = dynamicTypeSize
+        let font = Self.scaledFont(for: view.traitCollection)
+        if view.font != font {
+            view.font = font
+        }
         if view.text != text {
             view.text = text
         }
+    }
+
+    /// Monospaced body that follows Dynamic Type, not a fixed 13 pt.
+    private static func scaledFont(for traits: UITraitCollection) -> UIFont {
+        let base = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        return UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traits)
     }
 }
 

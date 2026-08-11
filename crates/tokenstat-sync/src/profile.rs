@@ -462,13 +462,23 @@ pub fn login(host_flag: Option<&str>) -> Result<LoginResult, ProfileError> {
 /// entry. A local-only delete left the credential valid for its whole life,
 /// so "signed out" on a phone someone was handing on did nothing online.
 ///
-/// The server call is best-effort: a dead network still clears the keychain so
-/// this device is signed out. An already-revoked or expired token is treated
-/// the same as success (the outcome the caller asked for).
+/// The server call is best-effort and short: a hung revoke must not pin Sign
+/// out for the full 60s profile timeout. Keychain delete always runs after the
+/// attempt, so a dead network still signs this device out. An already-revoked
+/// or expired token is treated the same as success.
 pub fn logout(host_flag: Option<&str>) -> Result<String, ProfileError> {
     let host = resolve_api_host(host_flag)?;
     if let Some(token) = keychain::load_token(&host)? {
-        if let Ok(client) = http_client() {
+        // Dedicated client with a short budget. Reusing `http_client` meant a
+        // dropped path could hold the whole logout for 60 seconds, and the
+        // keychain only cleared after that.
+        if let Ok(client) = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(4))
+            .connect_timeout(Duration::from_secs(2))
+            .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+        {
             let _ = client
                 .post(format!("{host}/api/v1/logout"))
                 .header("authorization", format!("Bearer {token}"))

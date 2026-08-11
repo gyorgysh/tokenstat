@@ -675,7 +675,13 @@ extension Bridge {
     }
 
     static func signOut() async throws {
-        _ = try await background("account.logout", as: Ack.self)
+        // Interactive: the Rust side already uses a short HTTP timeout for the
+        // revoke, and Sign out must not sit on the default long silence budget.
+        _ = try await background(
+            "account.logout",
+            patience: Patience.interactive,
+            as: Ack.self
+        )
     }
 
     /// Send the aggregate window to the account. Network-bound and slow.

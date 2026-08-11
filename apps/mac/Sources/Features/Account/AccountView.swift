@@ -227,22 +227,32 @@ struct AccountView: View {
                 #endif
 
                 #if os(macOS)
-                Button("Sign out") {
+                Button {
                     Task { await model.signOut() }
+                } label: {
+                    if model.isSigningOut {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Sign out")
+                    }
                 }
                 .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.isSyncing)
+                .disabled(model.isSyncing || model.isSigningOut)
                 #else
                 // Phone account UI lives in `ClientAccountSheet`. Keep a
                 // non-system control here if this view is ever shown on iOS.
                 Button {
                     Task { await model.signOut() }
                 } label: {
-                    Text("Sign out")
-                        .frame(maxWidth: .infinity)
+                    if model.isSigningOut {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Sign out")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
                 .buttonStyle(SecondaryButtonStyle())
-                .disabled(model.isSyncing)
+                .disabled(model.isSyncing || model.isSigningOut)
                 #endif
             }
         }
