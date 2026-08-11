@@ -113,8 +113,13 @@ final class TerminalStackView: NSView {
             // SwiftUI runs inside a layout pass, and moving first responder there
             // re-enters layout on a hierarchy that is already being laid out.
             // Next turn of the runloop is soon enough for a keystroke.
+            //
+            // Re-check `lastClaimsFocus` when the block runs: the user can leave
+            // for Home in the same turn this was scheduled, and without the
+            // guard the terminal would steal the keyboard from that destination.
             DispatchQueue.main.async { [weak self, weak active] in
                 guard let self, let active, active.superview === self else { return }
+                guard self.lastClaimsFocus else { return }
                 self.window?.makeFirstResponder(active)
             }
         } else if active == nil {
