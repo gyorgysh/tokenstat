@@ -50,15 +50,31 @@ enum TerminalPreferences {
     /// Defaults on when VoiceOver is already running the first time the key is
     /// read, so accessibility users are not left with a silent terminal until
     /// they find the Account toggle.
+    ///
+    /// Cached after the first read. This is checked on the output path, which
+    /// for a printing process runs thousands of times a second, and a defaults
+    /// lookup per line of a build log is a cost nobody asked for. The toggle
+    /// writes through the cache, so the only way to miss a change is to edit
+    /// the domain from outside the app.
     static var exposesToVoiceOver: Bool {
         get {
+            if let cached = voiceOverCache { return cached }
+            let value: Bool
             if UserDefaults.standard.object(forKey: voiceOverKey) == nil {
-                return NSWorkspace.shared.isVoiceOverEnabled
+                value = NSWorkspace.shared.isVoiceOverEnabled
+            } else {
+                value = UserDefaults.standard.bool(forKey: voiceOverKey)
             }
-            return UserDefaults.standard.bool(forKey: voiceOverKey)
+            voiceOverCache = value
+            return value
         }
-        set { UserDefaults.standard.set(newValue, forKey: voiceOverKey) }
+        set {
+            voiceOverCache = newValue
+            UserDefaults.standard.set(newValue, forKey: voiceOverKey)
+        }
     }
+
+    private nonisolated(unsafe) static var voiceOverCache: Bool?
 
     /// The user does not want colour: new terminals start with NO_COLOR=1.
     static var disablesColor: Bool {
@@ -430,22 +446,42 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         // must not chase a changing value mid-stream.
         let bridgeID = hostID
         if writerTask == nil {
-            writerTask = Task { [weak self] in
-                guard let self else { return }
-                for await event in self.eventStream.stream {
+            // Detached, and deliberately so. This class is a MainActor class,
+            // so a plain `Task` here runs its body on the main actor: every
+            // keystroke would have to be scheduled on the thread that is busy
+            // parsing and drawing output before it could even reach the
+            // bridge. Under a stream that is seconds of queue, and it is the
+            // whole "typing stops working while a build prints" report. The
+            // bridge call itself needs no actor, so nothing here touches the
+            // main actor on the way to the pty.
+            let events = eventStream.stream
+            writerTask = Task.detached(priority: .userInitiated) { [weak self] in
+                // Held locally so the loop can decide whether the error state
+                // changed without reading main-actor state.
+                var lastError: String?
+                for await event in events {
                     switch event {
                     case let .write(bytes):
+                        var failure: String?
                         do {
                             try await Bridge.ptyWrite(id: bridgeID, bytes: bytes)
-                            transportError = nil
-                            // The byte has landed, so the echo is on its way.
-                            // Read now rather than on whatever the loop's next
-                            // scheduled read happened to be: `send` already
-                            // woke the loop, but that was before the write
-                            // crossed the bridge.
-                            wake()
                         } catch {
-                            transportError = error.localizedDescription
+                            failure = error.localizedDescription
+                        }
+                        // The byte has landed, so the echo is on its way. Read
+                        // now rather than on whatever the loop's next scheduled
+                        // read happened to be: `send` already woke the loop,
+                        // but that was before the write crossed the bridge.
+                        //
+                        // Not awaited. Waiting for the main actor here would
+                        // put the next keystroke back behind the draw queue,
+                        // which is what this task exists to avoid.
+                        Task { @MainActor [weak self] in self?.wake() }
+                        if failure != lastError {
+                            lastError = failure
+                            Task { @MainActor [weak self] in
+                                self?.transportError = failure
+                            }
                         }
                     case let .resize(rows, cols):
                         try? await Bridge.ptyResize(id: bridgeID, rows: rows, cols: cols)
@@ -489,9 +525,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     offset: offset,
                     waitMs: isFocused ? Self.readHold : 0
                 )
-                if chunk.dropped > 0 { droppedOutput = true }
+                // Guarded. This is observed, and a session the reader cannot
+                // keep up with reports a drop on every single poll: an
+                // unguarded write there rebuilds the pane at poll rate, on the
+                // one thread that is already behind.
+                if chunk.dropped > 0, !droppedOutput { droppedOutput = true }
                 if !chunk.bytes.isEmpty {
-                    feed(chunk.bytes)
+                    await feed(chunk.bytes)
                     offset = chunk.nextOffset
                     // Output is flowing, so stay at the floor: this is where
                     // typing latency comes from.
@@ -551,10 +591,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                         state = .stopped
                         // One last read in case output arrived right at exit.
                         if let final = try? await Bridge.ptyRead(id: id, offset: offset) {
-                            if final.dropped > 0 { droppedOutput = true }
+                            if final.dropped > 0, !droppedOutput { droppedOutput = true }
                             if !final.bytes.isEmpty {
                                 offset = final.nextOffset
-                                feed(final.bytes)
+                                await feed(final.bytes)
                             }
                         }
                         break
@@ -583,7 +623,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// `feedFinish` that asks for a repaint. Feeding the emulator directly
     /// leaves a terminal that takes input, runs the command, and shows nothing
     /// until an unrelated click or resize happens to invalidate the view.
-    private func feed(_ bytes: Data) {
+    private func feed(_ bytes: Data) async {
         if !hasOutput {
             hasOutput = true
         }
@@ -599,11 +639,36 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             // One long-lived timer, not a cancel/recreate per packet.
             ensureIdleCheck()
         }
-        view.feed(byteArray: ArraySlice(bytes))
+        // In slices, with a turn of the run loop between them.
+        //
+        // Parsing is main-thread work and it is not cheap: measured against
+        // this emulator, plain lines run about 60 MB/s and a full-screen TUI
+        // repaint about 12, so half a megabyte of an agent redrawing itself is
+        // ~40 ms of main thread in one uninterruptible block. Feeding a whole
+        // poll's worth at once means a keystroke waits out that block, then the
+        // next one, for as long as the output lasts. Sliced, the same total
+        // work is the same total work, but the run loop gets between the
+        // pieces and a key press is handled within a slice rather than within
+        // a chunk. The parser is a state machine that already survives a
+        // sequence cut in half by a read boundary, so this changes nothing
+        // about what is drawn.
+        let all = [UInt8](bytes)
+        var start = 0
+        while start < all.count {
+            let end = min(start + Self.feedSlice, all.count)
+            view.feed(byteArray: all[start..<end])
+            start = end
+            if start < all.count { await Task.yield() }
+        }
         if TerminalPreferences.exposesToVoiceOver {
             publishAccessibilityValue()
         }
     }
+
+    /// How much output is handed to the emulator between two turns of the run
+    /// loop. Around 2 ms of parsing at the worst rate measured, which is under
+    /// a display frame and far under anything a person feels as a stuck key.
+    private static let feedSlice = 24 * 1024
 
     /// Set the session state from a host report.
     ///
@@ -810,23 +875,39 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         eventStream.continuation.yield(.resize(rows: newRows, cols: newCols))
     }
 
+    /// OSC 0/2. Guarded: a program that puts a progress figure in its title
+    /// sets one per redraw, and `title` is observed, so an unguarded write is a
+    /// tab strip rebuilt at the rate the program prints.
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {
         MainActor.assumeIsolated {
-            self.title = title
+            if self.title != title { self.title = title }
         }
     }
 
+    /// OSC 7, and the same reasoning: a shell emits it on every prompt.
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         MainActor.assumeIsolated {
-            reportedCwd = directory
+            if reportedCwd != directory { reportedCwd = directory }
         }
     }
 
+    /// The emulator scrolled.
+    ///
+    /// **Once per line**, from inside the feed, so a build log calls this
+    /// thousands of times a second. It used to hop to the main actor with a
+    /// `Task` and clear the accessibility throttle, which meant a queue of
+    /// main-actor jobs as long as the output, each one rebuilding the visible
+    /// screen as text. That queue is what a keystroke had to wait behind, and
+    /// it grows for as long as the process prints: the longer the stream, the
+    /// further behind typing fell.
+    ///
+    /// Nothing to do here when the screen is not exposed to VoiceOver, and
+    /// when it is, the throttled path already refreshes it four times a second.
     nonisolated func scrolled(source: TerminalView, position: Double) {
-        Task { @MainActor [weak self] in
-            self?.lastAccessibilityValueAt = nil
-            self?.publishAccessibilityValue()
-        }
+        guard TerminalPreferences.exposesToVoiceOver else { return }
+        // SwiftTerm calls this on the main thread: from the feed, which runs
+        // there, or from a user scroll.
+        MainActor.assumeIsolated { publishAccessibilityValue() }
     }
 
     nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
