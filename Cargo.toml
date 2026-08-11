@@ -71,7 +71,7 @@ getrandom = "0.4"
 # Machine identity and the remote transport. The static key a peer pins is the
 # same key the Noise handshake authenticates, so there is one key and one
 # question: is this the machine I agreed to talk to.
-x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
 snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom", "std"] }
 tungstenite = { version = "0.27", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
 
