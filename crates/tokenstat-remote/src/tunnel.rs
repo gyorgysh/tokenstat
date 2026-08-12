@@ -158,24 +158,16 @@ impl TunnelSession {
         session
     }
 
-    /// Replace the HELLO credential and drop the live socket so the
-    /// supervisor reconnects with the new token. Used when refreshing a
-    /// short-lived `tunnel:connect` secret before it expires.
-    /// The same token again is not a change. Dropping a healthy socket for it
-    /// would take every live channel down with it, and the host calls this on
-    /// every `remote.tunnel` request, which a phone sends each time it opens a
-    /// host or pulls to refresh.
+    /// Replace the HELLO credential the next connection will use.
+    ///
+    /// The live socket is left alone. A credential is checked once, at HELLO,
+    /// so a socket that is already registered is not made any more valid by a
+    /// newer token, and dropping it to adopt one would take every live channel
+    /// with it. Refreshing happens twice a day, and it used to end a working
+    /// terminal each time.
     pub fn set_token(&self, token: &str) {
-        {
-            let mut held = self.token.lock().unwrap_or_else(|e| e.into_inner());
-            if *held == token {
-                return;
-            }
-            *held = token.to_string();
-        }
-        if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            let _ = socket.close(None);
-        }
+        let mut held = self.token.lock().unwrap_or_else(|e| e.into_inner());
+        *held = token.to_string();
     }
 
     /// Teach this session how to replace a credential the relay refused.

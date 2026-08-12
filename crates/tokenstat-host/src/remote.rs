@@ -210,6 +210,49 @@ fn account_token() -> Result<String, String> {
         .ok_or_else(|| "sign in to tokenstat.ai before enabling remote reach".into())
 }
 
+/// The HELLO credential in hand, and when it stops being usable.
+struct HeldCredential {
+    token: String,
+    /// Local deadline. `None` for the legacy login bearer, which does not expire.
+    expires_at: Option<Instant>,
+}
+
+fn held_credential() -> &'static Mutex<Option<HeldCredential>> {
+    static HELD: OnceLock<Mutex<Option<HeldCredential>>> = OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(None))
+}
+
+/// Mint again once a credential is inside this much of its expiry.
+const CREDENTIAL_REFRESH_MARGIN: Duration = Duration::from_secs(600);
+
+/// The HELLO credential, minting one only when there is a reason to.
+///
+/// `force` is for a credential the relay refused: mint whatever the cache says.
+/// Otherwise a token still comfortably inside its term is reused. Every
+/// `remote.tunnel` request used to mint, and a phone sends one each time it
+/// opens a host or pulls to refresh, so the machine spent its hourly mint
+/// budget replacing a credential that was working. It also handed the relay a
+/// moving target: each new token superseded the one the live socket was about
+/// to reconnect with.
+fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
+    if !force {
+        if let Ok(guard) = held_credential().lock() {
+            if let Some(held) = guard.as_ref() {
+                let usable = match held.expires_at {
+                    None => true,
+                    Some(at) => at
+                        .checked_duration_since(Instant::now())
+                        .is_some_and(|left| left > CREDENTIAL_REFRESH_MARGIN),
+                };
+                if usable {
+                    return Ok((held.token.clone(), None));
+                }
+            }
+        }
+    }
+    mint_hello_token()
+}
+
 /// Register the machine on the account directory, then mint a short-lived
 /// tunnel:connect token for HELLO.
 ///
@@ -218,7 +261,7 @@ fn account_token() -> Result<String, String> {
 /// plan or registration refusal would turn a message the user can act on
 /// ("register this machine", "remote reach is a paid feature") into a generic
 /// tunnel denial minutes later.
-fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
+fn mint_hello_token() -> Result<(String, Option<u64>), String> {
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     // Phones (no local-host) register as clients so they do not burn a host
@@ -238,15 +281,28 @@ fn tunnel_hello_token() -> Result<(String, Option<u64>), String> {
     set_tunnel_state(|state| state.registered = true);
 
     match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
-        Ok(tok) => Ok((tok.token, Some(tok.expires_in))),
+        Ok(tok) => {
+            hold_credential(&tok.token, Some(tok.expires_in));
+            Ok((tok.token, Some(tok.expires_in)))
+        }
         Err(tokenstat_sync::profile::ProfileError::Unsupported(reason)) => {
             // An account host from before tunnel tokens still accepts the sync
             // bearer on HELLO, if its relay has the legacy path open.
             eprintln!("remote: {reason}; falling back to the login bearer");
             let legacy = account_token()?;
+            hold_credential(&legacy, None);
             Ok((legacy, None))
         }
         Err(error) => Err(format!("could not mint a tunnel credential: {error}")),
+    }
+}
+
+fn hold_credential(token: &str, expires_in: Option<u64>) {
+    if let Ok(mut guard) = held_credential().lock() {
+        *guard = Some(HeldCredential {
+            token: token.to_string(),
+            expires_at: expires_in.map(|secs| Instant::now() + Duration::from_secs(secs)),
+        });
     }
 }
 
@@ -258,8 +314,10 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
     if tunnel_running().load(Ordering::Acquire) {
         if let Ok(guard) = tunnel_session().lock() {
             if guard.is_some() {
-                // Still mint so a near-expiry token is replaced before HELLO fails.
-                if let Ok((hello_token, _)) = tunnel_hello_token() {
+                // The held credential, minted again only when it is close to
+                // expiry. The live socket is already registered, so this is
+                // about what the next reconnect will carry.
+                if let Ok((hello_token, _)) = tunnel_hello_token(false) {
                     if let Some(existing) = guard.as_ref() {
                         existing.set_token(&hello_token);
                     }
@@ -297,7 +355,7 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             return;
         }
     };
-    let (hello_token, expires_in) = match tunnel_hello_token() {
+    let (hello_token, expires_in) = match tunnel_hello_token(false) {
         Ok(pair) => pair,
         Err(error) => {
             eprintln!("remote: tunnel is enabled but unavailable: {error}");
@@ -344,7 +402,8 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 // The repair for a refused credential, handed to the
                 // supervisor so it can fix itself between two reconnects
                 // instead of waiting for somebody to toggle a switch.
-                session.set_renew(Box::new(|| match tunnel_hello_token() {
+                // The relay refused what we hold, so this one must mint.
+                session.set_renew(Box::new(|| match tunnel_hello_token(true) {
                     Ok((token, _)) => {
                         set_tunnel_state(|state| state.error = None);
                         Some(token)
@@ -461,18 +520,14 @@ fn tunnel_token_refresh_loop(
         if !tunnel_running().load(Ordering::Acquire) {
             return;
         }
-        let machine_id = match tokenstat_sync::config::ensure_machine_id() {
-            Ok(id) => id,
-            Err(e) => {
-                eprintln!("remote: tunnel token refresh skipped: {e}");
-                retry_secs = Some(next_retry(retry_secs));
-                continue;
-            }
-        };
-        match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
-            Ok(tok) => {
-                tunnel.set_token(&tok.token);
-                ttl = tok.expires_in.max(300);
+        // Through the same door every other caller uses, so the held
+        // credential is the one the socket carries. A refresh that minted
+        // behind the cache would leave the next `remote.tunnel` request
+        // handing the relay a token this loop had already superseded.
+        match tunnel_hello_token(true) {
+            Ok((token, expires_in)) => {
+                tunnel.set_token(&token);
+                ttl = expires_in.unwrap_or(ttl).max(300);
                 retry_secs = None;
                 set_tunnel_state(|state| state.error = None);
             }
