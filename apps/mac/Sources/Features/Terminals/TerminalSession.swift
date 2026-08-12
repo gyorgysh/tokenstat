@@ -634,10 +634,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         guard failedReads.isMultiple(of: 8) else { return true }
         guard let info = try? await Bridge.ptyInfo(id: hostID) else {
             if failedReads >= 40 {
-                let sessions = (try? await Bridge.ptyList()) ?? []
-                if !sessions.contains(where: { $0.id == hostID }) {
-                    state = .stopped
-                    return false
+                do {
+                    let sessions = try await Bridge.ptyList()
+                    if !sessions.contains(where: { $0.id == hostID }) {
+                        state = .stopped
+                        return false
+                    }
+                } catch {
+                    // An unavailable list cannot distinguish a dead PTY from
+                    // an unavailable host. Keep retrying until it answers.
                 }
             }
             return true
@@ -850,12 +855,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         feedPumpScheduled = false
         guard !feedInFlight else { return }
         feedInFlight = true
+        Self.frameScheduler.begin(id: id)
+        defer { Self.frameScheduler.end(id: id) }
         defer { feedInFlight = false }
         while pendingFeedHead < pendingFeed.count {
             let chunk = pendingFeed[pendingFeedHead]
             pendingFeedHead += 1
             pendingFeedBytes -= chunk.count
-            await feedToView(chunk)
+            await feedToView(chunk, sessionID: id)
         }
         if pendingFeedHead == pendingFeed.count {
             pendingFeed.removeAll(keepingCapacity: true)
@@ -871,7 +878,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// `feedFinish` that asks for a repaint. Feeding the emulator directly
     /// leaves a terminal that takes input, runs the command, and shows nothing
     /// until an unrelated click or resize happens to invalidate the view.
-    private func feedToView(_ bytes: Data) async {
+    private func feedToView(_ bytes: Data, sessionID: String) async {
         // In slices, with a turn of the run loop between them.
         //
         // Parsing is main-thread work and it is not cheap: measured against
@@ -889,10 +896,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         let all = [UInt8](bytes)
         var start = 0
         while start < all.count {
+            await Self.frameScheduler.acquire(id: sessionID)
             let end = min(start + slice, all.count)
             let began = ContinuousClock.now
             view.feed(byteArray: all[start..<end])
             Self.frameScheduler.record(ContinuousClock.now - began)
+            Self.frameScheduler.finish(id: sessionID)
             start = end
             if start < all.count { await pace() }
         }
@@ -942,6 +951,31 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     private final class FrameBudgetScheduler {
         private var frameStart = ContinuousClock.now
         private var spent: Duration = .zero
+        private var active: [String] = []
+        private var current: String?
+
+        func begin(id: String) {
+            guard !active.contains(id) else { return }
+            active.append(id)
+            current = current ?? id
+        }
+
+        func end(id: String) {
+            active.removeAll { $0 == id }
+            if current == id { current = active.first }
+        }
+
+        func acquire(id: String) async {
+            while current != id, active.contains(id) {
+                await Task.yield()
+            }
+        }
+
+        func finish(id: String) {
+            guard current == id, active.count > 1,
+                  let index = active.firstIndex(of: id) else { return }
+            current = active[(index + 1) % active.count]
+        }
 
         func record(_ duration: Duration) {
             spent += duration

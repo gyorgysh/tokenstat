@@ -241,12 +241,13 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
         })
     };
     let mut offset = 0u64;
+    let reader_id = format!("remote-stream:{session}");
     loop {
         let alive = tokenstat_pty::manager()
             .info(session)
             .map(|info| info.alive)
             .unwrap_or(false);
-        match tokenstat_pty::manager().read(session, offset) {
+        match tokenstat_pty::manager().read_for_stream(session, &reader_id, offset) {
             Ok(chunk) if !chunk.bytes.is_empty() => {
                 let frame = PtyFrame {
                     next_offset: chunk.next_offset,
@@ -275,6 +276,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
         }
         std::thread::sleep(Duration::from_millis(30));
     }
+    tokenstat_pty::manager().forget_reader(session, &reader_id);
     writer.close();
     let _ = input.join();
 }

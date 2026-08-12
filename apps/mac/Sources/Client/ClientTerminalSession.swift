@@ -201,10 +201,15 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         guard failedReads.isMultiple(of: 8) else { return true }
         guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
             if failedReads >= 40 {
-                let sessions = (try? await ClientRemote.ptyList(peer: peer)) ?? []
-                if !sessions.contains(where: { $0.id == id }) {
-                    alive = false
-                    return false
+                do {
+                    let sessions = try await ClientRemote.ptyList(peer: peer)
+                    if !sessions.contains(where: { $0.id == id }) {
+                        alive = false
+                        return false
+                    }
+                } catch {
+                    // A failed list is still a transport outage, not proof
+                    // that the remote PTY disappeared.
                 }
             }
             return true

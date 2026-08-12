@@ -24,7 +24,7 @@
 //! oldest bytes. That is reported rather than hidden: silently skipping output
 //! makes a command look like it produced less than it did.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::PathBuf;
 #[cfg(unix)]
@@ -195,6 +195,7 @@ struct Session {
     /// Front ends currently showing this session, by opaque client id.
     viewers: Mutex<HashMap<String, Viewer>>,
     read_offsets: Mutex<HashMap<String, u64>>,
+    stream_readers: Mutex<HashSet<String>>,
 }
 
 /// One front end showing a session, and the geometry it can display.
@@ -459,6 +460,7 @@ impl Manager {
             last_activity,
             viewers: Mutex::new(HashMap::new()),
             read_offsets: Mutex::new(HashMap::new()),
+            stream_readers: Mutex::new(HashSet::new()),
         });
 
         Ok((session, info))
@@ -723,16 +725,16 @@ impl Manager {
         let Ok(s) = self.get(id) else {
             return Ok(());
         };
+        s.read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(viewer);
         {
             let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
             if viewers.remove(viewer).is_none() {
                 return Ok(());
             }
         }
-        s.read_offsets
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(viewer);
         Self::apply_agreed_size(&s)
     }
 
@@ -752,6 +754,22 @@ impl Manager {
                     Some((r, c)) => Some((r.min(v.rows), c.min(v.cols))),
                 })
         };
+        let active_viewers: HashSet<String> = s
+            .viewers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect();
+        let stream_readers = s
+            .stream_readers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        s.read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|reader, _| active_viewers.contains(reader) || stream_readers.contains(reader));
         // Nobody is watching. Leave the size alone: there is no geometry that
         // is more right than the last one, and resizing a terminal nothing is
         // showing would only make the program redraw for no reader.
@@ -797,10 +815,48 @@ impl Manager {
     /// PTY producer after backpressure.
     pub fn read_for_viewer(&self, id: &str, viewer: &str, offset: u64) -> Result<Chunk, PtyError> {
         let s = self.get(id)?;
+        self.read_acknowledged(&s, viewer, offset, false)
+    }
+
+    /// Read for the daemon's persistent remote subscription. Stream readers
+    /// have no geometry lease, so they are tracked separately from viewers and
+    /// removed when the stream closes.
+    pub fn read_for_stream(&self, id: &str, reader: &str, offset: u64) -> Result<Chunk, PtyError> {
+        let s = self.get(id)?;
+        self.read_acknowledged(&s, reader, offset, true)
+    }
+
+    /// Forget a stream reader so it cannot hold the shared output window.
+    pub fn forget_reader(&self, id: &str, reader: &str) {
+        let Ok(s) = self.get(id) else { return };
+        s.stream_readers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(reader);
         s.read_offsets
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(viewer.to_string(), offset);
+            .remove(reader);
+        s.buffer_space.notify_all();
+    }
+
+    fn read_acknowledged(
+        &self,
+        s: &Arc<Session>,
+        reader: &str,
+        offset: u64,
+        stream: bool,
+    ) -> Result<Chunk, PtyError> {
+        if stream {
+            s.stream_readers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(reader.to_string());
+        }
+        s.read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(reader.to_string(), offset);
         let minimum = s
             .read_offsets
             .lock()
@@ -813,7 +869,7 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .discard_before(minimum);
-        self.read_session(&s, offset)
+        self.read_session(s, offset)
     }
 
     fn read_session(&self, s: &Arc<Session>, offset: u64) -> Result<Chunk, PtyError> {
@@ -859,6 +915,7 @@ impl Manager {
                 s.alive.store(false, Ordering::SeqCst);
                 s.exit_code
                     .store(status.exit_code() as i32, Ordering::SeqCst);
+                s.buffer_space.notify_all();
             }
         }
 
@@ -2015,6 +2072,7 @@ mod tests {
     fn a_silent_viewer_expires_and_stops_constraining() {
         let m = Manager::new();
         let s = stay_busy(&m);
+        let session = m.get(&s.id).expect("session");
         m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
         m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
         // A front end that was killed or lost its network never detaches.
@@ -2027,9 +2085,21 @@ mod tests {
             let phone = viewers.get_mut("phone").expect("phone viewer");
             phone.seen_ms = now_ms().saturating_sub(VIEWER_TTL_MS + 1);
         }
+        session
+            .read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert("phone".into(), 12);
         // Any call that could change the answer prunes; the Mac's own poll is
         // what gets there first in practice.
         m.touch_viewer(&s.id, "mac").expect("touch");
+        assert!(
+            !session
+                .read_offsets
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains_key("phone")
+        );
         let info = m.info(&s.id).expect("info");
         assert_eq!((info.rows, info.cols), (50, 200));
         let _ = m.kill(&s.id);
@@ -2092,6 +2162,30 @@ mod tests {
         let second = m.read(&s.id, first.next_offset).unwrap();
         assert!(!String::from_utf8_lossy(&second.bytes).contains("hello-from-pty"));
         assert_eq!(second.dropped, 0);
+    }
+
+    #[test]
+    fn a_stream_reader_can_acknowledge_and_release_its_offset() {
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        let session = m.get(&s.id).expect("session");
+        m.read_for_stream(&s.id, "remote", 0).expect("stream read");
+        assert!(
+            session
+                .stream_readers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains("remote")
+        );
+        m.forget_reader(&s.id, "remote");
+        assert!(
+            !session
+                .stream_readers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .contains("remote")
+        );
+        m.close(&s.id).unwrap();
     }
 
     #[test]

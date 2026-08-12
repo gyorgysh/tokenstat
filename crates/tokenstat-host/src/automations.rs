@@ -818,6 +818,7 @@ impl Store {
         let deadline = Instant::now() + Duration::from_secs(budget_seconds);
         let mut file = std::fs::File::create(path).ok();
         let mut offset = 0u64;
+        let reader_id = format!("automation:{run_id}");
         let mut stopped_by_budget = false;
 
         loop {
@@ -830,7 +831,7 @@ impl Store {
                 // printed, which is most of them.
                 let tail = Instant::now() + DRAIN_TAIL;
                 while Instant::now() < tail {
-                    if let Ok(chunk) = manager.read(pty_id, offset)
+                    if let Ok(chunk) = manager.read_for_stream(pty_id, &reader_id, offset)
                         && !chunk.bytes.is_empty()
                     {
                         offset = chunk.next_offset;
@@ -842,7 +843,7 @@ impl Store {
                 }
                 break;
             }
-            if let Ok(chunk) = manager.read(pty_id, offset) {
+            if let Ok(chunk) = manager.read_for_stream(pty_id, &reader_id, offset) {
                 offset = chunk.next_offset;
                 if let Some(f) = &mut file {
                     let _ = f.write_all(&chunk.bytes);
@@ -855,6 +856,7 @@ impl Store {
             std::thread::sleep(DRAIN_POLL);
         }
 
+        manager.forget_reader(pty_id, &reader_id);
         let exit_code = Self::settle_exit_code(pty_id);
         let status = if stopped_by_budget {
             "stopped"
