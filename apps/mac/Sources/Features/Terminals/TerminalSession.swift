@@ -243,9 +243,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// does.
     var isFocused = false {
         didSet {
-            guard isFocused, isFocused != oldValue else { return }
-            // Coming to the front should not wait out a background delay.
-            wake()
+            guard isFocused != oldValue else { return }
+            // The frame budget follows the screen: see `FrameBudgetScheduler`.
+            if isFocused {
+                Self.frameScheduler.setFocused(id)
+                // Coming to the front should not wait out a background delay.
+                wake()
+            } else {
+                Self.frameScheduler.clearFocused(id)
+            }
         }
     }
 
@@ -860,15 +866,38 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         defer { feedInFlight = false }
         while pendingFeedHead < pendingFeed.count {
             let chunk = pendingFeed[pendingFeedHead]
+            // Drop the queue's own reference to the bytes before feeding them.
+            //
+            // The consumed prefix used to be released only by the `removeAll`
+            // below, and that line is reached only when the queue runs dry.
+            // A session printing without a pause never lets it run dry: the
+            // loop keeps finding more, and every chunk it has already fed
+            // stays alive in the array. An agent working for an hour therefore
+            // held every byte it had printed, which is a leak that grows with
+            // the output and shows up as an app that was fine when it started
+            // and is not an hour later.
+            pendingFeed[pendingFeedHead] = Data()
             pendingFeedHead += 1
             pendingFeedBytes -= chunk.count
             await feedToView(chunk, sessionID: id)
+            // The slots themselves are cheap, but an unbounded array of them
+            // is still unbounded. Compacting on a threshold keeps this O(1)
+            // amortised rather than an O(n) shuffle per chunk.
+            if pendingFeedHead >= Self.feedCompactAfter {
+                pendingFeed.removeFirst(pendingFeedHead)
+                pendingFeedHead = 0
+            }
         }
         if pendingFeedHead == pendingFeed.count {
             pendingFeed.removeAll(keepingCapacity: true)
             pendingFeedHead = 0
         }
     }
+
+    /// How many consumed slots may sit at the front of the queue before it is
+    /// compacted. Large enough that a burst does not pay a shuffle per chunk,
+    /// small enough that the array cannot grow without bound.
+    private static let feedCompactAfter = 64
 
     /// Hand output to the terminal view.
     ///
@@ -922,10 +951,27 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// One display frame on this Mac's main screen, so the pacing below is a
     /// frame on a 120 Hz panel and a frame on a 60 Hz one rather than a fixed
     /// 16 ms that means something different on each.
-    private static let frameInterval: Duration = {
-        let hz = NSScreen.main?.maximumFramesPerSecond ?? 60
-        return .seconds(1.0 / Double(min(max(hz, 30), 240)))
-    }()
+    /// Re-read rather than resolved once for the process's life. A laptop that
+    /// launched on a 60 Hz external display and was later used on its own
+    /// 120 Hz panel kept budgeting for the display it no longer has, in the
+    /// direction that hurts: half a frame's worth of parsing per frame. Cached
+    /// for a second, so this costs nothing on the hot path and still corrects
+    /// itself a beat after the window moves.
+    private static var frameInterval: Duration {
+        .seconds(1.0 / Double(screenRefreshRate))
+    }
+
+    private static var cachedRefreshRate: (hz: Int, at: ContinuousClock.Instant)?
+
+    private static var screenRefreshRate: Int {
+        let now = ContinuousClock.now
+        if let cached = cachedRefreshRate, now - cached.at < .seconds(1) {
+            return cached.hz
+        }
+        let hz = min(max(NSScreen.main?.maximumFramesPerSecond ?? 60, 30), 240)
+        cachedRefreshRate = (hz, now)
+        return hz
+    }
 
     /// How much of each frame the emulator may spend parsing before the run
     /// loop gets the rest of it.
@@ -939,10 +985,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// lurches. A fixed share per frame is what makes the frame rate a floor
     /// instead of a by-product: the emulator gets most of the frame, the run
     /// loop always gets the rest.
-    private static let frameBudget: Duration = frameInterval * 0.6
+    private static var frameBudget: Duration { frameInterval * 0.6 }
     /// Clearing a backlog: give the emulator most of the frame so it catches
     /// up, still leave a slice for keystrokes and chrome.
-    private static let frameBudgetCatchUp: Duration = frameInterval * 0.9
+    private static var frameBudgetCatchUp: Duration { frameInterval * 0.9 }
 
     /// One scheduler owns the frame budget for every terminal. It uses a real
     /// frame start, never a future timestamp, so a sleeping session cannot
@@ -953,6 +999,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         private var spent: Duration = .zero
         private var active: [String] = []
         private var current: String?
+        /// The session on screen, when one of the feeders is.
+        private var focused: String?
+        /// Where the round-robin over the *other* sessions has got to.
+        ///
+        /// Its own cursor rather than an offset from whoever last went. With
+        /// the focused session taking every other turn, rotating from the last
+        /// finisher's index always landed back on the same neighbour and the
+        /// sessions past it never got a turn at all.
+        private var rotation = 0
 
         func begin(id: String) {
             guard !active.contains(id) else { return }
@@ -962,19 +1017,76 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
         func end(id: String) {
             active.removeAll { $0 == id }
-            if current == id { current = active.first }
+            if current == id { current = preferred() }
         }
 
+        /// Which session is on screen. Set as focus moves, so the budget
+        /// follows the terminal somebody is actually reading.
+        func setFocused(_ id: String?) {
+            focused = id
+        }
+
+        /// Give up being the focused session, if this is still the one holding
+        /// it. Guarded so a stale hand-back cannot clear whoever took over.
+        func clearFocused(_ id: String) {
+            if focused == id { focused = nil }
+        }
+
+        /// Who should go next when the current turn ends for a reason other
+        /// than finishing a slice: the visible session if it is waiting.
+        private func preferred() -> String? {
+            if let focused, active.contains(focused) { return focused }
+            return active.first
+        }
+
+        /// Wait for this session's turn at the frame budget.
+        ///
+        /// Parked, not spun. `Task.yield()` from a MainActor method goes to the
+        /// back of the main actor's own queue and comes straight back, so a
+        /// session waiting its turn used to burn the main thread for the whole
+        /// time the current one sat inside `pace`'s sleep. With one session
+        /// that never happens (it is always `current`), which is why this only
+        /// bites when two or more are printing at once: exactly the heavy
+        /// output case, where the main thread can least afford it.
+        ///
+        /// A short sleep rather than a continuation queue on purpose. A missed
+        /// wake-up in a hand-rolled queue is a terminal that never draws again,
+        /// and no amount of throughput is worth that failure mode. Sleeping
+        /// costs at most this long in extra latency per slice, far inside a
+        /// frame, and it cannot deadlock.
         func acquire(id: String) async {
             while current != id, active.contains(id) {
-                await Task.yield()
+                try? await Task.sleep(for: Self.turnPoll)
             }
         }
 
+        /// Fine enough to be invisible inside a frame, coarse enough that
+        /// waiting is a parked task rather than a busy main thread.
+        private static let turnPoll: Duration = .microseconds(500)
+
+        /// Hand the turn on, weighted towards the session on screen.
+        ///
+        /// The budget is one frame's worth for every terminal at once, so an
+        /// even rotation means the terminal somebody is reading is one of four
+        /// equal claimants on it while three sessions nobody can see take the
+        /// rest. That is the throttle a heavy agent run produces: not a slow
+        /// emulator, a visible session holding a quarter of a frame.
+        ///
+        /// Every other turn, not every turn. A background session that stops
+        /// draining loses the earliest part of its output to the host's
+        /// bounded ring, so starving them is a correctness problem and not
+        /// just an unfair one. Half keeps them draining and still makes the
+        /// visible terminal feel like the only one running.
         func finish(id: String) {
-            guard current == id, active.count > 1,
-                  let index = active.firstIndex(of: id) else { return }
-            current = active[(index + 1) % active.count]
+            guard current == id, active.count > 1 else { return }
+            if let focused, focused != id, active.contains(focused) {
+                current = focused
+                return
+            }
+            let others = active.filter { $0 != focused }
+            guard !others.isEmpty else { return }
+            rotation = (rotation + 1) % others.count
+            current = others[rotation]
         }
 
         func record(_ duration: Duration) {
