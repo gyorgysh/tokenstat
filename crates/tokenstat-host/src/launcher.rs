@@ -322,9 +322,12 @@ fn search_path() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{PROFILES, Profile, catalog, resolve_profile};
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
+    #[cfg(unix)]
+    use std::path::PathBuf;
 
     /// A `$HOME` with `<dir>/<command>` in it, executable.
+    #[cfg(unix)]
     fn home_with(dir: &str, command: &str) -> PathBuf {
         let home = std::env::temp_dir().join(format!("tokenstat-launcher-{dir}-{command}"));
         let bin = home.join(dir);
