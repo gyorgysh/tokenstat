@@ -571,7 +571,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// does not hop onto MainActor for the whole body (which would put every
     /// `ptyRead` back behind feed and undo the reason this is detached).
     nonisolated private func poll(id: String) async {
+        var recoveryDelay = 50
         while !Task.isCancelled {
+            if await renderBackpressureActive() {
+                try? await Task.sleep(for: .milliseconds(10))
+                continue
+            }
             // Snapshot on the actor, then read off it. Holding MainActor across
             // a held `ptyRead` was fine (await releases it), but applying a
             // large feed on the same task kept the next read behind the parse
@@ -592,12 +597,19 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 )
                 let shouldStop = await applyChunk(chunk, plan: plan)
                 if shouldStop { break }
+                recoveryDelay = 50
                 unheld = plan.focused
                     && chunk.bytes.isEmpty
                     && ContinuousClock.now - askedAt < Self.heldFloor
             } catch {
-                // The session is gone on the host side; nothing more to read.
-                break
+                // A host restart, socket repair, or temporary tunnel failure is
+                // not a process exit. Keep the offset and retry so a tab never
+                // becomes a permanently frozen view after one failed read.
+                let retry = await notePollFailure(error)
+                if !retry || Task.isCancelled { break }
+                try? await Task.sleep(for: .milliseconds(recoveryDelay))
+                recoveryDelay = min(recoveryDelay * 2, 2_000)
+                continue
             }
 
             guard let napMs = await afterPollNapMilliseconds(unheld: unheld) else { break }
@@ -606,6 +618,27 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             }
         }
         await finishPoll()
+    }
+
+    @MainActor
+    private func notePollFailure(_ error: Error) async -> Bool {
+        guard !removed else { return false }
+        let message = error.localizedDescription
+        if transportError != message { transportError = message }
+        // Ask the host whether the process still exists. A successful info call
+        // clears a transient transport banner and also prevents retrying a
+        // process that has genuinely exited.
+        guard let info = try? await Bridge.ptyInfo(id: hostID) else { return true }
+        if rows != info.rows { rows = info.rows }
+        if cols != info.cols { cols = info.cols }
+        if alive != info.alive { alive = info.alive }
+        if let code = info.exitCode {
+            exitCode = code
+            state = .stopped
+            return false
+        }
+        if info.alive { transportError = nil }
+        return info.alive
     }
 
     @MainActor
@@ -619,6 +652,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             hot: Date() < hotUntil,
             delay: pollDelay
         )
+    }
+
+    @MainActor
+    private func renderBackpressureActive() -> Bool {
+        pendingFeedBytes >= Self.renderHighWater
     }
 
     @MainActor
@@ -740,18 +778,17 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
     /// Bytes read from the host that have not been fed into SwiftTerm yet.
     ///
-    /// A queue, not a gate. Output is always on its way to the emulator; this
-    /// only exists so the poll loop never waits on main-thread parse work, and
-    /// it drains as fast as the frame budget allows. Nothing about the app's
-    /// activation state can stop it, which is the whole point: a terminal that
-    /// stops painting when the user clicks another window is not a tool you can
-    /// watch a build in.
-    @ObservationIgnored private var pendingFeed = Data()
-    /// Cap on deferred bytes. Above this the oldest pending output is dropped
-    /// the same way the host ring trims, and `droppedOutput` is set.
-    private static let maxPendingFeed = 2 * 1024 * 1024
+    /// A segmented queue, not a copying buffer. Output is always on its way to
+    /// the emulator; the queue exists so the poll loop never waits on main-
+    /// thread parse work and so output remains ordered while the renderer gets
+    /// its fair share of each frame.
+    @ObservationIgnored private var pendingFeed: [Data] = []
+    @ObservationIgnored private var pendingFeedHead = 0
+    @ObservationIgnored private var pendingFeedBytes = 0
     /// True while `pumpFeed` is on the main actor eating `pendingFeed`.
     @ObservationIgnored private var feedInFlight = false
+    @ObservationIgnored private var feedPumpScheduled = false
+    private static let renderHighWater = 8 * 1024 * 1024
 
     /// Behind enough that clearing the backlog matters more than leaving the
     /// frame roomy.
@@ -762,7 +799,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// of the frame after the backlog is gone, and it expires while a big one
     /// is still draining.
     private var isCatchingUp: Bool {
-        pendingFeed.count >= Self.catchUpBacklog
+        pendingFeedBytes >= Self.catchUpBacklog
     }
 
     /// One catch-up slice. Under this the normal budget clears the queue inside
@@ -784,31 +821,31 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             ensureIdleCheck()
         }
         pendingFeed.append(bytes)
-        trimPendingFeed()
-        // Unconditional. The pump returns at once when one is already running,
-        // so this costs a task and nothing else, and there is no state in which
-        // bytes sit in the queue with nobody coming for them.
-        Task { await pumpFeed() }
-    }
-
-    private func trimPendingFeed() {
-        guard pendingFeed.count > Self.maxPendingFeed else { return }
-        let excess = pendingFeed.count - Self.maxPendingFeed
-        pendingFeed.removeFirst(excess)
-        if !droppedOutput { droppedOutput = true }
+        pendingFeedBytes += bytes.count
+        // Coalesce wake-ups. A printing process can produce many chunks before
+        // the main actor gets a turn, and one scheduler task is enough to drain
+        // all of them.
+        if !feedInFlight, !feedPumpScheduled {
+            feedPumpScheduled = true
+            Task { await pumpFeed() }
+        }
     }
 
     /// Feed whatever is queued, until there is nothing left.
     private func pumpFeed() async {
+        feedPumpScheduled = false
         guard !feedInFlight else { return }
         feedInFlight = true
         defer { feedInFlight = false }
-        while !pendingFeed.isEmpty {
-            let sliceSize = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
-            let take = min(sliceSize, pendingFeed.count)
-            let slice = pendingFeed.prefix(take)
-            pendingFeed.removeFirst(take)
-            await feedToView(Data(slice))
+        while pendingFeedHead < pendingFeed.count {
+            let chunk = pendingFeed[pendingFeedHead]
+            pendingFeedHead += 1
+            pendingFeedBytes -= chunk.count
+            await feedToView(chunk)
+        }
+        if pendingFeedHead == pendingFeed.count {
+            pendingFeed.removeAll(keepingCapacity: true)
+            pendingFeedHead = 0
         }
     }
 
@@ -841,7 +878,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             let end = min(start + slice, all.count)
             let began = ContinuousClock.now
             view.feed(byteArray: all[start..<end])
-            spentThisFrame += ContinuousClock.now - began
+            Self.spentThisFrame += ContinuousClock.now - began
             start = end
             if start < all.count { await pace() }
         }
@@ -885,11 +922,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     private static let frameBudgetCatchUp: Duration = frameInterval * 0.9
 
     /// When the current frame's parse budget started counting.
-    @ObservationIgnored private var frameOpenedAt = ContinuousClock.now
+    private static var frameOpenedAt = ContinuousClock.now
     /// Main-thread parse time already spent inside the current frame. Carried
     /// across `feed` calls: several chunks can land in one frame, and a budget
     /// that reset per call would not be a budget.
-    @ObservationIgnored private var spentThisFrame: Duration = .zero
+    private static var spentThisFrame: Duration = .zero
 
     /// Hand the frame back once this frame's parse budget is spent.
     ///
@@ -900,21 +937,21 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     private func pace() async {
         let budget = isCatchingUp ? Self.frameBudgetCatchUp : Self.frameBudget
         let now = ContinuousClock.now
-        let elapsed = now - frameOpenedAt
+        let elapsed = now - Self.frameOpenedAt
         if elapsed >= Self.frameInterval {
             // A new frame started while we were parsing. Fresh budget.
-            frameOpenedAt = now
-            spentThisFrame = .zero
+            Self.frameOpenedAt = now
+            Self.spentThisFrame = .zero
             await Task.yield()
             return
         }
-        guard spentThisFrame >= budget else {
+        guard Self.spentThisFrame >= budget else {
             await Task.yield()
             return
         }
         let remaining = Self.frameInterval - elapsed
-        frameOpenedAt = now + remaining
-        spentThisFrame = .zero
+        Self.frameOpenedAt = now + remaining
+        Self.spentThisFrame = .zero
         try? await Task.sleep(for: remaining)
     }
 

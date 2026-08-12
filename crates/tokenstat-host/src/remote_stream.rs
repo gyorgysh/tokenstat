@@ -406,14 +406,20 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
     if !guard.active {
         return None;
     }
-    let len = guard.buffer.len() as u64;
-    let dropped = guard.trimmed.saturating_sub(offset);
-    let start = offset.min(len) as usize;
+    let (start, next_offset, dropped) = cache_window(guard.buffer.len(), guard.trimmed, offset);
     Some(json!({
         "data": crate::base64::encode(&guard.buffer[start..]),
-        "nextOffset": len,
+        "nextOffset": next_offset,
         "dropped": dropped,
     }))
+}
+
+fn cache_window(len: usize, trimmed: u64, offset: u64) -> (usize, u64, u64) {
+    let len = len as u64;
+    let next_offset = trimmed.saturating_add(len);
+    let dropped = trimmed.saturating_sub(offset);
+    let start = offset.max(trimmed).saturating_sub(trimmed).min(len) as usize;
+    (start, next_offset, dropped)
 }
 
 /// Send keystrokes to a subscribed remote session over its channel. Returns
@@ -517,7 +523,15 @@ mod tests {
     use tokenstat_identity::MachineIdentity;
     use tokenstat_remote::{handshake_initiator, handshake_responder};
 
-    use super::{parse_handshake, pump_local, pump_proxy};
+    use super::{cache_window, parse_handshake, pump_local, pump_proxy};
+
+    #[test]
+    fn remote_cache_offsets_remain_absolute_after_trim() {
+        assert_eq!(cache_window(8, 100, 100), (0, 108, 0));
+        assert_eq!(cache_window(8, 100, 104), (4, 108, 0));
+        assert_eq!(cache_window(8, 100, 90), (0, 108, 10));
+        assert_eq!(cache_window(8, 100, 200), (8, 108, 0));
+    }
 
     #[test]
     fn a_stream_handshake_names_its_token() {

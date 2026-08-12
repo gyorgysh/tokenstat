@@ -152,6 +152,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     nonisolated private func poll(peer: String, id: String) async {
+        var recoveryDelay = 50
         while !Task.isCancelled {
             guard let plan = await makePlan() else { break }
             do {
@@ -163,14 +164,36 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 )
                 let shouldStop = await apply(chunk)
                 if shouldStop { break }
+                recoveryDelay = 50
             } catch {
-                break
+                let retry = await notePollFailure(peer: peer, id: id, error: error)
+                if !retry || Task.isCancelled { break }
+                try? await Task.sleep(for: .milliseconds(recoveryDelay))
+                recoveryDelay = min(recoveryDelay * 2, 2_000)
+                continue
             }
             if plan.delay > 0 {
                 try? await Task.sleep(for: .milliseconds(plan.delay))
             }
         }
         await MainActor.run { [weak self] in self?.pollTask = nil }
+    }
+
+    @MainActor
+    private func notePollFailure(peer: String, id: String, error: Error) async -> Bool {
+        guard !removed else { return false }
+        let message = error.localizedDescription
+        if transportError != message { transportError = message }
+        guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else { return true }
+        if rows != info.rows { rows = info.rows }
+        if cols != info.cols { cols = info.cols }
+        if alive != info.alive { alive = info.alive }
+        if let code = info.exitCode {
+            exitCode = code
+            return false
+        }
+        if info.alive { transportError = nil }
+        return info.alive
     }
 
     private struct Plan: Sendable {

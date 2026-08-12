@@ -40,7 +40,7 @@ use serde::Serialize;
 /// Enough that a client polling a few times a second never loses anything, and
 /// small enough that a runaway `yes` does not eat memory. The terminal emulator
 /// keeps its own scrollback; this is only the handoff window.
-const BUFFER_BYTES: usize = 512 * 1024;
+const BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
 /// Slack allowed above [`BUFFER_BYTES`] before the buffer is trimmed.
 ///
@@ -50,7 +50,7 @@ const BUFFER_BYTES: usize = 512 * 1024;
 /// into hundreds of megabytes a second of pure copying, per session. Letting it
 /// grow and then trimming in one go amortizes the copy to roughly one byte
 /// moved per byte produced.
-const TRIM_SLACK: usize = 128 * 1024;
+const TRIM_SLACK: usize = 512 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
