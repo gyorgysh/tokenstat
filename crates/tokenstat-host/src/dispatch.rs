@@ -2006,16 +2006,6 @@ fn client_proxy_listen(params: &str) -> Result<Value, String> {
     crate::remote_proxy::listen(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
-/// Ask every vendor what is left of its plan.
-///
-/// On a host (Mac): live vendor reads, optional post to the account when the
-/// opt-in switch is on (P2). On a client (phone): GET the account store, which
-/// is what hosts posted.
-///
-/// One refresh at a time, and that lock is the only thing this serializes
-/// against. The session used to provide the same guarantee by accident, and it
-/// charged every other screen for it. Two screens asking at once should share
-/// the wait, not fan out ten requests.
 /// Ask the vendors again, and post the answer if the user opted in.
 ///
 /// The scheduler's door into the same pass a front end triggers, so there is
@@ -2027,6 +2017,16 @@ pub(crate) fn refresh_plan_limits() {
     let _ = usage_limits();
 }
 
+/// Ask every vendor what is left of its plan.
+///
+/// On a host (Mac): live vendor reads, optional post to the account when the
+/// opt-in switch is on (P2). On a client (phone): GET the account store, which
+/// is what hosts posted.
+///
+/// One refresh at a time, and that lock is the only thing this serializes
+/// against. The session used to provide the same guarantee by accident, and it
+/// charged every other screen for it. Two screens asking at once should share
+/// the wait, not fan out ten requests.
 fn usage_limits() -> Value {
     static REFRESH: Mutex<()> = Mutex::new(());
     let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
@@ -2097,8 +2097,6 @@ fn usage_limits() -> Value {
 
 /// Plan limits from the account store (phone / client shape).
 ///
-/// Hosts post; this only reads. Multiple machines can report the same source:
-/// the newest reading wins so Home shows one row per provider.
 /// How old a posted reading may be before the phone marks it stale.
 ///
 /// Wider than the host's refresh interval, so an ordinary hourly pass never
@@ -2108,6 +2106,8 @@ fn usage_limits() -> Value {
 #[cfg(not(feature = "local-host"))]
 const READING_GOES_STALE_MS: i64 = 3 * 60 * 60 * 1000;
 
+/// Hosts post; this only reads. Multiple machines can report the same source:
+/// the newest reading wins so Home shows one row per provider.
 #[cfg(not(feature = "local-host"))]
 fn account_plane_limits() -> Value {
     use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};

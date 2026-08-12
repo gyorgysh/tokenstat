@@ -52,11 +52,50 @@ pub fn start(session: Arc<Mutex<Session>>) {
 /// Insights take the identical path and cannot disagree about what was sent.
 /// Quiet on failure: a machine that is offline keeps whatever the account
 /// already has, and the next pass retries.
+///
+/// Two gates beyond the switch, because this pass is five vendor APIs and not
+/// a local read. Signed out there is nowhere to post to, so the whole pass is
+/// wasted work against somebody else's rate limit. And its own interval, which
+/// the sync loop's cannot be: that one drops to a minute whenever the machine
+/// is unlinked or the server asks for it, and a vendor sweep every minute is
+/// how an account gets itself throttled.
 fn post_limits() {
     if !tokenstat_sync::config::limits_sync_enabled() {
         return;
     }
+    // Posting needs the login credential. Without one the vendor reads have
+    // nowhere to go, and the switch being on is a statement of intent for when
+    // the machine is signed in again, not a licence to keep polling.
+    if !tokenstat_sync::scheduling_info(None).is_ok_and(|info| info.logged_in) {
+        return;
+    }
+    if !limits_pass_is_due() {
+        return;
+    }
     crate::dispatch::refresh_plan_limits();
+}
+
+/// How often the vendors are asked, whatever the sync loop is doing.
+///
+/// A quota window moves over hours, so an hour is already finer than the thing
+/// being measured, and a person who wants the number now opens Insights, which
+/// runs the pass on the spot.
+const LIMITS_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+fn limits_pass_is_due() -> bool {
+    use std::sync::OnceLock;
+    static LAST: OnceLock<Mutex<Option<std::time::Instant>>> = OnceLock::new();
+    let cell = LAST.get_or_init(|| Mutex::new(None));
+    let Ok(mut last) = cell.lock() else {
+        return false;
+    };
+    match *last {
+        Some(at) if at.elapsed() < LIMITS_REFRESH_INTERVAL => false,
+        _ => {
+            *last = Some(std::time::Instant::now());
+            true
+        }
+    }
 }
 
 /// Fetch the hosted list-rate snapshot and write it where the core reads it.
