@@ -25,6 +25,20 @@ struct Profile {
     bypass_args: &'static [&'static str],
     harness_id: Option<&'static str>,
     symbol: Option<&'static str>,
+    /// Where this tool's own installer puts it, relative to `$HOME`.
+    ///
+    /// A CLI that ships its own directory is only on the PATH because its
+    /// installer edited a startup file, and that edit is exactly what does not
+    /// survive a fresh machine, a shell the user changed afterwards, or a
+    /// profile that guards it behind a condition. The daemon then cannot see a
+    /// harness the user has plainly installed, and the launcher offers a
+    /// shorter list on one Mac than on another with no way to tell why.
+    ///
+    /// Searched after the PATH, so a version manager or a deliberate override
+    /// still wins. Only directories a known installer actually writes belong
+    /// here: the policy is to under-report rather than to guess, and a wrong
+    /// absolute path is worse than a missing tile.
+    install_dirs: &'static [&'static str],
 }
 
 const PROFILES: &[Profile] = &[
@@ -36,6 +50,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: None,
         symbol: Some("terminal"),
+        install_dirs: &[],
     },
     Profile {
         id: "claude_code",
@@ -45,6 +60,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-skip-permissions"],
         harness_id: Some("claude_code"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "codex",
@@ -54,6 +70,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-bypass-approvals-and-sandbox"],
         harness_id: Some("codex"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "opencode",
@@ -63,6 +80,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
+        install_dirs: &[".opencode/bin"],
     },
     Profile {
         id: "grok",
@@ -72,6 +90,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--permission-mode", "bypassPermissions"],
         harness_id: Some("grok"),
         symbol: None,
+        install_dirs: &[".grok/bin"],
     },
     Profile {
         id: "copilot",
@@ -81,6 +100,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--allow-all"],
         harness_id: Some("copilot"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "cline",
@@ -90,6 +110,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cline"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "openclaw",
@@ -99,6 +120,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("openclaw"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "muse",
@@ -108,6 +130,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("muse"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "pi",
@@ -117,6 +140,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("pi"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "zed",
@@ -126,6 +150,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("zed"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "antigravity",
@@ -135,6 +160,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-skip-permissions"],
         harness_id: Some("antigravity"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "cursor_agent",
@@ -144,6 +170,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cursor"),
         symbol: None,
+        install_dirs: &[],
     },
     Profile {
         id: "cursor",
@@ -153,6 +180,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cursor"),
         symbol: None,
+        install_dirs: &[],
     },
 ];
 
@@ -166,12 +194,13 @@ pub(crate) fn catalog() -> Value {
     } else {
         &[]
     };
+    let home = std::env::var("HOME").unwrap_or_default();
     let available: Vec<Value> = PROFILES
         .iter()
         .filter(|profile| {
             profile.id == "shell"
                 || profile.command.starts_with('/')
-                || resolve_on_path(profile.command, &path).is_some()
+                || resolve_profile(profile, &path, Path::new(&home)).is_some()
         })
         .map(|profile| {
             let mut value = json!({
@@ -186,7 +215,7 @@ pub(crate) fn catalog() -> Value {
             if profile.id == "shell" {
                 value["command"] = json!(shell);
                 value["args"] = json!(shell_args);
-            } else if let Some(full) = resolve_on_path(profile.command, &path) {
+            } else if let Some(full) = resolve_profile(profile, &path, Path::new(&home)) {
                 // Absolute path so a click does not need the login PATH to
                 // find the binary. Spawn used to block on `$SHELL -ilc env`
                 // just to resolve `claude` → `/Users/…/bin/claude`.
@@ -196,6 +225,29 @@ pub(crate) fn catalog() -> Value {
         })
         .collect();
     Value::Array(available)
+}
+
+/// Where this profile's command actually is: the search path first, then the
+/// directory its own installer uses.
+///
+/// The order is the point. A tool on the PATH is the one the user's shell
+/// would run, so it wins even when a copy sits in the install directory as
+/// well. The install directory is the answer to "it is plainly installed and
+/// tokenstat cannot see it", which happens on any machine whose startup file
+/// does not export it.
+fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<String> {
+    if let Some(found) = resolve_on_path(profile.command, path) {
+        return Some(found);
+    }
+    if home.as_os_str().is_empty() {
+        return None;
+    }
+    profile
+        .install_dirs
+        .iter()
+        .map(|dir| home.join(dir).join(profile.command))
+        .find(|candidate| is_executable(candidate))
+        .map(|candidate| candidate.display().to_string())
 }
 
 /// First executable match for a bare command name on the search path.
@@ -269,7 +321,92 @@ fn search_path() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROFILES, catalog};
+    use super::{PROFILES, Profile, catalog, resolve_profile};
+    use std::path::{Path, PathBuf};
+
+    /// A `$HOME` with `<dir>/<command>` in it, executable.
+    fn home_with(dir: &str, command: &str) -> PathBuf {
+        let home = std::env::temp_dir().join(format!("tokenstat-launcher-{dir}-{command}"));
+        let bin = home.join(dir);
+        std::fs::create_dir_all(&bin).expect("a temp home");
+        let path = bin.join(command);
+        std::fs::write(&path, b"#!/bin/sh\n").expect("a fake binary");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+                .expect("an executable bit");
+        }
+        home
+    }
+
+    fn profile(command: &'static str, install_dirs: &'static [&'static str]) -> Profile {
+        Profile {
+            id: "test",
+            name: "Test",
+            command,
+            args: &[],
+            bypass_args: &[],
+            harness_id: None,
+            symbol: None,
+            install_dirs,
+        }
+    }
+
+    /// The reported bug: `~/.opencode/bin/opencode` exists, the machine's
+    /// startup file never exported that directory, and the launcher offered no
+    /// OpenCode tile with nothing to say about why.
+    #[cfg(unix)]
+    #[test]
+    fn a_tool_in_its_own_install_directory_is_found_off_the_path() {
+        let home = home_with(".opencode/bin", "opencode");
+        let found = resolve_profile(&profile("opencode", &[".opencode/bin"]), &[], &home)
+            .expect("an installed tool must be found without the PATH");
+        assert!(found.ends_with(".opencode/bin/opencode"), "{found}");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The PATH still decides. A version manager or a deliberate override is
+    /// what the user's own shell would run, and the install directory must not
+    /// quietly take precedence over it.
+    #[cfg(unix)]
+    #[test]
+    fn the_path_wins_over_the_install_directory() {
+        let home = home_with(".grok/bin", "grok");
+        let elsewhere = home_with("preferred", "grok");
+        let path = vec![elsewhere.join("preferred").display().to_string()];
+        let found = resolve_profile(&profile("grok", &[".grok/bin"]), &path, &home)
+            .expect("the PATH copy must be found");
+        assert!(found.ends_with("preferred/grok"), "{found}");
+        let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    /// A profile with no install directory of its own is unchanged: absent
+    /// from the PATH means absent.
+    #[test]
+    fn a_profile_without_an_install_directory_still_needs_the_path() {
+        let home = std::env::temp_dir();
+        assert!(resolve_profile(&profile("definitely-not-installed", &[]), &[], &home).is_none());
+        assert!(resolve_profile(&profile("opencode", &[]), &[], Path::new("")).is_none());
+    }
+
+    /// The two tools that ship their own directory are the two this exists
+    /// for. A rename here silently reintroduces the bug.
+    #[test]
+    fn the_tools_that_ship_a_directory_declare_it() {
+        for (id, dir) in [("opencode", ".opencode/bin"), ("grok", ".grok/bin")] {
+            let found = PROFILES
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("{id} must be in the catalog"));
+            assert!(
+                found.install_dirs.contains(&dir),
+                "{id} must look in {dir}, has {:?}",
+                found.install_dirs
+            );
+        }
+    }
 
     #[test]
     fn the_catalog_always_includes_the_shell() {

@@ -26,6 +26,16 @@ struct LaunchProfile: Identifiable, Sendable {
     /// Source id for the brand mark, or nil for a plain SF symbol.
     let harnessID: String?
     let symbol: String?
+    /// Where this tool's own installer puts it, relative to the home
+    /// directory, for CLIs that ship a directory instead of landing in a
+    /// shared one. Searched after the PATH, so an override still wins.
+    ///
+    /// `crates/tokenstat-host/src/launcher.rs` is the authority: the host
+    /// answers `launcher.catalog` for local and remote folders alike, and
+    /// `resolve()` replaces this whole list with its answer. These entries only
+    /// have to keep the first moments of a launch honest, so a tool the user
+    /// plainly installed does not flicker in.
+    var installDirs: [String] = []
 
     static let all: [LaunchProfile] = [
         LaunchProfile(
@@ -50,12 +60,14 @@ struct LaunchProfile: Identifiable, Sendable {
         LaunchProfile(
             id: "opencode", name: "OpenCode", command: "opencode", args: [],
             bypassArgs: ["--auto"],
-            harnessID: "opencode", symbol: nil
+            harnessID: "opencode", symbol: nil,
+            installDirs: [".opencode/bin"]
         ),
         LaunchProfile(
             id: "grok", name: "Grok Build", command: "grok", args: [],
             bypassArgs: ["--permission-mode", "bypassPermissions"],
-            harnessID: "grok", symbol: nil
+            harnessID: "grok", symbol: nil,
+            installDirs: [".grok/bin"]
         ),
         LaunchProfile(
             id: "copilot", name: "Copilot CLI", command: "copilot", args: [],
@@ -198,9 +210,15 @@ final class LaunchCatalog {
     }
 
     private nonisolated static func filter(_ profiles: [LaunchProfile], onPathIn path: [String]) -> [LaunchProfile] {
-        profiles.filter {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return profiles.filter {
             // The shell is an absolute path; everything else is looked up.
-            $0.command.hasPrefix("/") || isExecutable($0.command, in: path)
+            $0.command.hasPrefix("/")
+                || isExecutable($0.command, in: path)
+                // A CLI that ships its own directory is on the PATH only
+                // because its installer edited a startup file, and an app
+                // launched from Finder never sourced one.
+                || isExecutable($0.command, in: $0.installDirs.map { "\(home)/\($0)" })
         }
     }
 
