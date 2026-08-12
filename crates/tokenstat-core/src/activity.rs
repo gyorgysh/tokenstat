@@ -90,13 +90,54 @@ impl HeatCalendar {
         if want.is_empty() {
             return;
         }
+        let mut marked = false;
         for row in &mut self.rows {
             for cell in row.iter_mut().flatten() {
                 if cell.value == 0 && want.contains(&cell.date) {
                     cell.unmeasured = true;
+                    marked = true;
                 }
             }
         }
+        if marked {
+            self.recount();
+        }
+    }
+
+    /// Redo the counts that treat a day as worked or not.
+    ///
+    /// Marking a cell is not a drawing change. "Active days" and both streaks
+    /// answer *was this day worked*, and for a day whose transcripts were
+    /// deleted the answer is yes on the vendor's own record. Leaving them out
+    /// reported 50 active days out of 57 and broke a 57 day streak into 47,
+    /// which reads as a week off that never happened.
+    ///
+    /// Spend is deliberately untouched: those days are worked and unpriced, and
+    /// a total is a floor rather than wrong.
+    fn recount(&mut self) {
+        let mut days: Vec<(jiff::civil::Date, bool)> = self
+            .rows
+            .iter()
+            .flatten()
+            .flatten()
+            .map(|c| (c.date, c.value > 0 || c.unmeasured))
+            .collect();
+        days.sort_by_key(|(d, _)| *d);
+        self.active_days = days.iter().filter(|(_, worked)| *worked).count();
+        let mut run = 0usize;
+        let mut best = 0usize;
+        for (date, worked) in &days {
+            if *worked {
+                run += 1;
+                best = best.max(run);
+            } else if *date < self.last {
+                // Same rule as the build: today being quiet is not a break,
+                // because the day is not over.
+                run = 0;
+            }
+            self.streak_current = run;
+        }
+        self.streak_best = best;
     }
 
     /// How many days in this grid were worked without a usable measurement.
@@ -395,6 +436,45 @@ mod tests {
             cost_by_day(&rows, &prices),
             vec![("2026-07-29".to_string(), 0)]
         );
+    }
+
+    #[test]
+    fn marking_a_day_worked_makes_it_count_as_worked() {
+        // The whole point: "active days" and the streaks answer *was this day
+        // worked*, and for a day whose transcripts were deleted the answer is
+        // yes. Marking used to change only the drawing, which reported 50
+        // active days out of 57 and split one streak into two.
+        let days: Vec<_> = (1..=14)
+            .filter(|d| !(6..=8).contains(d))
+            .map(|d| (format!("2026-07-{d:02}"), 100u64))
+            .collect();
+        let mut cal = calendar(&days, 4, jiff::civil::date(2026, 7, 14)).expect("calendar");
+        assert_eq!(cal.active_days, 11);
+        assert_eq!(cal.streak_best, 6);
+
+        cal.mark_unmeasured(&[
+            "2026-07-06".to_string(),
+            "2026-07-07".to_string(),
+            "2026-07-08".to_string(),
+        ]);
+        assert_eq!(cal.unmeasured_days(), 3);
+        assert_eq!(cal.active_days, 14);
+        assert_eq!(cal.streak_best, 14);
+        // Spend is untouched: those days are worked and unpriced, so the total
+        // is a floor rather than wrong.
+        assert_eq!(cal.total, 1100);
+    }
+
+    #[test]
+    fn marking_a_day_that_already_has_usage_changes_nothing() {
+        let days: Vec<_> = (1..=10)
+            .map(|d| (format!("2026-07-{d:02}"), 100u64))
+            .collect();
+        let mut cal = calendar(&days, 4, jiff::civil::date(2026, 7, 10)).expect("calendar");
+        let before = (cal.active_days, cal.streak_best, cal.total);
+        cal.mark_unmeasured(&["2026-07-05".to_string()]);
+        assert_eq!(cal.unmeasured_days(), 0);
+        assert_eq!((cal.active_days, cal.streak_best, cal.total), before);
     }
 
     #[test]

@@ -196,10 +196,24 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
     println!("  {DIM}path{DIM:#}     {}", db_path.display());
     println!("  {DIM}events{DIM:#}   {}", ui::exact(totals.events));
     if let (Some(a), Some(b)) = (&totals.first_date, &totals.last_date) {
+        // Days a vendor recorded work for count as worked here too, or doctor
+        // contradicts every other screen about the same archive.
+        let unmeasured = store
+            .days_active_without_usage("claude_code")
+            .unwrap_or_default();
+        let in_range = unmeasured
+            .iter()
+            .filter(|d| d.as_str() >= a.as_str() && d.as_str() <= b.as_str())
+            .count();
         println!(
             "  {DIM}range{DIM:#}    {a} to {b} ({} active days)",
-            totals.days
+            totals.days + in_range as u64
         );
+        if in_range > 0 {
+            println!(
+                "  {DIM}         {in_range} of them worked with no token counts anywhere{DIM:#}"
+            );
+        }
     }
     match last_scan.as_deref().and_then(|s| s.parse::<i64>().ok()) {
         Some(ms) => {

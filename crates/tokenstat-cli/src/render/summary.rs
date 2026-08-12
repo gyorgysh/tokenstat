@@ -346,6 +346,14 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     );
     println!();
     heat_block(&cal, true);
+    if cal.unmeasured_days() > 0 {
+        println!(
+            "  {DIM}{} of those days were worked with no usage on record, drawn {}. \
+The value above is a floor.{DIM:#}",
+            cal.unmeasured_days(),
+            ui::heat_unknown_cell(),
+        );
+    }
     println!();
     Ok(())
 }
@@ -415,7 +423,16 @@ pub fn wrapped(
     println!();
     println!("  {DIM}requests{DIM:#}     {}", ui::exact(totals.events));
     println!("  {DIM}sessions{DIM:#}     {}", ui::exact(totals.sessions));
-    println!("  {DIM}active days{DIM:#}  {}", ui::exact(totals.days));
+    let unmeasured_in_year = store
+        .days_active_without_usage("claude_code")
+        .unwrap_or_default()
+        .iter()
+        .filter(|d| d.starts_with(&format!("{y:04}-")))
+        .count();
+    println!(
+        "  {DIM}active days{DIM:#}  {}",
+        ui::exact(totals.days + unmeasured_in_year as u64)
+    );
     println!("  {DIM}input+output{DIM:#} {}", ui::tokens(in_out));
     println!(
         "  {DIM}list value{DIM:#}   {}  {DIM}(not billed){DIM:#}",
