@@ -473,7 +473,16 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         // Wait out the backoff, or wake early when the network comes back and
         // a `nudge` lands. A wake resets the backoff so the fresh attempt is
         // not punished for the failed ones a dead network already earned.
-        let woken = wake_rx.recv_timeout(backoff).is_ok();
+        // `Disconnected` (the wake sender is gone) must not return instantly,
+        // or the loop would spin; the session upgrade at the top exits anyway.
+        let woken = match wake_rx.recv_timeout(backoff) {
+            Ok(()) => true,
+            Err(mpsc::RecvTimeoutError::Timeout) => false,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                std::thread::sleep(backoff);
+                false
+            }
+        };
         backoff = if woken {
             RECONNECT_FLOOR
         } else {

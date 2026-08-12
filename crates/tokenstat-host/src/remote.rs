@@ -334,6 +334,10 @@ fn mint_hello_token_impl(
 
     match minted {
         Ok(tok) => {
+            // A mint only succeeds for a registered machine, so a renewal that
+            // skipped registration (best-effort after the first mint) still
+            // means the machine is on the account directory.
+            set_tunnel_state(|state| state.registered = true);
             hold_credential(&tok.token, Some(tok.expires_in));
             Ok((tok.token, Some(tok.expires_in)))
         }
