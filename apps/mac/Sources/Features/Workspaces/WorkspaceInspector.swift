@@ -270,7 +270,11 @@ private struct CommitRow: View {
                     Text("·")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
-                    Text(commit.date, format: .relative(presentation: .named))
+                    // One shared tick rather than a live time source per row.
+                    // A commit list is the worst case for the latter: every
+                    // row installs one, and each one dirties the view graph on
+                    // every frame. See `RelativeClock`.
+                    RelativeTimeText(date: commit.date)
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                     Text("·")

@@ -150,7 +150,10 @@ private struct WindowBar: View {
                     .font(Theme.numeric(12, weight: .medium))
                     .foregroundStyle(window.severity.tint)
                 if let resets = window.resetsAt {
-                    Text("· resets \(resets, format: .relative(presentation: .named))")
+                    // The shared tick, not `format: .relative`. One live time
+                    // source per quota window kept the whole window in a
+                    // layout pass every frame. See `RelativeClock`.
+                    Text("· resets \(RelativeClock.phrase(for: resets))")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
                 }

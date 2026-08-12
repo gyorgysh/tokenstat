@@ -1922,9 +1922,11 @@ private struct StateBadge: View {
                 .lineLimit(1)
             if state == .idle, let since {
                 Text("·").font(.system(size: DisplayFit.dp(RowMetrics.meta))).foregroundStyle(.quaternary)
-                // SwiftUI keeps a relative date current on its own, so this
-                // counts up without the sidebar owning a timer.
-                Text(since, style: .relative)
+                // One shared tick, not a live time source per row. SwiftUI
+                // does keep `Text(_, style: .relative)` current on its own,
+                // and the price is a full window layout pass every frame for
+                // as long as one is on screen. See `RelativeClock`.
+                RelativeTimeText(date: since, presentation: .short)
                     .font(Theme.numeric(RowMetrics.meta))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
