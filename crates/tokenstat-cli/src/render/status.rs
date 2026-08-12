@@ -258,6 +258,60 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
             ui::exact(rec.archive_sessions)
         );
 
+        // Per model, because the aggregate hides which column is short and the
+        // two columns do not mean the same thing.
+        //
+        // Output is comparable: the vendor's lifetime figure and ours count the
+        // same generated tokens, so a shortfall there is history the
+        // transcripts no longer hold. Cache read is not. Measured on one real
+        // install, output stood complete against the vendor's own lifetime
+        // total at a moment when cache read was at a third of it, which a
+        // missing week cannot produce. Whatever the vendor counts as a cache
+        // read, it is not what a transcript records.
+        //
+        // So the table states both and claims neither. Do not turn the cache
+        // column into missing usage: on that install it would have doubled the
+        // reported lifetime spend. A model the archive is ahead on is the
+        // vendor lagging or naming a model differently, and is not a gap.
+        if let Ok(models) = store.vendor_models("claude_code") {
+            let mine = store
+                .model_totals_for_sources("claude_code")
+                .unwrap_or_default();
+            let mut rows: Vec<(String, u64, u64, u64, u64)> = Vec::new();
+            for v in &models {
+                let a = mine.get(&v.model).copied().unwrap_or((0, 0));
+                let out_gap = v.output.saturating_sub(a.0);
+                let cache_gap = v.cache_read.saturating_sub(a.1);
+                if out_gap + cache_gap < 1_000_000 {
+                    continue;
+                }
+                rows.push((v.model.clone(), a.0, v.output, a.1, v.cache_read));
+            }
+            rows.sort_by_key(|r| std::cmp::Reverse(r.4.saturating_sub(r.3)));
+            if !rows.is_empty() {
+                println!();
+                println!("  {BOLD}History the transcripts no longer hold{BOLD:#}");
+                println!(
+                    "  {DIM}{:<28}{:>10}{:>10}{:>12}{:>12}{DIM:#}",
+                    "model", "out has", "out said", "cache has", "cache said"
+                );
+                for (model, ao, vo, ac, vc) in rows.iter().take(8) {
+                    println!(
+                        "  {:<28}{:>10}{:>10}{:>12}{:>12}",
+                        ui::truncate(model, 27),
+                        ui::tokens(*ao),
+                        ui::tokens(*vo),
+                        ui::tokens(*ac),
+                        ui::tokens(*vc),
+                    );
+                }
+                println!(
+                    "  {DIM}Output short means history the transcripts no longer hold.{DIM:#}"
+                );
+                println!("  {DIM}Cache short is a counting difference, not missing usage.{DIM:#}");
+            }
+        }
+
         if totals.events == 0 {
             println!();
             let a = accent();

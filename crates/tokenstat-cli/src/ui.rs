@@ -369,7 +369,7 @@ fn char_width(c: char) -> usize {
     }
 }
 
-fn truncate(s: &str, w: usize) -> String {
+pub(crate) fn truncate(s: &str, w: usize) -> String {
     if w == 0 {
         return String::new();
     }

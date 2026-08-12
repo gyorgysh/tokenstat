@@ -10,7 +10,7 @@
 //! from provider-assigned fields, re-reading a file that was rewritten during a
 //! session resume is idempotent for free.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -306,6 +306,44 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS vendor_day_day ON vendor_day(day);
 
+            -- Durable per-day Claude counters. `vendor_day.tokens` is the
+            -- vendor's combined daily figure. This table keeps the separate
+            -- buckets tokenstat had actually archived for that day and model,
+            -- so a later vendor cleanup cannot erase the last exact snapshot.
+            CREATE TABLE IF NOT EXISTS claude_day_model (
+              day                  TEXT NOT NULL,
+              model                TEXT NOT NULL,
+              vendor_total         INTEGER NOT NULL DEFAULT 0,
+              archive_input        INTEGER,
+              archive_output       INTEGER,
+              archive_cache_read   INTEGER,
+              archive_cache_write_5m INTEGER,
+              archive_cache_write_1h INTEGER,
+              first_seen            TEXT NOT NULL,
+              last_seen             TEXT NOT NULL,
+              PRIMARY KEY (day, model)
+            ) STRICT;
+
+            -- A vendor's lifetime per-model totals, kept for good.
+            --
+            -- The per-day window slides and eventually forgets, but the
+            -- lifetime figures do not, and they are the only place some
+            -- history is stated at all: for a model used before the first
+            -- scan, this is the sole surviving record that those tokens
+            -- existed. Monotonic like `vendor_day`, so a vendor that resets or
+            -- re-scopes its own counters cannot take our copy down with it.
+            CREATE TABLE IF NOT EXISTS vendor_model (
+              source      TEXT NOT NULL,
+              model       TEXT NOT NULL,
+              input       INTEGER NOT NULL DEFAULT 0,
+              output      INTEGER NOT NULL DEFAULT 0,
+              cache_read  INTEGER NOT NULL DEFAULT 0,
+              cache_write INTEGER NOT NULL DEFAULT 0,
+              first_seen  TEXT NOT NULL,
+              last_seen   TEXT NOT NULL,
+              PRIMARY KEY (source, model)
+            ) STRICT;
+
             -- Per file scan state, so a rescan opens only what changed.
             -- The path is local only and never leaves the machine.
             CREATE TABLE IF NOT EXISTS shard (
@@ -355,6 +393,40 @@ impl Store {
             ) STRICT;
 
             CREATE INDEX IF NOT EXISTS vendor_day_day ON vendor_day(day);
+
+            CREATE TABLE IF NOT EXISTS claude_day_model (
+              day                  TEXT NOT NULL,
+              model                TEXT NOT NULL,
+              vendor_total         INTEGER NOT NULL DEFAULT 0,
+              archive_input        INTEGER,
+              archive_output       INTEGER,
+              archive_cache_read   INTEGER,
+              archive_cache_write_5m INTEGER,
+              archive_cache_write_1h INTEGER,
+              first_seen            TEXT NOT NULL,
+              last_seen             TEXT NOT NULL,
+              PRIMARY KEY (day, model)
+            ) STRICT;
+
+            -- A vendor's lifetime per-model totals, kept for good.
+            --
+            -- The per-day window slides and eventually forgets, but the
+            -- lifetime figures do not, and they are the only place some
+            -- history is stated at all: for a model used before the first
+            -- scan, this is the sole surviving record that those tokens
+            -- existed. Monotonic like `vendor_day`, so a vendor that resets or
+            -- re-scopes its own counters cannot take our copy down with it.
+            CREATE TABLE IF NOT EXISTS vendor_model (
+              source      TEXT NOT NULL,
+              model       TEXT NOT NULL,
+              input       INTEGER NOT NULL DEFAULT 0,
+              output      INTEGER NOT NULL DEFAULT 0,
+              cache_read  INTEGER NOT NULL DEFAULT 0,
+              cache_write INTEGER NOT NULL DEFAULT 0,
+              first_seen  TEXT NOT NULL,
+              last_seen   TEXT NOT NULL,
+              PRIMARY KEY (source, model)
+            ) STRICT;
             "#,
         )?;
         Ok(())
@@ -578,6 +650,24 @@ impl Store {
         q: &Query,
     ) -> Result<Vec<SplitBucket>, CoreError> {
         self.report_split(group, GroupBy::Model, q)
+    }
+
+    /// Return output and cache-read totals by model for one source.
+    pub fn model_totals_for_sources(
+        &self,
+        source: &str,
+    ) -> Result<HashMap<String, (u64, u64)>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT model, COALESCE(SUM(output), 0), COALESCE(SUM(cache_read), 0)
+               FROM event WHERE source = ?1 GROUP BY model",
+        )?;
+        let rows = stmt.query_map([source], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)? as u64, r.get::<_, i64>(2)? as u64),
+            ))
+        })?;
+        Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
     }
 
     /// One day's `model × source` rows, largest slice first.
@@ -926,6 +1016,13 @@ impl Store {
                    END)
         FROM event
         WHERE local_date >= ?1 AND local_date <= ?2
+          -- Nothing in this codebase writes `estimated`, and that is exactly
+          -- why the filter is here. An archive is a local file its owner can
+          -- edit, and reconstructing history no log still holds, by hand, into
+          -- a row marked `estimated` is a reasonable thing to do with your own
+          -- data. Publishing it is not: a profile is a claim about what was
+          -- measured. Keep this even if nothing appears to produce the value.
+          AND confidence <> 'estimated'
         GROUP BY local_date, source, model, project
         ORDER BY local_date, source, model, project
     "#;
@@ -975,6 +1072,56 @@ impl Store {
         Ok(())
     }
 
+    /// Snapshot Claude's daily vendor totals alongside exact archived buckets.
+    ///
+    /// The vendor total is the durable reconciliation target. The archive
+    /// columns are what the transcripts actually gave us, including NULL when
+    /// a source never reported a bucket. All values are high-water marks, so a
+    /// later scan or vendor cleanup cannot erase an earlier snapshot.
+    pub fn snapshot_claude_days(&self, now: &str) -> Result<(), CoreError> {
+        self.conn.execute(
+            r#"INSERT INTO claude_day_model
+                 (day, model, vendor_total, archive_input, archive_output,
+                  archive_cache_read, archive_cache_write_5m, archive_cache_write_1h,
+                  first_seen, last_seen)
+               SELECT v.day, v.model, v.tokens,
+                      SUM(e.input_fresh), SUM(e.output), SUM(e.cache_read),
+                      SUM(e.cache_write_5m), SUM(e.cache_write_1h), ?1, ?1
+                 FROM vendor_day v
+                 LEFT JOIN event e
+                   ON e.local_date = v.day
+                  AND e.model = v.model
+                  AND e.source = 'claude_code'
+                WHERE v.source = 'claude_code' AND v.model <> ''
+                GROUP BY v.day, v.model
+               ON CONFLICT(day, model) DO UPDATE SET
+                 vendor_total = MAX(vendor_total, excluded.vendor_total),
+                 archive_input = CASE
+                   WHEN excluded.archive_input IS NULL THEN archive_input
+                   WHEN archive_input IS NULL THEN excluded.archive_input
+                   ELSE MAX(archive_input, excluded.archive_input) END,
+                 archive_output = CASE
+                   WHEN excluded.archive_output IS NULL THEN archive_output
+                   WHEN archive_output IS NULL THEN excluded.archive_output
+                   ELSE MAX(archive_output, excluded.archive_output) END,
+                 archive_cache_read = CASE
+                   WHEN excluded.archive_cache_read IS NULL THEN archive_cache_read
+                   WHEN archive_cache_read IS NULL THEN excluded.archive_cache_read
+                   ELSE MAX(archive_cache_read, excluded.archive_cache_read) END,
+                 archive_cache_write_5m = CASE
+                   WHEN excluded.archive_cache_write_5m IS NULL THEN archive_cache_write_5m
+                   WHEN archive_cache_write_5m IS NULL THEN excluded.archive_cache_write_5m
+                   ELSE MAX(archive_cache_write_5m, excluded.archive_cache_write_5m) END,
+                 archive_cache_write_1h = CASE
+                   WHEN excluded.archive_cache_write_1h IS NULL THEN archive_cache_write_1h
+                   WHEN archive_cache_write_1h IS NULL THEN excluded.archive_cache_write_1h
+                   ELSE MAX(archive_cache_write_1h, excluded.archive_cache_write_1h) END,
+                 last_seen = excluded.last_seen"#,
+            params![now],
+        )?;
+        Ok(())
+    }
+
     /// Record what a vendor rollup said, without ever lowering what we already
     /// hold.
     ///
@@ -1010,6 +1157,56 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    /// Record a vendor's lifetime per-model totals, never lowering ours.
+    pub fn record_vendor_models(
+        &self,
+        source: &str,
+        rows: &[VendorModel],
+        now: &str,
+    ) -> Result<(), CoreError> {
+        for r in rows {
+            self.conn.execute(
+                "INSERT INTO vendor_model
+                   (source, model, input, output, cache_read, cache_write, first_seen, last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                 ON CONFLICT(source, model) DO UPDATE SET
+                   input       = MAX(input, excluded.input),
+                   output      = MAX(output, excluded.output),
+                   cache_read  = MAX(cache_read, excluded.cache_read),
+                   cache_write = MAX(cache_write, excluded.cache_write),
+                   last_seen   = excluded.last_seen",
+                params![
+                    source,
+                    r.model,
+                    r.input as i64,
+                    r.output as i64,
+                    r.cache_read as i64,
+                    r.cache_write as i64,
+                    now
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The lifetime per-model totals we have ever seen a vendor report.
+    pub fn vendor_models(&self, source: &str) -> Result<Vec<VendorModel>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT model, input, output, cache_read, cache_write
+               FROM vendor_model WHERE source = ? ORDER BY model",
+        )?;
+        let rows = stmt.query_map([source], |r| {
+            Ok(VendorModel {
+                model: r.get(0)?,
+                input: r.get::<_, i64>(1)? as u64,
+                output: r.get::<_, i64>(2)? as u64,
+                cache_read: r.get::<_, i64>(3)? as u64,
+                cache_write: r.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Everything ever seen from a vendor's rollup, newest window included.
