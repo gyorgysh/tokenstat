@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -43,6 +43,9 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// without bound. Streams are drained continuously, so real use never gets
 /// near this.
 const MAX_CHANNEL_BUFFER: usize = 32 * 1024 * 1024;
+/// Bound queued outbound data when the relay or peer is slow.
+const MAX_OUTBOUND_QUEUE: usize = 8 * 1024 * 1024;
+const OUTBOUND_FRAME_QUEUE: usize = 64;
 /// Where this machine's dial ids start. Channel ids are local to each socket,
 /// and the two sides choose them independently: the relay numbers the
 /// channels it opens to a socket from its own per-socket counter (which grows
@@ -70,7 +73,8 @@ pub struct TunnelSession {
     token: Mutex<String>,
     next_channel: AtomicU32,
     /// The writer thread's inbox. None while disconnected.
-    writer: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    writer: Mutex<Option<Writer>>,
+    writer_bytes: Arc<AtomicUsize>,
     /// The relay-dialled channels, for the host to answer.
     inbound_tx: Mutex<Option<mpsc::Sender<Arc<ChannelState>>>>,
     inbound_rx: Mutex<Option<mpsc::Receiver<Arc<ChannelState>>>>,
@@ -91,6 +95,12 @@ pub struct TunnelSession {
     /// out a backoff that was sized for a network that is now up.
     wake: Mutex<Option<mpsc::Sender<()>>>,
     stopped: AtomicBool,
+}
+
+#[derive(Clone)]
+struct Writer {
+    sender: mpsc::SyncSender<Vec<u8>>,
+    bytes: Arc<AtomicUsize>,
 }
 
 /// Mints a replacement HELLO credential. `None` when one cannot be had right
@@ -150,6 +160,7 @@ impl TunnelSession {
             token: Mutex::new(token.to_string()),
             next_channel: AtomicU32::new(1),
             writer: Mutex::new(None),
+            writer_bytes: Arc::new(AtomicUsize::new(0)),
             inbound_tx: Mutex::new(Some(inbound_tx)),
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),
@@ -299,19 +310,49 @@ impl TunnelSession {
     }
 
     fn send_channel_frame(&self, op: u8, ch: u32, payload: &[u8]) -> Result<(), RemoteError> {
+        if payload.len() > MAX_OUTBOUND_QUEUE {
+            return Err(RemoteError::Tunnel("channel frame is too large".into()));
+        }
         let mut frame = Vec::with_capacity(5 + payload.len());
         frame.push(op);
         frame.extend_from_slice(&ch.to_be_bytes());
         frame.extend_from_slice(payload);
-        let sender = self
+        let writer = self
             .writer
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
             .ok_or_else(|| RemoteError::Tunnel("tunnel is not connected".into()))?;
-        sender
-            .send(frame)
-            .map_err(|_| RemoteError::Tunnel("tunnel is not connected".into()))
+        let size = frame.len();
+        let mut current = writer.bytes.load(Ordering::Relaxed);
+        loop {
+            let Some(next) = current.checked_add(size) else {
+                return Err(RemoteError::Tunnel("tunnel outbound queue is full".into()));
+            };
+            if next > MAX_OUTBOUND_QUEUE {
+                return Err(RemoteError::Tunnel("tunnel outbound queue is full".into()));
+            }
+            match writer.bytes.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
+        match writer.sender.try_send(frame) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => {
+                writer.bytes.fetch_sub(size, Ordering::AcqRel);
+                Err(RemoteError::Tunnel("tunnel outbound queue is full".into()))
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                writer.bytes.fetch_sub(size, Ordering::AcqRel);
+                Err(RemoteError::Tunnel("tunnel is not connected".into()))
+            }
+        }
     }
 
     fn forget_channel(&self, state: &Arc<ChannelState>) {
@@ -539,41 +580,62 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     // and the loop parks briefly when there is nothing to do.
     set_relay_nonblocking(&mut socket)?;
 
-    let (writer_tx, writer_rx) = mpsc::channel::<Vec<u8>>();
-    *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(writer_tx);
+    let (writer_tx, writer_rx) = mpsc::sync_channel::<Vec<u8>>(OUTBOUND_FRAME_QUEUE);
+    let writer_bytes = Arc::clone(&session.writer_bytes);
+    writer_bytes.store(0, Ordering::Release);
+    *session.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(Writer {
+        sender: writer_tx,
+        bytes: Arc::clone(&writer_bytes),
+    });
     *session.socket.lock().unwrap_or_else(|e| e.into_inner()) = Some(socket);
 
     // The IO loop, inline: drain queued outgoing frames, then read one frame
     // (or idle-wait), and repeat. The socket is nonblocking, so neither the
     // read nor the flush can stall the loop.
+    let mut writer_blocked = false;
     loop {
-        while let Ok(frame) = writer_rx.try_recv() {
-            let send_failed = {
+        if writer_blocked {
+            let flush_result = {
                 let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
                 let Some(socket) = guard.as_mut() else { break };
-                // A WouldBlock here just means the frame is buffered and the
-                // next send or read flushes it; only a real error is fatal.
-                match socket.send(Message::Binary(frame.into())) {
-                    Ok(()) => false,
+                socket.flush()
+            };
+            match flush_result {
+                Ok(()) => writer_blocked = false,
+                Err(tungstenite::Error::Io(error))
+                    if error.kind() == io::ErrorKind::WouldBlock
+                        || error.kind() == io::ErrorKind::TimedOut => {}
+                Err(_) => {
+                    eprintln!("tunnel: io loop writer flush failed");
+                    break;
+                }
+            }
+        }
+        if !writer_blocked {
+            while let Ok(frame) = writer_rx.try_recv() {
+                writer_bytes.fetch_sub(frame.len(), Ordering::AcqRel);
+                let send_result = {
+                    let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
+                    let Some(socket) = guard.as_mut() else { break };
+                    socket.send(Message::Binary(frame.into()))
+                };
+                match send_result {
+                    Ok(()) => {}
                     Err(tungstenite::Error::Io(error))
                         if error.kind() == io::ErrorKind::WouldBlock
                             || error.kind() == io::ErrorKind::TimedOut =>
                     {
-                        false
+                        // The frame is now owned by tungstenite. Do not dequeue
+                        // another one until its write buffer can flush.
+                        writer_blocked = true;
+                        break;
                     }
-                    Err(_) => true,
+                    Err(_) => {
+                        eprintln!("tunnel: io loop writer send failed");
+                        writer_blocked = true;
+                        break;
+                    }
                 }
-            };
-            if send_failed {
-                eprintln!("tunnel: io loop writer send failed");
-                break;
-            }
-        }
-        // A WouldBlock during the drain left a frame in tungstenite's write
-        // buffer; give it another chance to reach the wire before reading.
-        if let Ok(mut guard) = session.socket.lock() {
-            if let Some(socket) = guard.as_mut() {
-                let _ = socket.flush();
             }
         }
         let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
