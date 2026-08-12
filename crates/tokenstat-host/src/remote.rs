@@ -676,6 +676,9 @@ fn tunnel_token_refresh_loop(
 pub(crate) fn stop_tunnel() {
     tunnel_running().store(false, Ordering::Release);
     clear_held_credential();
+    // The next start may be a different account, and a directory from the last
+    // one would label its machines.
+    clear_account_directory();
     if let Some(session) = tunnel_session()
         .lock()
         .ok()
@@ -767,10 +770,99 @@ fn register_client_identity() {
 /// Same-account devices on `/me` are approved without a second tap. The phone
 /// and Mac already share the login; requiring Machines → Approve for that is
 /// noise. Revoked peers never reach this path (authorize keeps them revoked).
+/// The account's machine directory, and when it was fetched.
+///
+/// Cached because [`account_peer_label`] runs inside the inbound handshake,
+/// once per channel the relay dials. Without this, every dial from a phone
+/// paid an HTTP round trip to the account host before the connection could be
+/// authorized, so a slow account host read to the user as a slow tunnel, and a
+/// phone opening a host or pulling to refresh spent one directory fetch per
+/// screen. The directory changes when somebody adds or renames a device, which
+/// is not something the handshake path has to see within the second.
+struct Directory {
+    /// Wall clock, so a machine that slept does not treat an overnight cache
+    /// as fresh. Same reason the tunnel credential is measured this way.
+    fetched_at_ms: i64,
+    machines: Vec<Value>,
+}
+
+fn account_directory() -> &'static Mutex<Option<Directory>> {
+    static CACHE: OnceLock<Mutex<Option<Directory>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
+const DIRECTORY_TTL_MS: i64 = 60_000;
+/// A device the cache has never seen may have registered since it was filled,
+/// so a miss is allowed to refetch. Bounded, because a peer that is not on the
+/// account at all is exactly what an unwanted dial looks like, and each one
+/// must not be able to make this machine call out.
+const DIRECTORY_MISS_REFETCH_MS: i64 = 10_000;
+
+fn last_directory_miss() -> &'static Mutex<i64> {
+    static AT: OnceLock<Mutex<i64>> = OnceLock::new();
+    AT.get_or_init(|| Mutex::new(0))
+}
+
+/// The machine list, from cache unless it is older than the TTL.
+fn account_machines(force: bool) -> Vec<Value> {
+    let now = jiff::Timestamp::now().as_millisecond();
+    if !force
+        && let Ok(guard) = account_directory().lock()
+        && let Some(held) = guard.as_ref()
+        && now - held.fetched_at_ms < DIRECTORY_TTL_MS
+    {
+        return held.machines.clone();
+    }
+    let Ok(status) = tokenstat_sync::sync_status(None) else {
+        // Keep whatever is held: an account host having a minute must not turn
+        // every same-account device into an unknown one.
+        return account_directory()
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|held| held.machines.clone()))
+            .unwrap_or_default();
+    };
+    if let Ok(mut guard) = account_directory().lock() {
+        *guard = Some(Directory {
+            fetched_at_ms: now,
+            machines: status.machines.clone(),
+        });
+    }
+    status.machines
+}
+
+/// Forget the cached directory. Called when remote reach stops, because the
+/// next start may be a different account.
+fn clear_account_directory() {
+    if let Ok(mut guard) = account_directory().lock() {
+        *guard = None;
+    }
+}
+
 fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
     let want = tokenstat_identity::hex(peer);
-    let status = tokenstat_sync::sync_status(None).ok()?;
-    for machine in &status.machines {
+    if let Some(label) = label_for(&account_machines(false), &want) {
+        return Some(label);
+    }
+    // Not in what we hold. A device that registered since the cache was filled
+    // is the ordinary reason, so refetch once, rate limited.
+    let now = jiff::Timestamp::now().as_millisecond();
+    let may_refetch = last_directory_miss().lock().is_ok_and(|mut at| {
+        let due = now - *at > DIRECTORY_MISS_REFETCH_MS;
+        if due {
+            *at = now;
+        }
+        due
+    });
+    if !may_refetch {
+        return None;
+    }
+    label_for(&account_machines(true), &want)
+}
+
+/// This peer's display name, from a machine directory already in hand.
+fn label_for(machines: &[Value], want: &str) -> Option<String> {
+    for machine in machines {
         // `continue`, not `?`. One machine in the directory without a key (a
         // computer that only ever synced) would otherwise end the search for
         // every machine after it, and which ones those are depends on the
@@ -782,7 +874,7 @@ fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
         else {
             continue;
         };
-        if !key.eq_ignore_ascii_case(&want) {
+        if !key.eq_ignore_ascii_case(want) {
             continue;
         }
         let label = machine
