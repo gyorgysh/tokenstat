@@ -1818,7 +1818,12 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
                     let _ = manager.touch_viewer(&p.id, viewer);
                 }
-                let mut chunk = manager.read(&p.id, p.offset).map_err(|e| e.to_string())?;
+                let mut chunk = match p.viewer.as_deref() {
+                    Some(viewer) => manager
+                        .read_for_viewer(&p.id, viewer, p.offset)
+                        .map_err(|e| e.to_string())?,
+                    None => manager.read(&p.id, p.offset).map_err(|e| e.to_string())?,
+                };
                 // Hold the call open until there is something to say, or the
                 // caller's patience runs out. Capped so a connection is never
                 // parked for long: this occupies one socket and one thread, and
@@ -1835,13 +1840,19 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                         std::time::Instant::now() + Duration::from_millis(wait.min(1_000));
                     while chunk.bytes.is_empty() && std::time::Instant::now() < deadline {
                         std::thread::sleep(Duration::from_millis(3));
-                        chunk = manager.read(&p.id, p.offset).map_err(|e| e.to_string())?;
+                        chunk = match p.viewer.as_deref() {
+                            Some(viewer) => manager
+                                .read_for_viewer(&p.id, viewer, p.offset)
+                                .map_err(|e| e.to_string())?,
+                            None => manager.read(&p.id, p.offset).map_err(|e| e.to_string())?,
+                        };
                     }
                 }
                 Ok(json!({
                     "data": crate::base64::encode(&chunk.bytes),
                     "nextOffset": chunk.next_offset,
                     "dropped": chunk.dropped,
+                    "paused": chunk.paused,
                 }))
             })
         }

@@ -31,6 +31,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     private(set) var cols: Int
     private(set) var hasOutput = false
     private(set) var droppedOutput = false
+    private(set) var outputPaused = false
     var transportError: String?
 
     @ObservationIgnored private var terminalView: TerminalView?
@@ -153,6 +154,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     nonisolated private func poll(peer: String, id: String) async {
         var recoveryDelay = 50
+        var failedReads = 0
         while !Task.isCancelled {
             guard let plan = await makePlan() else { break }
             do {
@@ -165,8 +167,15 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 let shouldStop = await apply(chunk)
                 if shouldStop { break }
                 recoveryDelay = 50
+                failedReads = 0
             } catch {
-                let retry = await notePollFailure(peer: peer, id: id, error: error)
+                failedReads += 1
+                let retry = await notePollFailure(
+                    peer: peer,
+                    id: id,
+                    error: error,
+                    failedReads: failedReads
+                )
                 if !retry || Task.isCancelled { break }
                 try? await Task.sleep(for: .milliseconds(recoveryDelay))
                 recoveryDelay = min(recoveryDelay * 2, 2_000)
@@ -180,11 +189,26 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     @MainActor
-    private func notePollFailure(peer: String, id: String, error: Error) async -> Bool {
+    private func notePollFailure(
+        peer: String,
+        id: String,
+        error: Error,
+        failedReads: Int
+    ) async -> Bool {
         guard !removed else { return false }
         let message = error.localizedDescription
         if transportError != message { transportError = message }
-        guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else { return true }
+        guard failedReads.isMultiple(of: 8) else { return true }
+        guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
+            if failedReads >= 40 {
+                let sessions = (try? await ClientRemote.ptyList(peer: peer)) ?? []
+                if !sessions.contains(where: { $0.id == id }) {
+                    alive = false
+                    return false
+                }
+            }
+            return true
+        }
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
@@ -210,6 +234,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     @MainActor
     private func apply(_ chunk: PtyChunk) -> Bool {
+        if outputPaused != chunk.paused { outputPaused = chunk.paused }
         if chunk.dropped > 0 { droppedOutput = true }
         if !chunk.bytes.isEmpty {
             offset = chunk.nextOffset

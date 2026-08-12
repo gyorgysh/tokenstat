@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
@@ -209,6 +209,8 @@ struct PtyFrame {
     next_offset: u64,
     dropped: u64,
     data: String,
+    #[serde(default)]
+    paused: bool,
 }
 
 /// The owning side of a terminal subscription: read the session's buffer by
@@ -250,6 +252,7 @@ fn pump_pty_subscribe(connection: Connection, session: &str) {
                     next_offset: chunk.next_offset,
                     dropped: chunk.dropped,
                     data: crate::base64::encode(&chunk.bytes),
+                    paused: chunk.paused,
                 };
                 let Ok(encoded) = serde_json::to_vec(&frame) else {
                     break;
@@ -289,6 +292,7 @@ struct PtySubscription {
     active: bool,
     /// The channel's write half: keystrokes ride it to the owning machine.
     writer: Option<StreamWriter>,
+    space: Arc<Condvar>,
 }
 
 fn pty_subscriptions() -> &'static Mutex<HashMap<String, Arc<Mutex<PtySubscription>>>> {
@@ -316,6 +320,7 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
         trimmed: 0,
         active: true,
         writer: None,
+        space: Arc::new(Condvar::new()),
     }));
     match pty_subscriptions().lock() {
         Ok(mut map) => {
@@ -367,6 +372,15 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
             guard.writer = Some(writer);
         }
         loop {
+            let mut guard = match cache.lock() {
+                Ok(guard) => guard,
+                Err(_) => break,
+            };
+            while guard.buffer.len() >= PTY_CACHE_CAP && guard.active {
+                let space = Arc::clone(&guard.space);
+                guard = space.wait(guard).unwrap_or_else(PoisonError::into_inner);
+            }
+            drop(guard);
             match reader.read(1 << 20) {
                 Ok(data) if data.is_empty() => break,
                 Ok(data) => {
@@ -379,11 +393,8 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                         Err(_) => break,
                     };
                     guard.buffer.extend_from_slice(&bytes);
-                    if guard.buffer.len() > PTY_CACHE_CAP {
-                        let excess = guard.buffer.len() - PTY_CACHE_CAP;
-                        guard.buffer.drain(..excess);
-                        guard.trimmed += excess as u64;
-                    }
+                    // The owning side is blocked while this cache is full, so
+                    // output is never evicted to make room.
                 }
                 Err(_) => break,
             }
@@ -402,15 +413,23 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
 pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<Value> {
     let key = format!("{peer}:{session}");
     let cache = pty_subscriptions().lock().ok()?.get(&key)?.clone();
-    let guard = cache.lock().ok()?;
+    let mut guard = cache.lock().ok()?;
     if !guard.active {
         return None;
     }
+    let acknowledged = offset.saturating_sub(guard.trimmed) as usize;
+    if acknowledged > 0 {
+        let count = acknowledged.min(guard.buffer.len());
+        guard.buffer.drain(..count);
+        guard.trimmed += count as u64;
+    }
     let (start, next_offset, dropped) = cache_window(guard.buffer.len(), guard.trimmed, offset);
+    guard.space.notify_all();
     Some(json!({
         "data": crate::base64::encode(&guard.buffer[start..]),
         "nextOffset": next_offset,
         "dropped": dropped,
+        "paused": guard.buffer.len() >= PTY_CACHE_CAP,
     }))
 }
 

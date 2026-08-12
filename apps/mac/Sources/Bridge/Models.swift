@@ -1427,11 +1427,14 @@ struct PtyChunk: Decodable, Sendable {
     /// Bytes dropped before this chunk because this reader fell behind the
     /// host's bounded buffer. Zero in normal use, and never silently ignored.
     var dropped: UInt64
+    /// The host paused its PTY reader because the lossless handoff window is full.
+    var paused: Bool
 
     private enum CodingKeys: String, CodingKey {
         case data
         case nextOffset
         case dropped
+        case paused
     }
 
     init(from decoder: Decoder) throws {
@@ -1443,6 +1446,7 @@ struct PtyChunk: Decodable, Sendable {
         bytes = Data(base64Encoded: encoded) ?? Data()
         nextOffset = try container.decode(UInt64.self, forKey: .nextOffset)
         dropped = try container.decode(UInt64.self, forKey: .dropped)
+        paused = try container.decodeIfPresent(Bool.self, forKey: .paused) ?? false
     }
 }
 

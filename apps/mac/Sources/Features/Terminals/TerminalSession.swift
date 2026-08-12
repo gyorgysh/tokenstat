@@ -163,6 +163,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// bounded buffer. The terminal cannot restore them, so the UI says so
     /// rather than pretending the output never existed.
     var droppedOutput = false
+    private(set) var outputPaused = false
 
     /// True after the first host output has been fed into the emulator.
     ///
@@ -572,6 +573,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// `ptyRead` back behind feed and undo the reason this is detached).
     nonisolated private func poll(id: String) async {
         var recoveryDelay = 50
+        var failedReads = 0
         while !Task.isCancelled {
             if await renderBackpressureActive() {
                 try? await Task.sleep(for: .milliseconds(10))
@@ -598,6 +600,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 let shouldStop = await applyChunk(chunk, plan: plan)
                 if shouldStop { break }
                 recoveryDelay = 50
+                failedReads = 0
                 unheld = plan.focused
                     && chunk.bytes.isEmpty
                     && ContinuousClock.now - askedAt < Self.heldFloor
@@ -605,7 +608,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 // A host restart, socket repair, or temporary tunnel failure is
                 // not a process exit. Keep the offset and retry so a tab never
                 // becomes a permanently frozen view after one failed read.
-                let retry = await notePollFailure(error)
+                failedReads += 1
+                let retry = await notePollFailure(error, failedReads: failedReads)
                 if !retry || Task.isCancelled { break }
                 try? await Task.sleep(for: .milliseconds(recoveryDelay))
                 recoveryDelay = min(recoveryDelay * 2, 2_000)
@@ -621,14 +625,23 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     @MainActor
-    private func notePollFailure(_ error: Error) async -> Bool {
+    private func notePollFailure(_ error: Error, failedReads: Int) async -> Bool {
         guard !removed else { return false }
         let message = error.localizedDescription
         if transportError != message { transportError = message }
-        // Ask the host whether the process still exists. A successful info call
-        // clears a transient transport banner and also prevents retrying a
-        // process that has genuinely exited.
-        guard let info = try? await Bridge.ptyInfo(id: hostID) else { return true }
+        // Reads get the first chance to recover. Probing liveness is deliberately
+        // sparse because info can repair a host connection too.
+        guard failedReads.isMultiple(of: 8) else { return true }
+        guard let info = try? await Bridge.ptyInfo(id: hostID) else {
+            if failedReads >= 40 {
+                let sessions = (try? await Bridge.ptyList()) ?? []
+                if !sessions.contains(where: { $0.id == hostID }) {
+                    state = .stopped
+                    return false
+                }
+            }
+            return true
+        }
         if rows != info.rows { rows = info.rows }
         if cols != info.cols { cols = info.cols }
         if alive != info.alive { alive = info.alive }
@@ -680,6 +693,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// should stop (process exited).
     @MainActor
     private func applyChunk(_ chunk: PtyChunk, plan: PollPlan) -> Bool {
+        if outputPaused != chunk.paused { outputPaused = chunk.paused }
         // Guarded. This is observed, and a session the reader cannot
         // keep up with reports a drop on every single poll: an
         // unguarded write there rebuilds the pane at poll rate, on the
@@ -878,7 +892,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             let end = min(start + slice, all.count)
             let began = ContinuousClock.now
             view.feed(byteArray: all[start..<end])
-            Self.spentThisFrame += ContinuousClock.now - began
+            Self.frameScheduler.record(ContinuousClock.now - began)
             start = end
             if start < all.count { await pace() }
         }
@@ -921,12 +935,40 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// up, still leave a slice for keystrokes and chrome.
     private static let frameBudgetCatchUp: Duration = frameInterval * 0.9
 
-    /// When the current frame's parse budget started counting.
-    private static var frameOpenedAt = ContinuousClock.now
-    /// Main-thread parse time already spent inside the current frame. Carried
-    /// across `feed` calls: several chunks can land in one frame, and a budget
-    /// that reset per call would not be a budget.
-    private static var spentThisFrame: Duration = .zero
+    /// One scheduler owns the frame budget for every terminal. It uses a real
+    /// frame start, never a future timestamp, so a sleeping session cannot
+    /// donate an invalid budget to another session.
+    @MainActor
+    private final class FrameBudgetScheduler {
+        private var frameStart = ContinuousClock.now
+        private var spent: Duration = .zero
+
+        func record(_ duration: Duration) {
+            spent += duration
+        }
+
+        func pace(budget: Duration, interval: Duration) async {
+            let now = ContinuousClock.now
+            if now - frameStart >= interval {
+                frameStart = now
+                spent = .zero
+                await Task.yield()
+                return
+            }
+            guard spent >= budget else {
+                await Task.yield()
+                return
+            }
+            let remaining = interval - (now - frameStart)
+            try? await Task.sleep(for: remaining)
+            // A sleep can overshoot. The next caller starts from the time it
+            // actually got the actor back, never from a timestamp in the future.
+            frameStart = ContinuousClock.now
+            spent = .zero
+        }
+    }
+
+    private static let frameScheduler = FrameBudgetScheduler()
 
     /// Hand the frame back once this frame's parse budget is spent.
     ///
@@ -936,23 +978,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// actually reserves time for drawing.
     private func pace() async {
         let budget = isCatchingUp ? Self.frameBudgetCatchUp : Self.frameBudget
-        let now = ContinuousClock.now
-        let elapsed = now - Self.frameOpenedAt
-        if elapsed >= Self.frameInterval {
-            // A new frame started while we were parsing. Fresh budget.
-            Self.frameOpenedAt = now
-            Self.spentThisFrame = .zero
-            await Task.yield()
-            return
-        }
-        guard Self.spentThisFrame >= budget else {
-            await Task.yield()
-            return
-        }
-        let remaining = Self.frameInterval - elapsed
-        Self.frameOpenedAt = now + remaining
-        Self.spentThisFrame = .zero
-        try? await Task.sleep(for: remaining)
+        await Self.frameScheduler.pace(budget: budget, interval: Self.frameInterval)
     }
 
     /// Set the session state from a host report.

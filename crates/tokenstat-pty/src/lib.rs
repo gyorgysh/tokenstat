@@ -30,7 +30,7 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use serde::Serialize;
@@ -41,16 +41,6 @@ use serde::Serialize;
 /// small enough that a runaway `yes` does not eat memory. The terminal emulator
 /// keeps its own scrollback; this is only the handoff window.
 const BUFFER_BYTES: usize = 8 * 1024 * 1024;
-
-/// Slack allowed above [`BUFFER_BYTES`] before the buffer is trimmed.
-///
-/// Trimming exactly the excess on every push means shifting the whole buffer
-/// down by a few kilobytes for each read from the pty, which is a memmove of
-/// the entire window per 8 KB of output. A build that prints fast turns that
-/// into hundreds of megabytes a second of pure copying, per session. Letting it
-/// grow and then trimming in one go amortizes the copy to roughly one byte
-/// moved per byte produced.
-const TRIM_SLACK: usize = 512 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
@@ -101,6 +91,8 @@ pub struct Chunk {
     /// Bytes dropped before this chunk because the reader fell behind the
     /// buffer. Zero in normal use, and never silently ignored.
     pub dropped: u64,
+    /// True while the producer is paused because the handoff window is full.
+    pub paused: bool,
 }
 
 /// A Device Status Report asking where the cursor is.
@@ -154,13 +146,6 @@ impl Buffer {
     fn push(&mut self, bytes: &[u8]) {
         self.data.extend_from_slice(bytes);
         self.total += bytes.len() as u64;
-        // Trim only once the slack is used up, and then all the way back to the
-        // window size. See `TRIM_SLACK`: the obvious version, dropping exactly
-        // the excess every time, copies the whole buffer per read.
-        if self.data.len() > BUFFER_BYTES + TRIM_SLACK {
-            let excess = self.data.len() - BUFFER_BYTES;
-            self.data.drain(..excess);
-        }
     }
 
     /// Offset of the oldest byte still held.
@@ -182,6 +167,15 @@ impl Buffer {
             bytes: self.data[start..].to_vec(),
             next_offset: self.total,
             dropped,
+            paused: self.data.len() >= BUFFER_BYTES,
+        }
+    }
+
+    fn discard_before(&mut self, offset: u64) {
+        let earliest = self.earliest();
+        if offset > earliest {
+            let count = (offset - earliest).min(self.data.len() as u64) as usize;
+            self.data.drain(..count);
         }
     }
 }
@@ -189,6 +183,7 @@ impl Buffer {
 struct Session {
     info: Mutex<SessionInfo>,
     buffer: Arc<Mutex<Buffer>>,
+    buffer_space: Arc<Condvar>,
     /// Shared with the reader thread, which answers the terminal's own
     /// questions. See `wants_cursor_position`.
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -199,6 +194,7 @@ struct Session {
     last_activity: Arc<Mutex<Option<u64>>>,
     /// Front ends currently showing this session, by opaque client id.
     viewers: Mutex<HashMap<String, Viewer>>,
+    read_offsets: Mutex<HashMap<String, u64>>,
 }
 
 /// One front end showing a session, and the geometry it can display.
@@ -389,6 +385,7 @@ impl Manager {
             .map_err(|e| PtyError::Spawn(e.to_string()))?;
 
         let buffer = Arc::new(Mutex::new(Buffer::new()));
+        let buffer_space = Arc::new(Condvar::new());
         let alive = Arc::new(AtomicBool::new(true));
         let exit_code = Arc::new(AtomicI32::new(i32::MIN));
         let last_activity = Arc::new(Mutex::new(None));
@@ -396,6 +393,7 @@ impl Manager {
 
         {
             let buffer = Arc::clone(&buffer);
+            let buffer_space = Arc::clone(&buffer_space);
             let alive = Arc::clone(&alive);
             let last_activity = Arc::clone(&last_activity);
             let writer = Arc::clone(&writer);
@@ -404,6 +402,13 @@ impl Manager {
                 // Enough to catch a status request split across two reads.
                 let mut tail: Vec<u8> = Vec::new();
                 loop {
+                    let mut buffered = buffer.lock().unwrap_or_else(PoisonError::into_inner);
+                    while buffered.data.len() >= BUFFER_BYTES && alive.load(Ordering::SeqCst) {
+                        buffered = buffer_space
+                            .wait(buffered)
+                            .unwrap_or_else(PoisonError::into_inner);
+                    }
+                    drop(buffered);
                     match reader.read(&mut chunk) {
                         Ok(0) => break,
                         Ok(n) => {
@@ -424,6 +429,7 @@ impl Manager {
                     }
                 }
                 alive.store(false, Ordering::SeqCst);
+                buffer_space.notify_all();
             });
         }
 
@@ -444,6 +450,7 @@ impl Manager {
         let session = Arc::new(Session {
             info: Mutex::new(info.clone()),
             buffer,
+            buffer_space,
             writer,
             master: Mutex::new(pair.master),
             child: Mutex::new(child),
@@ -451,6 +458,7 @@ impl Manager {
             exit_code,
             last_activity,
             viewers: Mutex::new(HashMap::new()),
+            read_offsets: Mutex::new(HashMap::new()),
         });
 
         Ok((session, info))
@@ -721,6 +729,10 @@ impl Manager {
                 return Ok(());
             }
         }
+        s.read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(viewer);
         Self::apply_agreed_size(&s)
     }
 
@@ -776,11 +788,38 @@ impl Manager {
     /// Output after `offset`. Returns immediately, empty when there is none.
     pub fn read(&self, id: &str, offset: u64) -> Result<Chunk, PtyError> {
         let s = self.get(id)?;
-        let chunk = s
-            .buffer
+        self.read_session(&s, offset)
+    }
+
+    /// Read for a named front end and acknowledge the bytes it has consumed.
+    /// The slowest named reader keeps the shared window, so multiple viewers
+    /// remain lossless while a single viewer can release memory and resume the
+    /// PTY producer after backpressure.
+    pub fn read_for_viewer(&self, id: &str, viewer: &str, offset: u64) -> Result<Chunk, PtyError> {
+        let s = self.get(id)?;
+        s.read_offsets
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .read_from(offset);
+            .insert(viewer.to_string(), offset);
+        let minimum = s
+            .read_offsets
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .copied()
+            .min()
+            .unwrap_or(offset);
+        s.buffer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .discard_before(minimum);
+        self.read_session(&s, offset)
+    }
+
+    fn read_session(&self, s: &Arc<Session>, offset: u64) -> Result<Chunk, PtyError> {
+        let guard = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+        let chunk = guard.read_from(offset);
+        s.buffer_space.notify_all();
         Ok(chunk)
     }
 
@@ -858,6 +897,7 @@ impl Manager {
             .unwrap_or_else(PoisonError::into_inner)
             .kill();
         s.alive.store(false, Ordering::SeqCst);
+        s.buffer_space.notify_all();
         Ok(())
     }
 
@@ -2154,35 +2194,34 @@ mod tests {
     }
 
     #[test]
-    fn a_reader_that_falls_behind_is_told_how_much_it_lost() {
-        // Silently resuming would make a terminal look like the command
-        // produced less output than it did.
+    fn a_full_buffer_is_reported_as_paused_without_loss() {
         let mut b = Buffer::new();
-        let written = BUFFER_BYTES + TRIM_SLACK + 1000;
+        let written = BUFFER_BYTES;
         b.push(&vec![b'a'; written]);
         let chunk = b.read_from(0);
-        // Trimming goes back to the window size, not to the trigger point, so
-        // everything above `BUFFER_BYTES` is gone and is reported.
-        assert_eq!(chunk.dropped, (TRIM_SLACK + 1000) as u64);
+        assert_eq!(chunk.dropped, 0);
         assert_eq!(chunk.bytes.len(), BUFFER_BYTES);
         assert_eq!(chunk.next_offset, written as u64);
+        assert!(chunk.paused);
     }
 
     #[test]
-    fn the_buffer_stays_bounded_without_copying_on_every_push() {
-        // The slack is what makes a fast build cheap: pushes inside it must not
-        // move anything, and the buffer must still never grow without limit.
+    fn the_buffer_can_hold_exactly_the_reader_window() {
         let mut b = Buffer::new();
-        for _ in 0..4096 {
-            b.push(&[b'x'; 8 * 1024]);
-            assert!(
-                b.data.len() <= BUFFER_BYTES + TRIM_SLACK,
-                "buffer grew to {} bytes",
-                b.data.len()
-            );
-        }
-        assert!(b.data.len() >= BUFFER_BYTES, "trimmed below the window");
-        assert_eq!(b.total, 4096 * 8 * 1024);
+        b.push(&[b'x'; BUFFER_BYTES]);
+        assert_eq!(b.data.len(), BUFFER_BYTES);
+        assert_eq!(b.total, BUFFER_BYTES as u64);
+    }
+
+    #[test]
+    fn acknowledging_a_reader_releases_prefix_without_changing_offsets() {
+        let mut b = Buffer::new();
+        b.push(b"0123456789");
+        b.discard_before(4);
+        let chunk = b.read_from(4);
+        assert_eq!(chunk.bytes, b"456789");
+        assert_eq!(chunk.next_offset, 10);
+        assert_eq!(chunk.dropped, 0);
     }
 
     #[test]

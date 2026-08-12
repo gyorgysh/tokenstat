@@ -697,7 +697,7 @@ struct TerminalHost: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if session.exitCode != nil || session.droppedOutput {
+            if session.exitCode != nil || session.droppedOutput || session.outputPaused {
                 statusLine
             }
         }
@@ -717,6 +717,11 @@ struct TerminalHost: View {
                 Text("Some output was lost: the reader fell behind.")
                     .font(.caption)
                     .foregroundStyle(Theme.warning)
+            }
+            if session.outputPaused {
+                Text("Output paused while the terminal catches up.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
         }
