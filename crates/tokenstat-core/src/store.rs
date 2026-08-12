@@ -22,6 +22,9 @@ use crate::watermark::Watermark;
 
 const SCHEMA_VERSION: i64 = 1;
 
+/// Meta key marking that [`Store::relabel_legacy_recovery`] has run.
+const LEGACY_RECOVERY_KEY: &str = "legacy_recovery_relabelled";
+
 /// Length of a Claude-style usage block. A new block starts when activity
 /// resumes after this gap, or when the previous block's window has elapsed.
 pub const BLOCK_DURATION_MS: i64 = 5 * 60 * 60 * 1000;
@@ -1100,6 +1103,38 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Make the recovered rows an older build wrote publishable, once.
+    ///
+    /// Recovery used to be written as `claude_code_estimate` at confidence
+    /// `estimated`, and [`Self::SYNC_ROLLUP_SQL`] refuses `estimated` on
+    /// purpose, so those rows stay on the machine no matter how often the owner
+    /// syncs. That filter is aimed at hand-written history, and these rows are
+    /// not that: this tool derived them from the vendor's own rollup, which is
+    /// exactly what it still does today under the name `claude_code_rollup` at
+    /// confidence `derived`. So they are relabelled to say what they are.
+    ///
+    /// The source name is left alone. [`Self::clear_recovered`] deletes
+    /// `claude_code_rollup` on every scan so the derivation can be recomputed,
+    /// and these rows cannot be recomputed: they cover days the vendor's window
+    /// has long since dropped, which makes them the only surviving record of
+    /// those days. Renaming them into that source would delete them on the next
+    /// scan.
+    ///
+    /// Runs once, guarded by a meta key, so an owner who prefers them unpublished
+    /// can delete them and not have a later scan undo that.
+    pub fn relabel_legacy_recovery(&self) -> Result<u64, CoreError> {
+        if self.meta(LEGACY_RECOVERY_KEY)?.is_some() {
+            return Ok(0);
+        }
+        let n = self.conn.execute(
+            "UPDATE event SET confidence = 'derived'
+              WHERE source = 'claude_code_estimate' AND confidence = 'estimated'",
+            [],
+        )?;
+        self.set_meta(LEGACY_RECOVERY_KEY, "1")?;
+        Ok(n as u64)
+    }
+
     /// Drop recovered rows so a scan can recompute them.
     ///
     /// Recovered events are derived state: the shortfall they represent shrinks
@@ -1551,6 +1586,35 @@ mod tests {
         let (day, month) = s.statusline_snapshot("2023-11-15", "2023-11-01").unwrap();
         assert_eq!(day.output, Some(7));
         assert_eq!(month.output, Some(7));
+    }
+
+    #[test]
+    fn the_legacy_recovery_rows_become_publishable_once() {
+        let s = Store::open_in_memory().unwrap();
+        s.conn
+            .execute(
+                "INSERT INTO event (id, source, ts_ms, local_date, local_hour, model,
+                                    session, project, output, billing, confidence)
+                 VALUES (X'01', 'claude_code_estimate', 0, '2026-06-20', 12, 'claude-opus-4-8',
+                         '', '(recovered)', 5, 'plan', 'estimated'),
+                        (X'02', 'claude_code', 0, '2026-06-27', 12, 'claude-opus-4-8',
+                         '', 'p', 7, 'plan', 'exact')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(s.relabel_legacy_recovery().unwrap(), 1);
+        // Sync refuses `estimated`, so the relabel is what lets the day leave
+        // the machine at all.
+        let rows = s.sync_rollup("2026-06-01", "2026-06-30").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .any(|r| r.src == "claude_code_estimate" && r.conf == "derived"));
+
+        // Once only: an owner who deletes these rows must not get them back,
+        // and a second run must not touch anything else.
+        assert_eq!(s.relabel_legacy_recovery().unwrap(), 0);
     }
 
     #[test]

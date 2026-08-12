@@ -121,6 +121,10 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
         return Ok(report);
     };
 
+    // One-shot, and here rather than in `Store::open` because open must not
+    // write: a statusline would wait behind the lock.
+    store.relabel_legacy_recovery()?;
+
     let marks = store.watermarks()?;
     let mut all_events = Vec::new();
     let mut marks_to_store = Vec::new();
