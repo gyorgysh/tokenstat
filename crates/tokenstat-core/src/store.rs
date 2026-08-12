@@ -1030,19 +1030,21 @@ impl Store {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// Days a vendor said were worked and the archive has no tokens for.
+    /// Days a vendor said were worked and the archive has nothing at all for.
     ///
     /// The honest gap. Activity outlives token counts in the vendor's rollup,
     /// so these are days that provably happened and whose usage no file on this
     /// machine can state. Never guessed at: a caller shows them as unknown.
+    ///
+    /// Deliberately "no events from any tool", not "none from this vendor". A
+    /// day the archive measured through some other harness is already an active
+    /// day and already drawn, and counting it again would inflate the very
+    /// figure this exists to correct.
     pub fn days_active_without_usage(&self, source: &str) -> Result<Vec<String>, CoreError> {
         let mut stmt = self.conn.prepare(
             "SELECT v.day FROM vendor_day v
               WHERE v.source = ? AND v.model = '' AND v.messages > 0
-                AND NOT EXISTS (
-                  SELECT 1 FROM event e
-                   WHERE e.local_date = v.day AND e.source LIKE 'claude_code%'
-                )
+                AND NOT EXISTS (SELECT 1 FROM event e WHERE e.local_date = v.day)
               ORDER BY v.day",
         )?;
         let rows = stmt.query_map([source], |r| r.get::<_, String>(0))?;

@@ -28,6 +28,15 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         return Ok(());
     }
 
+    // Days the archive measured, plus days a vendor recorded work for and
+    // nothing can price. Shown as one number with the split spelled out
+    // underneath: "50" is wrong when 57 days were worked, and "57" alone claims
+    // usage for seven of them that nobody has.
+    let unmeasured_days = store
+        .days_active_without_usage("claude_code")
+        .unwrap_or_default()
+        .len() as u64;
+
     let c = &totals.counters;
     // Split the headline the way the tools themselves do. Cache reads dwarf
     // everything else, often by two orders of magnitude, so folding them into
@@ -41,7 +50,14 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         ("Sessions", ui::exact(totals.sessions)),
         ("Requests", ui::exact(totals.events)),
         ("Input + output", ui::tokens(in_out)),
-        ("Active days", ui::exact(totals.days)),
+        (
+            "Active days",
+            if unmeasured_days > 0 {
+                format!("{}+{}", ui::exact(totals.days), unmeasured_days)
+            } else {
+                ui::exact(totals.days)
+            },
+        ),
     ];
     let mut labels = String::from("  ");
     let mut values = String::from("  ");
@@ -73,8 +89,21 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     if !days.is_empty() {
         println!();
         let pairs = daily_cost(store, q, &prices)?;
-        if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz)) {
+        if let Some(mut cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz)) {
+            let unknown = store
+                .days_active_without_usage("claude_code")
+                .unwrap_or_default();
+            cal.mark_unmeasured(&unknown);
+            let marked = cal.unmeasured_days();
             heat_block(&cal, false);
+            if marked > 0 {
+                println!(
+                    "  {DIM}{} {} worked with no usage on record, drawn {}{DIM:#}",
+                    marked,
+                    if marked == 1 { "day" } else { "days" },
+                    ui::heat_unknown_cell(),
+                );
+            }
         }
     }
 
@@ -211,6 +240,13 @@ fn heat_block(cal: &ui::HeatCalendar, legend: bool) {
         for cell in row {
             match cell {
                 None => line.push_str("  "),
+                Some(c) if c.unmeasured => {
+                    // Its own mark, not level 0. A day off and a day whose
+                    // transcripts were deleted before the first scan both have
+                    // no tokens, and drawing them alike says the second never
+                    // happened.
+                    line.push_str(&format!("{DIM}{}{DIM:#} ", ui::heat_unknown_cell()));
+                }
                 Some(c) => {
                     let s = ui::heat_style(c.level);
                     line.push_str(&format!("{s}{}{s:#} ", ui::heat_cell()));

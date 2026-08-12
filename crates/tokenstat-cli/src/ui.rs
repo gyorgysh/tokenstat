@@ -401,6 +401,14 @@ pub fn heat_cell() -> &'static str {
     if caps().unicode { "■" } else { "#" }
 }
 
+/// The mark for a day that was worked and whose usage is not known.
+///
+/// Hollow on purpose: it reads as "something was here" without claiming a
+/// magnitude, which is exactly what is true about those days.
+pub fn heat_unknown_cell() -> &'static str {
+    if caps().unicode { "□" } else { "?" }
+}
+
 /// Ellipsis used when a cell is truncated.
 pub fn ellipsis() -> &'static str {
     if caps().unicode { "…" } else { ".." }

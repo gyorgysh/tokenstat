@@ -66,6 +66,48 @@ pub struct HeatCell {
     pub value: u64,
     /// Heat level `0..=4`. Level 0 means the day is inside the range but idle.
     pub level: u8,
+    /// The day was worked and its usage is not known.
+    ///
+    /// Distinct from level 0, and the distinction is the whole point: a day off
+    /// and a day whose transcripts were deleted before the first scan both have
+    /// no tokens, and drawing them the same way tells the reader the second one
+    /// did not happen. Set from a vendor's own activity record, which outlives
+    /// its token counts.
+    pub unmeasured: bool,
+}
+
+impl HeatCalendar {
+    /// Mark days that were worked but have no measurable usage.
+    ///
+    /// Applied after building rather than passed in, so every caller that has
+    /// no such list is unaffected and keeps the grid it already drew.
+    pub fn mark_unmeasured(&mut self, dates: &[String]) {
+        use std::collections::HashSet;
+        let want: HashSet<jiff::civil::Date> = dates
+            .iter()
+            .filter_map(|d| d.parse::<jiff::civil::Date>().ok())
+            .collect();
+        if want.is_empty() {
+            return;
+        }
+        for row in &mut self.rows {
+            for cell in row.iter_mut().flatten() {
+                if cell.value == 0 && want.contains(&cell.date) {
+                    cell.unmeasured = true;
+                }
+            }
+        }
+    }
+
+    /// How many days in this grid were worked without a usable measurement.
+    pub fn unmeasured_days(&self) -> usize {
+        self.rows
+            .iter()
+            .flatten()
+            .flatten()
+            .filter(|c| c.unmeasured)
+            .count()
+    }
 }
 
 /// A calendar-aligned activity grid, newest week last.
@@ -169,6 +211,7 @@ pub fn calendar(
             date,
             value,
             level: scale.level(value),
+            unmeasured: false,
         };
         if value > 0 {
             total += value;
