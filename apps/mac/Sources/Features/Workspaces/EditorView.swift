@@ -38,7 +38,13 @@ struct EditorView: View {
                 loading
             }
             #else
-            loading
+            if let document = model.document(for: path, in: folder.id) {
+                IOSCodeTextView(document: document)
+                    .background(Theme.background)
+                mobileStatusLine(document)
+            } else {
+                loading
+            }
             #endif
         }
         .background(Theme.background)
@@ -99,6 +105,44 @@ struct EditorView: View {
             }
             .disabled(!document.isDirty)
             .keyboardShortcut("s")
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.s)
+        .background(Theme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+    #endif
+
+    #if !os(macOS)
+    private func mobileStatusLine(_ document: EditorDocument) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Text(path)
+                .font(ClientType.caption.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.head)
+
+            if document.isDirty {
+                Label("Unsaved", systemImage: "circle.fill")
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.warning)
+            }
+
+            if let note = document.highlightNote {
+                Text(note)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer()
+            Button("Save") {
+                Task { await model.saveText(path, in: folder.id) }
+            }
+            .disabled(!document.isDirty)
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
