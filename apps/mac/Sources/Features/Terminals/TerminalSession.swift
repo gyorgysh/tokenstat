@@ -251,41 +251,31 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// visible and costs a bridge round trip per session per read, which is
     /// what saturated the socket pool and made a launch click wait.
     private static let minPollDelay = 16
-    /// The floor for a session nobody is looking at. Still far faster than the
+    /// The floor for a session that is not on screen. Still far faster than the
     /// host's buffer fills, so no output is lost. Raised from 150 so several
     /// idle agents do not saturate the 16-connection socket pool.
     private static let backgroundPollDelay = 200
-    /// While the app is not active, every session must still drain the host.
-    /// 200 ms left a full-screen game filling the 512 KB ring; 50 ms keeps
-    /// several buried sessions ahead of a printing agent without matching
-    /// the focused floor.
-    private static let inactivePollDelay = 50
     private static let maxPollDelay = 400
-    /// Short hold for buried sessions: enough that an idle agent costs a
-    /// handful of round trips a second, short enough that a covered app still
-    /// drains when something wakes up.
-    private static let inactiveReadHold = 100
 
     /// The fastest this session polls right now.
     ///
-    /// While the app is buried under a full-screen game every live session
-    /// must still drain the host, so the background floor is much tighter
-    /// than when the user is simply looking at another tab inside the app.
+    /// Only which session is *on screen* decides this. Whether the app is the
+    /// frontmost one deliberately does not: a window sitting beside the editor
+    /// the user is actually typing in is being watched, and a terminal that
+    /// stops updating whenever focus moves elsewhere is useless for watching a
+    /// build.
     private var pollFloor: Int {
-        if isFocused { return Self.minPollDelay }
-        if !appIsActive { return Self.inactivePollDelay }
-        return Self.backgroundPollDelay
+        isFocused ? Self.minPollDelay : Self.backgroundPollDelay
     }
 
     /// How long the host may hold a read for this session right now.
     ///
-    /// Focused sessions always hold. While the app itself is inactive every
-    /// session holds briefly too: without that, a background agent under
-    /// Godot only gets a poll every 200 ms and the 512 KB host ring fills.
+    /// The on-screen session always holds, so its loop is paced by the host
+    /// answering rather than by a delay this side invented. Sessions nobody can
+    /// see do not hold a connection: the pool is 16 wide and shared with
+    /// launches and liveness calls.
     private var readWaitMs: Int {
-        if isFocused { return Self.readHold }
-        if !appIsActive { return Self.inactiveReadHold }
-        return 0
+        isFocused ? Self.readHold : 0
     }
     /// Milliseconds of polling since the last liveness check.
     private var sinceInfo = 0
@@ -525,11 +515,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         guard pollTask == nil else { return }
         // Detached on purpose. The class is a MainActor class, so a plain
         // `Task` would park every read on the actor that also parses and
-        // draws. After a full-screen game that actor is busy for a long time,
-        // and a poll that waits on it cannot drain the host, so the 512 KB
-        // ring fills and the return is a dead terminal. Reading off the actor
-        // and only hopping on for feed keeps the host empty while the screen
-        // catches up.
+        // draws. Under a heavy stream that actor is busy, and a poll that waits
+        // on it cannot drain the host, so the 512 KB ring fills and output is
+        // lost. Reading off the actor and only hopping on for feed keeps the
+        // host empty whatever the screen is doing.
         pollTask = Task.detached(priority: .userInitiated) { [weak self] in
             await self?.poll(id: bridgeID)
         }
@@ -610,7 +599,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             offset: offset,
             waitMs: readWaitMs,
             floor: pollFloor,
-            focused: isFocused || !appIsActive,
+            focused: isFocused,
             hot: Date() < hotUntil,
             delay: pollDelay
         )
@@ -647,10 +636,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             // Output is flowing, so stay at the floor: this is where
             // typing latency comes from.
             pollDelay = plan.floor
-            // Queue, do not await the feed. Awaiting put the next host read
-            // behind the parse budget and was the "return from Godot, terminal
-            // is dead" path: the ring filled while the view was still catching
-            // up. Accept kicks a pump that runs beside the poll loop.
+            // Queue, do not await the feed. Awaiting puts the next host read
+            // behind the parse budget, and then the ring fills while the view
+            // is still catching up on what it already has. Accept kicks a pump
+            // that runs beside the poll loop.
             acceptBytes(chunk.bytes)
         } else if plan.hot {
             // Nothing came back yet, but somebody is typing or just returned.
@@ -720,10 +709,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             }
         }
 
-        // Focused (or app-inactive drain) sessions never sleep between reads
-        // except when the host answered an empty held read immediately.
-        let drainingHard = isFocused || !appIsActive
-        if !drainingHard {
+        // The on-screen session never sleeps between reads except when the host
+        // answered an empty held read immediately. The held read is the pacing.
+        if !isFocused {
             return pollDelay
         }
         if unheld {
@@ -734,38 +722,43 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         return 0
     }
 
-    /// Whether the app is frontmost enough that drawing the emulator is
-    /// useful. Set by `TerminalsModel` from activation notifications.
-    ///
-    /// While a full-screen game owns the screen this is false: the poll still
-    /// drains the host into `pendingFeed` so the 512 KB ring does not drop,
-    /// but main-thread parse work is deferred until somebody can see it.
-    @ObservationIgnored var appIsActive = true
-
     /// Bytes read from the host that have not been fed into SwiftTerm yet.
-    /// Only grows while the app is inactive, or while a catch-up pump is still
-    /// chewing through a backlog after return.
+    ///
+    /// A queue, not a gate. Output is always on its way to the emulator; this
+    /// only exists so the poll loop never waits on main-thread parse work, and
+    /// it drains as fast as the frame budget allows. Nothing about the app's
+    /// activation state can stop it, which is the whole point: a terminal that
+    /// stops painting when the user clicks another window is not a tool you can
+    /// watch a build in.
     @ObservationIgnored private var pendingFeed = Data()
     /// Cap on deferred bytes. Above this the oldest pending output is dropped
     /// the same way the host ring trims, and `droppedOutput` is set.
     private static let maxPendingFeed = 2 * 1024 * 1024
     /// True while `pumpFeed` is on the main actor eating `pendingFeed`.
     @ObservationIgnored private var feedInFlight = false
-    /// Until this date, feed uses the catch-up budget so a return from a
-    /// full-screen game clears the backlog instead of crawling at the normal
-    /// 60 % frame share.
-    @ObservationIgnored private var catchUpUntil = Date.distantPast
 
+    /// Behind enough that clearing the backlog matters more than leaving the
+    /// frame roomy.
+    ///
+    /// Measured from the backlog itself rather than from a clock. A window of
+    /// "catch up hard until this date" is a guess about how far behind the
+    /// terminal is, and it is wrong in both directions: it keeps spending 90%
+    /// of the frame after the backlog is gone, and it expires while a big one
+    /// is still draining.
     private var isCatchingUp: Bool {
-        Date() < catchUpUntil || !pendingFeed.isEmpty
+        pendingFeed.count >= Self.catchUpBacklog
     }
+
+    /// One catch-up slice. Under this the normal budget clears the queue inside
+    /// a frame or two anyway.
+    private static let catchUpBacklog = feedSliceCatchUp
 
     /// Queue host output for the emulator without waiting for it to parse.
     ///
-    /// The poll loop must not await feed: that serialised host drain behind
-    /// main-thread parse and is why a terminal under Godot came back empty or
-    /// minutes behind. Accept is cheap; `pumpFeed` does the real work beside
-    /// the next read.
+    /// The poll loop must not await feed: that serialises the host drain behind
+    /// main-thread parse, and a terminal that cannot drain loses the middle of
+    /// its output. Accept is cheap; `pumpFeed` does the real work beside the
+    /// next read.
     private func acceptBytes(_ bytes: Data) {
         guard !bytes.isEmpty else { return }
         if !hasOutput { hasOutput = true }
@@ -774,18 +767,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             if state != .working { state = .working }
             ensureIdleCheck()
         }
-        if appIsActive, pendingFeed.isEmpty, !feedInFlight, !isCatchingUp {
-            // Fast path when we are live and caught up: feed immediately in a
-            // task so the caller (poll) can schedule the next read.
-            pendingFeed.append(bytes)
-            Task { await pumpFeed() }
-            return
-        }
         pendingFeed.append(bytes)
         trimPendingFeed()
-        if appIsActive {
-            Task { await pumpFeed() }
-        }
+        // Unconditional. The pump returns at once when one is already running,
+        // so this costs a task and nothing else, and there is no state in which
+        // bytes sit in the queue with nobody coming for them.
+        Task { await pumpFeed() }
     }
 
     private func trimPendingFeed() {
@@ -795,12 +782,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         if !droppedOutput { droppedOutput = true }
     }
 
-    /// Feed whatever is queued, as long as the app is active.
+    /// Feed whatever is queued, until there is nothing left.
     private func pumpFeed() async {
         guard !feedInFlight else { return }
         feedInFlight = true
         defer { feedInFlight = false }
-        while appIsActive, !pendingFeed.isEmpty {
+        while !pendingFeed.isEmpty {
             let sliceSize = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
             let take = min(sliceSize, pendingFeed.count)
             let slice = pendingFeed.prefix(take)
@@ -851,9 +838,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// loop. Around 2 ms of parsing at the worst rate measured, which is under
     /// a display frame and far under anything a person feels as a stuck key.
     private static let feedSlice = 24 * 1024
-    /// Larger slices while catching up after the app was buried: the user is
-    /// staring at a backlog, not typing into a live stream, and smaller slices
-    /// just lengthen the crawl.
+    /// Larger slices while a real backlog is queued: the user is staring at
+    /// output that is already behind, not typing into a live stream, and
+    /// smaller slices just lengthen the crawl.
     private static let feedSliceCatchUp = 64 * 1024
 
     /// One display frame on this Mac's main screen, so the pacing below is a
@@ -877,8 +864,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// instead of a by-product: the emulator gets most of the frame, the run
     /// loop always gets the rest.
     private static let frameBudget: Duration = frameInterval * 0.6
-    /// Catch-up after a full-screen game: give the emulator most of the frame
-    /// so the backlog clears, still leave a slice for keystrokes and chrome.
+    /// Clearing a backlog: give the emulator most of the frame so it catches
+    /// up, still leave a slice for keystrokes and chrome.
     private static let frameBudgetCatchUp: Duration = frameInterval * 0.9
 
     /// When the current frame's parse budget started counting.
@@ -1046,39 +1033,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         endNap()
     }
 
-    /// The user is back: the app was activated, or the window came out from
-    /// behind something.
-    ///
-    /// The read loop already wakes when a session gains focus inside the app,
-    /// but nothing told it about the window itself. Coming back from a
-    /// full-screen game is the sharp case: host output was queued into
-    /// `pendingFeed` without painting, and this kicks catch-up so the backlog
-    /// clears at most of each frame instead of the normal 60 % crawl.
-    func resume() {
-        guard !isPending, exitCode == nil else { return }
-        appIsActive = true
-        wake()
-        // Longer than a keystroke's window. A return from Godot can leave
-        // megabytes to paint; two seconds was not enough and the loop dropped
-        // back to the normal budget mid-catch-up.
-        let until = Date().addingTimeInterval(Self.returnWindow)
-        hotUntil = until
-        catchUpUntil = until
-        // The pacing counters are stale by however long the app was away, and
-        // a stale frame start would spend the first slice's budget on a frame
-        // that ended minutes ago.
-        frameOpenedAt = ContinuousClock.now
-        spentThisFrame = .zero
-        Task { await pumpFeed() }
-    }
-
-    /// The app is no longer frontmost. Keep draining the host into
-    /// `pendingFeed`, but stop spending main-thread time on an emulator nobody
-    /// can see.
-    func noteAppInactive() {
-        appIsActive = false
-    }
-
     /// While this is in the future the poll stays at its floor, whatever the
     /// reads return.
     private var hotUntil = Date.distantPast
@@ -1086,9 +1040,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// bridge round trip and the process, short enough that a session nobody
     /// is typing in goes quiet again immediately.
     private static let hotWindow: TimeInterval = 0.4
-    /// Coming back from another app, especially a full-screen game. Long
-    /// enough to clear a multi-megabyte deferred backlog at catch-up pace.
-    private static let returnWindow: TimeInterval = 12
     /// Under this, an empty read did not wait: the host answered at once, so
     /// it has no `waitMs` to hold the call with.
     private static let heldFloor: Duration = .milliseconds(readHold / 4)

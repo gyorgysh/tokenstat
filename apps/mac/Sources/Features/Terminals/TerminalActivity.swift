@@ -25,6 +25,13 @@ import Foundation
 /// `userInitiatedAllowingIdleSystemSleep` still leaves the Mac free to sleep
 /// when nobody is at it, so a terminal is not why a laptop stays awake in a bag.
 ///
+/// This assertion is the whole background story now. The app used to track its
+/// own activation and stand down when it was not frontmost, which was wrong
+/// twice over: a window beside the editor is being watched even though the app
+/// is not in front, and the state got stuck off, so a terminal stayed frozen
+/// until something happened to a window. Held while a session runs, dropped
+/// when it exits, and never conditional on who is in front.
+///
 /// Reference counted, because the assertion belongs to "some session is
 /// running" rather than to whichever session started first.
 @MainActor
