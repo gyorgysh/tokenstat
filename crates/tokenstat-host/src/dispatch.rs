@@ -1768,9 +1768,18 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 return answer;
             }
             pty_id(params).and_then(|p| {
-                let info = tokenstat_pty::manager()
-                    .info(&p.id)
-                    .map_err(|e| e.to_string())?;
+                let manager = tokenstat_pty::manager();
+                // Also a lease refresh, and for one caller it is the only one.
+                // A Mac showing another machine's terminal has its `pty.read`
+                // answered from a locally pushed cache, so those reads never
+                // reach the machine that owns the pty and cannot say anybody is
+                // still watching. Liveness polling does reach it, so without
+                // this that viewer expires every fifteen seconds and the
+                // terminal's width flaps between the two machines.
+                if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
+                    let _ = manager.touch_viewer(&p.id, viewer);
+                }
+                let info = manager.info(&p.id).map_err(|e| e.to_string())?;
                 let mut value = serde_json::to_value(info).map_err(|e| e.to_string())?;
                 add_activity(&mut value);
                 Ok(value)

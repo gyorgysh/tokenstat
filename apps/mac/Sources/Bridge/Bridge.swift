@@ -1008,10 +1008,15 @@ extension Bridge {
         try await background("pty.list", patience: Patience.interactive, as: [PtySessionInfo].self)
     }
 
+    /// Liveness, size and activity for one session.
+    ///
+    /// Carries the viewer id because for a session owned by another machine
+    /// this is the only call that reaches the owner: reads there are answered
+    /// from a locally pushed cache. See `TerminalViewer`.
     static func ptyInfo(id: String) async throws -> PtySessionInfo {
         try await background(
             "pty.info",
-            ["id": id],
+            ["id": id, "viewer": TerminalViewer.id],
             patience: Patience.interactive,
             as: PtySessionInfo.self
         )

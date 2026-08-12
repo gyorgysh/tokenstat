@@ -708,7 +708,13 @@ impl Manager {
     /// immediate, so closing a session on the phone puts the Mac back at once
     /// instead of a quarter of a minute later.
     pub fn drop_viewer(&self, id: &str, viewer: &str) -> Result<(), PtyError> {
-        let s = self.get(id)?;
+        // A session that is already gone has nothing to give back, and closing
+        // one is exactly when this is called: the front end closes the pty and
+        // then tears its own session down, in that order. Erroring there would
+        // make the ordinary path report a failure that means nothing.
+        let Ok(s) = self.get(id) else {
+            return Ok(());
+        };
         {
             let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
             if viewers.remove(viewer).is_none() {

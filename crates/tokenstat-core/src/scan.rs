@@ -139,13 +139,29 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
+            // How the numbers in this file are read, not what is in it.
+            //
+            // The recovered rows are derived, so a fix to the derivation makes
+            // every row already in the archive wrong, and the watermark cannot
+            // see that: the file has not changed, only our reading of it. A
+            // version stamped in the archive is what lets a corrected build
+            // rebuild rows an older one got wrong, instead of leaving them
+            // until Claude Code happens to touch the file again.
+            //
+            // Bump this whenever `claude_stats::backfill_events` changes what
+            // it would produce from the same input.
+            const RECOVERY_LOGIC_VERSION: &str = "2";
+            let recovery_stale = store.meta("claude_rollup_logic").ok().flatten().as_deref()
+                != Some(RECOVERY_LOGIC_VERSION);
             let stats_unchanged = watermark::classify(stats_prev, stats_size, stats_mtime)
-                == watermark::Change::Unchanged;
+                == watermark::Change::Unchanged
+                && !recovery_stale;
             if !stats_unchanged {
                 if let Ok(contents) = std::fs::read_to_string(&stats_path) {
                     if let Some(stats) = claude_stats::parse(&contents) {
                         let daily = claude_stats::daily_model_tokens(&contents);
                         store.clear_recovered()?;
+                        store.set_meta("claude_rollup_logic", RECOVERY_LOGIC_VERSION)?;
                         let have = store.archive_by_date_model()?;
                         let events = claude_stats::backfill_events(&stats, &daily, &have, tz);
                         report.days_recovered = events

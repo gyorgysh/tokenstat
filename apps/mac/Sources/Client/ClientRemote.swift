@@ -60,7 +60,12 @@ enum ClientRemote {
     }
 
     static func ptyInfo(peer: String, id: String) async throws -> PtySessionInfo {
-        try await Bridge.onPeer(peer, "pty.info", ["id": id], as: PtySessionInfo.self)
+        try await Bridge.onPeer(
+            peer,
+            "pty.info",
+            ["id": id, "viewer": TerminalViewer.id],
+            as: PtySessionInfo.self
+        )
     }
 
     static func ptyRead(
