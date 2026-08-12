@@ -72,7 +72,7 @@ enum ClientRemote {
         try await Bridge.onPeer(
             peer,
             "pty.read",
-            ["id": id, "offset": offset, "waitMs": waitMs],
+            ["id": id, "offset": offset, "waitMs": waitMs, "viewer": TerminalViewer.id],
             as: PtyChunk.self
         )
     }
@@ -87,12 +87,34 @@ enum ClientRemote {
         )
     }
 
-    static func ptyResize(peer: String, id: String, rows: Int, cols: Int) async throws {
-        struct Ack: Codable, Sendable { let rows: Int; let cols: Int }
-        _ = try await Bridge.onPeer(
+    /// Say what this phone can show, and get back what the session became.
+    ///
+    /// The Mac that owns the session is usually watching it too, so the answer
+    /// is the smaller of the two geometries. Sending the ask rather than a
+    /// command is what stops the Mac being left narrow after the phone closes.
+    /// See `TerminalViewer`.
+    @discardableResult
+    static func ptyResize(
+        peer: String,
+        id: String,
+        rows: Int,
+        cols: Int
+    ) async throws -> PtySizeAck {
+        try await Bridge.onPeer(
             peer,
             "pty.resize",
-            ["id": id, "rows": rows, "cols": cols],
+            ["id": id, "rows": rows, "cols": cols, "viewer": TerminalViewer.id],
+            as: PtySizeAck.self
+        )
+    }
+
+    /// Stop showing a session without stopping the process on the Mac.
+    static func ptyDetach(peer: String, id: String) async throws {
+        struct Ack: Codable, Sendable { let detached: Bool }
+        _ = try await Bridge.onPeer(
+            peer,
+            "pty.detach",
+            ["id": id, "viewer": TerminalViewer.id],
             as: Ack.self
         )
     }

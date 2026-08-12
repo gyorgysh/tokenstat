@@ -95,6 +95,15 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     func stop() {
         removed = true
+        // The reported bug, from this end: closing a session here used to leave
+        // the Mac's own terminal clamped to the phone's width. Giving up the
+        // claim puts it straight back. Fire and forget: the host expires the
+        // claim on its own, and closing a screen must not wait on the tunnel.
+        if !isPending, !hostID.isEmpty {
+            let id = hostID
+            let peer = peer
+            Task.detached { try? await ClientRemote.ptyDetach(peer: peer, id: id) }
+        }
         pollTask?.cancel()
         pollTask = nil
         writerTask?.cancel()
@@ -219,12 +228,20 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         Task { @MainActor in
             guard newCols > 0, newRows > 0 else { return }
-            if cols == newCols, rows == newRows { return }
-            cols = newCols
-            rows = newRows
+            // Against what was last announced, not against `rows`/`cols`. Those
+            // are the host's answer, and the host's answer is the *agreed* size
+            // across every viewer, which on a phone attached to a wider Mac is
+            // smaller than this screen. Comparing against it would suppress the
+            // announcement of the phone's real width, and the pty would keep
+            // wrapping to a geometry this screen cannot show.
+            if announced?.rows == newRows, announced?.cols == newCols { return }
+            announced = (rows: newRows, cols: newCols)
             eventStream.continuation.yield(.resize(rows: newRows, cols: newCols))
         }
     }
+
+    /// What this screen last told the host it can show.
+    @ObservationIgnored private var announced: (rows: Int, cols: Int)?
 
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
 

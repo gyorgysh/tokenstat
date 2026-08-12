@@ -197,7 +197,36 @@ struct Session {
     alive: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
     last_activity: Arc<Mutex<Option<u64>>>,
+    /// Front ends currently showing this session, by opaque client id.
+    viewers: Mutex<HashMap<String, Viewer>>,
 }
+
+/// One front end showing a session, and the geometry it can display.
+///
+/// A pty has exactly one size, so two front ends of different shapes cannot
+/// each get their own. The size that works for both is the smaller one in each
+/// axis: the program then wraps inside what the phone can show, and the Mac
+/// draws that same content in part of a wider view, which is correct rather
+/// than merely tolerable. A pty sized to the Mac and shown on a phone is not,
+/// because the wrap points land off the side of the screen.
+#[derive(Debug, Clone, Copy)]
+struct Viewer {
+    rows: u16,
+    cols: u16,
+    /// Last time this viewer was heard from. A front end that is killed, loses
+    /// its network, or is swiped away never says goodbye, and a viewer that
+    /// nobody can see must not keep the terminal small forever.
+    seen_ms: u64,
+}
+
+/// How long a viewer counts without being heard from.
+///
+/// Every front end polls this session for output far more often than this, so
+/// a live viewer refreshes many times over inside the window. It only decides
+/// how long a *dead* one keeps constraining the size, and the explicit detach
+/// on close is what handles the ordinary case, so this can be generous without
+/// anybody waiting on it.
+const VIEWER_TTL_MS: u64 = 15_000;
 
 /// Epoch milliseconds, for activity timestamps.
 fn now_ms() -> u64 {
@@ -421,6 +450,7 @@ impl Manager {
             alive,
             exit_code,
             last_activity,
+            viewers: Mutex::new(HashMap::new()),
         });
 
         Ok((session, info))
@@ -619,6 +649,107 @@ impl Manager {
     /// Tell the program its window changed, so it redraws at the new size.
     pub fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<(), PtyError> {
         let s = self.get(id)?;
+        Self::apply_size(&s, rows, cols)
+    }
+
+    /// Resize on behalf of one named front end.
+    ///
+    /// The session is then set to the largest geometry every live viewer can
+    /// show, which is the smallest one in each axis. This is what makes a phone
+    /// and a Mac watching the same terminal both correct at once, and it is
+    /// also what puts the Mac back to its own size the moment the phone lets
+    /// go: the constraint leaves with the viewer that imposed it.
+    pub fn resize_viewer(
+        &self,
+        id: &str,
+        viewer: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<(), PtyError> {
+        let s = self.get(id)?;
+        {
+            let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+            viewers.insert(
+                viewer.to_string(),
+                Viewer {
+                    rows: rows.max(1),
+                    cols: cols.max(1),
+                    seen_ms: now_ms(),
+                },
+            );
+        }
+        Self::apply_agreed_size(&s)
+    }
+
+    /// Note that a viewer is still watching, and re-apply the agreed size if
+    /// another viewer has since expired or let go.
+    ///
+    /// Called from the read path, which every front end drives continuously, so
+    /// a viewer's lease is refreshed by the act of watching rather than by
+    /// anything it has to remember to send.
+    pub fn touch_viewer(&self, id: &str, viewer: &str) -> Result<(), PtyError> {
+        let s = self.get(id)?;
+        {
+            let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+            // Only a viewer that has declared a geometry counts. A front end
+            // that never resizes never constrains anything, which keeps an
+            // older client exactly as it was.
+            let Some(entry) = viewers.get_mut(viewer) else {
+                return Ok(());
+            };
+            entry.seen_ms = now_ms();
+        }
+        Self::apply_agreed_size(&s)
+    }
+
+    /// A front end has stopped showing this session.
+    ///
+    /// The TTL would get here on its own; this is what makes the ordinary case
+    /// immediate, so closing a session on the phone puts the Mac back at once
+    /// instead of a quarter of a minute later.
+    pub fn drop_viewer(&self, id: &str, viewer: &str) -> Result<(), PtyError> {
+        let s = self.get(id)?;
+        {
+            let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+            if viewers.remove(viewer).is_none() {
+                return Ok(());
+            }
+        }
+        Self::apply_agreed_size(&s)
+    }
+
+    /// Set the session to the smallest geometry any live viewer needs.
+    ///
+    /// Expired viewers are pruned here rather than on a timer: every path that
+    /// could change the answer already comes through this function.
+    fn apply_agreed_size(s: &Arc<Session>) -> Result<(), PtyError> {
+        let agreed = {
+            let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = now_ms();
+            viewers.retain(|_, v| now.saturating_sub(v.seen_ms) < VIEWER_TTL_MS);
+            viewers
+                .values()
+                .fold(None::<(u16, u16)>, |acc, v| match acc {
+                    None => Some((v.rows, v.cols)),
+                    Some((r, c)) => Some((r.min(v.rows), c.min(v.cols))),
+                })
+        };
+        // Nobody is watching. Leave the size alone: there is no geometry that
+        // is more right than the last one, and resizing a terminal nothing is
+        // showing would only make the program redraw for no reader.
+        let Some((rows, cols)) = agreed else {
+            return Ok(());
+        };
+        {
+            let info = s.info.lock().unwrap_or_else(PoisonError::into_inner);
+            if info.rows == rows && info.cols == cols {
+                return Ok(());
+            }
+        }
+        Self::apply_size(s, rows, cols)
+    }
+
+    fn apply_size(s: &Arc<Session>, rows: u16, cols: u16) -> Result<(), PtyError> {
         let size = PtySize {
             rows: rows.max(1),
             cols: cols.max(1),
@@ -1764,6 +1895,135 @@ mod tests {
     /// A script that stays busy for roughly a minute without needing input.
     fn stay_busy(m: &Manager) -> SessionInfo {
         spawn(m, "sleep 60", "ping -n 61 127.0.0.1 > nul")
+    }
+
+    // --- viewer-scoped sizing -----------------------------------------------
+    //
+    // A pty has one size and can have two front ends. These pin the rule that
+    // makes a phone and a Mac watching the same session both correct: the
+    // session is the smallest geometry any live viewer can show, and a viewer
+    // that leaves takes its constraint with it.
+
+    #[test]
+    fn one_viewer_gets_exactly_what_it_asked_for() {
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("resize");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (50, 200));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn two_viewers_agree_on_the_smaller_of_each_axis() {
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        let info = m.info(&s.id).expect("info");
+        // Not the phone's rows and not the Mac's cols: each axis is decided on
+        // its own, so nothing a program prints can run off either screen.
+        assert_eq!((info.rows, info.cols), (40, 60));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn the_agreement_holds_whichever_order_they_arrive_in() {
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (40, 60));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn a_viewer_that_detaches_takes_its_constraint_with_it() {
+        // The reported bug: the phone shrank the Mac's terminal and closing it
+        // left the Mac small.
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        m.drop_viewer(&s.id, "phone").expect("detach");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (50, 200));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn the_last_viewer_leaving_keeps_the_size_it_left_behind() {
+        // Nothing is showing the session, so no geometry is more right than
+        // another and resizing would make the program redraw for no reader.
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        m.drop_viewer(&s.id, "phone").expect("detach");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (40, 60));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn a_silent_viewer_expires_and_stops_constraining() {
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        // A front end that was killed or lost its network never detaches.
+        {
+            let session = m.get(&s.id).expect("session");
+            let mut viewers = session
+                .viewers
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let phone = viewers.get_mut("phone").expect("phone viewer");
+            phone.seen_ms = now_ms().saturating_sub(VIEWER_TTL_MS + 1);
+        }
+        // Any call that could change the answer prunes; the Mac's own poll is
+        // what gets there first in practice.
+        m.touch_viewer(&s.id, "mac").expect("touch");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (50, 200));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn touching_an_unknown_viewer_changes_nothing() {
+        // An older front end never sends a viewer id, so it must not be able to
+        // register itself with no geometry and pin the session to nothing.
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        m.touch_viewer(&s.id, "stranger").expect("touch");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (40, 60));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn a_viewerless_resize_still_sets_the_size_outright() {
+        // The old client path, kept working on purpose.
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize(&s.id, 30, 100).expect("resize");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (30, 100));
+        let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn a_viewer_that_grows_releases_the_session_again() {
+        // Rotating the phone to landscape, or the Mac window widening.
+        let m = Manager::new();
+        let s = stay_busy(&m);
+        m.resize_viewer(&s.id, "mac", 50, 200).expect("mac");
+        m.resize_viewer(&s.id, "phone", 40, 60).expect("phone");
+        m.resize_viewer(&s.id, "phone", 45, 120).expect("rotate");
+        let info = m.info(&s.id).expect("info");
+        assert_eq!((info.rows, info.cols), (45, 120));
+        let _ = m.kill(&s.id);
     }
 
     #[test]

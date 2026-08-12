@@ -295,6 +295,17 @@ struct PtyIdParams {
     /// delay left.
     #[serde(default)]
     wait_ms: Option<u64>,
+    /// Opaque id for the front end making the call, stable while it is showing
+    /// the session.
+    ///
+    /// A pty has one size and can have two front ends, so `pty.resize` states
+    /// what *this* viewer can show rather than what the session must become,
+    /// and the host sizes the session to suit every viewer at once. `pty.read`
+    /// carries it to keep the viewer's lease alive, and `pty.detach` gives it
+    /// up. Absent means an older client, which resizes the session outright
+    /// exactly as before.
+    #[serde(default)]
+    viewer: Option<String>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1789,6 +1800,14 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             }
             pty_id(params).and_then(|p| {
                 let manager = tokenstat_pty::manager();
+                // Watching is what keeps a viewer's lease alive, so the size
+                // agreement needs nothing the client has to remember to send.
+                // Before the hold, not after: a held read can park for a
+                // quarter second, and a lease that only refreshed on the way
+                // out would be that much staler for no reason.
+                if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
+                    let _ = manager.touch_viewer(&p.id, viewer);
+                }
                 let mut chunk = manager.read(&p.id, p.offset).map_err(|e| e.to_string())?;
                 // Hold the call open until there is something to say, or the
                 // caller's patience runs out. Capped so a connection is never
@@ -1853,10 +1872,40 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                     (Some(r), Some(c)) => (r, c),
                     _ => return Err("pty.resize needs rows and cols".into()),
                 };
-                tokenstat_pty::manager()
-                    .resize(&p.id, rows, cols)
-                    .map_err(|e| e.to_string())?;
-                Ok(json!({"rows": rows, "cols": cols}))
+                let manager = tokenstat_pty::manager();
+                match p.viewer.as_deref() {
+                    Some(viewer) if !viewer.is_empty() => manager
+                        .resize_viewer(&p.id, viewer, rows, cols)
+                        .map_err(|e| e.to_string())?,
+                    _ => manager
+                        .resize(&p.id, rows, cols)
+                        .map_err(|e| e.to_string())?,
+                }
+                // What the session actually became, which is not what was asked
+                // for when a smaller viewer is also attached. The caller needs
+                // the real answer: it draws that geometry.
+                let info = manager.info(&p.id).map_err(|e| e.to_string())?;
+                Ok(json!({"rows": info.rows, "cols": info.cols}))
+            })
+        }
+
+        // A front end has stopped showing a session, without killing it.
+        //
+        // Only the size agreement cares. The lease would expire on its own, so
+        // this is not what makes the feature correct, it is what makes it feel
+        // immediate: close a session on the phone and the Mac is back to its
+        // own width before the animation finishes.
+        "pty.detach" => {
+            if let Some(answer) = route_remote_pty("pty.detach", params) {
+                return answer;
+            }
+            pty_id(params).and_then(|p| {
+                if let Some(viewer) = p.viewer.as_deref().filter(|v| !v.is_empty()) {
+                    tokenstat_pty::manager()
+                        .drop_viewer(&p.id, viewer)
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(json!({"detached": true}))
             })
         }
 
@@ -2431,6 +2480,7 @@ mod tests {
             "pty.read",
             "pty.write",
             "pty.resize",
+            "pty.detach",
             "pty.kill",
             "pty.close",
             // The editor re-highlights on a keystroke debounce, so it is on the

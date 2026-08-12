@@ -1029,7 +1029,7 @@ extension Bridge {
     static func ptyRead(id: String, offset: UInt64, waitMs: Int = 0) async throws -> PtyChunk {
         try await background(
             "pty.read",
-            ["id": id, "offset": offset, "waitMs": waitMs],
+            ["id": id, "offset": offset, "waitMs": waitMs, "viewer": TerminalViewer.id],
             patience: Patience.interactive,
             as: PtyChunk.self
         )
@@ -1045,12 +1045,32 @@ extension Bridge {
         )
     }
 
-    static func ptyResize(id: String, rows: Int, cols: Int) async throws {
-        _ = try await background(
+    /// Say what this front end can show, and get back what the session became.
+    ///
+    /// Not the same thing when a phone is watching the same session: the host
+    /// sizes it to suit every viewer, so the answer can be smaller than the ask.
+    /// See `TerminalViewer`.
+    @discardableResult
+    static func ptyResize(id: String, rows: Int, cols: Int) async throws -> PtySizeAck {
+        try await background(
             "pty.resize",
-            ["id": id, "rows": rows, "cols": cols],
+            ["id": id, "rows": rows, "cols": cols, "viewer": TerminalViewer.id],
             patience: Patience.interactive,
             as: PtySizeAck.self
+        )
+    }
+
+    /// Stop showing a session without stopping the process.
+    ///
+    /// Gives up this front end's claim on the size so the others get their own
+    /// back at once. The host expires the claim on its own if this never
+    /// arrives, so it is a courtesy rather than a requirement.
+    static func ptyDetach(id: String) async throws {
+        _ = try await background(
+            "pty.detach",
+            ["id": id, "viewer": TerminalViewer.id],
+            patience: Patience.interactive,
+            as: PtyDetachAck.self
         )
     }
 
@@ -1190,7 +1210,10 @@ private extension Automation {
 }
 
 private struct PtyWriteAck: Codable, Sendable { let written: Int }
-private struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }
+/// What the session actually became. Not always what was asked for: see
+/// `TerminalViewer`.
+struct PtySizeAck: Codable, Sendable { let rows: Int; let cols: Int }
+private struct PtyDetachAck: Codable, Sendable { let detached: Bool }
 
 // MARK: - Machines
 

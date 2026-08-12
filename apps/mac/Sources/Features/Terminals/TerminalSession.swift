@@ -141,7 +141,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// and writing them would be an observed write, which invalidates SwiftUI
     /// mid-pass. This shadow is what the delegate compares and writes; the
     /// observed pair catches up on the next turn.
-    @ObservationIgnored private var reportedSize: (rows: Int, cols: Int)
+    ///
+    /// Nil until the view has laid out and said what it can show. Seeding it
+    /// from the host would defeat the point: the host's size is the size agreed
+    /// across *every* viewer, so on a session a phone has already clamped it is
+    /// the phone's, and adopting it would make this Mac announce the phone's
+    /// width as its own and stay pinned to it.
+    @ObservationIgnored private var reportedSize: (rows: Int, cols: Int)?
 
     /// Why keystrokes are not reaching the process, when they are not. Set on
     /// a failed write so "I cannot type" is a visible, diagnosable state
@@ -312,7 +318,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
-        reportedSize = (info.rows, info.cols)
         applyState(
             alive: info.alive,
             exitCode: info.exitCode,
@@ -342,7 +347,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         exitCode = nil
         self.rows = rows
         self.cols = cols
-        reportedSize = (rows, cols)
         state = .starting
         isPending = true
     }
@@ -370,7 +374,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
-        reportedSize = (info.rows, info.cols)
         isPending = false
         applyState(
             alive: info.alive,
@@ -539,6 +542,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// Stop polling. Called when the session is closed.
     func stop() {
         removed = true
+        // Give up this front end's claim on the session's size, so a phone
+        // still watching it gets its own geometry back rather than staying
+        // clamped to a Mac window nobody is looking at. Fire and forget: the
+        // host expires the claim anyway, and a close must not wait on the
+        // network to finish.
+        if !isPending, !hostID.isEmpty {
+            let id = hostID
+            Task.detached { try? await Bridge.ptyDetach(id: id) }
+        }
         releaseActivity()
         idleCheckTask?.cancel()
         idleCheckTask = nil
@@ -1103,7 +1115,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         // AppKit calls this on the main thread, which is where the actor lives.
         let changed = MainActor.assumeIsolated {
-            guard newCols != reportedSize.cols || newRows != reportedSize.rows else {
+            guard newCols != reportedSize?.cols || newRows != reportedSize?.rows else {
                 return false
             }
             reportedSize = (newRows, newCols)
@@ -1117,10 +1129,15 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             }
             return true
         }
-        // A resize the pty already has is not a no-op: it still raises SIGWINCH,
-        // and a shell reprints its prompt and a full screen program repaints
-        // everything. The first layout of a session spawned at the right size
-        // reports exactly the size it already is, so this is the common case.
+        // The first layout always reports, even when it names the size the pty
+        // already has. That used to be suppressed, because a redundant resize
+        // still raises SIGWINCH and makes a shell reprint its prompt. It is no
+        // longer redundant: a viewer-scoped resize is this front end declaring
+        // what it can show, and the host only touches the pty when the size
+        // agreed across viewers actually moves, so no SIGWINCH follows. Without
+        // it a Mac that spawned a session at its own size would never register
+        // as a viewer, and a phone attaching later would be the only voice in
+        // the agreement.
         guard changed else { return }
         eventStream.continuation.yield(.resize(rows: newRows, cols: newCols))
     }
