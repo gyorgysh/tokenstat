@@ -142,6 +142,24 @@ pub fn stamp_key() -> &'static str {
 mod tests {
     use super::*;
 
+    /// A scratch directory, and a teardown that cannot fail the test.
+    ///
+    /// Removal is best effort on purpose. Windows refuses to delete a
+    /// directory while any handle into it is open, and SQLite keeps one until
+    /// its connection is dropped, so an unwrap here turns "the OS held a file
+    /// a moment longer" into a red build about something the test was not
+    /// checking.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ts-backup-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn a_fresh_archive_is_due_and_a_just_copied_one_is_not() {
         assert!(is_due(None, 0));
@@ -157,8 +175,7 @@ mod tests {
 
     #[test]
     fn rotation_shifts_every_slot_and_drops_the_oldest() {
-        let dir = std::env::temp_dir().join(format!("ts-backup-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = scratch("rotate");
         let db = dir.join("a.db");
         for n in 0..3 {
             std::fs::write(slot(&db, n), format!("gen{n}")).unwrap();
@@ -171,15 +188,14 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(slot(&db, 1)).unwrap(), "gen0");
         assert_eq!(std::fs::read_to_string(slot(&db, 2)).unwrap(), "gen1");
-        std::fs::remove_dir_all(&dir).unwrap();
+        cleanup(&dir);
     }
 
     /// The copy has to be openable and hold the same rows, which is the whole
     /// point and the thing a byte copy of a WAL database silently fails at.
     #[test]
     fn a_copy_is_a_readable_archive_with_the_same_contents() {
-        let dir = std::env::temp_dir().join(format!("ts-backup-run-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = scratch("run");
         let db = dir.join("a.db");
         {
             let conn = rusqlite::Connection::open(&db).unwrap();
@@ -189,10 +205,12 @@ mod tests {
             let made = run(&conn, &db, None, 0, 3).unwrap().unwrap();
             assert_eq!(made, slot(&db, 0));
         }
-        let copy = rusqlite::Connection::open(slot(&db, 0)).unwrap();
-        let v: i64 = copy.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+        let v: i64 = {
+            let copy = rusqlite::Connection::open(slot(&db, 0)).unwrap();
+            copy.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap()
+        };
         assert_eq!(v, 42);
-        std::fs::remove_dir_all(&dir).unwrap();
+        cleanup(&dir);
     }
 
     /// The failure that matters: a copy that cannot be written must leave the
@@ -201,8 +219,7 @@ mod tests {
     /// were left.
     #[test]
     fn a_failed_copy_destroys_nothing() {
-        let dir = std::env::temp_dir().join(format!("ts-backup-fail-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = scratch("fail");
         let db = dir.join("a.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute("CREATE TABLE t (v INTEGER)", []).unwrap();
@@ -222,18 +239,19 @@ mod tests {
                 "slot {n} must be exactly as it was"
             );
         }
-        std::fs::remove_dir_all(&dir).unwrap();
+        drop(conn);
+        cleanup(&dir);
     }
 
     #[test]
     fn a_copy_already_taken_today_is_skipped() {
-        let dir = std::env::temp_dir().join(format!("ts-backup-skip-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = scratch("skip");
         let db = dir.join("a.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute("CREATE TABLE t (v INTEGER)", []).unwrap();
         assert!(run(&conn, &db, Some(0), 1_000, 3).unwrap().is_none());
         assert!(!slot(&db, 0).exists());
-        std::fs::remove_dir_all(&dir).unwrap();
+        drop(conn);
+        cleanup(&dir);
     }
 }
