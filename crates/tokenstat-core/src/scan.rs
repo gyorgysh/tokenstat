@@ -146,7 +146,7 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
                     if let Some(stats) = claude_stats::parse(&contents) {
                         let daily = claude_stats::daily_model_tokens(&contents);
                         store.clear_recovered()?;
-                        let have = store.in_out_by_date_model()?;
+                        let have = store.archive_by_date_model()?;
                         let events = claude_stats::backfill_events(&stats, &daily, &have, tz);
                         report.days_recovered = events
                             .iter()

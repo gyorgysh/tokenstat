@@ -30,6 +30,16 @@ pub struct Store {
     conn: Connection,
 }
 
+/// What the transcripts hold for one (date, model), on both bases a vendor
+/// rollup might state itself on. See [`Store::archive_by_date_model`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ArchiveDayTotals {
+    /// Input plus output, excluding cache.
+    pub in_out: u64,
+    /// Every billable token, cache included.
+    pub total: u64,
+}
+
 /// One row of a grouped report.
 #[derive(Debug, Clone)]
 pub struct Bucket {
@@ -801,21 +811,32 @@ impl Store {
         Ok(())
     }
 
-    /// Input plus output per (date, model) from transcripts only.
+    /// What the transcripts account for per (date, model), on both bases.
     ///
     /// This is what a vendor rollup is compared against to work out how much of
-    /// each day was lost to log cleanup.
-    pub fn in_out_by_date_model(
+    /// each day was lost to log cleanup. Both figures are kept because the
+    /// vendor does not state its own on either basis consistently: its lifetime
+    /// `modelUsage` excludes cache while its per-day `dailyModelTokens` includes
+    /// it. Subtracting one basis from the other silently turns cache tokens into
+    /// generated ones, which is the most expensive column there is.
+    pub fn archive_by_date_model(
         &self,
-    ) -> Result<std::collections::BTreeMap<(String, String), u64>, CoreError> {
+    ) -> Result<std::collections::BTreeMap<(String, String), ArchiveDayTotals>, CoreError> {
         let mut stmt = self.conn.prepare(
-            "SELECT local_date, model, COALESCE(SUM(input_fresh),0)+COALESCE(SUM(output),0)
+            "SELECT local_date, model,
+                    COALESCE(SUM(input_fresh),0)+COALESCE(SUM(output),0),
+                    COALESCE(SUM(input_fresh),0)+COALESCE(SUM(output),0)
+                      +COALESCE(SUM(cache_read),0)+COALESCE(SUM(cache_write_5m),0)
+                      +COALESCE(SUM(cache_write_1h),0)
              FROM event WHERE source = 'claude_code' GROUP BY local_date, model",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 (r.get::<_, String>(0)?, r.get::<_, String>(1)?),
-                r.get::<_, i64>(2)? as u64,
+                ArchiveDayTotals {
+                    in_out: r.get::<_, i64>(2)? as u64,
+                    total: r.get::<_, i64>(3)? as u64,
+                },
             ))
         })?;
         Ok(rows.collect::<Result<std::collections::BTreeMap<_, _>, _>>()?)

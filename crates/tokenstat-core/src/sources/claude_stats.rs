@@ -21,6 +21,7 @@ use serde::Deserialize;
 use crate::model::{
     BillingMode, Confidence, Counters, EventId, Extras, SourceId, Timestamp, UsageEvent,
 };
+use crate::store::ArchiveDayTotals;
 
 /// Per-model totals as the vendor rollup states them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -38,6 +39,12 @@ impl ModelTotals {
     pub fn in_out(&self) -> u64 {
         self.input + self.output
     }
+
+    /// Every billable token, cache included. Not the vendor's headline figure,
+    /// but the basis its per-day `dailyModelTokens` numbers are stated on.
+    pub fn total(&self) -> u64 {
+        self.input + self.output + self.cache_read + self.cache_creation
+    }
 }
 
 /// The parts of the rollup worth reading.
@@ -53,6 +60,41 @@ pub struct StatsCache {
 impl StatsCache {
     pub fn in_out_total(&self) -> u64 {
         self.by_model.values().map(|m| m.in_out()).sum()
+    }
+}
+
+/// Which measurement the per-day `dailyModelTokens` figures are stated on.
+///
+/// The rollup mixes two bases in one file: lifetime `modelUsage` breaks tokens
+/// into four buckets and its headline excludes cache, while `dailyModelTokens`
+/// (added in `dailyModelTokensVersion` 5) states a single number per model per
+/// day that includes cache. Reading the second as if it were the first turns a
+/// day that was 97% cache reads into a day of generated tokens, and generated
+/// tokens are priced up to 50x a cache read.
+///
+/// So the basis is measured rather than assumed, and it is measurable: the
+/// retained days are a subset of lifetime, so their sum cannot exceed the
+/// lifetime figure on the same basis. A daily sum above lifetime input plus
+/// output is therefore proof the daily numbers count something else, and the
+/// only other thing in the file is cache. If a future version changes the
+/// field back, this notices instead of repricing every recovered day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DailyBasis {
+    /// One number per day covering every bucket, cache included.
+    Total,
+    /// Input plus output only, matching the lifetime headline.
+    InputOutput,
+}
+
+pub fn detect_basis(stats: &StatsCache, daily: &[(String, BTreeMap<String, u64>)]) -> DailyBasis {
+    let daily_sum: u64 = daily
+        .iter()
+        .flat_map(|(_, by_model)| by_model.values())
+        .sum();
+    if daily_sum > stats.in_out_total() {
+        DailyBasis::Total
+    } else {
+        DailyBasis::InputOutput
     }
 }
 
@@ -122,50 +164,78 @@ pub fn parse(contents: &str) -> Option<StatsCache> {
 /// The rollup outlives the transcripts, so it is the only way to recover history
 /// past the cleanup window on a machine where tokenstat was installed late. It
 /// is coarse: one event per day and model, with no session or project
-/// attribution and no cache figures.
+/// attribution.
 ///
-/// `have` maps `(date, model)` to the input plus output the transcripts already
-/// account for. Only the shortfall is recovered, so a day whose transcripts
-/// survive in full contributes nothing here and a partially pruned day is topped
-/// up to the figure the vendor itself reports.
+/// `have` maps `(date, model)` to what the transcripts already account for.
+/// Only the shortfall is recovered, so a day whose transcripts survive in full
+/// contributes nothing here and a partially pruned day is topped up to the
+/// figure the vendor itself reports.
 ///
 /// Pruning is not all or nothing. A day can keep some of its transcripts and
 /// lose others, so an all-or-nothing rule per day leaves most of the gap open.
 ///
-/// The daily figure is input plus output combined. Splitting it uses that
-/// model's lifetime input to output ratio, which is an estimate, so these events
-/// are recorded at [`Confidence::Derived`] and under a distinct source.
+/// The daily figure is one number per model, so recovering a day means both
+/// working out how much of it is missing and splitting that shortfall into
+/// buckets. Both steps depend on which basis the vendor stated the day on, so
+/// [`detect_basis`] decides that first and the shortfall is taken against the
+/// archive on the *same* basis. The split uses that model's own lifetime
+/// proportions, which is an estimate, so these events are recorded at
+/// [`Confidence::Derived`] and under a distinct source.
+///
+/// A model with no lifetime totals to split by recovers nothing. There is no
+/// safe guess: on the total basis a day is overwhelmingly cache, so assuming
+/// output would invent spend, and assuming cache would invent a discount. A day
+/// left unrecovered is already what happens without this file at all.
 pub fn backfill_events(
     stats: &StatsCache,
     daily: &[(String, BTreeMap<String, u64>)],
-    have: &BTreeMap<(String, String), u64>,
+    have: &BTreeMap<(String, String), ArchiveDayTotals>,
     tz: &jiff::tz::TimeZone,
 ) -> Vec<UsageEvent> {
+    let basis = detect_basis(stats, daily);
     let mut out = Vec::new();
     for (date, by_model) in daily {
         for (model, vendor_tokens) in by_model {
             // Saturating: the archive can legitimately hold more than the
             // rollup, which is recomputed periodically and lags the current day.
-            let already = have
+            let archive = have
                 .get(&(date.clone(), model.clone()))
                 .copied()
-                .unwrap_or(0);
-            let tokens = &vendor_tokens.saturating_sub(already);
-            if *tokens == 0 {
+                .unwrap_or_default();
+            let already = match basis {
+                DailyBasis::Total => archive.total,
+                DailyBasis::InputOutput => archive.in_out,
+            };
+            let tokens = vendor_tokens.saturating_sub(already);
+            if tokens == 0 {
                 continue;
             }
-            // Ratio from the model's own lifetime totals. Falling back to
-            // all-output is deliberate: generated tokens dominate every model
-            // observed, so it errs toward the larger, more expensive bucket
-            // rather than flattering the number.
-            let (input, output) = match stats.by_model.get(model) {
-                Some(m) if m.in_out() > 0 => {
-                    let in_share = m.input as f64 / m.in_out() as f64;
-                    let i = (*tokens as f64 * in_share).round() as u64;
-                    (i, tokens.saturating_sub(i))
-                }
-                _ => (0, *tokens),
+            let Some(m) = stats.by_model.get(model) else {
+                continue;
             };
+            // Shares over exactly the buckets the basis covers, so the parts
+            // always add back up to the day the vendor reported.
+            let denom = match basis {
+                DailyBasis::Total => m.total(),
+                DailyBasis::InputOutput => m.in_out(),
+            };
+            if denom == 0 {
+                continue;
+            }
+            let share =
+                |part: u64| ((tokens as f64) * (part as f64) / (denom as f64)).round() as u64;
+            let input = share(m.input);
+            // Only the total basis says anything about cache. On the in+out
+            // basis these must stay zero or they would eat into output, which
+            // is the bucket that has to absorb the remainder below.
+            let (cache_read, cache_write) = match basis {
+                DailyBasis::Total => (share(m.cache_read), share(m.cache_creation)),
+                DailyBasis::InputOutput => (0, 0),
+            };
+            // Output takes the remainder so rounding can never lose or invent a
+            // token against the figure the vendor stated.
+            let counted = input + cache_read + cache_write;
+            let output = tokens.saturating_sub(counted);
 
             // Midday local time, so the event cannot drift across a date
             // boundary when bucketed back into the same zone.
@@ -176,6 +246,30 @@ pub fn backfill_events(
                 .map(|z| z.timestamp().as_millisecond())
                 .unwrap_or(0);
 
+            let counters = match basis {
+                DailyBasis::Total => Counters {
+                    input_fresh: Some(input),
+                    output: Some(output),
+                    cache_read: Some(cache_read),
+                    // The rollup states one cache-creation figure without a TTL.
+                    // Attributed to the 5 minute tier, which is the default and
+                    // the overwhelming majority of writes, rather than billed at
+                    // the 1 hour rate on no evidence.
+                    cache_write_5m: Some(cache_write),
+                    cache_write_1h: Some(0),
+                },
+                DailyBasis::InputOutput => Counters {
+                    input_fresh: Some(input),
+                    output: Some(output),
+                    // On this basis the day says nothing about cache, and
+                    // reporting zero would understate activity that certainly
+                    // happened.
+                    cache_read: None,
+                    cache_write_5m: None,
+                    cache_write_1h: None,
+                },
+            };
+
             out.push(UsageEvent {
                 id: EventId::derive(&["claude_rollup", date, model]),
                 source: SourceId::ClaudeCodeRollup,
@@ -183,16 +277,7 @@ pub fn backfill_events(
                 model: model.clone(),
                 session: String::new(),
                 project: "(recovered)".to_string(),
-                counters: Counters {
-                    input_fresh: Some(input),
-                    output: Some(output),
-                    // The rollup does not break these down per day, and
-                    // reporting zero would understate cache activity that
-                    // certainly happened.
-                    cache_read: None,
-                    cache_write_5m: None,
-                    cache_write_1h: None,
-                },
+                counters,
                 extras: Extras::default(),
                 billing: BillingMode::Plan,
                 confidence: Confidence::Derived,
@@ -287,6 +372,32 @@ mod tests {
       }
     }"#;
 
+    /// The shape a real install has: cache dwarfs input and output.
+    const CACHE_HEAVY: &str = r#"{
+      "lastComputedDate": "2026-08-11",
+      "modelUsage": {
+        "claude-opus-5": {
+          "inputTokens": 143374, "outputTokens": 16603920,
+          "cacheReadInputTokens": 5164247659, "cacheCreationInputTokens": 81938162
+        }
+      }
+    }"#;
+
+    fn day(date: &str, model: &str, tokens: u64) -> (String, BTreeMap<String, u64>) {
+        (
+            date.to_string(),
+            BTreeMap::from([(model.to_string(), tokens)]),
+        )
+    }
+
+    fn have(
+        date: &str,
+        model: &str,
+        t: ArchiveDayTotals,
+    ) -> BTreeMap<(String, String), ArchiveDayTotals> {
+        BTreeMap::from([((date.to_string(), model.to_string()), t)])
+    }
+
     #[test]
     fn parses_the_vendor_rollup() {
         let s = parse(SAMPLE).unwrap();
@@ -296,6 +407,7 @@ mod tests {
         assert_eq!(opus.input, 4_018_543);
         assert_eq!(opus.output, 40_327_792);
         assert_eq!(opus.in_out(), 44_346_335);
+        assert_eq!(opus.total(), 44_346_485);
     }
 
     #[test]
@@ -318,26 +430,44 @@ mod tests {
         assert!(parse("not json").is_none());
     }
 
+    // --- basis detection ----------------------------------------------------
+
+    #[test]
+    fn a_daily_sum_above_lifetime_in_out_can_only_be_a_total() {
+        // The retained days are a subset of lifetime, so on the in+out basis
+        // their sum could not exceed the lifetime in+out figure.
+        let stats = parse(CACHE_HEAVY).unwrap();
+        let daily = vec![day("2026-08-11", "claude-opus-5", 576_031_559)];
+        assert_eq!(detect_basis(&stats, &daily), DailyBasis::Total);
+    }
+
+    #[test]
+    fn a_daily_sum_within_lifetime_in_out_is_read_as_in_out() {
+        let stats = parse(SAMPLE).unwrap();
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 1_000)];
+        assert_eq!(detect_basis(&stats, &daily), DailyBasis::InputOutput);
+    }
+
+    // --- backfill -----------------------------------------------------------
+
     #[test]
     fn backfill_skips_days_the_transcripts_already_cover() {
         let stats = parse(SAMPLE).unwrap();
         let daily = vec![
-            (
-                "2026-06-20".to_string(),
-                BTreeMap::from([("claude-opus-4-8".to_string(), 1000u64)]),
-            ),
-            (
-                "2026-06-21".to_string(),
-                BTreeMap::from([("claude-opus-4-8".to_string(), 2000u64)]),
-            ),
+            day("2026-06-20", "claude-opus-4-8", 1000),
+            day("2026-06-21", "claude-opus-4-8", 2000),
         ];
         // The 21st is fully accounted for by transcripts already.
-        let have = BTreeMap::from([(
-            ("2026-06-21".to_string(), "claude-opus-4-8".to_string()),
-            2000u64,
-        )]);
+        let seen = have(
+            "2026-06-21",
+            "claude-opus-4-8",
+            ArchiveDayTotals {
+                in_out: 2000,
+                total: 900_000,
+            },
+        );
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &have, &tz);
+        let ev = backfill_events(&stats, &daily, &seen, &tz);
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].source, SourceId::ClaudeCodeRollup);
         assert_eq!(ev[0].confidence, Confidence::Derived);
@@ -346,7 +476,7 @@ mod tests {
             ev[0].counters.input_fresh.unwrap() + ev[0].counters.output.unwrap(),
             1000
         );
-        // Cache is genuinely unknown here, not zero.
+        // Cache is genuinely unknown on this basis, not zero.
         assert_eq!(ev[0].counters.cache_read, None);
         assert!(ev[0].counters.has_unknown());
     }
@@ -354,10 +484,7 @@ mod tests {
     #[test]
     fn backfill_is_idempotent() {
         let stats = parse(SAMPLE).unwrap();
-        let daily = vec![(
-            "2026-06-20".to_string(),
-            BTreeMap::from([("claude-opus-4-8".to_string(), 1000u64)]),
-        )];
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 1000)];
         let none = BTreeMap::new();
         let tz = jiff::tz::TimeZone::UTC;
         let a = backfill_events(&stats, &daily, &none, &tz);
@@ -368,10 +495,7 @@ mod tests {
     #[test]
     fn backfill_splits_using_the_model_ratio() {
         let stats = parse(SAMPLE).unwrap();
-        let daily = vec![(
-            "2026-06-20".to_string(),
-            BTreeMap::from([("claude-opus-4-8".to_string(), 44_346_335u64)]),
-        )];
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 44_346_335)];
         let tz = jiff::tz::TimeZone::UTC;
         let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
         // Given the whole lifetime total for that model, the split should
@@ -381,32 +505,30 @@ mod tests {
     }
 
     #[test]
-    fn unknown_model_falls_back_to_output() {
+    fn a_model_with_no_lifetime_totals_recovers_nothing() {
+        // Nothing to split by, and every guess is expensive in one direction or
+        // the other. A day left unrecovered is what happens without this file.
         let stats = parse(SAMPLE).unwrap();
-        let daily = vec![(
-            "2026-06-20".to_string(),
-            BTreeMap::from([("brand-new-model".to_string(), 500u64)]),
-        )];
+        let daily = vec![day("2026-06-20", "brand-new-model", 500)];
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
-        assert_eq!(ev[0].counters.output, Some(500));
-        assert_eq!(ev[0].counters.input_fresh, Some(0));
+        assert!(backfill_events(&stats, &daily, &BTreeMap::new(), &tz).is_empty());
     }
 
     #[test]
     fn partially_pruned_days_are_topped_up_not_skipped() {
         let stats = parse(SAMPLE).unwrap();
-        let daily = vec![(
-            "2026-06-20".to_string(),
-            BTreeMap::from([("claude-opus-4-8".to_string(), 1000u64)]),
-        )];
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 1000)];
         // Transcripts explain only 400 of the 1000 the vendor counted.
-        let have = BTreeMap::from([(
-            ("2026-06-20".to_string(), "claude-opus-4-8".to_string()),
-            400u64,
-        )]);
+        let seen = have(
+            "2026-06-20",
+            "claude-opus-4-8",
+            ArchiveDayTotals {
+                in_out: 400,
+                total: 400,
+            },
+        );
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &have, &tz);
+        let ev = backfill_events(&stats, &daily, &seen, &tz);
         assert_eq!(ev.len(), 1);
         assert_eq!(
             ev[0].counters.input_fresh.unwrap() + ev[0].counters.output.unwrap(),
@@ -417,17 +539,61 @@ mod tests {
     #[test]
     fn an_archive_ahead_of_the_rollup_recovers_nothing() {
         let stats = parse(SAMPLE).unwrap();
-        let daily = vec![(
-            "2026-06-20".to_string(),
-            BTreeMap::from([("claude-opus-4-8".to_string(), 100u64)]),
-        )];
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 100)];
         // Today's transcripts can exceed a rollup computed days ago.
-        let have = BTreeMap::from([(
-            ("2026-06-20".to_string(), "claude-opus-4-8".to_string()),
-            999u64,
-        )]);
+        let seen = have(
+            "2026-06-20",
+            "claude-opus-4-8",
+            ArchiveDayTotals {
+                in_out: 999,
+                total: 999,
+            },
+        );
         let tz = jiff::tz::TimeZone::UTC;
-        assert!(backfill_events(&stats, &daily, &have, &tz).is_empty());
+        assert!(backfill_events(&stats, &daily, &seen, &tz).is_empty());
+    }
+
+    // --- the regression this all exists for ---------------------------------
+
+    #[test]
+    fn a_cache_heavy_day_is_not_recovered_as_generated_tokens() {
+        // Real numbers from the install that priced one day at $14,278. The day
+        // is 576M tokens of which the model's lifetime shape says 0.3% were
+        // generated. Read as input-plus-output it became 571M output tokens.
+        let stats = parse(CACHE_HEAVY).unwrap();
+        let daily = vec![day("2026-08-11", "claude-opus-5", 576_031_559)];
+        let tz = jiff::tz::TimeZone::UTC;
+        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
+        assert_eq!(ev.len(), 1);
+        let c = &ev[0].counters;
+        // The parts still add back up to exactly what the vendor reported.
+        assert_eq!(c.total(), 576_031_559);
+        // Cache reads carry the day, and output is a rounding error beside them.
+        assert!(c.cache_read.unwrap() > 560_000_000, "{c:?}");
+        assert!(c.output.unwrap() < 2_500_000, "{c:?}");
+        // Under the old in+out reading this was above 571M.
+        assert!(c.output.unwrap() * 200 < c.cache_read.unwrap(), "{c:?}");
+        // Nothing is left unknown once the day is stated on the total basis.
+        assert!(!c.has_unknown());
+    }
+
+    #[test]
+    fn a_total_basis_day_subtracts_the_archive_on_the_same_basis() {
+        // Mixing bases is the bug: an in+out archive figure against a total
+        // vendor figure leaves cache tokens in the shortfall to be repriced.
+        let stats = parse(CACHE_HEAVY).unwrap();
+        let daily = vec![day("2026-08-11", "claude-opus-5", 576_031_559)];
+        let seen = have(
+            "2026-08-11",
+            "claude-opus-5",
+            ArchiveDayTotals {
+                in_out: 1_000_000,
+                total: 576_031_559,
+            },
+        );
+        let tz = jiff::tz::TimeZone::UTC;
+        // The archive holds the whole day, so nothing is missing.
+        assert!(backfill_events(&stats, &daily, &seen, &tz).is_empty());
     }
 
     #[test]
