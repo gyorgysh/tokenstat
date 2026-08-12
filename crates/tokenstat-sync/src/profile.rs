@@ -52,6 +52,14 @@ pub enum ProfileError {
     /// hides a real problem behind a path that still happens to work.
     #[error("{0}")]
     Unsupported(String),
+    /// The machine row is not on the account (never registered, unlinked, or
+    /// re-registered elsewhere).
+    ///
+    /// Structured so a caller can drive the one fix that works: re-register
+    /// the machine, then mint again. A generic message would force a string
+    /// match against prose the server can reword.
+    #[error("this machine is not registered on the account")]
+    MachineNotRegistered,
     #[error("{0}")]
     Message(String),
 }
@@ -149,6 +157,13 @@ fn refusal_error(text: &str, status: u16) -> ProfileError {
         error: None,
         message: None,
     });
+    // The one refusal with a fix the caller can perform itself. The machine
+    // is not on the account: re-registering it (PUT /api/v1/machines/me) is
+    // exactly the repair, and the caller needs the structured signal to know
+    // to do it rather than give up.
+    if body.error.as_deref() == Some("machine_not_registered") {
+        return ProfileError::MachineNotRegistered;
+    }
     let detail = body
         .message
         .or(body.error)

@@ -34,6 +34,7 @@ use serde_json::{Value, json};
 use tokenstat_identity::Trust;
 use tokenstat_identity::{MachineIdentity, PeerStore, public_key_from_hex};
 use tokenstat_remote::{Refused, authorize_with};
+use tokenstat_sync::profile::ProfileError;
 
 use crate::session::Session;
 
@@ -265,31 +266,78 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
 /// plan or registration refusal would turn a message the user can act on
 /// ("register this machine", "remote reach is a paid feature") into a generic
 /// tunnel denial minutes later.
+///
+/// Registration is mandatory on the first mint of a process and best-effort
+/// afterwards: a transient 5xx (or a captive-portal redirect) on the register
+/// route must not turn a renewal the account can already serve into "tunnel
+/// unavailable". The one refusal registration cannot fix is a mint answering
+/// `machine_not_registered`, which drives a single re-register before the
+/// second attempt.
 fn mint_hello_token() -> Result<(String, Option<u64>), String> {
     let machine_id = tokenstat_sync::config::ensure_machine_id().map_err(|e| e.to_string())?;
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    let first = !REGISTERED_THIS_PROCESS.swap(true, Ordering::AcqRel);
+    mint_hello_token_impl(
+        &machine_id,
+        &identity,
+        first,
+        |mid, ident, kind| {
+            tokenstat_sync::profile::register_machine_identity_kind(
+                None,
+                mid,
+                &ident.public_key_hex(),
+                &tokenstat_identity::machine_label(),
+                kind,
+            )
+            .map_err(|e| e.to_string())
+        },
+        |mid| tokenstat_sync::profile::mint_tunnel_token(None, mid),
+    )
+}
+
+/// Has this process already tried to register the machine with the account?
+///
+/// Not "is it registered": the flag stays set even when the first attempt
+/// failed, because the first attempt being mandatory is about not *skipping*
+/// the call, and the mint + re-register path below repairs a machine the
+/// account does not know.
+static REGISTERED_THIS_PROCESS: AtomicBool = AtomicBool::new(false);
+
+fn mint_hello_token_impl(
+    machine_id: &str,
+    identity: &MachineIdentity,
+    first: bool,
+    mut register: impl FnMut(&str, &MachineIdentity, &str) -> Result<(), String>,
+    mut mint: impl FnMut(&str) -> Result<tokenstat_sync::profile::TunnelToken, ProfileError>,
+) -> Result<(String, Option<u64>), String> {
     // Phones (no local-host) register as clients so they do not burn a host
     // machine slot. Macs remain hosts.
     #[cfg(feature = "local-host")]
     let kind = "host";
     #[cfg(not(feature = "local-host"))]
     let kind = "client";
-    tokenstat_sync::profile::register_machine_identity_kind(
-        None,
-        &machine_id,
-        &identity.public_key_hex(),
-        &tokenstat_identity::machine_label(),
-        kind,
-    )
-    .map_err(|e| e.to_string())?;
-    set_tunnel_state(|state| state.registered = true);
+    if first {
+        register(machine_id, identity, kind)?;
+        set_tunnel_state(|state| state.registered = true);
+    }
 
-    match tokenstat_sync::profile::mint_tunnel_token(None, &machine_id) {
+    let mut minted = mint(machine_id);
+    if matches!(minted, Err(ProfileError::MachineNotRegistered)) {
+        // The account stopped knowing this machine (unlinked, re-registered
+        // elsewhere). One registration retry is the whole fix: it re-publishes
+        // the key the mint binds to. More than one is the same answer to the
+        // same question.
+        register(machine_id, identity, kind)?;
+        set_tunnel_state(|state| state.registered = true);
+        minted = mint(machine_id);
+    }
+
+    match minted {
         Ok(tok) => {
             hold_credential(&tok.token, Some(tok.expires_in));
             Ok((tok.token, Some(tok.expires_in)))
         }
-        Err(tokenstat_sync::profile::ProfileError::Unsupported(reason)) => {
+        Err(ProfileError::Unsupported(reason)) => {
             // An account host from before tunnel tokens still accepts the sync
             // bearer on HELLO, if its relay has the legacy path open.
             eprintln!("remote: {reason}; falling back to the login bearer");
@@ -1018,6 +1066,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
         "remote.status" => status(),
         "remote.serve" => serve(params),
         "remote.call" => forward(params),
+        "remote.nudge" => nudge(),
         _ => return None,
     })
 }
@@ -1039,6 +1088,27 @@ struct ForwardParams {
     peer: String,
     method: String,
     params: Value,
+}
+
+/// Wake the tunnel after the network comes back or the machine wakes from
+/// sleep.
+///
+/// The supervisor sizes its reconnect backoff for a network that may still be
+/// dead. A connectivity restore means it is not, so the next reconnect should
+/// not wait out the rest of that backoff. When no session is live, this tries
+/// the same start a retry tick would, now rather than later.
+fn nudge() -> Result<Value, String> {
+    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
+        session.nudge();
+        return Ok(json!({"nudged": true}));
+    }
+    let settings = load_settings();
+    if settings.tunnel
+        && let Ok(session) = session_for_serving()
+    {
+        start_tunnel_if_enabled(session, &settings);
+    }
+    Ok(json!({"nudged": true}))
 }
 
 fn status() -> Result<Value, String> {
@@ -1173,5 +1243,81 @@ mod tests {
         assert_eq!(parse_params(""), json!({}));
         assert_eq!(parse_params("  "), json!({}));
         assert_eq!(parse_params(r#"{"a":1}"#), json!({"a": 1}));
+    }
+
+    fn test_identity() -> MachineIdentity {
+        MachineIdentity::from_secret([7u8; 32])
+    }
+
+    fn test_token() -> tokenstat_sync::profile::TunnelToken {
+        tokenstat_sync::profile::TunnelToken {
+            token: "tsk_deadbeef_secret".into(),
+            expires_at: "2030-01-01T00:00:00.000Z".into(),
+            expires_in: 43_200,
+            machine: "m_0123456789abcdef".into(),
+        }
+    }
+
+    /// A transient registration failure must not block a renewal the account
+    /// can already serve. That is the P0 hardening: a 5xx on the register
+    /// route used to read as "tunnel unavailable" until the next retry.
+    #[test]
+    fn a_registration_hiccup_does_not_block_a_renewal() {
+        let (token, expires) = mint_hello_token_impl(
+            "m_0123456789abcdef",
+            &test_identity(),
+            // Not the first mint of a process: the account already knows the
+            // machine, so registration is best-effort.
+            false,
+            |_, _, _| Err("the register route 500'd".into()),
+            |_| Ok(test_token()),
+        )
+        .expect("a renewal must survive a register hiccup");
+        assert_eq!(token, "tsk_deadbeef_secret");
+        assert_eq!(expires, Some(43_200));
+    }
+
+    /// Registration stays mandatory on the first mint of a process: a machine
+    /// the account has never seen must not get a token that binds nothing.
+    #[test]
+    fn registration_still_gates_the_first_mint() {
+        let err = mint_hello_token_impl(
+            "m_0123456789abcdef",
+            &test_identity(),
+            true,
+            |_, _, _| Err("no account host reachable".into()),
+            |_| Ok(test_token()),
+        )
+        .expect_err("the first mint must not skip registration");
+        assert!(err.contains("no account host"), "{err}");
+    }
+
+    /// A mint refusal that says the machine is not registered drives one
+    /// re-register, then a second mint. That is the repair the refusal names.
+    #[test]
+    fn a_not_registered_refusal_re_registers_then_mints() {
+        let mut registers = 0;
+        let mut mints = 0;
+        let (token, _) = mint_hello_token_impl(
+            "m_0123456789abcdef",
+            &test_identity(),
+            false,
+            |_, _, _| {
+                registers += 1;
+                Ok(())
+            },
+            |_| {
+                mints += 1;
+                if mints == 1 {
+                    Err(ProfileError::MachineNotRegistered)
+                } else {
+                    Ok(test_token())
+                }
+            },
+        )
+        .expect("one re-register fixes a machine the account forgot");
+        assert_eq!(token, "tsk_deadbeef_secret");
+        assert_eq!(registers, 1);
+        assert_eq!(mints, 2);
     }
 }

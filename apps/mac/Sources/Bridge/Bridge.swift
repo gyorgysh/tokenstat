@@ -1295,6 +1295,12 @@ extension Bridge {
         try await background("remote.serve", ["tunnel": enabled], as: TunnelOutcome.self)
     }
 
+    /// Tell the daemon the network is back or the machine woke, so the tunnel
+    /// supervisor stops waiting out its reconnect backoff and tries now.
+    static func nudgeTunnel() async {
+        _ = try? await background("remote.nudge", as: Nudged.self)
+    }
+
     /// Ask a peer a question, through this machine's daemon.
     ///
     /// The result is the peer's own, unwrapped: a failure over there is a
@@ -1334,3 +1340,4 @@ extension Bridge {
 
 private struct Changed: Codable, Sendable { let changed: Bool }
 private struct Forgotten: Codable, Sendable { let forgotten: Bool }
+private struct Nudged: Codable, Sendable { let nudged: Bool }

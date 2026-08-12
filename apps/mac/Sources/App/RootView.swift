@@ -362,6 +362,14 @@ struct RootView: View {
                 await appUpdate.checkAndInstall()
             }
             Task { await workspaces.loadRemote() }
+            Task { await Bridge.nudgeTunnel() }
+        }
+        // Waking from sleep is the same story as the network coming back: the
+        // machine's egress is only just arriving, so the tunnel supervisor
+        // should reconnect now rather than wait out a backoff sized for a
+        // laptop that was off.
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            Task { await Bridge.nudgeTunnel() }
         }
     }
 

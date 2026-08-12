@@ -106,8 +106,10 @@ struct ClientRootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             // Cold start offline leaves authNeedsRetry. Signed-in screens also
-            // want a fresh me after the network returns.
+            // want a fresh me after the network returns, and the tunnel session
+            // this phone holds should reconnect now, not after its backoff.
             Task { await account.load() }
+            Task { await Bridge.nudgeTunnel() }
         }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()

@@ -86,6 +86,10 @@ pub struct TunnelSession {
     /// account. None means "retry with what we have", which is what a build
     /// without an account does.
     renew: Mutex<Option<RenewToken>>,
+    /// Wakes the supervisor's backoff wait. `nudge` sends here when the network
+    /// comes back or the machine wakes from sleep, so a reconnect does not wait
+    /// out a backoff that was sized for a network that is now up.
+    wake: Mutex<Option<mpsc::Sender<()>>>,
     stopped: AtomicBool,
 }
 
@@ -139,6 +143,7 @@ impl TunnelSession {
     /// reconnects it with backoff, and keeps it registered until `shutdown`.
     pub fn spawn(endpoint: &str, identity: &MachineIdentity, token: &str) -> Arc<Self> {
         let (inbound_tx, inbound_rx) = mpsc::channel::<Arc<ChannelState>>();
+        let (wake_tx, wake_rx) = mpsc::channel::<()>();
         let session = Arc::new(Self {
             endpoint: endpoint.to_string(),
             key_hex: identity.public_key_hex(),
@@ -151,10 +156,11 @@ impl TunnelSession {
             socket: Mutex::new(None),
             status: Mutex::new(TunnelStatus::default()),
             renew: Mutex::new(None),
+            wake: Mutex::new(Some(wake_tx)),
             stopped: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&session);
-        std::thread::spawn(move || supervisor(weak));
+        std::thread::spawn(move || supervisor(weak, wake_rx));
         session
     }
 
@@ -262,8 +268,22 @@ impl TunnelSession {
     /// channels end with an error, which is what a daemon shutdown means.
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Relaxed);
+        self.nudge();
         if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = socket.close(None);
+        }
+    }
+
+    /// Wake the supervisor and reset its reconnect backoff.
+    ///
+    /// Called when the network comes back or the machine wakes from sleep, so a
+    /// reconnect that would otherwise wait out its backoff starts immediately
+    /// instead. A no-op while the supervisor is connecting or connected: the
+    /// next wait simply runs at the floor, which is what a healthy network is
+    /// owed anyway.
+    pub fn nudge(&self) {
+        if let Some(tx) = self.wake.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            let _ = tx.send(());
         }
     }
 
@@ -420,7 +440,7 @@ impl Transport for ChannelTransport {
 
 // MARK: - The supervisor
 
-fn supervisor(session: Weak<TunnelSession>) {
+fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
     let mut backoff = RECONNECT_FLOOR;
     loop {
         let Some(session) = session.upgrade() else {
@@ -450,8 +470,15 @@ fn supervisor(session: Weak<TunnelSession>) {
             return;
         }
         mark_all_channels(&session, "tunnel disconnected");
-        std::thread::sleep(backoff);
-        backoff = (backoff * 2).min(RECONNECT_CEILING);
+        // Wait out the backoff, or wake early when the network comes back and
+        // a `nudge` lands. A wake resets the backoff so the fresh attempt is
+        // not punished for the failed ones a dead network already earned.
+        let woken = wake_rx.recv_timeout(backoff).is_ok();
+        backoff = if woken {
+            RECONNECT_FLOOR
+        } else {
+            (backoff * 2).min(RECONNECT_CEILING)
+        };
     }
 }
 
@@ -666,7 +693,7 @@ fn renewable_denial(text: &str) -> bool {
     };
     matches!(
         reason.trim(),
-        "bad_token" | "token_expired" | "key_mismatch"
+        "bad_token" | "token_expired" | "key_mismatch" | "token_revoked"
     )
 }
 
@@ -686,6 +713,9 @@ fn denial_message(text: &str) -> String {
              credential is required. update tokenstat"
         }
         "token_expired" => "the tunnel credential expired before it could be renewed",
+        "token_revoked" => {
+            "this machine's tunnel credential was revoked on the account. getting a new one"
+        }
         "key_mismatch" => {
             "this machine's key does not match the one registered on the account. turn remote \
              reach off and on again to re-register it"
@@ -731,10 +761,16 @@ mod tests {
         assert!(renewable_denial("DENIED bad_token"));
         assert!(renewable_denial("DENIED token_expired"));
         assert!(renewable_denial("DENIED key_mismatch"));
+        assert!(renewable_denial("DENIED token_revoked"));
         // Minting again cannot buy a plan or free a key another machine holds.
         assert!(!renewable_denial("DENIED not_on_this_plan"));
         assert!(!renewable_denial("DENIED key_already_live"));
         assert!(!renewable_denial("READY"));
+    }
+
+    #[test]
+    fn a_revoked_credential_gets_its_own_message() {
+        assert!(denial_message("DENIED token_revoked").contains("revoked"));
     }
 
     #[test]
