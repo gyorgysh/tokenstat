@@ -362,10 +362,22 @@ fn hold_credential(token: &str, expires_in: Option<u64>) {
     }
 }
 
+/// Serializes tunnel start so two callers cannot both create a session.
+///
+/// Without it, a retry tick and a connectivity nudge arriving in the same
+/// window both pass the `tunnel_running` guard (one finds the flag set but no
+/// session yet, clears it, and re-arms) and both spawn an inbound thread; the
+/// second `take_inbound()` would panic and take the daemon down. A caller that
+/// waits here then re-checks and sees the finished session instead.
+static STARTING: Mutex<()> = Mutex::new(());
+
 fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
     if !settings.tunnel {
         return;
     }
+    // Hold the whole start, network mints included. A second caller blocks
+    // here and then re-checks, so at most one session is ever created.
+    let _starting = STARTING.lock().unwrap_or_else(|e| e.into_inner());
     // Already live: refresh HELLO and leave the supervisor alone.
     if tunnel_running().load(Ordering::Acquire) {
         if let Ok(guard) = tunnel_session().lock() {
@@ -483,7 +495,11 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         // Inbound channels: the relay dialled us. Each is a fresh Noise
         // handshake over the channel, answered exactly like a direct TCP
         // connection, so the approval rule cannot tell the transports apart.
-        let inbound = tunnel.take_inbound();
+        // `None` here means another loop already took the receiver; a start
+        // that lost a race must not spawn a second one (or panic).
+        let Some(inbound) = tunnel.take_inbound() else {
+            return;
+        };
         while tunnel_running().load(Ordering::Acquire) {
             let state = match inbound.recv() {
                 Ok(state) => state,

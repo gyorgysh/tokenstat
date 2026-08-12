@@ -202,7 +202,7 @@ fn two_machines_pair_and_call_over_one_multiplexed_tunnel() {
 
     // B answers inbound channels: handshake, echo one message.
     let (tx, rx) = mpsc::channel();
-    let inbound = session_b.take_inbound();
+    let inbound = session_b.take_inbound().expect("inbound receiver");
     let responder = std::sync::Arc::clone(&session_b);
     std::thread::spawn(move || {
         let state = inbound.recv().expect("an inbound channel");

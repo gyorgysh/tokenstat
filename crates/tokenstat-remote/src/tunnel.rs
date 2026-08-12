@@ -206,12 +206,15 @@ impl TunnelSession {
     }
 
     /// Channels the relay opened to this machine, for the host to answer.
-    pub fn take_inbound(&self) -> mpsc::Receiver<Arc<ChannelState>> {
+    ///
+    /// `None` when a previous caller already took the receiver: inbound is
+    /// served by exactly one loop, and a second caller must not panic on a
+    /// shared receiver (a panic in a spawned thread would abort the daemon).
+    pub fn take_inbound(&self) -> Option<mpsc::Receiver<Arc<ChannelState>>> {
         self.inbound_rx
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()
-            .expect("take_inbound is called once")
     }
 
     /// Open a channel to a peer and wait for the relay to pair it.
