@@ -256,11 +256,6 @@ impl Store {
         }
     }
 
-    /// Where this archive lives, if it lives on disk.
-    pub fn path(&self) -> Option<&Path> {
-        self.path.as_deref()
-    }
-
     /// WAL + busy wait. Safe to call on a connection that will only read.
     fn configure(conn: &Connection) -> Result<(), CoreError> {
         // WAL keeps a statusline read from ever blocking behind a scan.

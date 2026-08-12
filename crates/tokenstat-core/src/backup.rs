@@ -80,6 +80,14 @@ fn rotate(path: &Path, keep: usize) -> std::io::Result<()> {
 /// Returns the path written, or `None` when a copy for today already exists.
 /// Errors are the caller's to soften: a failed backup must never fail a scan,
 /// because the scan is the thing that is actually collecting the data.
+///
+/// **The new copy is written before anything is rotated.** The other order is
+/// the obvious one and it is a trap: rotation deletes the oldest copy, so a
+/// `VACUUM INTO` that then fails has destroyed a backup and produced nothing.
+/// The failure that matters here is a full disk, which is also the failure that
+/// repeats: the stamp is only advanced on success, so the next hourly scan
+/// tries again, and seven of those would shift every copy off the end. Writing
+/// first means a failed backup costs nothing at all.
 pub fn run(
     conn: &rusqlite::Connection,
     path: &Path,
@@ -90,19 +98,23 @@ pub fn run(
     if keep == 0 || !is_due(last_backup_ms, now_ms) {
         return Ok(None);
     }
+    // A temporary name, because `VACUUM INTO` refuses to overwrite and slot 0
+    // is still occupied by yesterday's copy at this point.
+    let tmp = slot(path, keep).with_extension("part");
+    if tmp.exists() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    if let Err(e) = conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()]) {
+        // Leave no half-written file behind to be mistaken for a copy, and
+        // leave the existing copies exactly as they were.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     rotate(path, keep).map_err(|source| CoreError::Io {
         path: path.to_path_buf(),
         source,
     })?;
     let dest = slot(path, 0);
-    // Written to a temporary name first. VACUUM INTO refuses an existing file,
-    // and a copy interrupted halfway would otherwise sit in slot 0 looking like
-    // the freshest thing available.
-    let tmp = slot(path, 0).with_extension("0.part");
-    if tmp.exists() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    conn.execute("VACUUM INTO ?1", [tmp.to_string_lossy().as_ref()])?;
     std::fs::rename(&tmp, &dest).map_err(|source| CoreError::Io {
         path: dest.clone(),
         source,
@@ -180,6 +192,36 @@ mod tests {
         let copy = rusqlite::Connection::open(slot(&db, 0)).unwrap();
         let v: i64 = copy.query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(v, 42);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The failure that matters: a copy that cannot be written must leave the
+    /// copies that already exist untouched. Rotating first would have deleted
+    /// the oldest and produced nothing in its place, once an hour, until none
+    /// were left.
+    #[test]
+    fn a_failed_copy_destroys_nothing() {
+        let dir = std::env::temp_dir().join(format!("ts-backup-fail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("a.db");
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute("CREATE TABLE t (v INTEGER)", []).unwrap();
+        for n in 0..3 {
+            std::fs::write(slot(&db, n), format!("gen{n}")).unwrap();
+        }
+        // A directory where the copy wants to write is a write that cannot
+        // succeed, without needing to fill a disk to prove it.
+        std::fs::create_dir_all(slot(&db, 3).with_extension("part")).unwrap();
+
+        assert!(run(&conn, &db, None, 0, 3).is_err());
+
+        for n in 0..3 {
+            assert_eq!(
+                std::fs::read_to_string(slot(&db, n)).unwrap(),
+                format!("gen{n}"),
+                "slot {n} must be exactly as it was"
+            );
+        }
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
