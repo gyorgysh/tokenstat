@@ -59,6 +59,10 @@ struct HomeView: View {
 
                         panels(width: width)
 
+                        if showsLimitsSyncHint {
+                            limitsSyncHint
+                        }
+
                         if limitsPending {
                             panelPlaceholder
                         }
@@ -198,6 +202,69 @@ struct HomeView: View {
     private func columnCount(for width: CGFloat) -> Int {
         let fits = Int((width + Theme.Space.s) / (.panelWidth + Theme.Space.s))
         return max(1, min(panels.count, fits))
+    }
+
+    // MARK: - The plan limits the phone cannot see
+
+    /// Dismissed for good, per person rather than per window.
+    ///
+    /// A suggestion that comes back after every launch is not a suggestion, it
+    /// is an advert. Somebody who decided their quota numbers are not leaving
+    /// this Mac has answered the question, and the answer is kept.
+    @AppStorage("home.limitsSyncHint.dismissed") private var limitsSyncHintDismissed = false
+
+    /// Whether to offer the setting that would put these numbers on the phone.
+    ///
+    /// Only with something to share and somewhere to share it. Signed out, the
+    /// setting does nothing and the sentence would be a puzzle; with no panels
+    /// on screen there is nothing to talk about yet, and a hint that appears
+    /// before the first reading arrives looks like an error.
+    private var showsLimitsSyncHint: Bool {
+        !limitsSyncHintDismissed
+            && account.signedIn
+            && !account.limitsSyncEnabled
+            && !PlanLimits.visible(model.planLimits).isEmpty
+    }
+
+    /// A line offering the setting, and the way out of being offered it.
+    ///
+    /// It says what the phone shows today rather than naming the switch,
+    /// because the reason to want this is the phone being empty. The button
+    /// goes to Account, where the toggle and its own explanation of what leaves
+    /// the machine both live: flipping it from here would turn something off by
+    /// default into something that happened because a card was in the way.
+    private var limitsSyncHint: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+            Image(systemName: "iphone.and.arrow.forward")
+                .foregroundStyle(Theme.accent)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your phone cannot see these numbers")
+                    .font(.callout.weight(.medium))
+                Text("Share plan limits with my devices posts how full each window is, "
+                    + "so the phone still shows what is left while this Mac is asleep. "
+                    + "Percentages and reset times only, never a credential.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.s)
+            Button("Open Account") { onShowAccount() }
+                .buttonStyle(SecondaryButtonStyle())
+            Button {
+                limitsSyncHintDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Do not offer this again")
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(Theme.Space.s)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .transition(.opacity)
     }
 
     /// Whether to say the vendors are still being asked.
