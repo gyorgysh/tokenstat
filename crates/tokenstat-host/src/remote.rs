@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -767,9 +767,6 @@ fn register_client_identity() {
     }
 }
 
-/// Same-account devices on `/me` are approved without a second tap. The phone
-/// and Mac already share the login; requiring Machines → Approve for that is
-/// noise. Revoked peers never reach this path (authorize keeps them revoked).
 /// The account's machine directory, and when it was fetched.
 ///
 /// Cached because [`account_peer_label`] runs inside the inbound handshake,
@@ -839,13 +836,25 @@ fn clear_account_directory() {
     }
 }
 
+/// Same-account devices on `/me` are approved without a second tap. The phone
+/// and Mac already share the login, and requiring Machines then Approve for
+/// that is noise. Revoked peers never reach this path (authorize keeps them
+/// revoked).
 fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
     let want = tokenstat_identity::hex(peer);
+    let fetched_at = directory_fetched_at_ms();
     if let Some(label) = label_for(&account_machines(false), &want) {
         return Some(label);
     }
     // Not in what we hold. A device that registered since the cache was filled
     // is the ordinary reason, so refetch once, rate limited.
+    //
+    // Unless the call above already went to the network, which it does when
+    // the held copy was past its TTL. Asking again would be two round trips
+    // inside one handshake for the same answer.
+    if directory_fetched_at_ms() != fetched_at {
+        return None;
+    }
     let now = jiff::Timestamp::now().as_millisecond();
     let may_refetch = last_directory_miss().lock().is_ok_and(|mut at| {
         let due = now - *at > DIRECTORY_MISS_REFETCH_MS;
@@ -858,6 +867,17 @@ fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
         return None;
     }
     label_for(&account_machines(true), &want)
+}
+
+/// When the held directory was last filled, or 0 when nothing is held. Used to
+/// tell a cache hit from a fetch without threading a flag out of
+/// [`account_machines`].
+fn directory_fetched_at_ms() -> i64 {
+    account_directory()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|held| held.fetched_at_ms))
+        .unwrap_or(0)
 }
 
 /// This peer's display name, from a machine directory already in hand.
@@ -1011,32 +1031,59 @@ const MAX_IDLE_PER_PEER: usize = 4;
 /// clears the whole cache, and the app nudges on wake and when connectivity
 /// comes back, so the ceiling is the worst case for a machine nobody told us
 /// about rather than the normal one.
-const UNREACHABLE_FLOOR: Duration = Duration::from_secs(45);
-const UNREACHABLE_CEILING: Duration = Duration::from_secs(120);
+const UNREACHABLE_FLOOR_MS: i64 = 45_000;
+const UNREACHABLE_CEILING_MS: i64 = 120_000;
 
 /// One peer's absence: when it was last answered `no_such_peer`, and how many
 /// times in a row.
 #[derive(Clone, Copy)]
 struct Absence {
-    since: Instant,
+    /// Wall clock, for the same reason the tunnel credential is measured that
+    /// way: `Instant` stops advancing while a Mac is asleep, so an absence
+    /// recorded before the lid closed would still read as fresh hours later
+    /// and hide a peer that had been back the whole time.
+    since_ms: i64,
     strikes: u32,
 }
 
 impl Absence {
     /// How long this absence is trusted before the peer is dialled again.
-    fn ttl(&self) -> Duration {
-        let doubled = UNREACHABLE_FLOOR
-            .checked_mul(1u32 << self.strikes.min(3))
-            .unwrap_or(UNREACHABLE_CEILING);
-        doubled.min(UNREACHABLE_CEILING)
+    ///
+    /// The first miss is worth nothing. A dial can land in the moment between
+    /// a peer's daemon starting and its HELLO registering, and the relay only
+    /// holds an open for a key it saw recently, so a machine that has been off
+    /// for a while genuinely answers `no_such_peer` once on the way back.
+    /// Suppressing on that one answer would hide it until the wait ran out.
+    /// Suppressing from the second confirms it is really gone and still spares
+    /// the relay everything after that.
+    fn suppresses(&self) -> bool {
+        self.strikes > 0 && self.age_ms() < self.ttl_ms()
+    }
+
+    fn age_ms(&self) -> i64 {
+        jiff::Timestamp::now().as_millisecond() - self.since_ms
+    }
+
+    /// Doubling from the floor, capped, so a machine that has been off all day
+    /// is asked once every couple of minutes rather than twice a minute.
+    fn ttl_ms(&self) -> i64 {
+        let doubled = UNREACHABLE_FLOOR_MS.saturating_mul(1i64 << self.strikes.min(3));
+        doubled.min(UNREACHABLE_CEILING_MS)
+    }
+
+    /// Worth remembering at all. A confirmed absence that is long past its
+    /// wait, and a first miss that nothing followed up, are both just noise in
+    /// the map.
+    fn worth_keeping(&self) -> bool {
+        self.age_ms() < UNREACHABLE_CEILING_MS
     }
 }
 
 /// Peers the relay has told us are not on the tunnel, remembered briefly.
 ///
 /// The app reconciles remote workspaces on a timer, and every poll used to
-/// dial the peer again; for a machine whose tunnel was off or whose daemon was
-/// down, that meant a fresh `no_such_peer` channel open per poll on the relay.
+/// dial the peer again. For a machine whose tunnel was off or whose daemon
+/// was down, that meant a fresh `no_such_peer` channel open per poll on the relay.
 /// Inside the TTL the dial fails fast instead, with the same words, without
 /// another round trip.
 fn unreachable_peers() -> &'static Mutex<HashMap<String, Absence>> {
@@ -1048,13 +1095,17 @@ fn unreachable_peers() -> &'static Mutex<HashMap<String, Absence>> {
 /// the wait if it has said so before.
 fn note_unreachable(peer_hex: &str) {
     if let Ok(mut cache) = unreachable_peers().lock() {
+        // A strike only counts against an absence still inside its window. A
+        // peer that was missing an hour ago and is missing again now is not on
+        // its second consecutive miss, it is on its first.
         let strikes = cache
             .get(peer_hex)
-            .map_or(0, |a| a.strikes.saturating_add(1));
+            .filter(|previous| previous.worth_keeping())
+            .map_or(0, |previous| previous.strikes.saturating_add(1));
         cache.insert(
             peer_hex.to_string(),
             Absence {
-                since: Instant::now(),
+                since_ms: jiff::Timestamp::now().as_millisecond(),
                 strikes,
             },
         );
@@ -1205,10 +1256,10 @@ fn tunnel_dial(
         .lock()
         .ok()
         .and_then(|mut cache| {
-            cache.retain(|_, absence| absence.since.elapsed() < absence.ttl());
+            cache.retain(|_, absence| absence.worth_keeping());
             cache.get(&peer_hex).copied()
         })
-        .is_some()
+        .is_some_and(|absence| absence.suppresses())
     {
         return Err(format!(
             "could not reach {label} directly ({direct_error}) or through the tunnel: \
@@ -1584,20 +1635,21 @@ mod tests {
     /// already said.
     #[test]
     fn an_absence_outlasts_the_apps_retry_and_then_lengthens() {
+        let now = jiff::Timestamp::now().as_millisecond();
         let first = Absence {
-            since: Instant::now(),
+            since_ms: now,
             strikes: 0,
         };
         assert!(
-            first.ttl() >= Duration::from_secs(30),
-            "the floor must outlast the 30s peer retry, got {:?}",
-            first.ttl()
+            first.ttl_ms() >= 30_000,
+            "the floor must outlast the 30s peer retry, got {}",
+            first.ttl_ms()
         );
         let second = Absence {
-            since: Instant::now(),
+            since_ms: now,
             strikes: 1,
         };
-        assert!(second.ttl() > first.ttl());
+        assert!(second.ttl_ms() > first.ttl_ms());
     }
 
     /// A machine that has been off all day must not become invisible for
@@ -1605,17 +1657,53 @@ mod tests {
     /// comes back, for anybody who did not nudge.
     #[test]
     fn an_absence_never_grows_past_the_ceiling() {
+        let now = jiff::Timestamp::now().as_millisecond();
         for strikes in [0u32, 1, 2, 3, 4, 40, u32::MAX] {
             let absence = Absence {
-                since: Instant::now(),
+                since_ms: now,
                 strikes,
             };
             assert!(
-                absence.ttl() <= UNREACHABLE_CEILING,
-                "{strikes} strikes gave {:?}",
-                absence.ttl()
+                absence.ttl_ms() <= UNREACHABLE_CEILING_MS,
+                "{strikes} strikes gave {}",
+                absence.ttl_ms()
             );
         }
+    }
+
+    /// The first `no_such_peer` buys nothing. A dial can land between a peer's
+    /// daemon starting and its HELLO registering, and suppressing on that one
+    /// answer hides a machine that is already back.
+    #[test]
+    fn one_miss_does_not_hide_a_peer_that_is_coming_back() {
+        let now = jiff::Timestamp::now().as_millisecond();
+        assert!(
+            !Absence {
+                since_ms: now,
+                strikes: 0
+            }
+            .suppresses()
+        );
+        assert!(
+            Absence {
+                since_ms: now,
+                strikes: 1
+            }
+            .suppresses()
+        );
+    }
+
+    /// A confirmed absence stops suppressing once its wait is served, so a
+    /// machine that came back is found again without anybody nudging.
+    #[test]
+    fn an_absence_expires() {
+        let long_ago = jiff::Timestamp::now().as_millisecond() - UNREACHABLE_CEILING_MS - 1;
+        let stale = Absence {
+            since_ms: long_ago,
+            strikes: 1,
+        };
+        assert!(!stale.suppresses());
+        assert!(!stale.worth_keeping());
     }
 
     /// A dial that connected is proof the peer is back, so the next outage
@@ -1626,7 +1714,7 @@ mod tests {
         let peer = "cd".repeat(32);
         note_unreachable(&peer);
         note_unreachable(&peer);
-        assert!(unreachable_peers().lock().unwrap().contains_key(&peer));
+        assert!(unreachable_peers().lock().unwrap()[&peer].suppresses());
         clear_unreachable(&peer);
         assert!(!unreachable_peers().lock().unwrap().contains_key(&peer));
         note_unreachable(&peer);
