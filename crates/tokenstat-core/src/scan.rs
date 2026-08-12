@@ -83,6 +83,15 @@ pub struct ScanReport {
     /// already deleted.
     pub events_recovered: u64,
     pub days_recovered: u64,
+    /// Days a vendor's own rollup says were worked and for which no token count
+    /// exists anywhere: the transcripts were deleted before the first scan, and
+    /// the vendor kept the activity but not the counts.
+    ///
+    /// Reported rather than estimated. These days are real and their usage is
+    /// unknowable, and a chart that draws them the same as a day off is the
+    /// thing that makes somebody distrust a total that is actually correct for
+    /// what it can see.
+    pub days_active_unmeasured: Vec<String>,
     pub elapsed_ms: u128,
 }
 
@@ -168,10 +177,43 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
             let stats_unchanged = watermark::classify(stats_prev, stats_size, stats_mtime)
                 == watermark::Change::Unchanged
                 && !recovery_stale;
+            // Keep our own copy of the vendor's window, whether or not the
+            // recovery below has anything to do. The vendor's window slides and
+            // ours never shrinks, so history stops being as short as whatever
+            // Claude Code still happens to publish. Runs on every scan, not
+            // only when the recovery is stale, because the point is to catch a
+            // day before it falls off the far end.
+            if let Ok(contents) = std::fs::read_to_string(&stats_path) {
+                let now = jiff::Timestamp::now().to_string();
+                let mut seen: Vec<crate::store::VendorDay> = Vec::new();
+                for (date, by_model) in claude_stats::daily_model_tokens(&contents) {
+                    for (model, tokens) in by_model {
+                        seen.push(crate::store::VendorDay {
+                            day: date.clone(),
+                            model,
+                            tokens,
+                            ..Default::default()
+                        });
+                    }
+                }
+                for a in claude_stats::daily_activity(&contents) {
+                    seen.push(crate::store::VendorDay {
+                        day: a.date,
+                        model: String::new(),
+                        messages: a.messages,
+                        sessions: a.sessions,
+                        ..Default::default()
+                    });
+                }
+                store.record_vendor_days("claude_code", &seen, &now)?;
+            }
+            report.days_active_unmeasured = store.days_active_without_usage("claude_code")?;
             if !stats_unchanged {
                 if let Ok(contents) = std::fs::read_to_string(&stats_path) {
                     if let Some(stats) = claude_stats::parse(&contents) {
-                        let daily = claude_stats::daily_model_tokens(&contents);
+                        // From our copy, not the file: a day the vendor has
+                        // since dropped is still recoverable from here.
+                        let daily = vendor_daily_tokens(store)?;
                         store.clear_recovered()?;
                         store.set_meta("claude_rollup_logic", &stamp)?;
                         let have = store.archive_by_date_model()?;
@@ -698,4 +740,26 @@ fn home_dir() -> Option<PathBuf> {
 
 fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
+}
+
+/// One day of vendor-reported tokens, by model.
+type DailyModelTokens = (String, std::collections::BTreeMap<String, u64>);
+
+/// The per-day model tokens the archive has ever seen, newest reading winning.
+///
+/// The recovery reads this rather than the vendor's file so a day that has
+/// fallen out of the vendor's window is still recoverable from our own copy.
+fn vendor_daily_tokens(store: &Store) -> Result<Vec<DailyModelTokens>, CoreError> {
+    let mut by_day: std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>> =
+        std::collections::BTreeMap::new();
+    for row in store.vendor_days("claude_code")? {
+        if row.model.is_empty() || row.tokens == 0 {
+            continue;
+        }
+        by_day
+            .entry(row.day)
+            .or_default()
+            .insert(row.model, row.tokens);
+    }
+    Ok(by_day.into_iter().collect())
 }

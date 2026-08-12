@@ -103,6 +103,37 @@ pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
         println!("  {DIM}those transcripts were already deleted, the totals survive{DIM:#}");
     }
 
+    if !r.days_active_unmeasured.is_empty() {
+        let n = r.days_active_unmeasured.len();
+        println!();
+        println!(
+            "  {n} day{} worked before tokenstat could see them",
+            if n == 1 { "" } else { "s" }
+        );
+        let shown: Vec<&str> = r
+            .days_active_unmeasured
+            .iter()
+            .take(8)
+            .map(String::as_str)
+            .collect();
+        let more = n.saturating_sub(shown.len());
+        println!(
+            "  {DIM}{}{}{DIM:#}",
+            shown.join(", "),
+            if more > 0 {
+                format!(" and {more} more")
+            } else {
+                String::new()
+            }
+        );
+        // Not a number this tool will invent. Claude Code keeps activity for
+        // longer than it keeps token counts, so these days are provably worked
+        // and their usage is stated nowhere on this machine.
+        println!(
+            "  {DIM}Claude Code recorded work, no token counts survive. Totals are a floor.{DIM:#}"
+        );
+    }
+
     if r.files_found == 0 {
         println!();
         println!("  {DIM}No supported tool logs found on this machine.{DIM:#}");

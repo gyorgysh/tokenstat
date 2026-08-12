@@ -30,6 +30,17 @@ pub struct Store {
     conn: Connection,
 }
 
+/// One day of what a vendor's own rollup said, as kept in `vendor_day`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VendorDay {
+    pub day: String,
+    /// Empty on an activity row: those are per day, not per model.
+    pub model: String,
+    pub tokens: u64,
+    pub messages: u64,
+    pub sessions: u64,
+}
+
 /// What the transcripts hold for one (date, model), on both bases a vendor
 /// rollup might state itself on. See [`Store::archive_by_date_model`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -266,6 +277,35 @@ impl Store {
 
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) STRICT;
 
+            -- What a vendor's own rollup said about a day, kept for good.
+            --
+            -- A vendor rollup is a window, not a record: Claude Code publishes
+            -- per-day token counts for about a month and per-day activity for
+            -- about two, and drops the far end as it goes. Reading it live means
+            -- history is only ever as long as the vendor's window, and a day
+            -- that falls off is gone even though we once saw it.
+            --
+            -- So every scan writes what it saw here and nothing is ever
+            -- lowered. This is the archive's own copy, and it outlives the
+            -- vendor's pruning. `tokens` is the whole day for that model on
+            -- whatever basis the vendor stated; `messages` and `sessions` are
+            -- activity, which the vendor keeps for longer and which is what
+            -- proves a day was worked even when no token count survives.
+            CREATE TABLE IF NOT EXISTS vendor_day (
+              source     TEXT NOT NULL,
+              day        TEXT NOT NULL,
+              -- Empty for an activity row, which is per day and not per model.
+              model      TEXT NOT NULL,
+              tokens     INTEGER NOT NULL DEFAULT 0,
+              messages   INTEGER NOT NULL DEFAULT 0,
+              sessions   INTEGER NOT NULL DEFAULT 0,
+              first_seen TEXT NOT NULL,
+              last_seen  TEXT NOT NULL,
+              PRIMARY KEY (source, day, model)
+            ) STRICT;
+
+            CREATE INDEX IF NOT EXISTS vendor_day_day ON vendor_day(day);
+
             -- Per file scan state, so a rescan opens only what changed.
             -- The path is local only and never leaves the machine.
             CREATE TABLE IF NOT EXISTS shard (
@@ -286,6 +326,13 @@ impl Store {
     }
 
     /// Ensure post-ship indexes exist on archives that already had a schema.
+    /// Objects added after first ship, for an archive that already exists.
+    ///
+    /// `open` skips the full migrate on a ready archive, because CREATE TABLE
+    /// takes a write lock and a statusline must not wait behind one. Anything
+    /// added later therefore has to appear here as well, or it exists only on
+    /// machines that started fresh afterwards. `IF NOT EXISTS` is a catalog
+    /// check when the object is already there, so this stays cheap.
     fn ensure_indexes(conn: &Connection) -> Result<(), CoreError> {
         conn.execute_batch(
             r#"
@@ -294,6 +341,20 @@ impl Store {
             CREATE INDEX IF NOT EXISTS event_proj  ON event(project);
             CREATE INDEX IF NOT EXISTS event_ts    ON event(ts_ms);
             CREATE INDEX IF NOT EXISTS event_source ON event(source);
+
+            CREATE TABLE IF NOT EXISTS vendor_day (
+              source     TEXT NOT NULL,
+              day        TEXT NOT NULL,
+              model      TEXT NOT NULL,
+              tokens     INTEGER NOT NULL DEFAULT 0,
+              messages   INTEGER NOT NULL DEFAULT 0,
+              sessions   INTEGER NOT NULL DEFAULT 0,
+              first_seen TEXT NOT NULL,
+              last_seen  TEXT NOT NULL,
+              PRIMARY KEY (source, day, model)
+            ) STRICT;
+
+            CREATE INDEX IF NOT EXISTS vendor_day_day ON vendor_day(day);
             "#,
         )?;
         Ok(())
@@ -912,6 +973,80 @@ impl Store {
         self.conn
             .execute("DELETE FROM event WHERE source = 'claude_code_rollup'", [])?;
         Ok(())
+    }
+
+    /// Record what a vendor rollup said, without ever lowering what we already
+    /// hold.
+    ///
+    /// Monotonic on purpose. The vendor recomputes periodically and its window
+    /// slides, so the same day can come back smaller or not at all, and neither
+    /// means the usage stopped having happened. Taking the maximum makes this
+    /// table the high-water mark of everything the vendor has ever admitted to.
+    pub fn record_vendor_days(
+        &self,
+        source: &str,
+        rows: &[VendorDay],
+        now: &str,
+    ) -> Result<(), CoreError> {
+        for r in rows {
+            self.conn.execute(
+                "INSERT INTO vendor_day
+                   (source, day, model, tokens, messages, sessions, first_seen, last_seen)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                 ON CONFLICT(source, day, model) DO UPDATE SET
+                   tokens    = MAX(tokens, excluded.tokens),
+                   messages  = MAX(messages, excluded.messages),
+                   sessions  = MAX(sessions, excluded.sessions),
+                   last_seen = excluded.last_seen",
+                params![
+                    source,
+                    r.day,
+                    r.model,
+                    r.tokens as i64,
+                    r.messages as i64,
+                    r.sessions as i64,
+                    now
+                ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Everything ever seen from a vendor's rollup, newest window included.
+    pub fn vendor_days(&self, source: &str) -> Result<Vec<VendorDay>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT day, model, tokens, messages, sessions
+               FROM vendor_day WHERE source = ? ORDER BY day, model",
+        )?;
+        let rows = stmt.query_map([source], |r| {
+            Ok(VendorDay {
+                day: r.get(0)?,
+                model: r.get(1)?,
+                tokens: r.get::<_, i64>(2)? as u64,
+                messages: r.get::<_, i64>(3)? as u64,
+                sessions: r.get::<_, i64>(4)? as u64,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Days a vendor said were worked and the archive has no tokens for.
+    ///
+    /// The honest gap. Activity outlives token counts in the vendor's rollup,
+    /// so these are days that provably happened and whose usage no file on this
+    /// machine can state. Never guessed at: a caller shows them as unknown.
+    pub fn days_active_without_usage(&self, source: &str) -> Result<Vec<String>, CoreError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT v.day FROM vendor_day v
+              WHERE v.source = ? AND v.model = '' AND v.messages > 0
+                AND NOT EXISTS (
+                  SELECT 1 FROM event e
+                   WHERE e.local_date = v.day AND e.source LIKE 'claude_code%'
+                )
+              ORDER BY v.day",
+        )?;
+        let rows = stmt.query_map([source], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     pub fn set_meta(&self, k: &str, v: &str) -> Result<(), CoreError> {

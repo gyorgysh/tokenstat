@@ -385,6 +385,46 @@ pub fn daily_tokens_version(contents: &str) -> Option<u64> {
         .and_then(|r| r.version)
 }
 
+/// Per-day activity: how much work happened, with no token counts.
+///
+/// Claude Code keeps this for roughly twice as long as it keeps per-day token
+/// counts, which is why a day can be provably worked and have no measurable
+/// usage anywhere on the machine. Reported as activity rather than guessed at.
+pub fn daily_activity(contents: &str) -> Vec<DayActivity> {
+    #[derive(Deserialize)]
+    struct Day {
+        date: String,
+        #[serde(rename = "messageCount")]
+        messages: Option<u64>,
+        #[serde(rename = "sessionCount")]
+        sessions: Option<u64>,
+    }
+    #[derive(Deserialize)]
+    struct Root {
+        #[serde(rename = "dailyActivity")]
+        activity: Option<Vec<Day>>,
+    }
+    serde_json::from_str::<Root>(contents)
+        .ok()
+        .and_then(|r| r.activity)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| DayActivity {
+            date: d.date,
+            messages: d.messages.unwrap_or(0),
+            sessions: d.sessions.unwrap_or(0),
+        })
+        .collect()
+}
+
+/// One day of vendor-reported activity, with no token counts attached.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DayActivity {
+    pub date: String,
+    pub messages: u64,
+    pub sessions: u64,
+}
+
 pub fn daily_model_tokens(contents: &str) -> Vec<(String, BTreeMap<String, u64>)> {
     #[derive(Deserialize)]
     struct Day {
