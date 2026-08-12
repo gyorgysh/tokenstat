@@ -1926,7 +1926,7 @@ private struct StateBadge: View {
                 // does keep `Text(_, style: .relative)` current on its own,
                 // and the price is a full window layout pass every frame for
                 // as long as one is on screen. See `RelativeClock`.
-                RelativeTimeText(date: since, presentation: .short)
+                RelativeTimeText(date: since, unitsStyle: .short)
                     .font(Theme.numeric(RowMetrics.meta))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)

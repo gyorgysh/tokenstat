@@ -52,11 +52,20 @@ final class RelativeClock {
     /// at minute boundaries, and anything finer buys nothing but wake-ups.
     private static let tick: Duration = .seconds(15)
 
+    /// Set by `phrase`, cleared by each tick. The tick only writes `now` when
+    /// something read it since the last one, so a window with no relative text
+    /// on screen (or no window at all) costs a wake and nothing else: writing
+    /// an observed property nobody reads would invalidate views for a value
+    /// that changes nothing.
+    @ObservationIgnored fileprivate var wasRead = false
+
     private init() {
         Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.tick)
                 guard let self else { return }
+                guard self.wasRead else { continue }
+                self.wasRead = false
                 self.now = Date()
             }
         }
@@ -75,9 +84,17 @@ extension RelativeClock {
         for date: Date,
         style: RelativeDateTimeFormatter.UnitsStyle = .full
     ) -> String {
-        let reference = shared.now
+        // Two different jobs, deliberately separated. Reading `now` is the
+        // subscription: it is what makes SwiftUI call this body again on the
+        // next tick, and it is the only reason the property exists. The words
+        // are measured against the real current time, so a clock that went
+        // dormant because nothing was on screen cannot make the first phrase
+        // after that read hours late. `max` keeps the read load-bearing so
+        // nobody deletes it as unused.
+        let ticked = shared.now
+        shared.wasRead = true
         formatter.unitsStyle = style
-        return formatter.localizedString(for: date, relativeTo: reference)
+        return formatter.localizedString(for: date, relativeTo: max(ticked, Date()))
     }
 
     /// Shared because building one is not free and this renders once per row.
@@ -93,9 +110,12 @@ extension RelativeClock {
 /// directly rather than reaching for the live formatter again.
 struct RelativeTimeText: View {
     let date: Date
-    var presentation: RelativeDateTimeFormatter.UnitsStyle = .full
+    /// Named for its type, not for Foundation's `.relative(presentation:)`.
+    /// That is the `.named` versus `.numeric` axis and this is the other one,
+    /// so calling this `presentation` invites `.named` and a compile error.
+    var unitsStyle: RelativeDateTimeFormatter.UnitsStyle = .full
 
     var body: some View {
-        Text(RelativeClock.phrase(for: date, style: presentation))
+        Text(RelativeClock.phrase(for: date, style: unitsStyle))
     }
 }
