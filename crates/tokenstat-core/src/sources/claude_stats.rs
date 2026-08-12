@@ -166,19 +166,25 @@ pub fn parse(contents: &str) -> Option<StatsCache> {
 /// is coarse: one event per day and model, with no session or project
 /// attribution.
 ///
-/// `have` maps `(date, model)` to what the transcripts already account for.
-/// Only the shortfall is recovered, so a day whose transcripts survive in full
-/// contributes nothing here and a partially pruned day is topped up to the
-/// figure the vendor itself reports.
+/// `have` maps `(date, model)` to what the transcripts already account for, and
+/// a day and model the archive has anything at all for is left alone.
 ///
-/// Pruning is not all or nothing. A day can keep some of its transcripts and
-/// lose others, so an all-or-nothing rule per day leaves most of the gap open.
+/// This used to top up the difference instead, which sounds strictly better and
+/// is not. The two sides are not the same measurement, and the evidence for that
+/// is that the archive is sometimes *ahead* of the vendor for a day. Once that
+/// is true, keeping only the differences that point one way turns disagreement
+/// into spend: on one real install the top-up invented 4.74 billion tokens of
+/// "missing" usage across days whose transcripts were still on disk, while
+/// genuinely lost days accounted for 283 million. Recovery is for history that
+/// is gone, and "gone" is something the archive can answer honestly.
 ///
-/// The daily figure is one number per model, so recovering a day means both
-/// working out how much of it is missing and splitting that shortfall into
-/// buckets. Both steps depend on which basis the vendor stated the day on, so
-/// [`detect_basis`] decides that first and the shortfall is taken against the
-/// archive on the *same* basis. The split uses that model's own lifetime
+/// The cost is that a day which lost only some of its transcripts is recovered
+/// as far as the archive got and no further. That errs toward reporting less
+/// than happened, which is the right direction for a number nobody can check.
+///
+/// The daily figure is one number per model, so recovering a day means splitting
+/// it into buckets, and that depends on which basis the vendor stated it on.
+/// [`detect_basis`] decides. The split uses that model's own lifetime
 /// proportions, which is an estimate, so these events are recorded at
 /// [`Confidence::Derived`] and under a distinct source.
 ///
@@ -191,13 +197,15 @@ pub fn backfill_events(
     daily: &[(String, BTreeMap<String, u64>)],
     have: &BTreeMap<(String, String), ArchiveDayTotals>,
     tz: &jiff::tz::TimeZone,
-) -> Vec<UsageEvent> {
+) -> Recovery {
     let basis = detect_basis(stats, daily);
     let mut out = Vec::new();
     for (date, by_model) in daily {
         for (model, vendor_tokens) in by_model {
-            // Saturating: the archive can legitimately hold more than the
-            // rollup, which is recomputed periodically and lags the current day.
+            // Anything at all in the archive for this day and model means the
+            // transcripts are still there and this rollup has nothing to add.
+            // The vendor disagreeing with them is not evidence of missing
+            // usage: it disagrees in both directions.
             let archive = have
                 .get(&(date.clone(), model.clone()))
                 .copied()
@@ -206,7 +214,10 @@ pub fn backfill_events(
                 DailyBasis::Total => archive.total,
                 DailyBasis::InputOutput => archive.in_out,
             };
-            let tokens = vendor_tokens.saturating_sub(already);
+            if already > 0 {
+                continue;
+            }
+            let tokens = *vendor_tokens;
             if tokens == 0 {
                 continue;
             }
@@ -284,10 +295,96 @@ pub fn backfill_events(
             });
         }
     }
-    out
+    keep_plausible(stats, out)
+}
+
+/// What a recovery pass produced, and anything it refused to produce.
+#[derive(Debug, Default)]
+pub struct Recovery {
+    pub events: Vec<UsageEvent>,
+    pub warnings: Vec<crate::error::Warning>,
+}
+
+/// Drop any model whose recovered totals exceed what the same file says that
+/// model ever produced.
+///
+/// Recovery only ever redistributes history the vendor itself reports, so a
+/// derived bucket larger than that model's lifetime figure is arithmetically
+/// impossible and means the file is not being read the way it is written. This
+/// is the backstop for exactly that: a future `dailyModelTokensVersion` that
+/// changes units again, a field that starts meaning something else, a shape
+/// nobody here has seen. The failure mode it prevents is the one that matters,
+/// which is inventing spend confidently and silently.
+///
+/// Per model, not in total, so one model changing shape does not throw away the
+/// recovery of every other.
+fn keep_plausible(stats: &StatsCache, events: Vec<UsageEvent>) -> Recovery {
+    let mut derived: BTreeMap<String, (u64, u64, u64)> = BTreeMap::new();
+    for e in &events {
+        let slot = derived.entry(e.model.clone()).or_default();
+        slot.0 += e.counters.output.unwrap_or(0);
+        slot.1 += e.counters.cache_read.unwrap_or(0);
+        slot.2 += e.counters.input_fresh.unwrap_or(0);
+    }
+    let mut refused: Vec<String> = Vec::new();
+    let mut warnings = Vec::new();
+    for (model, (out, cr, inn)) in &derived {
+        let Some(lifetime) = stats.by_model.get(model) else {
+            continue;
+        };
+        for (bucket, got, cap) in [
+            ("output", *out, lifetime.output),
+            ("cache read", *cr, lifetime.cache_read),
+            ("input", *inn, lifetime.input),
+        ] {
+            if got > cap {
+                refused.push(model.clone());
+                warnings.push(crate::error::Warning::RecoveryImplausible {
+                    source: "claude_code_rollup",
+                    model: model.clone(),
+                    bucket,
+                    derived: got,
+                    lifetime: cap,
+                });
+                break;
+            }
+        }
+    }
+    if refused.is_empty() {
+        return Recovery {
+            events,
+            warnings: Vec::new(),
+        };
+    }
+    Recovery {
+        events: events
+            .into_iter()
+            .filter(|e| !refused.contains(&e.model))
+            .collect(),
+        warnings,
+    }
 }
 
 /// Per-day, per-model token totals from the rollup.
+/// The vendor's own version for the `dailyModelTokens` block.
+///
+/// Not trusted to mean anything in particular, and deliberately not matched
+/// against a known list: the units are measured by [`detect_basis`] and the
+/// result is bounded by [`keep_plausible`], both of which work on a version
+/// nobody here has seen. It is read so a bump can force an archive to rebuild
+/// its recovered rows, because those rows are derived and a file that starts
+/// saying something new makes every one of them stale.
+pub fn daily_tokens_version(contents: &str) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct Root {
+        #[serde(rename = "dailyModelTokensVersion")]
+        version: Option<u64>,
+    }
+    serde_json::from_str::<Root>(contents)
+        .ok()
+        .and_then(|r| r.version)
+}
+
 pub fn daily_model_tokens(contents: &str) -> Vec<(String, BTreeMap<String, u64>)> {
     #[derive(Deserialize)]
     struct Day {
@@ -467,7 +564,7 @@ mod tests {
             },
         );
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &seen, &tz);
+        let ev = backfill_events(&stats, &daily, &seen, &tz).events;
         assert_eq!(ev.len(), 1);
         assert_eq!(ev[0].source, SourceId::ClaudeCodeRollup);
         assert_eq!(ev[0].confidence, Confidence::Derived);
@@ -487,8 +584,8 @@ mod tests {
         let daily = vec![day("2026-06-20", "claude-opus-4-8", 1000)];
         let none = BTreeMap::new();
         let tz = jiff::tz::TimeZone::UTC;
-        let a = backfill_events(&stats, &daily, &none, &tz);
-        let b = backfill_events(&stats, &daily, &none, &tz);
+        let a = backfill_events(&stats, &daily, &none, &tz).events;
+        let b = backfill_events(&stats, &daily, &none, &tz).events;
         assert_eq!(a[0].id, b[0].id);
     }
 
@@ -497,7 +594,7 @@ mod tests {
         let stats = parse(SAMPLE).unwrap();
         let daily = vec![day("2026-06-20", "claude-opus-4-8", 44_346_335)];
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
+        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz).events;
         // Given the whole lifetime total for that model, the split should
         // reproduce its actual input and output almost exactly.
         assert_eq!(ev[0].counters.input_fresh.unwrap(), 4_018_543);
@@ -511,14 +608,20 @@ mod tests {
         let stats = parse(SAMPLE).unwrap();
         let daily = vec![day("2026-06-20", "brand-new-model", 500)];
         let tz = jiff::tz::TimeZone::UTC;
-        assert!(backfill_events(&stats, &daily, &BTreeMap::new(), &tz).is_empty());
+        assert!(
+            backfill_events(&stats, &daily, &BTreeMap::new(), &tz)
+                .events
+                .is_empty()
+        );
     }
 
     #[test]
-    fn partially_pruned_days_are_topped_up_not_skipped() {
+    fn a_day_the_archive_has_anything_for_is_left_alone() {
+        // The vendor disagreeing with surviving transcripts is disagreement,
+        // not loss. Topping up the difference is how a real install grew 4.74
+        // billion tokens of usage that never went missing.
         let stats = parse(SAMPLE).unwrap();
         let daily = vec![day("2026-06-20", "claude-opus-4-8", 1000)];
-        // Transcripts explain only 400 of the 1000 the vendor counted.
         let seen = have(
             "2026-06-20",
             "claude-opus-4-8",
@@ -528,12 +631,21 @@ mod tests {
             },
         );
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &seen, &tz);
-        assert_eq!(ev.len(), 1);
-        assert_eq!(
-            ev[0].counters.input_fresh.unwrap() + ev[0].counters.output.unwrap(),
-            600
+        assert!(
+            backfill_events(&stats, &daily, &seen, &tz)
+                .events
+                .is_empty()
         );
+    }
+
+    #[test]
+    fn a_day_the_archive_lost_entirely_is_recovered_in_full() {
+        let stats = parse(SAMPLE).unwrap();
+        let daily = vec![day("2026-06-20", "claude-opus-4-8", 1000)];
+        let tz = jiff::tz::TimeZone::UTC;
+        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz).events;
+        assert_eq!(ev.len(), 1);
+        assert_eq!(ev[0].counters.total(), 1000);
     }
 
     #[test]
@@ -550,7 +662,11 @@ mod tests {
             },
         );
         let tz = jiff::tz::TimeZone::UTC;
-        assert!(backfill_events(&stats, &daily, &seen, &tz).is_empty());
+        assert!(
+            backfill_events(&stats, &daily, &seen, &tz)
+                .events
+                .is_empty()
+        );
     }
 
     // --- the regression this all exists for ---------------------------------
@@ -563,7 +679,7 @@ mod tests {
         let stats = parse(CACHE_HEAVY).unwrap();
         let daily = vec![day("2026-08-11", "claude-opus-5", 576_031_559)];
         let tz = jiff::tz::TimeZone::UTC;
-        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
+        let ev = backfill_events(&stats, &daily, &BTreeMap::new(), &tz).events;
         assert_eq!(ev.len(), 1);
         let c = &ev[0].counters;
         // The parts still add back up to exactly what the vendor reported.
@@ -593,7 +709,59 @@ mod tests {
         );
         let tz = jiff::tz::TimeZone::UTC;
         // The archive holds the whole day, so nothing is missing.
-        assert!(backfill_events(&stats, &daily, &seen, &tz).is_empty());
+        assert!(
+            backfill_events(&stats, &daily, &seen, &tz)
+                .events
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_reading_that_beats_the_vendors_own_lifetime_total_is_refused() {
+        // The backstop for a format change nobody here has seen. Recovery only
+        // ever redistributes history this same file reports, so deriving more
+        // of a bucket than the lifetime figure is arithmetically impossible and
+        // means the file is being read wrong. This is the shape of the bug that
+        // priced a day at $14,278: 9.7 billion derived output tokens against a
+        // lifetime total of 90 million.
+        let stats = parse(CACHE_HEAVY).unwrap();
+        // A day claiming far more than this model ever produced in total.
+        let daily = vec![day("2026-08-11", "claude-opus-5", 900_000_000_000)];
+        let tz = jiff::tz::TimeZone::UTC;
+        let recovered = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
+        assert!(recovered.events.is_empty(), "{:?}", recovered.events);
+        assert_eq!(recovered.warnings.len(), 1);
+        assert!(
+            format!("{}", recovered.warnings[0]).contains("claude-opus-5"),
+            "{}",
+            recovered.warnings[0]
+        );
+    }
+
+    #[test]
+    fn one_model_changing_shape_does_not_lose_the_others() {
+        let stats = parse(SAMPLE).unwrap();
+        let daily = vec![
+            day("2026-06-20", "claude-opus-4-8", 1000),
+            day("2026-06-21", "claude-fable-5", 900_000_000_000),
+        ];
+        let tz = jiff::tz::TimeZone::UTC;
+        let recovered = backfill_events(&stats, &daily, &BTreeMap::new(), &tz);
+        assert_eq!(recovered.events.len(), 1);
+        assert_eq!(recovered.events[0].model, "claude-opus-4-8");
+        assert_eq!(recovered.warnings.len(), 1);
+    }
+
+    #[test]
+    fn the_vendors_own_format_version_is_read_when_present() {
+        // Not matched against a known list on purpose: it only has to change
+        // for an archive to rebuild its recovered rows.
+        assert_eq!(
+            daily_tokens_version(r#"{"dailyModelTokensVersion":5}"#),
+            Some(5)
+        );
+        assert_eq!(daily_tokens_version(r#"{}"#), None);
+        assert_eq!(daily_tokens_version("not json"), None);
     }
 
     #[test]

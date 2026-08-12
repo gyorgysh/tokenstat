@@ -150,9 +150,21 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
             //
             // Bump this whenever `claude_stats::backfill_events` changes what
             // it would produce from the same input.
-            const RECOVERY_LOGIC_VERSION: &str = "2";
-            let recovery_stale = store.meta("claude_rollup_logic").ok().flatten().as_deref()
-                != Some(RECOVERY_LOGIC_VERSION);
+            const RECOVERY_LOGIC_VERSION: &str = "3";
+            // Ours and the vendor's, together. Either moving makes the stored
+            // rows stale: a fix here changes what the same input produces, and
+            // a bump there changes what the input means.
+            let vendor_version = std::fs::read_to_string(&stats_path)
+                .ok()
+                .and_then(|c| claude_stats::daily_tokens_version(&c));
+            let stamp = format!(
+                "{RECOVERY_LOGIC_VERSION}/{}",
+                vendor_version
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".into())
+            );
+            let recovery_stale =
+                store.meta("claude_rollup_logic").ok().flatten().as_deref() != Some(stamp.as_str());
             let stats_unchanged = watermark::classify(stats_prev, stats_size, stats_mtime)
                 == watermark::Change::Unchanged
                 && !recovery_stale;
@@ -161,9 +173,11 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
                     if let Some(stats) = claude_stats::parse(&contents) {
                         let daily = claude_stats::daily_model_tokens(&contents);
                         store.clear_recovered()?;
-                        store.set_meta("claude_rollup_logic", RECOVERY_LOGIC_VERSION)?;
+                        store.set_meta("claude_rollup_logic", &stamp)?;
                         let have = store.archive_by_date_model()?;
-                        let events = claude_stats::backfill_events(&stats, &daily, &have, tz);
+                        let recovered = claude_stats::backfill_events(&stats, &daily, &have, tz);
+                        report.warnings.extend(recovered.warnings);
+                        let events = recovered.events;
                         report.days_recovered = events
                             .iter()
                             .map(|e| e.ts.local_date(tz))

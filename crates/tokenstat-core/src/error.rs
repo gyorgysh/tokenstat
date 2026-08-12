@@ -114,6 +114,20 @@ pub enum Warning {
     /// The tool is installed (or commonly used) but keeps usage on its servers.
     /// Reporting zero would look like "no usage", so say so instead.
     UsageNotOnDisk { source: &'static str },
+    /// Recovering history from a vendor rollup derived more of some bucket than
+    /// the vendor says that model ever produced, so the file is not being read
+    /// the way it is written and nothing was recovered for it.
+    ///
+    /// This is the guard that would have caught reading Claude Code's per-day
+    /// totals as input plus output: it derived 9.7 billion output tokens
+    /// against a lifetime figure of 90 million, in the same file.
+    RecoveryImplausible {
+        source: &'static str,
+        model: String,
+        bucket: &'static str,
+        derived: u64,
+        lifetime: u64,
+    },
 }
 
 impl std::fmt::Display for Warning {
@@ -152,6 +166,17 @@ impl std::fmt::Display for Warning {
             Warning::UsageNotOnDisk { source } => write!(
                 f,
                 "{source}: usage is not stored on disk, needs an explicit login later"
+            ),
+            Warning::RecoveryImplausible {
+                source,
+                model,
+                bucket,
+                derived,
+                lifetime,
+            } => write!(
+                f,
+                "{source}: recovering {model} derived {derived} {bucket} tokens against a \
+                 lifetime total of {lifetime} in the same file, so nothing was recovered for it"
             ),
         }
     }
