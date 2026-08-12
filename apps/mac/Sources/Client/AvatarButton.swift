@@ -34,9 +34,17 @@ struct AvatarButton: View {
 
     var action: () -> Void
 
-    /// Drawn at 30, tappable at 44. The drawn size is what looks right beside a
-    /// wordmark, the tap size is the minimum a finger can be asked to hit.
-    private let drawn: CGFloat = 30
+    /// The toolbar's own metric, and the whole item.
+    ///
+    /// This used to draw at 30 inside a 44pt frame, on the reasoning that 44 is
+    /// the minimum a finger can be asked to hit. In a toolbar that is the wrong
+    /// place to enforce it: the bar sizes its item to the frame and draws its
+    /// own container around it, so a 30pt circle in a 44pt item is 7pt of dead
+    /// space on every side. The picture reads as inset and sits off the leading
+    /// edge everything else on the screen lines up with. The bar already gives
+    /// its items a comfortable hit area, and `contentShape` makes the whole
+    /// circle count.
+    private let drawn: CGFloat = 34
 
     var body: some View {
         Button(action: action) {
@@ -77,8 +85,10 @@ struct AvatarButton: View {
                     .strokeBorder(Theme.accent.opacity(signedIn ? 0 : 0.55), lineWidth: 1.5)
             }
             .frame(width: drawn, height: drawn)
-            .frame(width: 44, height: 44)
-            .contentShape(.rect)
+            // The circle, not its bounding box. A rect content shape on a
+            // round control claims the corners it does not draw, which in a
+            // toolbar means swallowing taps meant for what sits beside it.
+            .contentShape(.circle)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(signedIn ? "Account, \(name)" : "Sign in to tokenstat")
