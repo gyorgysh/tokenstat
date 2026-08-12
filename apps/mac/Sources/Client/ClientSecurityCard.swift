@@ -33,47 +33,75 @@ struct ClientSecurityCard: View {
     @State private var identity: MachineIdentity?
     @State private var peer: Peer?
     @State private var copied: String?
+    @State private var isExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: 6) {
-                Image(systemName: "lock.shield.fill")
-                    .foregroundStyle(Theme.accent)
-                Text("End to end encrypted")
-                    .font(ClientType.sectionTitle)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Theme.Space.s) {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("End to end encrypted")
+                            .font(ClientType.sectionTitle)
+                        Text(isExpanded
+                            ? "Keys and fingerprints are visible"
+                            : "Keys are hidden until you choose to view them")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: Theme.Space.s)
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            Text("""
-            A connection between your devices is encrypted on one and decrypted \
-            on the other, with keys that never leave them. The relay forwards \
-            the bytes and cannot read them, and neither can tokenstat. Your \
-            folders, terminals and agents are on your own computer.
-            """)
-            .font(ClientType.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .buttonStyle(.plain)
+            .accessibilityHint(isExpanded ? "Hides the encryption keys" : "Shows the encryption keys")
 
-            if let identity {
-                keyRow(
-                    title: "This device",
-                    words: identity.words,
-                    fingerprint: identity.fingerprint,
-                    key: identity.key
-                )
-            }
-            if let peer {
-                keyRow(
-                    title: peerName ?? (peer.label.isEmpty ? "The other device" : peer.label),
-                    words: peer.words,
-                    fingerprint: peer.fingerprint,
-                    key: peer.key
-                )
-            }
+            if isExpanded {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text("""
+                    A connection between your devices is encrypted on one and decrypted \
+                    on the other, with keys that never leave them. The relay forwards \
+                    the bytes and cannot read them, and neither can tokenstat. Your \
+                    folders, terminals and agents are on your own computer.
+                    """)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
-                + "Compare the words with the other device to be sure.")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+                    if let identity {
+                        keyRow(
+                            title: "This device",
+                            words: identity.words,
+                            fingerprint: identity.fingerprint,
+                            key: identity.key
+                        )
+                    }
+                    if let peer {
+                        keyRow(
+                            title: peerName ?? (peer.label.isEmpty ? "The other device" : peer.label),
+                            words: peer.words,
+                            fingerprint: peer.fingerprint,
+                            key: peer.key
+                        )
+                    }
+
+                    Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
+                        + "Compare the words with the other device to be sure.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)

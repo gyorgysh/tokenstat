@@ -25,6 +25,7 @@ struct MachinesView: View {
 @Bindable var model: MachinesModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
+    @State private var encryptionExpanded = false
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
     @State private var pendingUnlink: Machine?
@@ -572,48 +573,85 @@ struct MachinesView: View {
     /// card, and it carries the fingerprints somebody can compare against the
     /// other machine rather than asking them to take the sentence on trust.
     private var encryptionNote: some View {
-        Card(
-            title: "End to end encrypted",
-            subtitle: "Only the two machines can read what passes between them."
-        ) {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("""
-                A connection between two machines carries terminal output, file \
-                contents and diffs. It is encrypted on one machine and \
-                decrypted on the other, with keys that never leave them. The \
-                tunnel relays the encrypted bytes and cannot read them, and \
-                neither can tokenstat. Only aggregate counters are ever \
-                eligible for sync.
-                """)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-                if let identity = model.identity {
-                    keyLine(
-                        title: "This machine",
-                        words: identity.words,
-                        fingerprint: identity.fingerprint
-                    )
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    encryptionExpanded.toggle()
                 }
-                ForEach(model.known.filter { $0.trust == .approved }) { peer in
-                    keyLine(
-                        title: peer.label.isEmpty
-                            ? (model.accountName(for: peer) ?? "Approved device")
-                            : peer.label,
-                        words: peer.words,
-                        fingerprint: peer.fingerprint
-                    )
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                    Image(systemName: "lock.shield.fill")
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("End to end encrypted")
+                            .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                        Text(encryptionExpanded
+                            ? "Keys and fingerprints are visible"
+                            : "Keys are hidden until you choose to view them")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: Theme.Space.s)
+                    Image(systemName: encryptionExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(encryptionExpanded
+                ? "Hides the encryption keys"
+                : "Shows the encryption keys")
 
-                Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
-                    + "Two machines showing the same words for each other are talking "
-                    + "to each other and to nothing in between.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            if encryptionExpanded {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    Text("""
+                    A connection between two machines carries terminal output, file \
+                    contents and diffs. It is encrypted on one machine and \
+                    decrypted on the other, with keys that never leave them. The \
+                    tunnel relays the encrypted bytes and cannot read them, and \
+                    neither can tokenstat. Only aggregate counters are ever \
+                    eligible for sync.
+                    """)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                    if let identity = model.identity {
+                        keyLine(
+                            title: "This machine",
+                            words: identity.words,
+                            fingerprint: identity.fingerprint
+                        )
+                    }
+                    ForEach(model.known.filter { $0.trust == .approved }) { peer in
+                        keyLine(
+                            title: peer.label.isEmpty
+                                ? (model.accountName(for: peer) ?? "Approved device")
+                                : peer.label,
+                            words: peer.words,
+                            fingerprint: peer.fingerprint
+                        )
+                    }
+
+                    Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
+                        + "Two machines showing the same words for each other are talking "
+                        + "to each other and to nothing in between.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .padding(Theme.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 
     private func keyLine(title: String, words: String?, fingerprint: String) -> some View {

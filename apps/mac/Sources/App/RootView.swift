@@ -55,12 +55,12 @@ enum Destination: String, CaseIterable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .home: return "house.fill"
+        case .home: return "square.grid.3x3.fill"
         case .todo: return "checklist"
-        case .workspaces: return "square.stack.3d.up.fill"
+        case .workspaces: return "folder.fill"
         case .automations: return "bolt.fill"
-        case .machines: return "desktopcomputer"
-        case .insights: return "chart.bar.fill"
+        case .machines: return "laptopcomputer"
+        case .insights: return "chart.bar.xaxis"
         case .account: return "person.crop.circle"
         }
     }

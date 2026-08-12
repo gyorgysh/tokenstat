@@ -305,7 +305,7 @@ struct AccountView: View {
     /// anyone can actually act on is the one they cannot pick out.
     private func machineRow(_ machine: Machine, isThisMachine: Bool) -> some View {
         HStack(spacing: Theme.Space.m) {
-            Image(systemName: isThisMachine ? "laptopcomputer" : "desktopcomputer")
+            Image(systemName: machineIcon(machine, isThisMachine: isThisMachine))
                 .foregroundStyle(isThisMachine ? Theme.accent : .secondary)
                 .frame(width: 18)
 
@@ -407,6 +407,13 @@ struct AccountView: View {
                 #endif
             }
         }
+    }
+
+    /// Show phones as phones on both the desktop account card and the client.
+    /// A host is a computer, with the current one using the laptop variant.
+    private func machineIcon(_ machine: Machine, isThisMachine: Bool) -> String {
+        if !machine.isHost { return "iphone" }
+        return isThisMachine ? "laptopcomputer" : "desktopcomputer"
     }
 
     private var licensesCard: some View {
