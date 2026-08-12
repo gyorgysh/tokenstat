@@ -1021,6 +1021,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         }
 
         "account.logout" => {
+            crate::remote::stop_tunnel();
             let host = tokenstat_sync::logout(None).envelope()?;
             with_session(s, |b| {
                 b.pending_login = None;

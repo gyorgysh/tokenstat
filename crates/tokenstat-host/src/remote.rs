@@ -362,6 +362,12 @@ fn hold_credential(token: &str, expires_in: Option<u64>) {
     }
 }
 
+fn clear_held_credential() {
+    if let Ok(mut guard) = held_credential().lock() {
+        *guard = None;
+    }
+}
+
 /// Serializes tunnel start so two callers cannot both create a session.
 ///
 /// Without it, a retry tick and a connectivity nudge arriving in the same
@@ -618,8 +624,9 @@ fn tunnel_token_refresh_loop(
     }
 }
 
-fn stop_tunnel() {
+pub(crate) fn stop_tunnel() {
     tunnel_running().store(false, Ordering::Release);
+    clear_held_credential();
     if let Some(session) = tunnel_session()
         .lock()
         .ok()
@@ -1339,5 +1346,12 @@ mod tests {
         assert_eq!(token, "tsk_deadbeef_secret");
         assert_eq!(registers, 1);
         assert_eq!(mints, 2);
+    }
+
+    #[test]
+    fn stopping_remote_reach_clears_the_held_credential() {
+        hold_credential("tsk_old_account_secret", Some(43_200));
+        clear_held_credential();
+        assert!(held_credential().lock().unwrap().is_none());
     }
 }
