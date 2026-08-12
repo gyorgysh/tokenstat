@@ -216,7 +216,7 @@ struct HomeView: View {
     /// Whether to offer the setting that would put these numbers on the phone.
     ///
     /// Only with something to share and somewhere to share it. Signed out, the
-    /// setting does nothing and the sentence would be a puzzle; with no panels
+    /// setting does nothing and the sentence would be a puzzle. With no panels
     /// on screen there is nothing to talk about yet, and a hint that appears
     /// before the first reading arrives looks like an error.
     private var showsLimitsSyncHint: Bool {

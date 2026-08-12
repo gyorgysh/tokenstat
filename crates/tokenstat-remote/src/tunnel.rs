@@ -115,7 +115,7 @@ struct Writer {
 /// Mints a replacement HELLO credential, or says why it could not.
 ///
 /// The reason matters and used to be thrown away. A relay that says
-/// `token_expired` is describing a symptom; the cause is whatever the mint
+/// `token_expired` is describing a symptom. The cause is whatever the mint
 /// answered, and "remote reach is a paid-plan feature" or "sign in again" is
 /// the sentence somebody can act on. Reporting the expiry instead is how a
 /// machine sat for days telling its owner a credential had expired when the
@@ -935,8 +935,8 @@ mod tests {
     }
 
     /// The mint's reason has to reach the sentence, because the relay's is a
-    /// symptom. "expired" is what the socket saw; "remote reach is a paid-plan
-    /// feature" is what somebody can do something about.
+    /// symptom. "expired" is what the socket saw, and "remote reach is a
+    /// paid-plan feature" is what somebody can do something about.
     #[test]
     fn a_failed_renewal_reports_what_the_account_said() {
         let denial = denial_message("DENIED token_expired");
