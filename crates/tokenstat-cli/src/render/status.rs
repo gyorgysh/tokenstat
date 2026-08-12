@@ -149,6 +149,13 @@ pub fn scan_report(r: &ScanReport, json: bool) -> Result<()> {
         println!("  {DIM}Run tokenstat doctor for source coverage.{DIM:#}");
     }
 
+    if let Some(made) = &r.backup {
+        println!(
+            "  {DIM}daily backup {}{DIM:#}",
+            made.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
+
     if !r.warnings.is_empty() {
         let w = warn();
         println!(
@@ -195,6 +202,29 @@ pub fn doctor(store: &Store, db_path: &Path, json: bool) -> Result<()> {
     println!("  {BOLD}Archive{BOLD:#}");
     println!("  {DIM}path{DIM:#}     {}", db_path.display());
     println!("  {DIM}events{DIM:#}   {}", ui::exact(totals.events));
+    // Worth a line even when it is working, because the reason it exists is a
+    // mistake nobody expects to make: a rescan of a machine whose logs have
+    // been pruned reads a smaller world than the archive already holds.
+    let copies = tokenstat_core::backup::list(db_path, tokenstat_core::backup::KEEP);
+    if copies.is_empty() {
+        println!("  {DIM}backups{DIM:#}  none yet, the next scan takes one");
+    } else {
+        let bytes: u64 = copies.iter().map(|(_, n)| n).sum();
+        println!(
+            "  {DIM}backups{DIM:#}  {} of {} daily copies, {}",
+            copies.len(),
+            tokenstat_core::backup::KEEP,
+            ui::bytes(bytes)
+        );
+        println!(
+            "  {DIM}         newest {}, restore by copying it over the archive{DIM:#}",
+            copies[0]
+                .0
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+    }
     if let (Some(a), Some(b)) = (&totals.first_date, &totals.last_date) {
         // Days a vendor recorded work for count as worked here too, or doctor
         // contradicts every other screen about the same archive.

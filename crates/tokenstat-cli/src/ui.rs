@@ -257,6 +257,21 @@ pub fn tokens(n: u64) -> String {
     }
 }
 
+/// Bytes on disk, in the units a person checking free space thinks in.
+pub fn bytes(n: u64) -> String {
+    const K: f64 = 1024.0;
+    let f = n as f64;
+    if f >= K * K * K {
+        format!("{:.1} GB", f / (K * K * K))
+    } else if f >= K * K {
+        format!("{:.0} MB", f / (K * K))
+    } else if f >= K {
+        format!("{:.0} kB", f / K)
+    } else {
+        format!("{n} B")
+    }
+}
+
 /// Thousands-separated integer, for places where the exact value matters.
 pub fn exact(n: u64) -> String {
     let s = n.to_string();

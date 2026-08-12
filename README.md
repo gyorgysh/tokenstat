@@ -208,6 +208,21 @@ one-shot report.
 Filters: `--since`, `--until`, `--last N`, `--model`, `--project`. Every command
 accepts `--json`.
 
+### The archive backs itself up
+
+The archive is not reconstructible. The tools that wrote your transcripts
+delete them after about 30 days and vendor rollup windows slide, so a rescan
+run months in reads a strictly smaller world than the archive already holds.
+
+So a scan takes one copy a day and keeps seven, logrotate style:
+`tokenstat.db.0` is newest, `tokenstat.db.6` oldest, and the oldest is dropped
+on each rotation. Copies use SQLite's `VACUUM INTO`, which is consistent under
+WAL and compacts as it writes, so a copy taken mid-scan is never torn. They are
+never read back automatically. To restore, stop everything touching the archive
+and copy a slot over `tokenstat.db` yourself.
+
+`tokenstat doctor` reports how many copies exist and what they cost on disk.
+
 List rates are not shipped in the binary. `tokenstat setup` fetches them, or run
 `tokenstat pricing --refresh` and `tokenstat catalog --refresh` yourself. Both
 land in your local data directory and are read offline from then on.

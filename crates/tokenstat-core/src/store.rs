@@ -28,6 +28,19 @@ pub const BLOCK_DURATION_MS: i64 = 5 * 60 * 60 * 1000;
 
 pub struct Store {
     conn: Connection,
+    /// Where this archive lives, when it lives anywhere. `None` for an
+    /// in-memory store, which is also the answer to "can this be backed up".
+    path: Option<PathBuf>,
+}
+
+/// A vendor's lifetime totals for one model, as kept in `vendor_model`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VendorModel {
+    pub model: String,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
 }
 
 /// One day of what a vendor's own rollup said, as kept in `vendor_day`.
@@ -206,14 +219,46 @@ impl Store {
             // full migrate write path.
             Self::ensure_indexes(&conn)?;
         }
-        Ok(Store { conn })
+        Ok(Store {
+            conn,
+            path: Some(path.to_path_buf()),
+        })
     }
 
     pub fn open_in_memory() -> Result<Self, CoreError> {
         let conn = Connection::open_in_memory()?;
         Self::configure(&conn)?;
         Self::migrate(&conn)?;
-        Ok(Store { conn })
+        Ok(Store { conn, path: None })
+    }
+
+    /// Take today's rotating copy of the archive, if one is not already taken.
+    ///
+    /// See [`crate::backup`] for why this exists and why it uses `VACUUM INTO`.
+    /// Returns the path written, or `None` when nothing was due, this store has
+    /// no file behind it, or the copy failed. Failure is deliberately not an
+    /// error: a scan that collected data and could not also back it up has
+    /// still done the more important half of its job.
+    pub fn backup_daily(&self, now_ms: i64) -> Option<PathBuf> {
+        let path = self.path.as_ref()?;
+        let last = self
+            .meta(crate::backup::stamp_key())
+            .ok()
+            .flatten()
+            .and_then(|v| v.parse::<i64>().ok());
+        match crate::backup::run(&self.conn, path, last, now_ms, crate::backup::KEEP) {
+            Ok(Some(made)) => {
+                let _ = self.set_meta(crate::backup::stamp_key(), &now_ms.to_string());
+                Some(made)
+            }
+            Ok(None) => None,
+            Err(_) => None,
+        }
+    }
+
+    /// Where this archive lives, if it lives on disk.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     /// WAL + busy wait. Safe to call on a connection that will only read.

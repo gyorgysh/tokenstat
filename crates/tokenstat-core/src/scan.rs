@@ -92,6 +92,9 @@ pub struct ScanReport {
     /// thing that makes somebody distrust a total that is actually correct for
     /// what it can see.
     pub days_active_unmeasured: Vec<String>,
+    /// Today's rotating copy of the archive, if this scan was the one to take
+    /// it. `None` means one already existed for today, not that it failed.
+    pub backup: Option<std::path::PathBuf>,
     pub elapsed_ms: u128,
 }
 
@@ -407,6 +410,11 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
     store.set_watermarks(&marks_to_store)?;
 
     store.set_meta("last_scan_ms", &now_ms().to_string())?;
+
+    // After the writes, so today's copy holds everything this scan found. The
+    // archive is not reconstructible from a machine whose logs have since been
+    // pruned, and the way it gets lost is a rescan, not a disk.
+    report.backup = store.backup_daily(now_ms());
     report.elapsed_ms = started.elapsed().as_millis();
     Ok(report)
 }

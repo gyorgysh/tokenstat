@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 pub mod activity;
+pub mod backup;
 pub mod budget;
 pub mod catalog;
 pub mod engine;
