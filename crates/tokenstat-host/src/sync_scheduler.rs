@@ -25,14 +25,38 @@ pub fn start(session: Arc<Mutex<Session>>) {
         // Refresh once up front; a machine offline right now keeps its last
         // known book and retries with the schedule.
         refresh_pricing(&session);
+        post_limits();
         loop {
             if !tokenstat_sync::cli_sync_schedule_active() {
                 run_once(&session);
             }
             refresh_pricing(&session);
+            post_limits();
             std::thread::sleep(sync_interval());
         }
     });
+}
+
+/// Put this machine's plan-limit readings on the account, if the user asked
+/// for that.
+///
+/// It used to ride `usage.limits`, which only runs when a front end asks. So
+/// the phone's copy was as old as the last time somebody opened Home or
+/// Insights **on the Mac**, and a Mac that was working all day without its
+/// window in front never posted at all. The whole point of the setting is that
+/// the phone can see the numbers while the Mac is asleep, which cannot depend
+/// on somebody having looked at the Mac first.
+///
+/// Off unless the setting is on. This runs the same vendor pass `usage.limits`
+/// runs, and that pass posts, so a scheduled refresh and a person opening
+/// Insights take the identical path and cannot disagree about what was sent.
+/// Quiet on failure: a machine that is offline keeps whatever the account
+/// already has, and the next pass retries.
+fn post_limits() {
+    if !tokenstat_sync::config::limits_sync_enabled() {
+        return;
+    }
+    crate::dispatch::refresh_plan_limits();
 }
 
 /// Fetch the hosted list-rate snapshot and write it where the core reads it.

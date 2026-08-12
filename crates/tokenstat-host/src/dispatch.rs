@@ -2016,6 +2016,17 @@ fn client_proxy_listen(params: &str) -> Result<Value, String> {
 /// against. The session used to provide the same guarantee by accident, and it
 /// charged every other screen for it. Two screens asking at once should share
 /// the wait, not fan out ten requests.
+/// Ask the vendors again, and post the answer if the user opted in.
+///
+/// The scheduler's door into the same pass a front end triggers, so there is
+/// one place that decides what a reading is and one place that sends it. See
+/// `sync_scheduler::post_limits` for why this cannot wait for somebody to open
+/// a window.
+#[cfg(all(unix, feature = "local-host"))]
+pub(crate) fn refresh_plan_limits() {
+    let _ = usage_limits();
+}
+
 fn usage_limits() -> Value {
     static REFRESH: Mutex<()> = Mutex::new(());
     let _one_at_a_time = REFRESH.lock().unwrap_or_else(PoisonError::into_inner);
@@ -2088,6 +2099,15 @@ fn usage_limits() -> Value {
 ///
 /// Hosts post; this only reads. Multiple machines can report the same source:
 /// the newest reading wins so Home shows one row per provider.
+/// How old a posted reading may be before the phone marks it stale.
+///
+/// Wider than the host's refresh interval, so an ordinary hourly pass never
+/// makes its own readings look doubtful, and narrow enough that a Mac that has
+/// been shut since yesterday is not still quoting yesterday's quota as though
+/// it were now.
+#[cfg(not(feature = "local-host"))]
+const READING_GOES_STALE_MS: i64 = 3 * 60 * 60 * 1000;
+
 #[cfg(not(feature = "local-host"))]
 fn account_plane_limits() -> Value {
     use tokenstat_core::limits::{LimitSeverity, ProviderLimits, UsageWindow};
@@ -2111,13 +2131,21 @@ fn account_plane_limits() -> Value {
         if windows.is_empty() {
             continue;
         }
+        // Staleness is decided here, from when the reading was taken, not
+        // taken from the row. The account stores what a host posted and hands
+        // it back with `stale: false` forever, so a percentage from last week
+        // arrived on the phone looking like the current one. A quota display
+        // that is confidently wrong about how much is left is worse than one
+        // that admits its age.
+        let age_ms = jiff::Timestamp::now().as_millisecond() - row.observed_at_ms;
+        let stale = row.stale || age_ms > READING_GOES_STALE_MS;
         let reading = ProviderLimits {
             source: row.src.clone(),
             plan: row.plan.clone(),
             windows,
             observed_at_ms: row.observed_at_ms,
             note: row.machine.map(|m| format!("from {m}")),
-            stale: row.stale,
+            stale,
         };
         match best.get(&reading.source) {
             Some(prev) if prev.observed_at_ms >= reading.observed_at_ms => {}
