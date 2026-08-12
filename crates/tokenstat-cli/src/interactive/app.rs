@@ -22,6 +22,7 @@ impl App {
             should_quit: false,
             empty: true,
             totals: Totals::default(),
+            days_unmeasured: Vec::new(),
             models: Vec::new(),
             days: Vec::new(),
             day_cost: Vec::new(),
@@ -64,6 +65,9 @@ impl App {
     pub(super) fn reload(&mut self, store: &Store) -> Result<()> {
         let q = self.filter.clone();
         self.totals = store.totals(&q)?;
+        self.days_unmeasured = store
+            .days_active_without_usage("claude_code")
+            .unwrap_or_default();
         self.empty = self.totals.events == 0;
         self.reconciliation = tokenstat_core::reconcile(store)?;
         if self.empty {

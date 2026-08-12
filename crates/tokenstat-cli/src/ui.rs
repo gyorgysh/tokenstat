@@ -429,7 +429,25 @@ pub const HEAT_COL: usize = 2;
 // app draws the same grid and a second implementation would be a second answer
 // to "how long is my streak". What stayed here is the part that is genuinely
 // about a terminal: the column arithmetic and the two label strings.
-pub use tokenstat_core::activity::{HeatCalendar, calendar as heat_calendar};
+pub use tokenstat_core::activity::HeatCalendar;
+
+/// Build an activity grid, marking the days that were worked and cannot be
+/// priced.
+///
+/// Wraps the core builder rather than re-exporting it so that every screen in
+/// this binary has to pass the list. Marking used to be something a caller
+/// could remember or forget, and the ones that forgot drew a week of real work
+/// as blank squares.
+pub fn heat_calendar(
+    days: &[(String, u64)],
+    weeks: usize,
+    anchor: jiff::civil::Date,
+    unmeasured: &[String],
+) -> Option<HeatCalendar> {
+    let mut cal = tokenstat_core::activity::calendar(days, weeks, anchor)?;
+    cal.mark_unmeasured(unmeasured);
+    Some(cal)
+}
 
 /// Drawing a calendar into a fixed-width grid.
 ///
@@ -604,7 +622,7 @@ mod tests {
         let days: Vec<_> = (1..=28)
             .map(|d| (format!("2026-07-{d:02}"), d as u64 * 100))
             .collect();
-        let cal = heat_calendar(&days, 5, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 5, anchor(), &[]).expect("calendar");
         assert_eq!(cal.rows.len(), 7);
         assert_eq!(cal.weeks, 5);
         assert!(cal.rows.iter().all(|r| r.len() == cal.weeks));
@@ -613,7 +631,7 @@ mod tests {
     #[test]
     fn calendar_puts_each_day_in_its_real_weekday_row() {
         let days = vec![("2026-07-29".to_string(), 10)];
-        let cal = heat_calendar(&days, 4, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 4, anchor(), &[]).expect("calendar");
         // 2026-07-29 is a Wednesday: row 2, Monday first.
         let found = cal.rows[2]
             .iter()
@@ -628,7 +646,7 @@ mod tests {
         // A week-old archive still renders a full rolling year of idle cells,
         // rather than collapsing to the days that happen to have data.
         let days = vec![("2026-07-27".to_string(), 5)];
-        let cal = heat_calendar(&days, 53, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 53, anchor(), &[]).expect("calendar");
         assert_eq!(cal.weeks, 53);
         assert_eq!(cal.active_days, 1);
         // A year back from the anchor week: starts in the previous August.
@@ -640,7 +658,7 @@ mod tests {
     fn calendar_leaves_days_after_the_anchor_blank() {
         // The rest of this week has not happened. Blank, not idle.
         let days = vec![("2026-07-29".to_string(), 5)];
-        let cal = heat_calendar(&days, 2, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 2, anchor(), &[]).expect("calendar");
         let last_col = cal.weeks - 1;
         assert!(cal.rows[2][last_col].is_some(), "Wednesday is the anchor");
         assert!(cal.rows[3][last_col].is_none(), "Thursday is the future");
@@ -652,7 +670,7 @@ mod tests {
         // The archive stores only active days. The grid must still show the
         // idle days between them, or every later column drifts.
         let days = vec![("2026-07-06".to_string(), 5), ("2026-07-10".to_string(), 7)];
-        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 12)).expect("calendar");
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 12), &[]).expect("calendar");
         assert_eq!(cal.active_days, 2);
         assert_eq!(cal.total, 12);
         assert_eq!(cal.busiest.map(|b| b.value), Some(7));
@@ -665,7 +683,7 @@ mod tests {
         let days: Vec<_> = (20..=24)
             .map(|d| (format!("2026-07-{d:02}"), 100u64))
             .collect();
-        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 24)).expect("calendar");
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 24), &[]).expect("calendar");
         assert_eq!(cal.streak_current, 5);
         assert_eq!(cal.streak_best, 5);
     }
@@ -677,10 +695,10 @@ mod tests {
         let days: Vec<_> = (26..=28)
             .map(|d| (format!("2026-07-{d:02}"), 100u64))
             .collect();
-        let cal = heat_calendar(&days, 4, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 4, anchor(), &[]).expect("calendar");
         assert_eq!(cal.streak_current, 3);
         // Two idle days before the anchor do break it.
-        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 30)).expect("calendar");
+        let cal = heat_calendar(&days, 4, jiff::civil::date(2026, 7, 30), &[]).expect("calendar");
         assert_eq!(cal.streak_current, 0);
     }
 
@@ -694,7 +712,7 @@ mod tests {
                 (d.to_string(), 100u64)
             })
             .collect();
-        let cal = heat_calendar(&days, 20, anchor()).expect("calendar");
+        let cal = heat_calendar(&days, 20, anchor(), &[]).expect("calendar");
         let header = cal.header();
         assert!(header.contains("Jun"));
         assert!(header.contains("Jul"));
@@ -706,6 +724,6 @@ mod tests {
 
     #[test]
     fn calendar_handles_empty_input() {
-        assert!(heat_calendar(&[], 5, anchor()).is_none());
+        assert!(heat_calendar(&[], 5, anchor(), &[]).is_none());
     }
 }

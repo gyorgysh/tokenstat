@@ -29,9 +29,13 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     }
 
     // Days the archive measured, plus days a vendor recorded work for and
-    // nothing can price. Shown as one number with the split spelled out
-    // underneath: "50" is wrong when 57 days were worked, and "57" alone claims
-    // usage for seven of them that nobody has.
+    // nothing can price.
+    //
+    // One number, because the question is how many days were worked and that is
+    // known: the vendor's activity log says so. Not being able to price a day
+    // is a fact about the tokens, not about the day, and the grid and the floor
+    // note are where that uncertainty belongs. Reporting 50 here denied that a
+    // week of work happened at all.
     let unmeasured_days = store
         .days_active_without_usage("claude_code")
         .unwrap_or_default()
@@ -50,14 +54,7 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
         ("Sessions", ui::exact(totals.sessions)),
         ("Requests", ui::exact(totals.events)),
         ("Input + output", ui::tokens(in_out)),
-        (
-            "Active days",
-            if unmeasured_days > 0 {
-                format!("{}+{}", ui::exact(totals.days), unmeasured_days)
-            } else {
-                ui::exact(totals.days)
-            },
-        ),
+        ("Active days", ui::exact(totals.days + unmeasured_days)),
     ];
     let mut labels = String::from("  ");
     let mut values = String::from("  ");
@@ -89,11 +86,10 @@ pub fn overview(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) -
     if !days.is_empty() {
         println!();
         let pairs = daily_cost(store, q, &prices)?;
-        if let Some(mut cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz)) {
-            let unknown = store
-                .days_active_without_usage("claude_code")
-                .unwrap_or_default();
-            cal.mark_unmeasured(&unknown);
+        let unknown = store
+            .days_active_without_usage("claude_code")
+            .unwrap_or_default();
+        if let Some(cal) = ui::heat_calendar(&pairs, heat_weeks(53), today(tz), &unknown) {
             let marked = cal.unmeasured_days();
             heat_block(&cal, false);
             if marked > 0 {
@@ -285,7 +281,10 @@ pub fn heatmap(store: &Store, tz: &jiff::tz::TimeZone, q: &Query, json: bool) ->
     let prices = PriceTable::load_with_catalog();
     let pairs = daily_cost(store, q, &prices)?;
     let weeks = if json { 53 } else { heat_weeks(53) };
-    let Some(cal) = ui::heat_calendar(&pairs, weeks, today(tz)) else {
+    let unknown = store
+        .days_active_without_usage("claude_code")
+        .unwrap_or_default();
+    let Some(cal) = ui::heat_calendar(&pairs, weeks, today(tz), &unknown) else {
         return empty_range(json);
     };
 
@@ -446,7 +445,10 @@ pub fn wrapped(
         let now = today(tz);
         let anchor = if now < year_end { now } else { year_end };
         let weeks = (anchor.day_of_year() as usize).div_ceil(7) + 1;
-        if let Some(cal) = ui::heat_calendar(&day_cost, heat_weeks(weeks), anchor) {
+        let unknown = store
+            .days_active_without_usage("claude_code")
+            .unwrap_or_default();
+        if let Some(cal) = ui::heat_calendar(&day_cost, heat_weeks(weeks), anchor, &unknown) {
             heat_block(&cal, true);
         }
     }

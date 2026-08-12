@@ -17,7 +17,48 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
         return print_json_buckets(&rows);
     }
     print_table(&rows, label, group);
+    note_unmeasured_days(store, q);
     Ok(())
+}
+
+/// Name the days in range that were worked and have no measurement.
+///
+/// A note rather than rows in the table. A row of zeros would say the day
+/// happened and cost nothing, which is the false statement this whole thing
+/// exists to stop, and a row of dashes would have to be excluded from every
+/// total and from the trend line anyway. The days are named so they can be
+/// recognised, and the totals above are honestly a floor.
+pub(super) fn note_unmeasured_days(store: &Store, q: &Query) {
+    let days = store
+        .days_active_without_usage("claude_code")
+        .unwrap_or_default();
+    let in_range: Vec<&String> = days
+        .iter()
+        .filter(|d| {
+            q.since.as_deref().is_none_or(|s| d.as_str() >= s)
+                && q.until.as_deref().is_none_or(|u| d.as_str() <= u)
+        })
+        .collect();
+    if in_range.is_empty() {
+        return;
+    }
+    let shown: Vec<&str> = in_range.iter().take(6).map(|d| d.as_str()).collect();
+    let more = in_range.len() - shown.len();
+    println!();
+    println!(
+        "  {DIM}{} day{} in this range were worked with no usage on record: {}{}{DIM:#}",
+        in_range.len(),
+        if in_range.len() == 1 { "" } else { "s" },
+        shown.join(", "),
+        if more > 0 {
+            format!(" and {more} more")
+        } else {
+            String::new()
+        },
+    );
+    println!(
+        "  {DIM}Claude Code recorded work, no token counts survive. Totals are a floor.{DIM:#}"
+    );
 }
 
 /// Sparkline and endpoints for a time-bucketed table, oldest point first.
@@ -161,6 +202,7 @@ pub fn monthly(store: &Store, q: &Query, json: bool) -> Result<()> {
         return print_json_buckets(&months);
     }
     print_table(&months, "Month", GroupBy::Day);
+    note_unmeasured_days(store, q);
     Ok(())
 }
 

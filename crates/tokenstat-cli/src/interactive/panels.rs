@@ -51,7 +51,10 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("{:<16}", ui::exact(app.totals.days)),
+            format!(
+                "{:<16}",
+                ui::exact(app.totals.days + app.days_unmeasured.len() as u64)
+            ),
             Style::default()
                 .fg(intensity_color(0.6))
                 .add_modifier(Modifier::BOLD),
@@ -88,7 +91,7 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
         let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
-        if let Some(cal) = ui::heat_calendar(pairs, weeks, today) {
+        if let Some(cal) = ui::heat_calendar(pairs, weeks, today, &app.days_unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
                 Style::default().fg(secondary()),
@@ -101,6 +104,16 @@ pub(super) fn summary_lines(app: &App, width: u16) -> Vec<Line<'static>> {
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
+                        // A day that was worked and cannot be priced gets its
+                        // own hollow mark, never level 0: a day off must not
+                        // look the same as a day whose transcripts are gone.
+                        Some(c) if c.unmeasured => {
+                            spans.push(Span::styled(
+                                ui::heat_unknown_cell(),
+                                Style::default().fg(MUTED),
+                            ));
+                            spans.push(Span::raw(" "));
+                        }
                         Some(c) => {
                             let (cr, cg, cb) = ui::heat_rgb(c.level);
                             spans.push(Span::styled(
@@ -716,7 +729,7 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
         .div_ceil(ui::HEAT_COL)
         .clamp(8, 53);
     let today = jiff::Timestamp::now().to_zoned(app.tz.clone()).date();
-    let Some(cal) = ui::heat_calendar(pairs, weeks, today) else {
+    let Some(cal) = ui::heat_calendar(pairs, weeks, today, &app.days_unmeasured) else {
         return lines;
     };
 
@@ -763,8 +776,16 @@ pub(super) fn heatmap_detail_lines(app: &App, width: u16) -> Vec<Line<'static>> 
                 Some(c) => {
                     let (cr, cg, cb) = ui::heat_rgb(c.level);
                     spans.push(Span::styled(
-                        ui::heat_cell(),
-                        Style::default().fg(brand((cr, cg, cb))),
+                        if c.unmeasured {
+                            ui::heat_unknown_cell()
+                        } else {
+                            ui::heat_cell()
+                        },
+                        Style::default().fg(if c.unmeasured {
+                            MUTED
+                        } else {
+                            brand((cr, cg, cb))
+                        }),
                     ));
                     spans.push(Span::raw(" "));
                 }
@@ -878,7 +899,10 @@ pub(super) fn wrapped_detail_lines(
             .saturating_sub(2 + ui::HEAT_GUTTER)
             .div_ceil(ui::HEAT_COL)
             .clamp(8, 53);
-        if let Some(cal) = ui::heat_calendar(&day_cost, weeks.min(fit), anchor) {
+        let unmeasured = store
+            .days_active_without_usage("claude_code")
+            .unwrap_or_default();
+        if let Some(cal) = ui::heat_calendar(&day_cost, weeks.min(fit), anchor, &unmeasured) {
             lines.push(Line::from(Span::styled(
                 cal.header(),
                 Style::default().fg(MUTED),
@@ -891,6 +915,16 @@ pub(super) fn wrapped_detail_lines(
                 for cell in row {
                     match cell {
                         None => spans.push(Span::raw("  ")),
+                        // A day that was worked and cannot be priced gets its
+                        // own hollow mark, never level 0: a day off must not
+                        // look the same as a day whose transcripts are gone.
+                        Some(c) if c.unmeasured => {
+                            spans.push(Span::styled(
+                                ui::heat_unknown_cell(),
+                                Style::default().fg(MUTED),
+                            ));
+                            spans.push(Span::raw(" "));
+                        }
                         Some(c) => {
                             let (cr, cg, cb) = ui::heat_rgb(c.level);
                             spans.push(Span::styled(

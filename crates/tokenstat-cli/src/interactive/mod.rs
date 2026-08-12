@@ -242,6 +242,10 @@ struct App {
     should_quit: bool,
     empty: bool,
     totals: Totals,
+    /// Days a vendor recorded work for that the archive cannot measure. Counted
+    /// into "Active days" and drawn on every grid: the day happened, only its
+    /// tokens are unknown.
+    days_unmeasured: Vec<String>,
     models: Vec<Bucket>,
     days: Vec<Bucket>,
     /// `(YYYY-MM-DD, microdollars)` for the heatmap. The grid ramps on spend,
