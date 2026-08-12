@@ -1608,9 +1608,10 @@ mod tests {
         // the machine at all.
         let rows = s.sync_rollup("2026-06-01", "2026-06-30").unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows
-            .iter()
-            .any(|r| r.src == "claude_code_estimate" && r.conf == "derived"));
+        assert!(
+            rows.iter()
+                .any(|r| r.src == "claude_code_estimate" && r.conf == "derived")
+        );
 
         // Once only: an owner who deletes these rows must not get them back,
         // and a second run must not touch anything else.
