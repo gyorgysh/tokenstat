@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
+
+import SafariServices
+import SwiftUI
+
+// The client is iOS and iPadOS only.
+#if !os(macOS)
+
+/// Presents legal documents without sending the person away from the app.
+/// Safari still owns the page, cookies, reader controls and dismissal gesture.
+struct ClientLegalBrowser: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ viewController: SFSafariViewController, context: Context) {}
+}
+
+#endif

@@ -22,6 +22,7 @@ import SwiftUI
 struct ClientLoginView: View {
     @Environment(AccountModel.self) private var account
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
+    @State private var legalURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,13 +97,24 @@ struct ClientLoginView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .sheet(isPresented: Binding(
+            get: { legalURL != nil },
+            set: { if !$0 { legalURL = nil } }
+        )) {
+            if let legalURL {
+                ClientLegalBrowser(url: legalURL)
+            }
+        }
     }
 
     @ViewBuilder
     private func legal(_ title: String, url: String) -> some View {
         if let destination = URL(string: url) {
-            Link(title, destination: destination)
-                .foregroundStyle(Theme.accent)
+            Button(title) {
+                legalURL = destination
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Theme.accent)
         }
     }
 

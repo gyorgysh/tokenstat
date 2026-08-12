@@ -55,6 +55,7 @@ private struct ClientAccountContent: View {
     @State private var showLicenses = false
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
+    @State private var legalURL: URL?
 
     var body: some View {
         ScrollView {
@@ -103,6 +104,14 @@ private struct ClientAccountContent: View {
                             Button("Done") { showDeletionWeb = false }
                         }
                     }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { legalURL != nil },
+            set: { if !$0 { legalURL = nil } }
+        )) {
+            if let legalURL {
+                ClientLegalBrowser(url: legalURL)
             }
         }
         .task {
@@ -315,7 +324,9 @@ private struct ClientAccountContent: View {
     @ViewBuilder
     private func legalLink(_ title: String, url: String) -> some View {
         if let destination = URL(string: url) {
-            Link(destination: destination) {
+            Button {
+                legalURL = destination
+            } label: {
                 HStack {
                     Text(title)
                         .font(ClientType.label)
@@ -328,6 +339,7 @@ private struct ClientAccountContent: View {
                 .frame(minHeight: 44)
                 .contentShape(.rect)
             }
+            .buttonStyle(.plain)
         }
     }
 
