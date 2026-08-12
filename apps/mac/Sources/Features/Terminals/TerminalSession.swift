@@ -1054,8 +1054,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         /// and no amount of throughput is worth that failure mode. Sleeping
         /// costs at most this long in extra latency per slice, far inside a
         /// frame, and it cannot deadlock.
+        /// `Task.isCancelled` first, because a cancelled task's `Task.sleep`
+        /// throws at once and `try?` eats it: without the check this stops
+        /// being a park and becomes the busy loop it was written to replace,
+        /// for a session that is being torn down and will never get a turn.
         func acquire(id: String) async {
-            while current != id, active.contains(id) {
+            while !Task.isCancelled, current != id, active.contains(id) {
                 try? await Task.sleep(for: Self.turnPoll)
             }
         }
