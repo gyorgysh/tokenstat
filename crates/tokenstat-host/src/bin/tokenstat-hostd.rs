@@ -19,7 +19,7 @@
 use std::process::ExitCode;
 
 #[cfg(unix)]
-use tokenstat_host::{Session, server};
+use tokenstat_host::{Session, ownership, server};
 
 fn main() -> ExitCode {
     match run() {
@@ -58,6 +58,16 @@ fn run() -> Result<(), String> {
         None => server::default_socket_path()?,
     };
 
+    // Before anything else, and before the archive is opened: one machine
+    // identity, one daemon. Two hosts sharing a key expire each other's tunnel
+    // credential on every renewal and knock each other off the relay, which
+    // reads as an unreachable machine and names no cause anywhere. See
+    // `ownership`.
+    let role = ownership::ensure_may_serve(&path)?;
+    if role == ownership::Role::Secondary {
+        watch_for_the_installed_host();
+    }
+
     // The login environment resolve is the one piece of a first spawn that can
     // take seconds (a loaded shell profile). Start it now, on a thread, so the
     // archive open and socket bind below overlap with it and the resolve is
@@ -76,6 +86,40 @@ fn run() -> Result<(), String> {
     eprintln!("tokenstat-hostd listening on {}", path.display());
 
     server::serve(listener, session)
+}
+
+/// A second daemon that started while nothing else was running still has to
+/// give the machine back when the installed host arrives.
+///
+/// The startup check only covers one order of events. Reboot, a `launchctl
+/// kickstart`, or simply opening the app is enough to bring the installed host
+/// up behind a development one, and from that moment the two are fighting over
+/// the same tunnel credential again.
+///
+/// Exiting rather than standing down in place. This process is by definition
+/// the one nobody installed: nothing restarts it, the terminals it owns are a
+/// test session's, and leaving it half alive would mean two daemons answering
+/// two sockets with one archive between them. A loud exit is easier to
+/// understand than a daemon that quietly stopped doing half its job.
+#[cfg(unix)]
+fn watch_for_the_installed_host() {
+    let Ok(identity) = tokenstat_identity::MachineIdentity::load_or_create() else {
+        return;
+    };
+    let key = identity.public_key_hex();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(20));
+            if ownership::owned_by_primary(&key) {
+                eprintln!(
+                    "tokenstat-hostd: the installed host has taken this machine's identity \
+                     back, so this second daemon is stopping. Two hosts on one identity \
+                     expire each other's tunnel credential."
+                );
+                std::process::exit(0);
+            }
+        }
+    });
 }
 
 #[cfg(windows)]

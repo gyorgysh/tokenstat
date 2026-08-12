@@ -57,6 +57,8 @@ pub mod error;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;
 mod machine;
+/// Which daemon speaks for this machine, when more than one is running.
+pub mod ownership;
 pub mod pricing;
 pub mod remote;
 /// Loopback proxy for phones that dial a host service (no full stream stack).
