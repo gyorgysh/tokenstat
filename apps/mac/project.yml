@@ -39,15 +39,22 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.3.2"
+    MARKETING_VERSION: "0.3.3"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
     # build number must rise for each upload) and which makes two different
     # builds indistinguishable in a crash report. v0.3.0 was the fifteenth
-    # release, so v0.3.1 is 16 and v0.3.2 is 17. Bump this with
-    # MARKETING_VERSION above, in the same commit.
-    CURRENT_PROJECT_VERSION: "17"
+    # release, so v0.3.1 is 16 and v0.3.2 is 17.
+    #
+    # **Every upload spends one, not every release.** A build number that has
+    # reached App Store Connect can never be reused, even by a build that was
+    # rejected during processing, so a second TestFlight upload of the same
+    # marketing version needs the next number. 17 went up as 0.3.2 and 18 is
+    # the same 0.3.2 with the orientation keys, and 19 is 0.3.3. Bump on each
+    # upload, and bump alongside MARKETING_VERSION in the same commit on each
+    # release.
+    CURRENT_PROJECT_VERSION: "19"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
@@ -145,6 +152,14 @@ targets:
         # will notarize.
         ENABLE_HARDENED_RUNTIME: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        # Required, not cosmetic: an upload with no orientations declared is
+        # rejected outright (error 90474), because an iPad app that does not
+        # say what it supports cannot be placed in a multitasking split. All
+        # four on both, which is what the rejection asks for. Lock the phone to
+        # portrait here if the design ever wants that, rather than dropping the
+        # key again.
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         # Cleartext HTTP to 127.0.0.1 for the remote port proxy browser. Without
         # this WKWebView paints a white page for every Browse port URL.
