@@ -517,11 +517,15 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                 session.set_renew(Box::new(|| match tunnel_hello_token(true) {
                     Ok((token, _)) => {
                         set_tunnel_state(|state| state.error = None);
-                        Some(token)
+                        Ok(token)
                     }
                     Err(error) => {
-                        set_tunnel_state(|state| state.error = Some(error));
-                        None
+                        set_tunnel_state(|state| state.error = Some(error.clone()));
+                        // Handed back as well as recorded: the supervisor puts
+                        // it into the refusal it reports, so the panel says
+                        // what the account actually answered instead of
+                        // restating the relay's symptom.
+                        Err(error)
                     }
                 }));
                 *guard = Some(session.clone());

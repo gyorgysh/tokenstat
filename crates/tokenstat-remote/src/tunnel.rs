@@ -62,6 +62,12 @@ const DIAL_ID_BASE: u32 = 1 << 30;
 /// hammering.
 const RECONNECT_FLOOR: Duration = Duration::from_secs(1);
 const RECONNECT_CEILING: Duration = Duration::from_secs(30);
+/// How many times in a row a fresh credential earns an immediate retry.
+///
+/// One covers the ordinary case: the credential expired, a new one was minted,
+/// try it. More than a couple in a row means the replacement is being refused
+/// too, which minting again cannot fix, so the backoff takes over.
+const MAX_IMMEDIATE_RENEWALS: u32 = 2;
 
 /// The one long-lived tunnel connection a daemon keeps.
 pub struct TunnelSession {
@@ -94,6 +100,9 @@ pub struct TunnelSession {
     /// comes back or the machine wakes from sleep, so a reconnect does not wait
     /// out a backoff that was sized for a network that is now up.
     wake: Mutex<Option<mpsc::Sender<()>>>,
+    /// Set when the last failed attempt ended in a fresh credential. The
+    /// supervisor takes it and retries immediately instead of waiting.
+    renewed: AtomicBool,
     stopped: AtomicBool,
 }
 
@@ -103,9 +112,25 @@ struct Writer {
     bytes: Arc<AtomicUsize>,
 }
 
-/// Mints a replacement HELLO credential. `None` when one cannot be had right
-/// now (offline, signed out), which leaves the supervisor retrying.
-pub type RenewToken = Box<dyn Fn() -> Option<String> + Send + Sync>;
+/// Mints a replacement HELLO credential, or says why it could not.
+///
+/// The reason matters and used to be thrown away. A relay that says
+/// `token_expired` is describing a symptom; the cause is whatever the mint
+/// answered, and "remote reach is a paid-plan feature" or "sign in again" is
+/// the sentence somebody can act on. Reporting the expiry instead is how a
+/// machine sat for days telling its owner a credential had expired when the
+/// account had simply stopped issuing them.
+pub type RenewToken = Box<dyn Fn() -> Result<String, String> + Send + Sync>;
+
+/// What came of asking for a replacement credential.
+enum Renewal {
+    /// A fresh credential is in hand. The next attempt is a different attempt.
+    Fresh,
+    /// One cannot be had right now, and this is why.
+    Unavailable(String),
+    /// Nothing taught this session how to mint. A build without an account.
+    NotConfigured,
+}
 
 /// What the tunnel connection is doing right now.
 #[derive(Debug, Clone, Default)]
@@ -168,6 +193,7 @@ impl TunnelSession {
             status: Mutex::new(TunnelStatus::default()),
             renew: Mutex::new(None),
             wake: Mutex::new(Some(wake_tx)),
+            renewed: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
         });
         let weak = Arc::downgrade(&session);
@@ -198,21 +224,22 @@ impl TunnelSession {
         *self.renew.lock().unwrap_or_else(|e| e.into_inner()) = Some(renew);
     }
 
-    /// Ask for a fresh credential and keep it. True when one arrived.
-    fn renew_credential(&self) -> bool {
+    /// Ask for a fresh credential and keep it.
+    fn renew_credential(&self) -> Renewal {
         let minted = {
             let guard = self.renew.lock().unwrap_or_else(|e| e.into_inner());
             match guard.as_ref() {
                 Some(renew) => renew(),
-                None => None,
+                None => return Renewal::NotConfigured,
             }
         };
         match minted {
-            Some(token) if !token.is_empty() => {
+            Ok(token) if !token.is_empty() => {
                 *self.token.lock().unwrap_or_else(|e| e.into_inner()) = token;
-                true
+                Renewal::Fresh
             }
-            _ => false,
+            Ok(_) => Renewal::Unavailable("the account returned an empty credential".into()),
+            Err(why) => Renewal::Unavailable(why),
         }
     }
 
@@ -486,6 +513,11 @@ impl Transport for ChannelTransport {
 
 fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
     let mut backoff = RECONNECT_FLOOR;
+    // Consecutive attempts that ended in a fresh credential. Bounded, because
+    // "the relay refuses it and minting produces another it also refuses" is a
+    // real state (two daemons on one identity used to produce exactly it), and
+    // retrying that without a pause is a hot loop against the account host.
+    let mut renewals = 0u32;
     loop {
         let Some(session) = session.upgrade() else {
             return;
@@ -499,6 +531,7 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
                 // not an error to show.
                 *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus::default();
                 backoff = RECONNECT_FLOOR;
+                renewals = 0;
             }
             Err(error) => {
                 if !session.stopped.load(Ordering::Relaxed) {
@@ -514,6 +547,21 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
             return;
         }
         mark_all_channels(&session, "tunnel disconnected");
+        // A credential that was just replaced deserves an immediate attempt.
+        // The refusal has already been answered, so the wait that follows an
+        // ordinary failure would only keep the machine reading as offline for
+        // a repair that has happened. Bounded by `MAX_IMMEDIATE_RENEWALS`, so
+        // a credential the relay keeps refusing falls back to the backoff
+        // rather than spending the account's mint budget in a loop.
+        if session.renewed.swap(false, Ordering::AcqRel) {
+            renewals += 1;
+            if renewals <= MAX_IMMEDIATE_RENEWALS {
+                backoff = RECONNECT_FLOOR;
+                continue;
+            }
+        } else {
+            renewals = 0;
+        }
         // Wait out the backoff, or wake early when the network comes back and
         // a `nudge` lands. A wake resets the backoff so the fresh attempt is
         // not punished for the failed ones a dead network already earned.
@@ -561,8 +609,27 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             // credential is replaced so the next attempt is a different
             // attempt. Plan and duplicate-key refusals are left alone, because
             // minting again would only ask the account the same question.
-            if renewable_denial(&text) && session.renew_credential() {
-                eprintln!("tunnel: credential refused, minted a fresh one");
+            if renewable_denial(&text) {
+                match session.renew_credential() {
+                    Renewal::Fresh => {
+                        // The supervisor reads this and retries at once. The
+                        // repair has already happened, and sleeping out a
+                        // backoff sized for a dead network would leave the
+                        // machine reading as offline for up to half a minute
+                        // after it was fixed.
+                        session.renewed.store(true, Ordering::Release);
+                        eprintln!("tunnel: credential refused, minted a fresh one");
+                        return Err(RemoteError::Tunnel(denial_message(&text)));
+                    }
+                    Renewal::Unavailable(why) => {
+                        // The mint's reason, not the relay's. See `RenewToken`.
+                        return Err(RemoteError::Tunnel(format!(
+                            "{}, and a replacement could not be minted: {why}",
+                            denial_message(&text)
+                        )));
+                    }
+                    Renewal::NotConfigured => {}
+                }
             }
             return Err(RemoteError::Tunnel(denial_message(&text)));
         }
@@ -845,6 +912,39 @@ mod tests {
     #[test]
     fn a_revoked_credential_gets_its_own_message() {
         assert!(denial_message("DENIED token_revoked").contains("revoked"));
+    }
+
+    /// A fresh credential is retried at once rather than after a backoff sized
+    /// for a network that is not the problem. Two in a row, then the backoff
+    /// takes over: a replacement the relay also refuses is not fixed by
+    /// minting a third.
+    #[test]
+    fn only_a_couple_of_renewals_skip_the_backoff() {
+        let mut renewals = 0u32;
+        let mut immediate = 0;
+        for _ in 0..6 {
+            renewals += 1;
+            if renewals <= MAX_IMMEDIATE_RENEWALS {
+                immediate += 1;
+            }
+        }
+        assert_eq!(immediate, MAX_IMMEDIATE_RENEWALS as usize);
+        // The ordinary case is one: expired, minted, retried. A ceiling below
+        // that would mean a credential that just healed still waits.
+        const { assert!(MAX_IMMEDIATE_RENEWALS >= 1) };
+    }
+
+    /// The mint's reason has to reach the sentence, because the relay's is a
+    /// symptom. "expired" is what the socket saw; "remote reach is a paid-plan
+    /// feature" is what somebody can do something about.
+    #[test]
+    fn a_failed_renewal_reports_what_the_account_said() {
+        let denial = denial_message("DENIED token_expired");
+        let full = format!(
+            "{denial}, and a replacement could not be minted: remote reach is a paid-plan feature"
+        );
+        assert!(full.contains("paid-plan"), "{full}");
+        assert!(full.contains("expired"), "{full}");
     }
 
     #[test]
