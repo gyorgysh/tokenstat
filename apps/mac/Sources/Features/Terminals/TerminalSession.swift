@@ -221,7 +221,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// The emulator, created on first access. Only call after attach.
     var view: TerminalView {
         if let terminalView { return terminalView }
-        let created = Self.makeTerminalView(delegate: self)
+        let created = Self.makeTerminalView(for: self)
         terminalView = created
         return created
     }
@@ -389,8 +389,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         start()
     }
 
-    private static func makeTerminalView(delegate: TerminalViewDelegate) -> TerminalView {
-        let view = TerminalView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
+    private static func makeTerminalView(for session: TerminalSession) -> TerminalView {
+        let view = TerminalDropView(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         // Colour it before SwiftUI's first layout pass, not after.
         //
         // A TUI asks the emulator what its background is (OSC 11) within
@@ -406,7 +406,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         view.optionAsMetaKey = true
         // SwiftTerm defaults to 500 lines, which a build log passes in seconds.
         view.terminal.changeHistorySize(scrollbackLines)
-        view.terminalDelegate = delegate
+        view.terminalDelegate = session
+        // Files dropped on the pane are typed as paths. The view needs the
+        // session rather than the delegate protocol, because a drop is a write
+        // to the pty that no keystroke produced.
+        view.session = session
         return view
     }
 
@@ -1096,6 +1100,26 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         guard let continuation = napper else { return }
         napper = nil
         continuation.resume()
+    }
+
+    /// Insert text at the cursor as a paste, not as typing.
+    ///
+    /// The distinction matters to a full screen program: with bracketed paste
+    /// on it is told where the pasted run starts and ends, so an agent CLI
+    /// treats a dropped path as one thing to be edited rather than as a burst
+    /// of keystrokes, and a newline inside it does not submit the prompt.
+    ///
+    /// Queued like a keystroke, so a drop cannot overtake what the user typed a
+    /// moment earlier.
+    func paste(text: String) {
+        guard !text.isEmpty else { return }
+        wake()
+        let bracketed = terminalViewIfLoaded?.getTerminal().bracketedPasteMode ?? false
+        var bytes: [UInt8] = []
+        if bracketed { bytes += EscapeSequences.bracketedPasteStart }
+        bytes += Array(text.utf8)
+        if bracketed { bytes += EscapeSequences.bracketedPasteEnd }
+        eventStream.continuation.yield(.write(bytes))
     }
 
     // MARK: - TerminalViewDelegate
