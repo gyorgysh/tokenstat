@@ -238,14 +238,18 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
     if !force {
         if let Ok(guard) = held_credential().lock() {
             if let Some(held) = guard.as_ref() {
-                let usable = match held.expires_at {
-                    None => true,
-                    Some(at) => at
-                        .checked_duration_since(Instant::now())
-                        .is_some_and(|left| left > CREDENTIAL_REFRESH_MARGIN),
-                };
-                if usable {
-                    return Ok((held.token.clone(), None));
+                // The lifetime left, not None: the caller schedules the refresh
+                // loop from what comes back, and a cache hit that said "no
+                // expiry" would start a tunnel nothing ever refreshed.
+                match held.expires_at {
+                    None => return Ok((held.token.clone(), None)),
+                    Some(at) => {
+                        if let Some(left) = at.checked_duration_since(Instant::now()) {
+                            if left > CREDENTIAL_REFRESH_MARGIN {
+                                return Ok((held.token.clone(), Some(left.as_secs())));
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -461,10 +465,14 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
 /// Keep trying to bring remote reach up, in the background, until it is up or
 /// the user turns it off.
 ///
-/// One retry thread at a time. The delay doubles from ten seconds to five
-/// minutes: a laptop opening its lid, a network coming back, or an account
-/// host that was briefly down all resolve inside that window without anybody
-/// visiting a settings screen.
+/// One retry thread at a time. The delay doubles from ten seconds to one
+/// minute: a laptop opening its lid, a network coming back, or an account host
+/// that was briefly down all resolve inside that window without anybody
+/// visiting a settings screen. The ceiling is a minute rather than five,
+/// because what it bounds is how long a machine reads as offline after the
+/// thing that was wrong stopped being wrong. One attempt a minute is nothing
+/// to an account host, and five minutes of "offline" is a long time to somebody
+/// looking at their own laptop.
 fn retry_start_later(session: Arc<Mutex<Session>>) {
     static RETRYING: AtomicBool = AtomicBool::new(false);
     if RETRYING.swap(true, Ordering::AcqRel) {
@@ -485,7 +493,7 @@ fn retry_start_later(session: Arc<Mutex<Session>>) {
             if tunnel_running().load(Ordering::Acquire) {
                 break;
             }
-            delay = (delay * 2).min(Duration::from_secs(300));
+            delay = (delay * 2).min(Duration::from_secs(60));
         }
         RETRYING.store(false, Ordering::Release);
     });
