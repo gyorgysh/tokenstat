@@ -68,12 +68,42 @@ struct IOSCodeTextView: UIViewRepresentable {
                 return
             }
             guard next.spansVersion != appliedSpans else { return }
+            // Not while an input method is composing. Marked text is a live
+            // editing session the text view owns, and rewriting the storage
+            // underneath it destroys the composition mid-word, which is every
+            // character for somebody typing Japanese or Chinese, or
+            // dictating. The colours can wait for the commit, and the next
+            // sync applies them.
+            guard view.markedTextRange == nil else { return }
             let selection = view.selectedRange
             applying = true
-            view.textStorage.setAttributedString(attributedText(next))
+            // Colours over the text that is already there, not a replacement
+            // for it. `setAttributedString` throws away the view's typing
+            // attributes and undo coalescing along with the string it was
+            // going to put back unchanged.
+            applyColours(next, to: view.textStorage)
             applying = false
             appliedSpans = next.spansVersion
             view.selectedRange = selection
+        }
+
+        /// Repaint an existing storage in place: one edit transaction, the
+        /// base colour reset across the whole range, then each span.
+        private func applyColours(_ document: EditorDocument, to storage: NSTextStorage) {
+            let full = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            storage.addAttribute(.foregroundColor, value: UIColor.label, range: full)
+            for span in document.spans {
+                guard span.start >= 0, span.len > 0, span.start + span.len <= storage.length else {
+                    continue
+                }
+                storage.addAttribute(
+                    .foregroundColor,
+                    value: UIColor(Theme.syntax(span.kind)),
+                    range: span.range
+                )
+            }
+            storage.endEditing()
         }
 
         func textViewDidChange(_ textView: UITextView) {

@@ -27,27 +27,33 @@ struct EditorView: View {
                 Banner(text: error, severity: .danger)
             }
 
-            #if os(macOS)
+            // One branch, not one per platform. Everything except the editor
+            // itself and its status line is the same on both, and two copies
+            // of the document lookup and the loading fallback would have to be
+            // kept in step by hand across a boundary neither side compiles.
             if let document = model.document(for: path, in: folder.id) {
-                CodeTextView(document: document) {
-                    Task { await model.saveText(path, in: folder.id) }
-                }
-                .background(Theme.background)
+                editor(document)
+                    .background(Theme.background)
                 statusLine(document)
             } else {
                 loading
             }
-            #else
-            if let document = model.document(for: path, in: folder.id) {
-                IOSCodeTextView(document: document)
-                    .background(Theme.background)
-                mobileStatusLine(document)
-            } else {
-                loading
-            }
-            #endif
         }
         .background(Theme.background)
+    }
+
+    /// The editor for this platform. The only real difference between the two
+    /// builds: AppKit's needs a save action passed in, UIKit's carries Save in
+    /// its own status line.
+    @ViewBuilder
+    private func editor(_ document: EditorDocument) -> some View {
+        #if os(macOS)
+        CodeTextView(document: document) {
+            Task { await model.saveText(path, in: folder.id) }
+        }
+        #else
+        IOSCodeTextView(document: document)
+        #endif
     }
 
     private var loading: some View {
@@ -116,7 +122,7 @@ struct EditorView: View {
     #endif
 
     #if !os(macOS)
-    private func mobileStatusLine(_ document: EditorDocument) -> some View {
+    private func statusLine(_ document: EditorDocument) -> some View {
         HStack(spacing: Theme.Space.s) {
             Text(path)
                 .font(ClientType.caption.monospaced())
