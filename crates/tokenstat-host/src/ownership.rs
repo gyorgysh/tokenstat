@@ -148,8 +148,15 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     // Loaded rather than passed in: the key is what decides this, and a caller
     // that had to fetch it first could get the comparison wrong in a way this
     // module could not stop.
-    let identity =
-        tokenstat_identity::MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    //
+    // Load, never create. A machine with no key yet cannot have another
+    // process holding it, so the answer is already known, and minting one here
+    // would leave identity material behind for a daemon that is about to
+    // refuse to start.
+    let Some(identity) = tokenstat_identity::MachineIdentity::load().map_err(|e| e.to_string())?
+    else {
+        return Ok(role);
+    };
     if owned_by_primary(&identity.public_key_hex()) {
         return Err(refusal(socket));
     }

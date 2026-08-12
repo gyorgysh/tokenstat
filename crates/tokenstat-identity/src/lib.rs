@@ -86,6 +86,18 @@ impl MachineIdentity {
         Ok(Self::from_secret(seed))
     }
 
+    /// The identity if this machine already has one, without creating it.
+    ///
+    /// For callers that only want to *compare* keys and would rather leave no
+    /// trace when there is nothing to compare. A daemon deciding whether some
+    /// other process already speaks for this machine is the case: with no key
+    /// on disk there is nothing another process could be holding, so the
+    /// question answers itself, and generating one to ask it would leave
+    /// identity material behind for a process that then refused to start.
+    pub fn load() -> Result<Option<Self>, IdentityError> {
+        Ok(read_key(&key_path()?)?.map(Self::from_secret))
+    }
+
     /// Build from raw private bytes. `StaticSecret` clamps them, so any 32
     /// bytes are a usable key and there is no "invalid seed" case to handle.
     pub fn from_secret(bytes: [u8; 32]) -> Self {
