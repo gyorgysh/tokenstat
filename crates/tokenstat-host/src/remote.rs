@@ -214,8 +214,18 @@ fn account_token() -> Result<String, String> {
 /// The HELLO credential in hand, and when it stops being usable.
 struct HeldCredential {
     token: String,
-    /// Local deadline. `None` for the legacy login bearer, which does not expire.
-    expires_at: Option<Instant>,
+    /// When the relay stops accepting it, as a wall-clock instant in
+    /// milliseconds since the epoch. `None` for the legacy login bearer, which
+    /// does not expire.
+    ///
+    /// **Wall clock, not [`Instant`], and that is the whole point.** On macOS
+    /// `Instant` stops advancing while the machine is asleep, and so does
+    /// `thread::sleep`. The relay expires a credential on a calendar. A laptop
+    /// that slept eight hours of a twelve hour credential used to believe it
+    /// still had most of the term left, so nothing refreshed, the socket was
+    /// denied `token_expired`, and the machine read as offline until somebody
+    /// noticed. The two clocks have to be the same clock.
+    expires_at_ms: Option<i64>,
 }
 
 fn held_credential() -> &'static Mutex<Option<HeldCredential>> {
@@ -242,13 +252,13 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
                 // The lifetime left, not None: the caller schedules the refresh
                 // loop from what comes back, and a cache hit that said "no
                 // expiry" would start a tunnel nothing ever refreshed.
-                match held.expires_at {
+                match held.expires_at_ms {
                     None => return Ok((held.token.clone(), None)),
                     Some(at) => {
-                        if let Some(left) = at.checked_duration_since(Instant::now()) {
-                            if left > CREDENTIAL_REFRESH_MARGIN {
-                                return Ok((held.token.clone(), Some(left.as_secs())));
-                            }
+                        if let Some(left) = seconds_left(at)
+                            && left > CREDENTIAL_REFRESH_MARGIN.as_secs()
+                        {
+                            return Ok((held.token.clone(), Some(left)));
                         }
                     }
                 }
@@ -256,6 +266,29 @@ fn tunnel_hello_token(force: bool) -> Result<(String, Option<u64>), String> {
         }
     }
     mint_hello_token()
+}
+
+/// Seconds of wall clock between now and `at_ms`, or `None` once it is past.
+fn seconds_left(at_ms: i64) -> Option<u64> {
+    let left_ms = at_ms - jiff::Timestamp::now().as_millisecond();
+    (left_ms > 0).then_some((left_ms / 1000) as u64)
+}
+
+/// When the relay will stop accepting a freshly minted credential.
+///
+/// The absolute time the account issued is preferred over `expires_in`,
+/// because it is the value the relay itself compares against and it survives a
+/// slow mint. `expires_in` is the fallback for a response whose timestamp will
+/// not parse, which is a server contract change rather than something a client
+/// should fall over on.
+fn credential_deadline_ms(token: &tokenstat_sync::profile::TunnelToken) -> i64 {
+    token
+        .expires_at
+        .parse::<jiff::Timestamp>()
+        .map(|at| at.as_millisecond())
+        .unwrap_or_else(|_| {
+            (jiff::Timestamp::now() + Duration::from_secs(token.expires_in)).as_millisecond()
+        })
 }
 
 /// Register the machine on the account directory, then mint a short-lived
@@ -338,8 +371,12 @@ fn mint_hello_token_impl(
             // skipped registration (best-effort after the first mint) still
             // means the machine is on the account directory.
             set_tunnel_state(|state| state.registered = true);
-            hold_credential(&tok.token, Some(tok.expires_in));
-            Ok((tok.token, Some(tok.expires_in)))
+            let deadline = credential_deadline_ms(&tok);
+            hold_credential(&tok.token, Some(deadline));
+            // The lifetime the caller schedules from is measured against the
+            // deadline rather than taken from `expires_in`, so a mint that took
+            // ten seconds does not hand back a half-life ten seconds too long.
+            Ok((tok.token, Some(seconds_left(deadline).unwrap_or(0))))
         }
         Err(ProfileError::Unsupported(reason)) => {
             // An account host from before tunnel tokens still accepts the sync
@@ -353,11 +390,11 @@ fn mint_hello_token_impl(
     }
 }
 
-fn hold_credential(token: &str, expires_in: Option<u64>) {
+fn hold_credential(token: &str, expires_at_ms: Option<i64>) {
     if let Ok(mut guard) = held_credential().lock() {
         *guard = Some(HeldCredential {
             token: token.to_string(),
-            expires_at: expires_in.map(|secs| Instant::now() + Duration::from_secs(secs)),
+            expires_at_ms,
         });
     }
 }
@@ -594,10 +631,18 @@ fn tunnel_token_refresh_loop(
     while tunnel_running().load(Ordering::Acquire) {
         // Refresh at half-life, never sooner than 2 minutes (local testing TTLs).
         let sleep_secs = retry_secs.unwrap_or((ttl / 2).max(120));
-        let mut waited = 0u64;
-        while waited < sleep_secs && tunnel_running().load(Ordering::Acquire) {
+        // Waited out against the calendar, not by counting one-second sleeps.
+        // Neither `thread::sleep` nor `Instant` advances while a Mac is
+        // asleep, so the old count reached its half-life after that many
+        // *awake* seconds while the relay had been expiring the credential the
+        // whole time. A laptop that sleeps every night got denied
+        // `token_expired` before anything here thought a refresh was due.
+        let wake_at_ms =
+            (jiff::Timestamp::now() + Duration::from_secs(sleep_secs)).as_millisecond();
+        while jiff::Timestamp::now().as_millisecond() < wake_at_ms
+            && tunnel_running().load(Ordering::Acquire)
+        {
             std::thread::sleep(Duration::from_secs(1));
-            waited += 1;
         }
         if !tunnel_running().load(Ordering::Acquire) {
             return;
@@ -856,19 +901,86 @@ fn pool() -> &'static Mutex<HashMap<String, Vec<tokenstat_remote::Connection>>> 
 
 const MAX_IDLE_PER_PEER: usize = 4;
 
-/// How long a peer that answered a dial with `no_such_peer` is remembered.
-const UNREACHABLE_TTL: Duration = Duration::from_secs(15);
+/// How long the first `no_such_peer` is remembered, and the ceiling the
+/// doubling stops at.
+///
+/// The floor used to be 15 seconds while the app re-dialled a failed peer
+/// every 30, so the cache expired before every single retry and suppressed
+/// nothing: a machine that had been off for an hour still cost the relay a
+/// channel open twice a minute. The floor now outlasts that retry, and a peer
+/// that stays absent is asked less and less often.
+///
+/// The ceiling is two minutes rather than something larger because this is
+/// also how long a machine that just woke up stays invisible. `remote.nudge`
+/// clears the whole cache, and the app nudges on wake and when connectivity
+/// comes back, so the ceiling is the worst case for a machine nobody told us
+/// about rather than the normal one.
+const UNREACHABLE_FLOOR: Duration = Duration::from_secs(45);
+const UNREACHABLE_CEILING: Duration = Duration::from_secs(120);
+
+/// One peer's absence: when it was last answered `no_such_peer`, and how many
+/// times in a row.
+#[derive(Clone, Copy)]
+struct Absence {
+    since: Instant,
+    strikes: u32,
+}
+
+impl Absence {
+    /// How long this absence is trusted before the peer is dialled again.
+    fn ttl(&self) -> Duration {
+        let doubled = UNREACHABLE_FLOOR
+            .checked_mul(1u32 << self.strikes.min(3))
+            .unwrap_or(UNREACHABLE_CEILING);
+        doubled.min(UNREACHABLE_CEILING)
+    }
+}
 
 /// Peers the relay has told us are not on the tunnel, remembered briefly.
 ///
-/// The app reconciles remote workspaces every few seconds, and every poll
-/// used to dial the peer again; for a machine whose tunnel was off or whose
-/// daemon was down, that meant a fresh `no_such_peer` channel open per poll
-/// on the relay. During the TTL the dial fails fast instead, with the same
-/// words, without another round trip.
-fn unreachable_peers() -> &'static Mutex<HashMap<String, Instant>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+/// The app reconciles remote workspaces on a timer, and every poll used to
+/// dial the peer again; for a machine whose tunnel was off or whose daemon was
+/// down, that meant a fresh `no_such_peer` channel open per poll on the relay.
+/// Inside the TTL the dial fails fast instead, with the same words, without
+/// another round trip.
+fn unreachable_peers() -> &'static Mutex<HashMap<String, Absence>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Absence>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Remember that the relay says this peer is not on the tunnel, and lengthen
+/// the wait if it has said so before.
+fn note_unreachable(peer_hex: &str) {
+    if let Ok(mut cache) = unreachable_peers().lock() {
+        let strikes = cache
+            .get(peer_hex)
+            .map_or(0, |a| a.strikes.saturating_add(1));
+        cache.insert(
+            peer_hex.to_string(),
+            Absence {
+                since: Instant::now(),
+                strikes,
+            },
+        );
+    }
+}
+
+/// Forget a peer's absence. A dial that connected is proof it is back, and the
+/// next failure should start from the floor rather than from where the last
+/// outage left off.
+fn clear_unreachable(peer_hex: &str) {
+    if let Ok(mut cache) = unreachable_peers().lock() {
+        cache.remove(peer_hex);
+    }
+}
+
+/// Forget every absence. `remote.nudge` means the ground truth just changed
+/// (the network came back, the machine woke), so what the relay said about a
+/// peer thirty seconds ago is no longer worth trusting.
+fn clear_all_unreachable() {
+    if let Ok(mut cache) = unreachable_peers().lock() {
+        cache.clear();
+    }
 }
 
 /// Call a peer and return its answer's result, unwrapped from the peer's
@@ -997,8 +1109,8 @@ fn tunnel_dial(
         .lock()
         .ok()
         .and_then(|mut cache| {
-            cache.retain(|_, seen| seen.elapsed() < UNREACHABLE_TTL);
-            cache.get(&peer_hex).map(|seen| seen.elapsed())
+            cache.retain(|_, absence| absence.since.elapsed() < absence.ttl());
+            cache.get(&peer_hex).copied()
         })
         .is_some()
     {
@@ -1025,16 +1137,25 @@ fn tunnel_dial(
         match tunnel.open_channel(peer).and_then(|channel| {
             tokenstat_remote::handshake_initiator(Box::new(channel), identity, Some(peer), label)
         }) {
-            Ok(connection) => return Ok(connection),
+            Ok(connection) => {
+                clear_unreachable(&peer_hex);
+                return Ok(connection);
+            }
             Err(error) => {
                 last = error.to_string();
+                // `no_such_peer` is the relay's settled answer, not a race it
+                // lost. The relay already holds an open for a key that was
+                // live recently, precisely so a dial arriving mid-reconnect
+                // waits rather than fails, so by the time this end hears
+                // `no_such_peer` the reconnect window has already been sat
+                // out. Retrying spends two more channel opens to be told the
+                // same thing twice more, which is most of what a machine that
+                // is simply switched off costs the relay.
                 if last.contains("no_such_peer") {
-                    if let Ok(mut cache) = unreachable_peers().lock() {
-                        cache.insert(peer_hex.clone(), Instant::now());
-                    }
+                    note_unreachable(&peer_hex);
+                    break;
                 }
-                let retryable = last.contains("no_such_peer")
-                    || last.contains("not connected")
+                let retryable = last.contains("not connected")
                     || last.contains("closed")
                     || last.contains("failed to fill whole buffer");
                 if !retryable || attempt == 2 {
@@ -1125,6 +1246,11 @@ struct ForwardParams {
 /// not wait out the rest of that backoff. When no session is live, this tries
 /// the same start a retry tick would, now rather than later.
 fn nudge() -> Result<Value, String> {
+    // What the relay said about a peer a minute ago was true of a network that
+    // has since changed. Every absence is forgotten here so a machine that came
+    // back with this one is dialled at once rather than waiting out a backoff
+    // it earned while the network was down.
+    clear_all_unreachable();
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
         session.nudge();
         return Ok(json!({"nudged": true}));
@@ -1276,11 +1402,15 @@ mod tests {
         MachineIdentity::from_secret([7u8; 32])
     }
 
+    /// A mint response shaped like a real one: `expires_at` and `expires_in`
+    /// describe the same moment. They have to agree, because the deadline is
+    /// read from the absolute time and the lifetime is derived back out of it.
     fn test_token() -> tokenstat_sync::profile::TunnelToken {
+        let ttl = 43_200;
         tokenstat_sync::profile::TunnelToken {
             token: "tsk_deadbeef_secret".into(),
-            expires_at: "2030-01-01T00:00:00.000Z".into(),
-            expires_in: 43_200,
+            expires_at: (jiff::Timestamp::now() + Duration::from_secs(ttl)).to_string(),
+            expires_in: ttl,
             machine: "m_0123456789abcdef".into(),
         }
     }
@@ -1301,7 +1431,11 @@ mod tests {
         )
         .expect("a renewal must survive a register hiccup");
         assert_eq!(token, "tsk_deadbeef_secret");
-        assert_eq!(expires, Some(43_200));
+        // A range, not the exact lifetime: what comes back is measured from
+        // the deadline to now, so a slow mint legitimately reports a second or
+        // two less than the token was issued for.
+        let left = expires.expect("a minted credential expires");
+        assert!((43_195..=43_200).contains(&left), "got {left}");
     }
 
     /// Registration stays mandatory on the first mint of a process: a machine
@@ -1348,10 +1482,124 @@ mod tests {
         assert_eq!(mints, 2);
     }
 
+    /// The floor has to outlast the app's own retry for the cache to suppress
+    /// anything at all. It used to be shorter, so every scheduled re-dial found
+    /// the entry expired and spent a channel open learning what the relay had
+    /// already said.
+    #[test]
+    fn an_absence_outlasts_the_apps_retry_and_then_lengthens() {
+        let first = Absence {
+            since: Instant::now(),
+            strikes: 0,
+        };
+        assert!(
+            first.ttl() >= Duration::from_secs(30),
+            "the floor must outlast the 30s peer retry, got {:?}",
+            first.ttl()
+        );
+        let second = Absence {
+            since: Instant::now(),
+            strikes: 1,
+        };
+        assert!(second.ttl() > first.ttl());
+    }
+
+    /// A machine that has been off all day must not become invisible for
+    /// longer than the ceiling: that is how long it stays missing after it
+    /// comes back, for anybody who did not nudge.
+    #[test]
+    fn an_absence_never_grows_past_the_ceiling() {
+        for strikes in [0u32, 1, 2, 3, 4, 40, u32::MAX] {
+            let absence = Absence {
+                since: Instant::now(),
+                strikes,
+            };
+            assert!(
+                absence.ttl() <= UNREACHABLE_CEILING,
+                "{strikes} strikes gave {:?}",
+                absence.ttl()
+            );
+        }
+    }
+
+    /// A dial that connected is proof the peer is back, so the next outage
+    /// starts counting from the floor rather than from where the last one
+    /// stopped.
+    #[test]
+    fn connecting_forgets_an_absence() {
+        let peer = "cd".repeat(32);
+        note_unreachable(&peer);
+        note_unreachable(&peer);
+        assert!(unreachable_peers().lock().unwrap().contains_key(&peer));
+        clear_unreachable(&peer);
+        assert!(!unreachable_peers().lock().unwrap().contains_key(&peer));
+        note_unreachable(&peer);
+        let strikes = unreachable_peers().lock().unwrap()[&peer].strikes;
+        assert_eq!(strikes, 0, "a cleared peer starts over");
+        clear_all_unreachable();
+    }
+
     #[test]
     fn stopping_remote_reach_clears_the_held_credential() {
-        hold_credential("tsk_old_account_secret", Some(43_200));
+        let in_an_hour = (jiff::Timestamp::now() + Duration::from_secs(3600)).as_millisecond();
+        hold_credential("tsk_old_account_secret", Some(in_an_hour));
         clear_held_credential();
         assert!(held_credential().lock().unwrap().is_none());
+    }
+
+    /// The deadline comes from the account's own absolute time, because that
+    /// is the value the relay compares against. Deriving it from `expires_in`
+    /// starts the clock when the answer arrived rather than when it was
+    /// issued, which hands back a term slightly longer than the one the relay
+    /// will honour.
+    #[test]
+    fn the_deadline_is_the_time_the_account_issued() {
+        let token = tokenstat_sync::profile::TunnelToken {
+            expires_at: "2030-01-01T00:00:00Z".into(),
+            ..test_token()
+        };
+        let expected = "2030-01-01T00:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .expect("a timestamp")
+            .as_millisecond();
+        assert_eq!(credential_deadline_ms(&token), expected);
+    }
+
+    /// A response whose timestamp will not parse is a server contract change,
+    /// not a reason to leave the machine without remote reach. `expires_in`
+    /// carries it.
+    #[test]
+    fn an_unparsable_expiry_falls_back_to_the_lifetime() {
+        let token = tokenstat_sync::profile::TunnelToken {
+            expires_at: "whenever".into(),
+            expires_in: 600,
+            ..test_token()
+        };
+        let left = seconds_left(credential_deadline_ms(&token)).expect("a live credential");
+        assert!((595..=600).contains(&left), "got {left}");
+    }
+
+    /// A deadline that has passed is not "a very small amount of time left".
+    /// Reporting seconds there would let a dead credential look refreshable.
+    #[test]
+    fn a_passed_deadline_has_no_time_left() {
+        let a_minute_ago = jiff::Timestamp::now().as_millisecond() - 60_000;
+        assert_eq!(seconds_left(a_minute_ago), None);
+    }
+
+    /// The reason this is measured on the calendar at all: a Mac that slept
+    /// through most of a credential's term must read as nearly expired, not as
+    /// nearly fresh. A held credential inside the refresh margin is re-minted
+    /// rather than handed back.
+    #[test]
+    fn a_credential_inside_the_margin_is_not_reused() {
+        let nearly_up = (jiff::Timestamp::now()
+            + Duration::from_secs(CREDENTIAL_REFRESH_MARGIN.as_secs() / 2))
+        .as_millisecond();
+        assert!(
+            seconds_left(nearly_up).is_some_and(|left| left <= CREDENTIAL_REFRESH_MARGIN.as_secs()),
+            "a credential this close to expiry must not satisfy the cache check"
+        );
+        clear_held_credential();
     }
 }
