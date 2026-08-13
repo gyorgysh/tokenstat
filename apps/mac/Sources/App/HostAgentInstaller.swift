@@ -88,6 +88,17 @@ enum HostAgentInstaller {
             .appendingPathComponent("Library/Logs/tokenstat", isDirectory: true)
         try fileManager.createDirectory(at: launchAgents, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: logs, withIntermediateDirectories: true)
+        #if os(macOS)
+        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: logs.path)
+        for name in ["hostd.out.log", "hostd.err.log"] {
+            let file = logs.appendingPathComponent(name)
+            if !fileManager.fileExists(atPath: file.path) {
+                fileManager.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600])
+            } else {
+                try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+            }
+        }
+        #endif
 
         let plist = launchAgents.appendingPathComponent("\(label).plist")
         // ProcessType is Interactive on purpose. Background throttles the
