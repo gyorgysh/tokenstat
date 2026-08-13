@@ -267,6 +267,15 @@ struct HomeView: View {
         .transition(.opacity)
     }
 
+    /// Local-clock greeting plus the first name. Signed out stays literal.
+    private var greetingTitle: String {
+        guard let name = account.account?.title, !name.isEmpty else {
+            return "Not signed in"
+        }
+        let hasHistory = (model.calendar?.activeDays ?? 0) > 0
+        return HomeGreeting.line(name: name, hasHistory: hasHistory)
+    }
+
     /// Whether to say the vendors are still being asked.
     ///
     /// Only while nothing has arrived. A panel that is already on screen says
@@ -288,7 +297,7 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
-                    Text(account.account?.title ?? "Not signed in")
+                    Text(greetingTitle)
                         .font(.system(size: 20, weight: .semibold))
                     if let tier = account.account?.tier, !tier.isEmpty {
                         // The glyph the profile page uses, not the written

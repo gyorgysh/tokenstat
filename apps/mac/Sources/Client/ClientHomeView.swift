@@ -17,6 +17,7 @@ import SwiftUI
 /// Mac awake is blank exactly when it is wanted. See `docs/mobile-app.md`.
 struct ClientHomeView: View {
     @Environment(ConnectivityModel.self) private var connectivity
+    @Environment(AccountModel.self) private var account
     @State private var model = HomeModel()
     /// The day whose detail sheet is open. A sheet rather than the Mac's hover
     /// popover, because a finger has no hover.
@@ -27,6 +28,7 @@ struct ClientHomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                greeting
                 if let calendar = model.calendar {
                     totals(calendar)
                     heatmapCard(calendar)
@@ -108,6 +110,28 @@ struct ClientHomeView: View {
     }
 
     // MARK: - Pieces
+
+    /// Same line the website and the Mac home use: a local-clock phrase,
+    /// the first name, and the star / crown / laurel next to it.
+    @ViewBuilder
+    private var greeting: some View {
+        if let name = account.account?.title, !name.isEmpty {
+            HStack(alignment: .center, spacing: Theme.Space.s) {
+                Text(HomeGreeting.line(name: name, hasHistory: hasHistory))
+                    .font(ClientType.screenTitle)
+                    .lineLimit(2)
+                if let tier = account.account?.tier, !tier.isEmpty {
+                    TierMark(tier: tier, size: 16)
+                }
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var hasHistory: Bool {
+        (model.calendar?.activeDays ?? 0) > 0
+    }
 
     private func totals(_ calendar: ActivityCalendar) -> some View {
         HStack(spacing: Theme.Space.s) {
