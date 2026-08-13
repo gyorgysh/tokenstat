@@ -11,7 +11,7 @@
 //! stale.
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 use atomicwrites::{AllowOverwrite, AtomicFile};
@@ -77,19 +77,33 @@ pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::R
         .get(reqwest::header::ETAG)
         .and_then(|value| value.to_str().ok())
         .map(str::to_owned);
-    let bytes = resp.bytes()?;
     // Pricing / catalog snapshots are a few hundred KB. A hostile body must not
     // allocate without limit into hostd during the hourly refresh.
     const MAX_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
+    let bytes = read_capped(resp, MAX_SNAPSHOT_BYTES)?;
     if bytes.len() > MAX_SNAPSHOT_BYTES {
-        anyhow::bail!(
-            "snapshot from {url} is {} bytes, over the {MAX_SNAPSHOT_BYTES} cap",
-            bytes.len()
-        );
+        anyhow::bail!("snapshot from {url} is over the {MAX_SNAPSHOT_BYTES} cap");
     }
-    let text = String::from_utf8(bytes.to_vec())
+    let text = String::from_utf8(bytes)
         .map_err(|e| anyhow::anyhow!("snapshot from {url} is not UTF-8: {e}"))?;
     Ok(Fetched::Body { text, etag })
+}
+
+fn read_capped(mut resp: reqwest::blocking::Response, max: usize) -> anyhow::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        let n = resp.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        let take = n.min(max.saturating_add(1).saturating_sub(buf.len()));
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.len() > max {
+            break;
+        }
+    }
+    Ok(buf)
 }
 
 /// Sidecar path for a snapshot file: `current.json` → `current.etag`.

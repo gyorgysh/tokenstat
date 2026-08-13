@@ -396,7 +396,7 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
         .send()?;
 
     let status = poll.status();
-    let text = poll.text()?;
+    let text = limited_text(poll)?;
 
     if status.as_u16() == 428
         || text.contains("authorization_pending")
@@ -1547,14 +1547,29 @@ fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, ProfileError> {
 
 fn limited_text(resp: reqwest::blocking::Response) -> Result<String, ProfileError> {
     const MAX: usize = 256 * 1024;
-    let bytes = resp.bytes()?;
+    let bytes = read_capped(resp, MAX)?;
     if bytes.len() > MAX {
-        return Ok(format!(
-            "[response truncated: {} bytes over {MAX}-byte cap]",
-            bytes.len()
-        ));
+        return Ok(format!("[response truncated: over {MAX}-byte cap]"));
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn read_capped(mut resp: reqwest::blocking::Response, max: usize) -> Result<Vec<u8>, ProfileError> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        let n = resp.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        let take = n.min(max.saturating_add(1).saturating_sub(buf.len()));
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.len() > max {
+            break;
+        }
+    }
+    Ok(buf)
 }
 
 /// Hand a URL to whatever the platform opens links with.
