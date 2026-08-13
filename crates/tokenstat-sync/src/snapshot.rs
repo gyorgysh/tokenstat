@@ -59,6 +59,8 @@ pub fn fetch_conditional(url: &str, path: &Path, timeout_secs: u64) -> anyhow::R
         // A conditional GET is a freshness check; it must not hang on a dead
         // network for the whole request timeout.
         .connect_timeout(std::time::Duration::from_secs(10))
+        // A captive portal 302 would otherwise be stored as a price book.
+        .redirect(reqwest::redirect::Policy::none())
         .user_agent(format!("tokenstat/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
     let mut request = client.get(url);
