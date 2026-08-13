@@ -2018,6 +2018,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // proxy stream on the peer, so a browser tab can reach a service on
         // the other machine's own localhost. The listener binds loopback only.
         "proxy.listen" => proxy_listen(params),
+        "proxy.unlisten" => proxy_unlisten(params),
 
         other => Err(format!("unknown method: {other}")),
     }
@@ -2029,6 +2030,7 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
 fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
         "proxy.listen" => Some(client_proxy_listen(params)),
+        "proxy.unlisten" => Some(client_proxy_unlisten(params)),
         _ => None,
     }
 }
@@ -2044,6 +2046,19 @@ fn client_proxy_listen(params: &str) -> Result<Value, String> {
     }
     let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     crate::remote_proxy::listen(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
+}
+
+#[cfg(not(feature = "local-host"))]
+fn client_proxy_unlisten(params: &str) -> Result<Value, String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Params {
+        peer: String,
+        host: Option<String>,
+        port: u16,
+    }
+    let p: Params = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    crate::remote_proxy::unlisten(&p.peer, p.host.as_deref().unwrap_or("127.0.0.1"), p.port)
 }
 
 /// Ask the vendors again, and post the answer if the user opted in.
@@ -2309,6 +2324,21 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
         }
     });
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
+}
+
+#[cfg(feature = "local-host")]
+fn proxy_unlisten(params: &str) -> Result<Value, String> {
+    let p: ProxyListenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+    let host = p.host.as_deref().unwrap_or("127.0.0.1");
+    let key = format!("{}:{host}:{}", p.peer, p.port);
+    if let Some(stop) = proxy_listeners()
+        .lock()
+        .map_err(|e| e.to_string())?
+        .remove(&key)
+    {
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    Ok(json!({"stopped": true}))
 }
 
 /// How many loopback bridges a daemon will hold at once. Browsed ports are

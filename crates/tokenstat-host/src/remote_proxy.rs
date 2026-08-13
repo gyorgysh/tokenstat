@@ -91,6 +91,16 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
     Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
 }
 
+/// Stop the loopback bridge for this peer and port.
+pub(crate) fn unlisten(peer: &str, host: &str, target: u16) -> Result<Value, String> {
+    let host = if host.is_empty() { "127.0.0.1" } else { host };
+    let key = format!("{peer}:{host}:{target}");
+    if let Some(stop) = listeners().lock().map_err(|e| e.to_string())?.remove(&key) {
+        stop.store(true, Ordering::Relaxed);
+    }
+    Ok(json!({"stopped": true}))
+}
+
 fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {
     let params = json!({"kind": "proxy", "host": host, "port": port});
     let result = crate::remote::call_peer_result(peer, "stream.open", &params.to_string())?;
@@ -109,7 +119,13 @@ fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, St
 
 fn pump_tcp(tcp: TcpStream, connection: Connection) {
     let (reader, writer) = connection.split();
-    let tcp_reader = tcp.try_clone().expect("cloning a socket for the pump");
+    let tcp_reader = match tcp.try_clone() {
+        Ok(clone) => clone,
+        Err(_) => {
+            let _ = tcp.shutdown(std::net::Shutdown::Both);
+            return;
+        }
+    };
     let reader = Arc::new(reader);
     let writer = Arc::new(writer);
 

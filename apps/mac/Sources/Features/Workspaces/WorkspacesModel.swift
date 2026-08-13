@@ -69,6 +69,8 @@ struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
     var url: String
     var number: Int
+    var peer: String?
+    var port: Int?
     var title: String { "Browser \(number)" }
 }
 
@@ -331,6 +333,9 @@ final class WorkspacesModel {
     }
 
     func closeBrowser(_ tab: WorkspaceBrowserTab, in workspaceID: String) {
+        if let peer = tab.peer, let port = tab.port {
+            Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
+        }
         browserTabs[workspaceID]?.removeAll { $0.id == tab.id }
         guard activeBrowserID[workspaceID] == tab.id else { return }
         activeBrowserID[workspaceID] = browserTabs[workspaceID]?.last?.id
@@ -353,6 +358,10 @@ final class WorkspacesModel {
         do {
             let proxy = try await Bridge.proxyListen(peer: parts[1], host: "127.0.0.1", port: port)
             let tab = showBrowser(in: folder.id)
+            if let index = browserTabs[folder.id]?.firstIndex(where: { $0.id == tab.id }) {
+                browserTabs[folder.id]?[index].peer = parts[1]
+                browserTabs[folder.id]?[index].port = port
+            }
             setBrowserURL(proxy.url, in: folder.id, tabID: tab.id)
             errorMessage = nil
         } catch {

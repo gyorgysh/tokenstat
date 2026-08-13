@@ -1329,6 +1329,15 @@ extension Bridge {
         )
     }
 
+    static func proxyUnlisten(peer: String, host: String, port: Int) async {
+        struct Stopped: Codable, Sendable { let stopped: Bool? }
+        _ = try? await background(
+            "proxy.unlisten",
+            ["peer": peer, "host": host, "port": port],
+            as: Stopped.self
+        )
+    }
+
     /// Remove a machine from the account directory. The server deletes that
     /// machine's uploaded rows, so this is for a stale machine id (a
     /// reinstall) that is holding a machine-cap slot a live machine needs.
