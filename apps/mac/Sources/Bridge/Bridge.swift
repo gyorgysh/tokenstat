@@ -994,6 +994,13 @@ private func remoteWorkspace(_ id: String) -> RemoteWorkspaceTarget? {
 // MARK: - Terminals
 
 extension Bridge {
+    /// Discover model servers that are already listening on this Mac's loopback.
+    /// The host performs the probes so the client never needs a second network
+    /// path or permission model for local tools.
+    static func localModels() async throws -> [LocalProvider] {
+        try await background("local.models", patience: Patience.interactive, as: [LocalProvider].self)
+    }
+
     /// Launch a command in the workspace's folder. The process is owned by the
     /// host, so it outlives this window and any tab switch.
     static func ptySpawn(

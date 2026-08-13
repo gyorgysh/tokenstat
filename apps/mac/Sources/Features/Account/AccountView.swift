@@ -15,6 +15,9 @@ struct AccountView: View {
     /// iOS only: the in-app web view that completes deletion on the website.
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
+    #if os(macOS)
+    @State private var localModels = LocalModelsModel()
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,6 +56,7 @@ struct AccountView: View {
 
                     #if os(macOS)
                     terminalCard
+                    localModelsCard
                     #endif
                     licensesCard
                     deleteAccountCard
@@ -408,6 +412,97 @@ struct AccountView: View {
             }
         }
     }
+
+    #if os(macOS)
+    private var localModelsCard: some View {
+        Card(
+            title: "Local models",
+            subtitle: "Models served by LM Studio or Ollama on this Mac"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack {
+                    Text("Nothing is sent to tokenstat. These checks use loopback only.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        Task { await localModels.load() }
+                    } label: {
+                        if localModels.isLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Check LM Studio and Ollama again")
+                    .disabled(localModels.isLoading)
+                }
+
+                if let error = localModels.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.danger)
+                } else if localModels.providers.isEmpty && !localModels.isLoading {
+                    Text("Check for local model servers to see their models here.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(localModels.providers) { provider in
+                        localProviderRow(provider)
+                    }
+                }
+            }
+        }
+        .task {
+            await localModels.load()
+        }
+    }
+
+    private func localProviderRow(_ provider: LocalProvider) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
+                Circle()
+                    .fill(provider.available ? Theme.accent : Theme.border)
+                    .frame(width: 8, height: 8)
+                Text(provider.name)
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text(provider.available ? "Available" : "Not running")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if provider.available {
+                if provider.models.isEmpty {
+                    Text("No models loaded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(provider.models) { model in
+                        HStack(spacing: Theme.Space.s) {
+                            Text(model.name)
+                                .font(Theme.mono(11))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            if let size = model.sizeDescription {
+                                Text(size)
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                }
+            } else if let error = provider.error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, Theme.Space.xs)
+    }
+    #endif
 
     /// Show phones as phones on both the desktop account card and the client.
     /// A host is a computer, with the current one using the laptop variant.

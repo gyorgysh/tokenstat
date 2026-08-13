@@ -56,6 +56,8 @@ pub mod dto;
 pub mod error;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;
+#[cfg(feature = "local-host")]
+pub(crate) mod local_models;
 mod machine;
 /// Which daemon speaks for this machine, when more than one is running.
 pub mod ownership;

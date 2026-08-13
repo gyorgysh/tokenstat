@@ -689,6 +689,29 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var symbol: String?
 }
 
+/// A model server discovered on this machine's loopback.
+struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var baseURL: String
+    var available: Bool
+    var models: [LocalModel]
+    var error: String?
+}
+
+struct LocalModel: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var sizeBytes: UInt64?
+
+    var sizeDescription: String? {
+        guard let sizeBytes, sizeBytes > 0 else { return nil }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .binary
+        return formatter.string(fromByteCount: Int64(sizeBytes))
+    }
+}
+
 struct SyncScheduleStatus: Codable, Sendable {
     let loggedIn: Bool
     let cliScheduleActive: Bool

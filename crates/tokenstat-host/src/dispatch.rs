@@ -1627,6 +1627,14 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         return Some(answer);
     }
 
+    #[cfg(feature = "local-host")]
+    if method == "local.models" {
+        return Some(
+            crate::local_models::discover()
+                .and_then(|providers| serde_json::to_value(providers).map_err(|e| e.to_string())),
+        );
+    }
+
     Some(match method {
         // Where a daemon on this machine would be listening.
         //
