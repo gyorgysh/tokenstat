@@ -60,7 +60,7 @@ final class MachinesModel {
         guard account?.signedIn == true, let tier = account?.tier?.lowercased() else {
             return false
         }
-        return tier == "supporter" || tier == "patron"
+        return ["supporter", "patron", "legend"].contains(tier)
     }
 
     /// Whether an account machine's workspaces are in the sidebar, which is

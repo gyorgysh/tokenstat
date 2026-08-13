@@ -353,10 +353,10 @@ struct Wordmark: View {
 /// The tier, as the silhouette the website puts beside a name.
 ///
 /// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crown for
-/// Patron, a star for Supporter. SF Symbols was the first attempt and it is the
-/// wrong call for a badge. `crown.fill` is Apple's crown, not this brand's, and
-/// a mark that is nearly the website's is worse than one that is obviously
-/// different, because it reads as the same badge rendered badly.
+/// Patron, a star for Supporter, a laurel for Legend. SF Symbols was the first
+/// attempt and it is the wrong call for a badge. `crown.fill` is Apple's crown,
+/// not this brand's, and a mark that is nearly the website's is worse than one
+/// that is obviously different, because it reads as the same badge rendered badly.
 ///
 /// Free has no mark at all. A badge everyone holds is decoration, and the
 /// profile page shows nothing there either.
@@ -400,6 +400,7 @@ struct BadgeShape: Shape {
     enum Kind {
         case crown
         case star
+        case laurel
         /// A tier this build does not know. A new tier on the server must not
         /// make an account look downgraded, so it still gets a mark.
         case seal
@@ -409,6 +410,7 @@ struct BadgeShape: Shape {
 
     init?(tier: String) {
         switch tier.lowercased() {
+        case "legend": kind = .laurel
         case "patron": kind = .crown
         case "supporter": kind = .star
         case "free", "": return nil
@@ -456,6 +458,29 @@ struct BadgeShape: Shape {
             path.addLine(to: point(7.7, 13.5))
             path.addLine(to: point(3, 9.2))
             path.addLine(to: point(9.3, 8.5))
+            path.closeSubpath()
+        case .laurel:
+            // Same wreath as Profile.jsx BADGE_PATH.legend, in line segments.
+            path.move(to: point(12, 2.4))
+            path.addLine(to: point(8.4, 5))
+            path.addLine(to: point(5.6, 8.6))
+            path.addLine(to: point(4.4, 12.8))
+            path.addLine(to: point(4.8, 16.6))
+            path.addLine(to: point(6.6, 20.4))
+            path.addLine(to: point(8.8, 18.4))
+            path.addLine(to: point(7.8, 15.2))
+            path.addLine(to: point(8.4, 11.6))
+            path.addLine(to: point(10.2, 8.2))
+            path.addLine(to: point(12, 6))
+            path.addLine(to: point(13.8, 8.2))
+            path.addLine(to: point(15.6, 11.6))
+            path.addLine(to: point(16.2, 15.2))
+            path.addLine(to: point(15.2, 18.4))
+            path.addLine(to: point(17.4, 20.4))
+            path.addLine(to: point(19.2, 16.6))
+            path.addLine(to: point(19.6, 12.8))
+            path.addLine(to: point(18.4, 8.6))
+            path.addLine(to: point(15.6, 5))
             path.closeSubpath()
         case .seal:
             path.addEllipse(

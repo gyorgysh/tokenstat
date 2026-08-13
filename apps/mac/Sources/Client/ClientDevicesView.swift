@@ -536,11 +536,11 @@ enum DeviceHistory {
     /// How far back this tier's device spend should look.
     ///
     /// Matches the account history product: free a month, supporter a year,
-    /// patron everything the series still holds. The host clamps the upper
-    /// bound; the server still enforces each account's own depth.
+    /// patron and legend everything the series still holds. The host clamps
+    /// the upper bound; the server still enforces each account's own depth.
     static func days(for tier: String?) -> Int {
         switch tier?.lowercased() {
-        case "patron": return 3650
+        case "legend", "patron": return 3650
         case "supporter": return 365
         default: return 30
         }
