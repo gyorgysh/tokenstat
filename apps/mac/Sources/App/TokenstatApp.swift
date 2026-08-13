@@ -62,7 +62,9 @@ struct TokenstatApp: App {
         // daemon the bundled book is the only one there will be until a refresh
         // lands. Never replaces a fetched book, so this is safe every launch.
         Task { await Bridge.pricingSeed() }
+        #if os(macOS)
         DesktopSyncScheduler.start()
+        #endif
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.
     }
