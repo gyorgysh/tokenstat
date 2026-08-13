@@ -755,25 +755,16 @@ impl Manager {
     ///
     /// Expired viewers are pruned here rather than on a timer: every path that
     /// could change the answer already comes through this function.
-    fn apply_agreed_size(s: &Arc<Session>) -> Result<(), PtyError> {
-        let agreed = {
+    /// Drop viewers that have not refreshed inside [`VIEWER_TTL_MS`] and the
+    /// offsets they were holding. Called from resize and from every read, so
+    /// a phone that died without `pty.detach` cannot pin the 8 MiB ring.
+    fn prune_expired_readers(s: &Session) {
+        let now = now_ms();
+        let active_viewers: HashSet<String> = {
             let mut viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
-            let now = now_ms();
             viewers.retain(|_, v| now.saturating_sub(v.seen_ms) < VIEWER_TTL_MS);
-            viewers
-                .values()
-                .fold(None::<(u16, u16)>, |acc, v| match acc {
-                    None => Some((v.rows, v.cols)),
-                    Some((r, c)) => Some((r.min(v.rows), c.min(v.cols))),
-                })
+            viewers.keys().cloned().collect()
         };
-        let active_viewers: HashSet<String> = s
-            .viewers
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .cloned()
-            .collect();
         let stream_readers = s
             .stream_readers
             .lock()
@@ -783,6 +774,20 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .retain(|reader, _| active_viewers.contains(reader) || stream_readers.contains(reader));
+        s.buffer_space.notify_all();
+    }
+
+    fn apply_agreed_size(s: &Arc<Session>) -> Result<(), PtyError> {
+        Self::prune_expired_readers(s);
+        let agreed = {
+            let viewers = s.viewers.lock().unwrap_or_else(PoisonError::into_inner);
+            viewers
+                .values()
+                .fold(None::<(u16, u16)>, |acc, v| match acc {
+                    None => Some((v.rows, v.cols)),
+                    Some((r, c)) => Some((r.min(v.rows), c.min(v.cols))),
+                })
+        };
         // Nobody is watching. Leave the size alone: there is no geometry that
         // is more right than the last one, and resizing a terminal nothing is
         // showing would only make the program redraw for no reader.
@@ -870,6 +875,7 @@ impl Manager {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(reader.to_string(), offset);
+        Self::prune_expired_readers(s);
         let minimum = s
             .read_offsets
             .lock()
