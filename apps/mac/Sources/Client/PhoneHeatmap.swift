@@ -101,7 +101,7 @@ struct PhoneHeatmap: View {
                 Text(shortDate(focus.day.date))
                     .font(.system(size: 13, weight: .semibold))
                 Text(focus.day.value == 0
-                    ? "nothing spent"
+                    ? "nothing recorded"
                     : "\(formatSpend(focus.day.value)) at list rates")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)

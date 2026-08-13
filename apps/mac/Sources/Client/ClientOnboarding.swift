@@ -32,7 +32,7 @@ struct ClientOnboarding: View {
         OnboardingPage(
             symbol: "square.grid.3x3.fill",
             title: "Every device, one number",
-            body: "What your agents cost, across every laptop on your account, "
+            body: "What your agents used, across every laptop on your account, "
                 + "with all of them asleep."
         ),
         OnboardingPage(

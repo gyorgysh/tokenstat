@@ -35,7 +35,7 @@ struct AboutView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("Token usage and spend from every AI coding agent on this Mac, read locally.")
+            Text("Token usage from every AI coding agent on this Mac, read locally.")
                 .font(.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
