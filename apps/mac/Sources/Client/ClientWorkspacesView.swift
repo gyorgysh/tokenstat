@@ -18,7 +18,14 @@ import SwiftUI
 struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
+    @Environment(\.openURL) private var openURL
     @State private var model = ClientWorkspacesModel()
+
+    private var remoteAllowed: Bool {
+        if let remote = account.account?.canRemote { return remote }
+        let tier = account.account?.tier?.lowercased()
+        return tier == "supporter" || tier == "patron"
+    }
 
     var body: some View {
         @Bindable var model = model
@@ -42,7 +49,21 @@ struct ClientWorkspacesView: View {
                         .cardSurface()
                     }
 
-                    if model.hosts.isEmpty {
+                    if !remoteAllowed, account.signedIn {
+                        ClientEmptyState(
+                            kind: .needsAccount,
+                            title: "Remote is on Supporter",
+                            message: "This phone already shares the account. Free lets you see "
+                                + "usage from a computer and a phone. Opening folders and "
+                                + "terminals on the computer is a paid feature.",
+                            actionTitle: "See plans",
+                            action: {
+                                if let url = URL(string: "https://tokenstat.ai/pricing") {
+                                    openURL(url)
+                                }
+                            }
+                        )
+                    } else if model.hosts.isEmpty {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "No host devices yet",

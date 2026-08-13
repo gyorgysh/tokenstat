@@ -599,6 +599,12 @@ struct Account: Codable, Sendable, Hashable {
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
     var schemaCurrent: UInt32?
+    /// Host computers this plan may link. Phones do not take a slot.
+    var machineLimit: Int?
+    var hostsLinked: Int?
+    /// Whether the relay will accept a HELLO from this account.
+    var canRemote: Bool?
+    var syncInterval: Int?
 
     /// `thisMachineId` on the wire. Spelling the acronym without saying so
     /// left it nil on every decode, so no row in the machine list was ever
@@ -607,7 +613,10 @@ struct Account: Codable, Sendable, Hashable {
         case signedIn, host, handle, displayName, tier, avatar, lastSyncAt
         case thisMachineID = "thisMachineId"
         case machines, schemaCurrent
+        case machineLimit, hostsLinked, canRemote, syncInterval
     }
+
+    var hostMachines: [Machine] { machines.filter(\.isHost) }
 
     /// What to call this person on screen: their chosen name, or the handle
     /// when they have not set one.

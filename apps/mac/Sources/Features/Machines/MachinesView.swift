@@ -144,22 +144,37 @@ struct MachinesView: View {
         }
     }
 
+    @ViewBuilder
     private var addDeviceAction: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Add a device")
-                    .font(.callout.weight(.medium))
-                Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        if model.remoteReachAllowed {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Add a device")
+                        .font(.callout.weight(.medium))
+                    Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Add device") { addingDevice = true }
+                    .buttonStyle(AccentButtonStyle())
             }
-            Spacer()
-            Button("Add device") { addingDevice = true }
-                .buttonStyle(AccentButtonStyle())
+            .padding(Theme.Space.m)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        } else if model.account?.signedIn == true {
+            EmptyState(
+                symbol: "iphone.and.arrow.forward",
+                title: "A phone does not need this",
+                message: "Sign in on the phone with the same account. It sees usage without remote reach. Pairing another computer for folders and terminals is on Supporter."
+            ) {
+                Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(Theme.Space.m)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
         }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var hostSetup: some View {
@@ -282,12 +297,24 @@ struct MachinesView: View {
                         // invited to flip a switch the relay will refuse. A
                         // switch that was left on reads as off until the
                         // account qualifies again.
-                        Banner(
-                            text: model.account?.signedIn == true
-                                ? "Remote reach needs a Supporter or Patron plan, and this account does not have one."
-                                : "Remote reach needs a Supporter or Patron plan. Sign in with an account that has it.",
-                            severity: .warning
-                        )
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Text(model.account?.signedIn == true
+                                ? "This computer and a phone already share the account."
+                                : "Remote reach needs a signed-in Supporter or Patron account.")
+                                .font(.callout.weight(.medium))
+                            Text(model.account?.signedIn == true
+                                ? "Free syncs two computers and the phone app, so you can see usage from both. Opening folders and terminals on this Mac from another device is on Supporter."
+                                : "Sign in with an account that includes it, then turn the switch on.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if model.account?.signedIn == true {
+                                Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+                                    .font(.caption.weight(.semibold))
+                            }
+                        }
+                        .padding(Theme.Space.s)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.accentSoft.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     } else if planExpired {
                         Banner(
                             text: "Your plan no longer includes remote reach. The relay is refusing this machine until the plan is restored.",

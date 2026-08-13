@@ -954,6 +954,29 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
                     machines: s.machines.iter().map(MachineDto::from_value).collect(),
                     schema_current: s.schema_current,
+                    machine_limit: s
+                        .raw
+                        .get("sync")
+                        .and_then(|v| v.get("machine_limit"))
+                        .and_then(|v| v.as_u64())
+                        .map(|n| n as u32),
+                    hosts_linked: s
+                        .raw
+                        .get("sync")
+                        .and_then(|v| v.get("hosts_linked"))
+                        .and_then(|v| v.as_u64())
+                        .map(|n| n as u32),
+                    can_remote: s
+                        .raw
+                        .get("sync")
+                        .and_then(|v| v.get("remote"))
+                        .and_then(|v| v.as_bool()),
+                    sync_interval: s
+                        .raw
+                        .get("sync")
+                        .and_then(|v| v.get("min_interval"))
+                        .and_then(|v| v.as_u64())
+                        .map(|n| n as u32),
                 })
                 .envelope(),
                 Err(e) if e.is_unauthenticated() => serde_json::to_value(AccountDto {
@@ -967,6 +990,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     this_machine_id: None,
                     machines: Vec::new(),
                     schema_current: None,
+                    machine_limit: None,
+                    hosts_linked: None,
+                    can_remote: None,
+                    sync_interval: None,
                 })
                 .envelope(),
                 Err(e) => Err(e.to_string().into()),

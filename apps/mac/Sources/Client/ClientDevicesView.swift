@@ -40,7 +40,7 @@ struct ClientDevicesView: View {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "No devices yet",
-                            message: "Install tokenstat on a computer and sign in there. It shows up here after its first sync."
+                            message: "Install tokenstat on a computer and sign in there. Free includes two computers and this phone. It shows up here after the first sync."
                         )
                     }
                 } else {
@@ -142,12 +142,17 @@ struct ClientDevicesView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(deviceCount)
                 .font(ClientType.sectionTitle)
-            Text(model.windowDescription)
+            Text(planLine ?? model.windowDescription)
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
+            if let extra = planRemoteLine {
+                Text(extra)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
@@ -157,6 +162,19 @@ struct ClientDevicesView: View {
 
     private var deviceCount: String {
         machines.count == 1 ? "1 device" : "\(machines.count) devices"
+    }
+
+    private var planLine: String? {
+        guard let limit = account.account?.machineLimit else { return nil }
+        let hosts = machines.filter(\.isHost).count
+        return "\(hosts) of \(limit) computers. Phones do not use a slot."
+    }
+
+    private var planRemoteLine: String? {
+        if account.account?.canRemote == false {
+            return "Remote control is on Supporter. Usage from every linked device is already here."
+        }
+        return nil
     }
 }
 

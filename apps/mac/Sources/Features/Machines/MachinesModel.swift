@@ -56,6 +56,7 @@ final class MachinesModel {
     /// or expired account must not be invited to flip a switch the relay will
     /// refuse.
     var remoteReachAllowed: Bool {
+        if let remote = account?.canRemote { return remote }
         guard account?.signedIn == true, let tier = account?.tier?.lowercased() else {
             return false
         }
@@ -470,6 +471,7 @@ final class MachinesModel {
         if machine.machineID == account?.thisMachineID { return false }
         if machine.publicIdentity == identity?.key { return false }
         if machine.online == false { return false }
+        if !remoteReachAllowed { return false }
         if status?.tunnel != true { return false }
         return true
     }

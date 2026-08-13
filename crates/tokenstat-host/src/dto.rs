@@ -322,6 +322,13 @@ pub struct AccountDto {
     pub this_machine_id: Option<String>,
     pub machines: Vec<MachineDto>,
     pub schema_current: Option<u32>,
+    /// How many host computers this plan may link. Phones do not take a slot.
+    pub machine_limit: Option<u32>,
+    pub hosts_linked: Option<u32>,
+    /// Whether the relay will accept a HELLO from this account.
+    pub can_remote: Option<bool>,
+    /// Minimum seconds between accepted syncs from one host.
+    pub sync_interval: Option<u32>,
 }
 
 /// Outcome of a sync.

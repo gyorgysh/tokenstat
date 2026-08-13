@@ -291,17 +291,32 @@ struct AccountView: View {
     }
 
     private func machinesCard(_ account: Account) -> some View {
-        Card(
-            title: "Devices",
-            subtitle: account.machines.isEmpty
-                ? "Every device that has synced to this account"
-                : "\(account.machines.count) linked"
-        ) {
+        let hosts = account.hostMachines.count
+        let limit = account.machineLimit
+        let subtitle: String = {
+            if account.machines.isEmpty {
+                return "Every device that has synced to this account"
+            }
+            if let limit {
+                return "\(hosts) of \(limit) computers"
+                    + (account.canRemote == false ? ". No remote control on this plan." : "")
+            }
+            return "\(account.machines.count) linked"
+        }()
+        return Card(title: "Devices", subtitle: subtitle) {
             if account.machines.isEmpty {
                 #if os(macOS)
-                EmptyHint(text: "Nothing has synced yet. Sync now to link this device.")
+                EmptyState(
+                    symbol: "laptopcomputer.and.iphone",
+                    title: "Nothing linked yet",
+                    message: "Free includes two computers and a phone. Sync now to put this Mac on the account."
+                )
                 #else
-                EmptyHint(text: "No devices have linked yet. Install tokenstat on a computer and sign in there.")
+                EmptyState(
+                    symbol: "laptopcomputer.and.iphone",
+                    title: "No devices yet",
+                    message: "Install tokenstat on a computer and sign in there. This phone does not use a computer slot."
+                )
                 #endif
             } else {
                 VStack(spacing: 0) {
