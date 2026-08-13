@@ -68,6 +68,26 @@ const PROVIDERS: &[ProviderSpec] = &[
     },
 ];
 
+/// The spec for a provider id, or `None` when nothing here serves it.
+fn spec(provider: &str) -> Option<&'static ProviderSpec> {
+    PROVIDERS.iter().find(|spec| spec.id == provider)
+}
+
+/// Where a provider listens, with no API path on the end.
+///
+/// Two harness contracts want two different forms of the same address: the
+/// Anthropic-compatible one appends its own `/v1/messages`, while the
+/// OpenAI-compatible one is handed the `/v1` prefix already. Both come from
+/// this one table so a port lives in a single place.
+pub(crate) fn origin(provider: &str) -> Option<String> {
+    spec(provider).map(|spec| format!("http://127.0.0.1:{}", spec.port))
+}
+
+/// The OpenAI-compatible base URL a provider answers on.
+pub(crate) fn api_base_url(provider: &str) -> Option<&'static str> {
+    spec(provider).map(|spec| spec.base_url)
+}
+
 /// Probe the supported local model servers without contacting the internet.
 pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
     Ok(PROVIDERS
@@ -181,8 +201,47 @@ fn parse_ollama(value: &Value) -> Result<Vec<LocalModel>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_lmstudio, parse_ollama};
+    use super::{LocalModel, LocalProvider, api_base_url, origin, parse_lmstudio, parse_ollama};
     use serde_json::json;
+
+    #[test]
+    fn the_wire_shape_is_camel_case() {
+        // Pinned because a client decodes these names literally. `baseUrl`
+        // spelled `baseURL` on the other side failed every response, and the
+        // failure surfaced as "no local models discovered" rather than as a
+        // decoding error.
+        let value = serde_json::to_value(LocalProvider {
+            id: "lmstudio".into(),
+            name: "LM Studio".into(),
+            base_url: "http://127.0.0.1:1234/v1".into(),
+            available: true,
+            models: vec![LocalModel {
+                id: "qwen/a".into(),
+                name: "qwen/a".into(),
+                size_bytes: Some(7),
+            }],
+            error: None,
+        })
+        .expect("serialize");
+        let object = value.as_object().expect("an object");
+        let mut keys: Vec<_> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            ["available", "baseUrl", "error", "id", "models", "name"]
+        );
+        let model = value["models"][0].as_object().expect("an object");
+        let mut model_keys: Vec<_> = model.keys().map(String::as_str).collect();
+        model_keys.sort_unstable();
+        assert_eq!(model_keys, ["id", "name", "sizeBytes"]);
+    }
+
+    #[test]
+    fn a_providers_address_comes_from_one_table() {
+        assert_eq!(origin("lmstudio").as_deref(), Some("http://127.0.0.1:1234"));
+        assert_eq!(api_base_url("lmstudio"), Some("http://127.0.0.1:1234/v1"));
+        assert_eq!(origin("nothing"), None);
+    }
 
     #[test]
     fn lm_studio_models_use_the_openai_ids() {

@@ -598,6 +598,15 @@ struct Account: Codable, Sendable, Hashable {
     var machines: [Machine]
     var schemaCurrent: UInt32?
 
+    /// `thisMachineId` on the wire. Spelling the acronym without saying so
+    /// left it nil on every decode, so no row in the machine list was ever
+    /// the one you are sitting at.
+    enum CodingKeys: String, CodingKey {
+        case signedIn, host, handle, displayName, tier, avatar, lastSyncAt
+        case thisMachineID = "thisMachineId"
+        case machines, schemaCurrent
+    }
+
     /// What to call this person on screen: their chosen name, or the handle
     /// when they have not set one.
     var title: String? {
@@ -697,6 +706,14 @@ struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     var available: Bool
     var models: [LocalModel]
     var error: String?
+
+    /// `baseUrl` on the wire, because the host camel-cases `base_url` like
+    /// every other field. Swift spells the acronym, so the two names have to
+    /// be joined here: without this the whole response fails to decode, and
+    /// the launcher reported it as "no local models discovered".
+    enum CodingKeys: String, CodingKey {
+        case id, name, baseURL = "baseUrl", available, models, error
+    }
 }
 
 struct LocalModel: Codable, Sendable, Hashable, Identifiable {
