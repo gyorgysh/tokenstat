@@ -1621,10 +1621,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
+                // Peer-local ids, before we prefix them. The cache is served
+                // as the live list, so a stamp-only invalidate still hid this
+                // session and the app treated it as gone.
+                crate::remote_stream::remember_pty_session(peer, &value);
                 renamespace_session(&mut value, peer);
-                // A session just appeared on the peer; the cached pty list
-                // must not hide it from the parity watch for another 30s.
-                crate::remote_stream::invalidate_pty_list(peer);
                 return Ok(value);
             }
             let ws = crate::workspaces::folder(&p.workspace_id)?;
@@ -2010,12 +2011,13 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         }
 
         "pty.close" => {
-            if let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
-                && let Some((peer, _)) = split_remote(&parsed.id)
-            {
-                crate::remote_stream::invalidate_pty_list(peer);
-            }
             if let Some(answer) = route_remote_pty("pty.close", params) {
+                if answer.is_ok()
+                    && let Ok(parsed) = serde_json::from_str::<PtyIdParams>(params.trim())
+                    && let Some((peer, inner)) = split_remote(&parsed.id)
+                {
+                    crate::remote_stream::forget_pty_session(peer, inner);
+                }
                 return answer;
             }
             pty_id(params).and_then(|p| {
