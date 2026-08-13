@@ -36,6 +36,10 @@ extension Notification.Name {
     /// The local archive gained or changed events (scan, remote fetch). Home
     /// re-reads its heatmap without a full window restart.
     static let archiveDidChange = Notification.Name("ai.tokenstat.archiveDidChange")
+    /// A local host call is retrying after the daemon went quiet or disappeared.
+    static let hostRecoveryStarted = Notification.Name("ai.tokenstat.hostRecoveryStarted")
+    /// A local host call answered after a recovery attempt.
+    static let hostRecoveryFinished = Notification.Name("ai.tokenstat.hostRecoveryFinished")
 }
 
 @main

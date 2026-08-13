@@ -255,9 +255,14 @@ enum Bridge {
         var attempt = 0
         while true {
             do {
-                return try route.transport.call(method: method, params: params, patience: patience)
+                let result = try route.transport.call(method: method, params: params, patience: patience)
+                Self.postHostRecoveryFinished()
+                return result
             } catch {
                 attempt += 1
+                if Self.isHostRecoveryError(error) {
+                    Self.postHostRecoveryStarted()
+                }
                 guard route.isHosted,
                       Self.isRepairable(error),
                       attempt < maxHostRepairAttempts,
@@ -268,6 +273,19 @@ enum Bridge {
             }
         }
     }
+
+    #if os(macOS)
+    private static func postHostRecoveryStarted() {
+        NotificationCenter.default.post(name: .hostRecoveryStarted, object: nil)
+    }
+
+    private static func postHostRecoveryFinished() {
+        NotificationCenter.default.post(name: .hostRecoveryFinished, object: nil)
+    }
+    #else
+    private static func postHostRecoveryStarted() {}
+    private static func postHostRecoveryFinished() {}
+    #endif
 
     /// The urgent variant of `call`: same repair-and-retry loop, urgent
     /// transport path.

@@ -2254,6 +2254,7 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
                         Ok(connection) => crate::remote_stream::pump_local(tcp, connection),
                         Err(error) => {
                             eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
+                            crate::remote_stream::write_proxy_error(tcp, &error);
                         }
                     }
                 }

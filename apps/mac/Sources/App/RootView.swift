@@ -1290,6 +1290,7 @@ struct RootView: View {
             // Offline is the same card language as sync and update, so the
             // footer reads as one place for "what is the network doing".
             OfflineCard(connectivity: connectivity)
+            HostStatusCard()
             // Sync feedback is a card in the same slot and the same language
             // as the update card: success is the accent, rate limiting is
             // amber, a failure is red. A plain caption made a successful sync

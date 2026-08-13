@@ -199,8 +199,18 @@ final class HomeModel {
             hostRetryCount = 0
             hostRetryTask?.cancel()
         } catch {
-            errorMessage = error.localizedDescription
-            scheduleHostRetryIfNeeded(error)
+            // Host recovery is expected to resolve through the retry loop. The
+            // footer reports it quietly, so Home does not replace useful data
+            // with a large error card for a transient socket pause.
+            if Bridge.isHostRecoveryError(error) {
+                scheduleHostRetryIfNeeded(error)
+                // Once the bounded retry budget is spent, the error belongs on
+                // screen so the user has an explicit way to try again.
+                errorMessage = hostRetryCount >= hostRetryLimit ? error.localizedDescription : nil
+            } else {
+                errorMessage = error.localizedDescription
+                scheduleHostRetryIfNeeded(error)
+            }
         }
     }
 

@@ -72,6 +72,7 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
                         Ok(connection) => pump_tcp(tcp, connection),
                         Err(error) => {
                             eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
+                            crate::remote_stream::write_proxy_error(tcp, &error);
                         }
                     }
                 }
@@ -85,9 +86,9 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
             registry.remove(&key);
         }
     });
-    // Prefer localhost over 127.0.0.1: WKWebView / ATS treat local names more
-    // kindly, and iOS App Transport "local networking" covers both.
-    Ok(json!({"url": format!("http://localhost:{port}/")}))
+    // The listener is IPv4-only. Returning the numeric address prevents iOS
+    // from resolving localhost to ::1, where there is no listener.
+    Ok(json!({"url": format!("http://127.0.0.1:{port}/")}))
 }
 
 fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {

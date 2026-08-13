@@ -104,13 +104,20 @@ struct ClientWorkspaceDetailView: View {
                 .font(ClientType.sectionTitle)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Theme.Space.s) {
-                    launchChip(name: "Shell", command: "/bin/zsh", args: ["-l"])
-                    ForEach(catalog, id: \.id) { profile in
-                        launchChip(
-                            name: profile.name,
-                            command: profile.command,
-                            args: profile.args
-                        )
+                    if catalog.isEmpty {
+                        // Keep the surface useful while the owning host's
+                        // catalog is loading. Once it arrives, it supplies the
+                        // host's actual shell and the Shell tile is not added a
+                        // second time here.
+                        launchChip(name: "Shell", command: "/bin/zsh", args: ["-l"])
+                    } else {
+                        ForEach(catalog, id: \.id) { profile in
+                            launchChip(
+                                name: profile.name,
+                                command: profile.command,
+                                args: profile.args
+                            )
+                        }
                     }
                 }
             }

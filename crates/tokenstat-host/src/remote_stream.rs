@@ -162,11 +162,13 @@ fn pump_tcp_connection(tcp: TcpStream, connection: Connection) {
 
 /// The owning side of a proxy stream: dial the far machine's own loopback and
 /// bridge.
-fn pump_proxy(connection: Connection, host: &str, port: u16) {
+fn pump_proxy(mut connection: Connection, host: &str, port: u16) {
     let tcp = match TcpStream::connect((host, port)) {
         Ok(tcp) => tcp,
         Err(error) => {
             eprintln!("remote stream: proxy to {host}:{port} failed: {error}");
+            let message = error.to_string();
+            let _ = connection.send(proxy_error_response(&message).as_bytes());
             drop(connection);
             return;
         }
@@ -199,6 +201,23 @@ pub(crate) fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Con
 /// of `proxy.listen`, mirrored from the owning side's `pump_proxy`.
 pub(crate) fn pump_local(tcp: TcpStream, connection: Connection) {
     pump_tcp_connection(tcp, connection);
+}
+
+/// Return a readable HTTP response when the tunnel or target service fails.
+/// Without this, WKWebView reports every proxy failure as a generic lost
+/// connection and hides the reason the user can act on.
+pub(crate) fn write_proxy_error(mut tcp: TcpStream, error: &str) {
+    let _ = tcp.write_all(proxy_error_response(error).as_bytes());
+    let _ = tcp.shutdown(std::net::Shutdown::Both);
+}
+
+fn proxy_error_response(error: &str) -> String {
+    let body = format!("tokenstat could not reach the service on the host.\n\n{error}\n");
+    format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    )
 }
 
 /// One pushed chunk of terminal output. The same shape `pty.read` answers
@@ -544,7 +563,7 @@ mod tests {
     use tokenstat_identity::MachineIdentity;
     use tokenstat_remote::{handshake_initiator, handshake_responder};
 
-    use super::{cache_window, parse_handshake, pump_local, pump_proxy};
+    use super::{cache_window, parse_handshake, proxy_error_response, pump_local, pump_proxy};
 
     #[test]
     fn remote_cache_offsets_remain_absolute_after_trim() {
@@ -562,6 +581,14 @@ mod tests {
         );
         assert!(parse_handshake(r#"{"id":0,"method":"info"}"#).is_none());
         assert!(parse_handshake("not json").is_none());
+    }
+
+    #[test]
+    fn proxy_failures_are_readable_http() {
+        let response = proxy_error_response("connection refused");
+        assert!(response.starts_with("HTTP/1.1 502 Bad Gateway\r\n"));
+        assert!(response.contains("Content-Type: text/plain; charset=utf-8"));
+        assert!(response.ends_with("connection refused\n"));
     }
 
     /// A local port on one machine bridged through a Noise connection to a
