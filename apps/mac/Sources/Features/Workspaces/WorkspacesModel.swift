@@ -373,11 +373,34 @@ final class WorkspacesModel {
         guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return false }
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            if Task.isCancelled { return false }
             var request = URLRequest(url: url)
             request.timeoutInterval = 1
             request.httpMethod = "GET"
             if let (_, response) = try? await URLSession.shared.data(for: request),
                response is HTTPURLResponse {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        return false
+    }
+
+    /// True when the remote harness answered through the local proxy.
+    ///
+    /// The proxy writes 502 while the peer port is still closed, so that
+    /// status is "not yet". Time out and return false so the caller can
+    /// still open the tab.
+    private nonisolated static func waitForProxyPage(_ url: URL, timeout: TimeInterval = 45) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if Task.isCancelled { return false }
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 1
+            request.httpMethod = "GET"
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               let http = response as? HTTPURLResponse,
+               http.statusCode != 502 {
                 return true
             }
             try? await Task.sleep(for: .milliseconds(400))
@@ -396,6 +419,9 @@ final class WorkspacesModel {
         }
         do {
             let proxy = try await Bridge.proxyListen(peer: parts[1], host: "127.0.0.1", port: port)
+            if let url = URL(string: proxy.url) {
+                _ = await Self.waitForProxyPage(url)
+            }
             let tab = showBrowser(in: folder.id)
             if let index = browserTabs[folder.id]?.firstIndex(where: { $0.id == tab.id }) {
                 browserTabs[folder.id]?[index].peer = parts[1]
