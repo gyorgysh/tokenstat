@@ -56,6 +56,7 @@ struct TokenstatApp: App {
     /// different owner than the ones it ends with.
     init() {
         Self.adoptPreferencesFromPreviousBundleID()
+        Self.excludeSecretsFromBackup()
         Bridge.connect()
         // Before anything asks for a figure. A machine with no price book
         // renders every value as unknown, and on a platform with no CLI and no
@@ -67,6 +68,21 @@ struct TokenstatApp: App {
         #endif
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.
+    }
+
+    /// Keep the machine key and the login bearer out of iCloud / Time Machine
+    /// backups. Restoring them onto a second device clones the identity.
+    private static func excludeSecretsFromBackup() {
+        guard let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first?.appendingPathComponent("ai.tokenstat.tokenstat") else { return }
+        for name in ["identity", "credentials"] {
+            var url = base.appendingPathComponent(name)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+        }
     }
 
     /// Carry preferences over from `ai.tokenstat.Tokenstat`.
