@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
@@ -631,9 +631,42 @@ fn ensure_running(session: &TunnelSession) -> Result<(), RemoteError> {
     }
 }
 
+/// DNS under a deadline. `to_socket_addrs` has no timeout of its own,
+/// and a blackholed resolver used to park the supervisor until the OS
+/// gave up, which `nudge` and `shutdown` could not cut short.
+fn resolve_relay_addrs(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<Vec<SocketAddr>, RemoteError> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    let lookup = host.to_string();
+    std::thread::Builder::new()
+        .name("tunnel-dns".into())
+        .spawn(move || {
+            let result = (lookup.as_str(), port)
+                .to_socket_addrs()
+                .map(|iter| iter.collect::<Vec<_>>());
+            let _ = tx.send(result);
+        })
+        .map_err(RemoteError::Io)?;
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(addrs)) if !addrs.is_empty() => Ok(addrs),
+        Ok(Ok(_)) => Err(RemoteError::Tunnel(format!("{host} resolves to nothing"))),
+        Ok(Err(error)) => Err(RemoteError::Io(error)),
+        Err(_) => Err(RemoteError::Tunnel(format!("looking up {host} timed out"))),
+    }
+}
+
 /// TCP + TLS + the WebSocket handshake, bounded so a dead relay cannot park
 /// the supervisor until the OS gives up.
-fn connect_relay(endpoint: &str) -> Result<(Socket, TcpStream), RemoteError> {
+fn connect_relay_to(
+    endpoint: &str,
+    session: Option<&TunnelSession>,
+) -> Result<(Socket, TcpStream), RemoteError> {
+    if let Some(session) = session {
+        ensure_running(session)?;
+    }
     let request = endpoint.into_client_request().map_err(tunnel_error)?;
     let host = request
         .uri()
@@ -657,11 +690,13 @@ fn connect_relay(endpoint: &str) -> Result<(Socket, TcpStream), RemoteError> {
         .uri()
         .port_u16()
         .unwrap_or(if is_tls { 443 } else { 80 });
-    let addr = (host_for_addr.as_str(), port)
-        .to_socket_addrs()
-        .map_err(RemoteError::Io)?
+    let addr = resolve_relay_addrs(&host_for_addr, port, CONNECT_TIMEOUT)?
+        .into_iter()
         .next()
         .ok_or_else(|| RemoteError::Tunnel(format!("{host_for_addr} resolves to nothing")))?;
+    if let Some(session) = session {
+        ensure_running(session)?;
+    }
     let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).map_err(RemoteError::Io)?;
     stream.set_nodelay(true).map_err(RemoteError::Io)?;
     stream
@@ -671,14 +706,28 @@ fn connect_relay(endpoint: &str) -> Result<(Socket, TcpStream), RemoteError> {
         .set_write_timeout(Some(HELLO_TIMEOUT))
         .map_err(RemoteError::Io)?;
     let raw = stream.try_clone().map_err(RemoteError::Io)?;
-    let (socket, _) =
-        client_tls_with_config(request, stream, None, None).map_err(|error| match error {
-            HandshakeError::Failure(failure) => tunnel_error(failure),
-            HandshakeError::Interrupted(_) => {
-                RemoteError::Tunnel("websocket handshake was interrupted".into())
+    // Published before TLS so `shutdown` can close the handshake. Stored
+    // only after this function used to leave a toggle-off as a live
+    // socket the IO loop could still keep.
+    if let Some(session) = session {
+        *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(raw.try_clone().map_err(RemoteError::Io)?);
+    }
+    let handshake = client_tls_with_config(request, stream, None, None);
+    match handshake {
+        Ok((socket, _)) => Ok((socket, raw)),
+        Err(error) => {
+            if let Some(session) = session {
+                drop_connecting(session);
             }
-        })?;
-    Ok((socket, raw))
+            Err(match error {
+                HandshakeError::Failure(failure) => tunnel_error(failure),
+                HandshakeError::Interrupted(_) => {
+                    RemoteError::Tunnel("websocket handshake was interrupted".into())
+                }
+            })
+        }
+    }
 }
 
 /// Connect, register, and pump until the socket dies.
@@ -689,8 +738,7 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let (mut socket, raw) = connect_relay(&session.endpoint)?;
-    *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) = Some(raw);
+    let (mut socket, _raw) = connect_relay_to(&session.endpoint, Some(session))?;
     let _connecting = ConnectingGuard(session);
     if let Err(error) = ensure_running(session) {
         let _ = socket.close(None);
@@ -1123,7 +1171,8 @@ mod tests {
     #[test]
     fn a_refused_relay_fails_before_the_connect_budget() {
         let started = Instant::now();
-        let error = connect_relay("ws://127.0.0.1:1").expect_err("nothing listens on port 1");
+        let error =
+            connect_relay_to("ws://127.0.0.1:1", None).expect_err("nothing listens on port 1");
         assert!(started.elapsed() < CONNECT_TIMEOUT);
         assert!(
             matches!(error, RemoteError::Io(_)),
