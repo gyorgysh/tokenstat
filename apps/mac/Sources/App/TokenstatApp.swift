@@ -80,6 +80,10 @@ struct TokenstatApp: App {
 
     /// Keep the machine key and the login bearer out of iCloud / Time Machine
     /// backups. Restoring them onto a second device clones the identity.
+    ///
+    /// The directories are created here, before anything writes a key, because
+    /// `setResourceValues` on a missing path is a no-op and the first session
+    /// is the one that mints both secrets.
     private static func excludeSecretsFromBackup() {
         guard let base = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -87,6 +91,7 @@ struct TokenstatApp: App {
         ).first?.appendingPathComponent("ai.tokenstat.tokenstat") else { return }
         for name in ["identity", "credentials"] {
             var url = base.appendingPathComponent(name)
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try? url.setResourceValues(values)
