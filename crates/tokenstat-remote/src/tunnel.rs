@@ -483,6 +483,12 @@ impl Write for ChannelTransport {
     }
 }
 
+impl Drop for ChannelTransport {
+    fn drop(&mut self) {
+        Transport::close(self);
+    }
+}
+
 impl Transport for ChannelTransport {
     fn close(&mut self) {
         if self.closed.swap(true, Ordering::Relaxed) {
@@ -547,6 +553,7 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
             return;
         }
         mark_all_channels(&session, "tunnel disconnected");
+        forget_all_channels(&session);
         // A credential that was just replaced deserves an immediate attempt.
         // The refusal has already been answered, so the wait that follows an
         // ordinary failure would only keep the machine reading as offline for
@@ -764,14 +771,19 @@ fn dispatch_frame(session: &Arc<TunnelSession>, frame: &[u8]) {
 
     match op {
         CH_OPENED => {
-            // Our own dial: mark it open. An id we do not know is the relay
-            // dialling us: a fresh channel for the host to answer.
+            // Our own dial: mark it open. An id we do not know, or one that
+            // already died on the last socket, is the relay dialling us.
+            // Relay inbound ids restart at 1 on every new socket. Leaving a
+            // dead entry in the map would swallow that OPENED as a late ack
+            // of our own dial, and the host would never handshake.
             let mut map = channels.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(state) = map.get(&id) {
                 let mut inner = state.inner.lock().unwrap_or_else(|e| e.into_inner());
-                inner.opened = true;
-                state.cond.notify_all();
-                return;
+                if inner.error.is_none() && !inner.eof {
+                    inner.opened = true;
+                    state.cond.notify_all();
+                    return;
+                }
             }
             let state = Arc::new(ChannelState::new(id));
             map.insert(id, Arc::clone(&state));
@@ -821,6 +833,16 @@ fn mark_all_channels(session: &TunnelSession, reason: &str) {
         }
         state.cond.notify_all();
     }
+}
+
+/// Drop every id after a socket dies so the next socket's inbound OPENED
+/// (relay ids restart at 1) is not mistaken for a late ack of this one.
+fn forget_all_channels(session: &TunnelSession) {
+    session
+        .channels
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
 }
 
 /// Whether a fresh credential could plausibly fix this refusal.
@@ -945,6 +967,83 @@ mod tests {
         );
         assert!(full.contains("paid-plan"), "{full}");
         assert!(full.contains("expired"), "{full}");
+    }
+
+    fn inert_session() -> Arc<TunnelSession> {
+        let (inbound_tx, inbound_rx) = mpsc::channel();
+        Arc::new(TunnelSession {
+            endpoint: String::new(),
+            key_hex: String::new(),
+            token: Mutex::new(String::new()),
+            next_channel: AtomicU32::new(1),
+            writer: Mutex::new(None),
+            writer_bytes: Arc::new(AtomicUsize::new(0)),
+            inbound_tx: Mutex::new(Some(inbound_tx)),
+            inbound_rx: Mutex::new(Some(inbound_rx)),
+            channels: Mutex::new(HashMap::new()),
+            socket: Mutex::new(None),
+            status: Mutex::new(TunnelStatus::default()),
+            renew: Mutex::new(None),
+            wake: Mutex::new(None),
+            renewed: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+        })
+    }
+
+    fn opened_frame(id: u32) -> Vec<u8> {
+        let mut frame = Vec::new();
+        frame.push(CH_OPENED);
+        frame.extend_from_slice(&id.to_be_bytes());
+        frame
+    }
+
+    #[test]
+    fn a_dead_inbound_id_is_reused_after_the_socket_dies() {
+        let session = inert_session();
+        let inbound = session.take_inbound().expect("inbound");
+        let dead = Arc::new(ChannelState::new(1));
+        {
+            let mut inner = dead.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.error = Some("tunnel disconnected".into());
+        }
+        session
+            .channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(1, dead);
+        mark_all_channels(&session, "tunnel disconnected");
+        forget_all_channels(&session);
+        dispatch_frame(&session, &opened_frame(1));
+        let opened = inbound.try_recv().expect("inbound OPENED after reconnect");
+        assert_eq!(opened.id, 1);
+        assert!(
+            opened
+                .inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .error
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn an_errored_id_is_not_treated_as_our_own_dial() {
+        let session = inert_session();
+        let inbound = session.take_inbound().expect("inbound");
+        let dead = Arc::new(ChannelState::new(1));
+        {
+            let mut inner = dead.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.error = Some("tunnel disconnected".into());
+        }
+        session
+            .channels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(1, Arc::clone(&dead));
+        dispatch_frame(&session, &opened_frame(1));
+        let opened = inbound.try_recv().expect("OPENED delivered as inbound");
+        assert_eq!(opened.id, 1);
+        assert!(!Arc::ptr_eq(&opened, &dead));
     }
 
     #[test]
