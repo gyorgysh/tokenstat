@@ -11,6 +11,7 @@ struct AccountView: View {
     @Bindable var model: AccountModel
     @Environment(\.openURL) private var openURL
     /// Whether the third-party notices sheet is open.
+    @State private var confirmSignOut = false
     @State private var showLicenses = false
     /// iOS only: the in-app web view that completes deletion on the website.
     @State private var showDeletionWeb = false
@@ -247,7 +248,7 @@ struct AccountView: View {
                 .tint(Theme.accent)
 
                 Button {
-                    Task { await model.signOut() }
+                    confirmSignOut = true
                 } label: {
                     if model.isSigningOut {
                         ProgressView().controlSize(.small)
@@ -257,6 +258,18 @@ struct AccountView: View {
                 }
                 .buttonStyle(SecondaryButtonStyle())
                 .disabled(model.isSyncing || model.isSigningOut)
+                .confirmationDialog(
+                    "Sign out of this device?",
+                    isPresented: $confirmSignOut,
+                    titleVisibility: .visible
+                ) {
+                    Button("Sign out", role: .destructive) {
+                        Task { await model.signOut() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Usage on this account stays. You will need to approve the device again.")
+                }
                 #else
                 // Phone account UI lives in `ClientAccountSheet`. Keep a
                 // non-system control here if this view is ever shown on iOS.
