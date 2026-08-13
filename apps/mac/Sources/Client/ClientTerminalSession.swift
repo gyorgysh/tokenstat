@@ -40,6 +40,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @ObservationIgnored private var writerTask: Task<Void, Never>?
     @ObservationIgnored private var removed = false
     @ObservationIgnored private var isPending = false
+    @ObservationIgnored private var lastInfoAt = Date.distantPast
+    @ObservationIgnored private var inForeground = true
 
     private enum PtyEvent {
         case write([UInt8])
@@ -112,6 +114,13 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         eventStream.continuation.finish()
     }
 
+    /// The screen is on screen. Backgrounded polls skip the held read so a
+    /// frozen phone does not sit in a tunnel wait, and coming back nudges
+    /// the supervisor instead of waiting out a leftover backoff.
+    func setForeground(_ active: Bool) {
+        inForeground = active
+    }
+
     private func start() {
         guard !isPending else { return }
         let bridgeID = hostID
@@ -166,6 +175,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 )
                 let shouldStop = await apply(chunk)
                 if shouldStop { break }
+                if !(await checkLiveness(peer: peer, id: id)) { break }
                 recoveryDelay = 50
                 failedReads = 0
             } catch {
@@ -234,7 +244,11 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @MainActor
     private func makePlan() -> Plan? {
         guard !removed else { return nil }
-        return Plan(offset: offset, waitMs: 250, delay: hasOutput ? 16 : 50)
+        return Plan(
+            offset: offset,
+            waitMs: inForeground ? 250 : 0,
+            delay: hasOutput ? 16 : 50
+        )
     }
 
     @MainActor
@@ -247,8 +261,33 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             let bytes = [UInt8](chunk.bytes)
             view.feed(byteArray: ArraySlice(bytes))
         }
-        // Liveness occasionally.
         return false
+    }
+
+    /// Ask the host whether the process is still running. A clean exit used
+    /// to leave this screen saying Running until the next failed read.
+    @MainActor
+    private func checkLiveness(peer: String, id: String) async -> Bool {
+        guard !removed else { return false }
+        guard Date().timeIntervalSince(lastInfoAt) >= 0.25 else { return true }
+        lastInfoAt = Date()
+        guard let info = try? await ClientRemote.ptyInfo(peer: peer, id: id) else {
+            return true
+        }
+        if rows != info.rows { rows = info.rows }
+        if cols != info.cols { cols = info.cols }
+        if alive != info.alive { alive = info.alive }
+        if let code = info.exitCode {
+            exitCode = code
+            alive = false
+            return false
+        }
+        if !info.alive {
+            alive = false
+            return false
+        }
+        transportError = nil
+        return true
     }
 
     private static func makeView(delegate: TerminalViewDelegate) -> TerminalView {
@@ -347,6 +386,7 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
 /// Full-screen terminal for one remote session.
 struct ClientTerminalScreen: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     let session: ClientTerminalSession
     var onClose: (() -> Void)?
 
@@ -379,6 +419,15 @@ struct ClientTerminalScreen: View {
             .padding(.vertical, Theme.Space.s)
             .background(Theme.background)
 
+            if session.outputPaused {
+                Text("Output paused while the terminal catches up.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.warning)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.bottom, Theme.Space.xs)
+            }
+
             if let error = session.transportError {
                 Text(error)
                     .font(ClientType.caption)
@@ -393,6 +442,15 @@ struct ClientTerminalScreen: View {
         }
         .background(Color.black)
         .navigationBarHidden(true)
+        .onAppear {
+            session.setForeground(true)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            session.setForeground(phase == .active)
+            if phase == .active {
+                Task { await Bridge.nudgeTunnel() }
+            }
+        }
         .onDisappear {
             // Full-screen dismiss: stop draining when nobody is watching.
             // Re-open attaches a fresh session from pty.list.

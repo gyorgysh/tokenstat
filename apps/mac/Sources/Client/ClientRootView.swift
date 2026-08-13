@@ -29,6 +29,7 @@ import UIKit
 /// knowing about either. Custom glass is for the places no system control
 /// exists, and there are deliberately very few.
 struct ClientRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var launch = LaunchState()
     @State private var selection: ClientTab = .home
     /// One account model for the whole client. The avatar reads it, the sheet
@@ -109,6 +110,10 @@ struct ClientRootView: View {
             // want a fresh me after the network returns, and the tunnel session
             // this phone holds should reconnect now, not after its backoff.
             Task { await account.load() }
+            Task { await Bridge.nudgeTunnel() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
             Task { await Bridge.nudgeTunnel() }
         }
         .sheet(isPresented: $showAccount) {
