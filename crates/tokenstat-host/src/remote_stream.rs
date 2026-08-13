@@ -114,7 +114,13 @@ pub(crate) fn parse_handshake(first: &str) -> Option<String> {
 /// closing, and a closed socket shuts the remote TCP end down.
 fn pump_tcp_connection(tcp: TcpStream, connection: Connection) {
     let (reader, writer) = connection.split();
-    let tcp_reader = tcp.try_clone().expect("cloning a socket for the pump");
+    let tcp_reader = match tcp.try_clone() {
+        Ok(clone) => clone,
+        Err(_) => {
+            let _ = tcp.shutdown(std::net::Shutdown::Both);
+            return;
+        }
+    };
     let reader = Arc::new(reader);
     let writer = Arc::new(writer);
 
