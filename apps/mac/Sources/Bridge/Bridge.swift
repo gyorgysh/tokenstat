@@ -641,6 +641,10 @@ enum Bridge {
         try await background("blocks", ["query": query.payload], as: [Block].self)
     }
 
+    static func activeBlock(_ query: Query = Query()) async throws -> Block? {
+        try await background("blocks.active", ["query": query.payload], as: [Block].self).first
+    }
+
     /// Read every discoverable log source into the archive. Slow by nature:
     /// this is the call that walks the disk.
     static func scan() async throws -> ScanReport {

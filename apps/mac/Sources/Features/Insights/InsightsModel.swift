@@ -190,8 +190,10 @@ final class InsightsModel {
             async let byModel = Bridge.report(group: .model, query: q)
             async let byProject = Bridge.report(group: .project, query: q)
             async let bySource = Bridge.report(group: .source, query: q)
-            async let bySession = Bridge.report(group: .session, query: q)
-            async let blocks = Bridge.blocks(q)
+            var sessionQuery = q
+            sessionQuery.limit = 80
+            async let bySession = Bridge.report(group: .session, query: sessionQuery)
+            async let activeBlock = Bridge.activeBlock(q)
             async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
 
             self.totals = try await totals
@@ -200,7 +202,7 @@ final class InsightsModel {
             self.byProject = try await byProject
             self.bySource = try await bySource
             self.bySession = try await bySession
-            self.activeBlock = try await blocks.first(where: \.active)
+            self.activeBlock = try await activeBlock
             self.projectHarnesses = Self.buildProjectHarnesses(
                 projects: self.byProject,
                 split: try await split

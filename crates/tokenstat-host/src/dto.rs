@@ -27,6 +27,7 @@ pub struct QueryDto {
     pub model: Option<String>,
     pub project: Option<String>,
     pub billing: Option<BillingMode>,
+    pub limit: Option<u32>,
 }
 
 impl From<QueryDto> for Query {
@@ -37,6 +38,7 @@ impl From<QueryDto> for Query {
             model: q.model,
             project: q.project,
             billing: q.billing,
+            limit: q.limit,
         }
     }
 }

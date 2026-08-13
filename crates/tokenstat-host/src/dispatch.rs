@@ -913,6 +913,15 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             })
         }
 
+        "blocks.active" => {
+            let p: QueryParams = parse(params)?;
+            with_session(s, |b| {
+                let row = b.engine()?.active_block(&Query::from(p.query)).envelope()?;
+                let dtos: Vec<BlockDto> = row.into_iter().map(BlockDto::from).collect();
+                serde_json::to_value(dtos).envelope()
+            })
+        }
+
         // Long running. The caller must not run this on a UI thread.
         "scan" => with_session(s, |b| {
             let r = b.engine_mut()?.scan().envelope()?;

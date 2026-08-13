@@ -306,6 +306,7 @@ fn query_from_args(args: &Value) -> Query {
             .and_then(Value::as_str)
             .map(str::to_string),
         billing: None,
+        limit: None,
     }
 }
 

@@ -15,6 +15,7 @@ struct Query: Sendable, Equatable {
     var model: String?
     var project: String?
     var billing: String?
+    var limit: Int?
 
     var payload: [String: Any] {
         var out: [String: Any] = [:]
@@ -23,6 +24,7 @@ struct Query: Sendable, Equatable {
         if let model { out["model"] = model }
         if let project { out["project"] = project }
         if let billing { out["billing"] = billing }
+        if let limit { out["limit"] = limit }
         return out
     }
 }

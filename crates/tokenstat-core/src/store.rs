@@ -176,6 +176,9 @@ pub struct Query {
     pub model: Option<String>,
     pub project: Option<String>,
     pub billing: Option<BillingMode>,
+    /// When set, `report` returns at most this many groups. Insights pages
+    /// sessions at 50, so it must not pull every session in the archive.
+    pub limit: Option<u32>,
 }
 
 /// Totals across everything the archive holds.
@@ -599,13 +602,14 @@ impl Store {
              +COALESCE(SUM(cache_write_5m),0)+COALESCE(SUM(cache_write_1h),0)\
              +COALESCE(SUM(output),0)) DESC"
         };
+        let limit = q.limit.map(|n| format!(" LIMIT {n}")).unwrap_or_default();
         let sql = format!(
             r#"SELECT {col} AS k,
                       SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
                       SUM(cache_write_1h), SUM(output),
                       COUNT(*), COUNT(DISTINCT session)
                FROM event{where_sql}
-               GROUP BY k {order}"#,
+               GROUP BY k {order}{limit}"#,
             col = group.column(),
         );
         let mut stmt = self.conn.prepare(&sql)?;
@@ -850,7 +854,32 @@ impl Store {
     /// how Claude's rate-limit windows behave, and is more useful than fixed
     /// clock-aligned buckets for "how much of my current block have I used".
     pub fn blocks(&self, q: &Query, now_ms: i64) -> Result<Vec<UsageBlock>, CoreError> {
-        let (where_sql, args) = Self::where_clause(q);
+        self.fold_blocks(q, None, now_ms)
+    }
+
+    /// The open 5 hour window, if any. Insights only needs this one row, not
+    /// a walk of every event in the archive.
+    pub fn active_block(&self, q: &Query, now_ms: i64) -> Result<Option<UsageBlock>, CoreError> {
+        let since = now_ms.saturating_sub(2 * BLOCK_DURATION_MS);
+        let blocks = self.fold_blocks(q, Some(since), now_ms)?;
+        Ok(blocks.into_iter().find(|block| block.active))
+    }
+
+    fn fold_blocks(
+        &self,
+        q: &Query,
+        since_ms: Option<i64>,
+        now_ms: i64,
+    ) -> Result<Vec<UsageBlock>, CoreError> {
+        let (mut where_sql, mut args) = Self::where_clause(q);
+        if let Some(since) = since_ms {
+            if where_sql.is_empty() {
+                where_sql.push_str(" WHERE ts_ms >= ?");
+            } else {
+                where_sql.push_str(" AND ts_ms >= ?");
+            }
+            args.push(Box::new(since));
+        }
         let sql = format!(
             "SELECT ts_ms, session, input_fresh, cache_read, cache_write_5m, \
              cache_write_1h, output FROM event{where_sql} ORDER BY ts_ms ASC"
@@ -1536,6 +1565,12 @@ mod tests {
         assert!(blocks[0].active);
         assert!(!blocks[1].active);
         assert_eq!(blocks[1].events, 1);
+        let open = s.active_block(&Query::default(), t0 + 30_000).unwrap();
+        assert_eq!(open.unwrap().events, 2);
+        let none = s
+            .active_block(&Query::default(), t0 + BLOCK_DURATION_MS)
+            .unwrap();
+        assert!(none.is_none());
     }
 
     #[test]

@@ -346,6 +346,7 @@ impl Window {
             model: self.model.clone(),
             project: self.project.clone(),
             billing: None,
+            limit: None,
         }
     }
 }

@@ -149,6 +149,11 @@ impl Engine {
         self.store.blocks(q, now_ms)
     }
 
+    pub fn active_block(&self, q: &Query) -> Result<Option<UsageBlock>, CoreError> {
+        let now_ms = jiff::Timestamp::now().as_millisecond();
+        self.store.active_block(q, now_ms)
+    }
+
     pub fn scan(&mut self) -> Result<ScanReport, CoreError> {
         crate::scan(&mut self.store, &self.tz)
     }
