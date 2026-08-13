@@ -1412,6 +1412,9 @@ fn nudge() -> Result<Value, String> {
     // back with this one is dialled at once rather than waiting out a backoff
     // it earned while the network was down.
     clear_all_unreachable();
+    // Client builds have no pty list cache. The stream stack that owns it
+    // is compiled out with `local-host`.
+    #[cfg(feature = "local-host")]
     crate::remote_stream::invalidate_all_pty_lists();
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
         session.nudge();

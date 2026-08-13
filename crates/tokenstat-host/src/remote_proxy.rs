@@ -72,7 +72,7 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
                         Ok(connection) => pump_tcp(tcp, connection),
                         Err(error) => {
                             eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
-                            crate::remote_stream::write_proxy_error(tcp, &error);
+                            write_proxy_error(tcp, &error);
                         }
                     }
                 }
@@ -99,6 +99,19 @@ pub(crate) fn unlisten(peer: &str, host: &str, target: u16) -> Result<Value, Str
         stop.store(true, Ordering::Relaxed);
     }
     Ok(json!({"stopped": true}))
+}
+
+/// Same HTTP 502 the host's stream stack writes. Kept here so a client
+/// build does not have to compile `remote_stream`.
+fn write_proxy_error(mut tcp: TcpStream, error: &str) {
+    let body = format!("tokenstat could not reach the service on the host.\n\n{error}\n");
+    let response = format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let _ = tcp.write_all(response.as_bytes());
+    let _ = tcp.shutdown(std::net::Shutdown::Both);
 }
 
 fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, String> {
