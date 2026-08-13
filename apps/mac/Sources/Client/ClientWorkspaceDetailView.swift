@@ -25,6 +25,7 @@ struct ClientWorkspaceDetailView: View {
     @State private var showPort = false
     @State private var portText = "5173"
     @State private var browserURL: String?
+    @State private var forwardedPort: Int?
     @State private var isLoading = false
 
     private var workspaceID: String {
@@ -73,6 +74,10 @@ struct ClientWorkspaceDetailView: View {
         )) { item in
             ClientBrowserScreen(url: item.url) {
                 browserURL = nil
+                if let port = forwardedPort {
+                    forwardedPort = nil
+                    Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
+                }
             }
         }
     }
@@ -310,6 +315,7 @@ struct ClientWorkspaceDetailView: View {
         do {
             let result = try await Bridge.proxyListen(peer: peer, host: "127.0.0.1", port: Int(port))
             showPort = false
+            forwardedPort = Int(port)
             browserURL = result.url
         } catch {
             errorMessage = error.localizedDescription
@@ -423,6 +429,7 @@ struct ClientFileEditor: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var original: String = ""
+    @State private var confirmClose = false
 
     var body: some View {
         NavigationStack {
@@ -433,7 +440,13 @@ struct ClientFileEditor: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { dismiss() }
+                        Button("Close") {
+                            if content != original {
+                                confirmClose = true
+                            } else {
+                                dismiss()
+                            }
+                        }
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button(isSaving ? "Saving…" : "Save") {
@@ -452,6 +465,16 @@ struct ClientFileEditor: View {
                 }
         }
         .onAppear { original = content }
+        .confirmationDialog(
+            "Discard changes?",
+            isPresented: $confirmClose,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This file has edits that are not saved on the host.")
+        }
     }
 
     private func save() async {
@@ -554,6 +577,23 @@ struct ClientWebView: UIViewRepresentable {
 
         init(onError: @escaping (String) -> Void) {
             self.onError = onError
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            decisionHandler(Self.allows(navigationAction.request.url) ? .allow : .cancel)
+        }
+
+        static func allows(_ url: URL?) -> Bool {
+            guard let url, let scheme = url.scheme?.lowercased() else { return false }
+            if scheme == "about" { return true }
+            if let host = url.host, host == "127.0.0.1" || host == "localhost" {
+                return scheme == "http" || scheme == "https"
+            }
+            return scheme == "https" && (url.host == "tokenstat.ai" || url.host?.hasSuffix(".tokenstat.ai") == true)
         }
 
         func webView(
