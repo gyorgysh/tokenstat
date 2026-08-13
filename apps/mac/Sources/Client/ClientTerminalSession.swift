@@ -175,7 +175,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
                 )
                 let shouldStop = await apply(chunk)
                 if shouldStop { break }
-                if !(await checkLiveness(peer: peer, id: id)) { break }
+                if plan.checkAlive, !(await checkLiveness(peer: peer, id: id)) { break }
                 recoveryDelay = 50
                 failedReads = 0
             } catch {
@@ -239,6 +239,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         var offset: UInt64
         var waitMs: Int
         var delay: Int
+        var checkAlive: Bool
     }
 
     @MainActor
@@ -247,7 +248,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         return Plan(
             offset: offset,
             waitMs: inForeground ? 250 : 0,
-            delay: hasOutput ? 16 : 50
+            delay: inForeground ? (hasOutput ? 16 : 50) : 2_000,
+            checkAlive: inForeground
         )
     }
 
