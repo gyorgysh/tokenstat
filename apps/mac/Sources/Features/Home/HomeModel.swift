@@ -75,8 +75,6 @@ final class HomeModel {
     /// The host says so with a structured code rather than a sentence, so the
     /// screen can offer a sign-in button instead of quoting a CLI command.
     private(set) var needsAccountSignIn = false
-    private(set) var today: Bucket?
-    private(set) var week: [Bucket] = []
 
     /// What each vendor says is left of its plan.
     var planLimits: [ProviderLimits] = []
@@ -123,11 +121,21 @@ final class HomeModel {
     /// Value at list rates over the last seven calendar days, the same measure
     /// the heatmap colours by, so the two cannot disagree.
     var weekValue: Money {
-        week.totalValue
+        let micros = calendarDays.suffix(7).reduce(UInt64(0)) { $0 + $1.value }
+        return Money(micros: Int64(micros), estimated: false, complete: true)
     }
 
     var todayValue: Money {
-        today.map { [$0].totalValue } ?? Money(micros: 0, estimated: false, complete: true)
+        let micros = calendarDays.last { $0.date == calendar?.last }?.value ?? 0
+        return Money(micros: Int64(micros), estimated: false, complete: true)
+    }
+
+    /// Dated cells from the delivered grid, oldest first. The tiles read this
+    /// rather than a second day report, so All devices and This device stay
+    /// on the same series as the heatmap.
+    private var calendarDays: [HeatCell] {
+        guard let calendar else { return [] }
+        return calendar.rows.flatMap { $0.compactMap { $0 } }.sorted { $0.date < $1.date }
     }
 
     /// Load archive-backed Home data.
@@ -149,10 +157,9 @@ final class HomeModel {
         }
         do {
             async let calendar = Bridge.activityCalendar(scope: scope.wire)
-            // Both of these read the local archive, which the client build does
-            // not have. `archiveOnly` turns that refusal into empty rather than
-            // into an error banner over a heatmap that loaded perfectly well.
-            async let daily = Self.archiveOnly { try await Bridge.report(group: .day, query: Query()) }
+            // Plan usage still comes from the local archive. The iOS client
+            // has none. `archiveOnly` turns that refusal into empty rather
+            // than into an error banner over a heatmap that loaded well.
             async let plan = Self.archiveOnly {
                 try await Bridge.report(group: .source, query: Query(billing: "plan"))
             }
@@ -182,16 +189,6 @@ final class HomeModel {
             deliveredScope = newScope
             scopeNotice = grid?.notice
             needsAccountSignIn = grid?.noticeCode == "auth"
-
-            let days = try await daily
-
-            // The archive returns days oldest first. The last seven rows are
-            // the last seven days *with data*, which is not the same as the
-            // last seven days, so the range is taken from the calendar's own
-            // anchor instead.
-            let anchor = grid?.last ?? days.last?.key ?? ""
-            self.today = days.last { $0.key == anchor }
-            self.week = Array(days.suffix(7))
 
             self.planBySource = try await plan
             errorMessage = nil
