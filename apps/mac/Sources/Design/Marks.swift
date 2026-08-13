@@ -353,7 +353,7 @@ struct Wordmark: View {
 /// The tier, as the silhouette the website puts beside a name.
 ///
 /// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crown for
-/// Patron, a star for Supporter, a laurel for Legend. SF Symbols was the first
+/// Patron, a star for Supporter, a chevron badge for Legend. SF Symbols was the first
 /// attempt and it is the wrong call for a badge. `crown.fill` is Apple's crown,
 /// not this brand's, and a mark that is nearly the website's is worse than one
 /// that is obviously different, because it reads as the same badge rendered badly.
@@ -400,7 +400,7 @@ struct BadgeShape: Shape {
     enum Kind {
         case crown
         case star
-        case laurel
+        case badge
         /// A tier this build does not know. A new tier on the server must not
         /// make an account look downgraded, so it still gets a mark.
         case seal
@@ -410,7 +410,7 @@ struct BadgeShape: Shape {
 
     init?(tier: String) {
         switch tier.lowercased() {
-        case "legend": kind = .laurel
+        case "legend": kind = .badge
         case "patron": kind = .crown
         case "supporter": kind = .star
         case "free", "": return nil
@@ -459,66 +459,16 @@ struct BadgeShape: Shape {
             path.addLine(to: point(3, 9.2))
             path.addLine(to: point(9.3, 8.5))
             path.closeSubpath()
-        case .laurel:
-            // Two fern branches plus a bar, same path as Profile.jsx
-            // BADGE_PATH.legend. The hole in the middle is what keeps it
-            // from reading as a blob at 12–18px.
-            path.move(to: point(11.5, 3.2))
-            path.addLine(to: point(8.6, 3.8))
-            path.addLine(to: point(9.2, 6))
-            path.addLine(to: point(6.2, 5.8))
-            path.addLine(to: point(7, 8.2))
-            path.addLine(to: point(4.2, 8.4))
-            path.addLine(to: point(5.2, 10.8))
-            path.addLine(to: point(3, 11.8))
-            path.addLine(to: point(4.4, 14))
-            path.addLine(to: point(2.8, 15.6))
-            path.addLine(to: point(4.6, 17.4))
-            path.addLine(to: point(3.6, 19.8))
-            path.addLine(to: point(6.4, 19.6))
-            path.addLine(to: point(6.2, 21.8))
-            path.addLine(to: point(9, 20.2))
-            path.addLine(to: point(10.4, 22))
-            path.addLine(to: point(11.5, 19.4))
-            path.addLine(to: point(10, 17.2))
-            path.addLine(to: point(10.8, 14.8))
-            path.addLine(to: point(10, 12.4))
-            path.addLine(to: point(10.8, 10))
-            path.addLine(to: point(10.2, 7.6))
-            path.addLine(to: point(11, 5.4))
+        case .badge:
+            // Left-pointing chevron, same path as Profile.jsx BADGE_PATH.legend.
+            // The open back is what keeps it from reading as a triangle at 12–18px.
+            path.move(to: point(20.8, 3.8))
+            path.addLine(to: point(3.2, 12))
+            path.addLine(to: point(20.8, 20.2))
+            path.addLine(to: point(20.8, 15))
+            path.addLine(to: point(10.4, 12))
+            path.addLine(to: point(20.8, 9))
             path.closeSubpath()
-
-            path.move(to: point(12.5, 3.2))
-            path.addLine(to: point(15.4, 3.8))
-            path.addLine(to: point(14.8, 6))
-            path.addLine(to: point(17.8, 5.8))
-            path.addLine(to: point(17, 8.2))
-            path.addLine(to: point(19.8, 8.4))
-            path.addLine(to: point(18.8, 10.8))
-            path.addLine(to: point(21, 11.8))
-            path.addLine(to: point(19.6, 14))
-            path.addLine(to: point(21.2, 15.6))
-            path.addLine(to: point(19.4, 17.4))
-            path.addLine(to: point(20.4, 19.8))
-            path.addLine(to: point(17.6, 19.6))
-            path.addLine(to: point(17.8, 21.8))
-            path.addLine(to: point(15, 20.2))
-            path.addLine(to: point(13.6, 22))
-            path.addLine(to: point(12.5, 19.4))
-            path.addLine(to: point(14, 17.2))
-            path.addLine(to: point(13.2, 14.8))
-            path.addLine(to: point(14, 12.4))
-            path.addLine(to: point(13.2, 10))
-            path.addLine(to: point(13.8, 7.6))
-            path.addLine(to: point(13, 5.4))
-            path.closeSubpath()
-
-            path.addRect(
-                CGRect(
-                    origin: point(7.6, 21.4),
-                    size: CGSize(width: 8.8 * unit, height: 1.5 * unit)
-                )
-            )
         case .seal:
             path.addEllipse(
                 in: CGRect(

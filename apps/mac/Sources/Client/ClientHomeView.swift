@@ -112,7 +112,7 @@ struct ClientHomeView: View {
     // MARK: - Pieces
 
     /// Same line the website and the Mac home use: a local-clock phrase,
-    /// the first name, and the star / crown / laurel next to it.
+    /// the first name, and the star / crown / badge next to it.
     @ViewBuilder
     private var greeting: some View {
         if let name = account.account?.title, !name.isEmpty {
