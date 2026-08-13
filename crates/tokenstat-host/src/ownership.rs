@@ -142,6 +142,7 @@ pub fn owned_by_primary(my_key: &str) -> bool {
 #[cfg(unix)]
 pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     let role = role_for(socket);
+    hold_identity_lock().map_err(|_| refusal(socket))?;
     if role == Role::Primary {
         return Ok(role);
     }
@@ -168,6 +169,60 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
 /// The message has to carry the repair, because the person reading it is
 /// almost always in the middle of testing something and the obvious next move
 /// (run it again) is the one that does not work.
+/// Exclusive lock on this identity directory. Two daemons with the same
+/// key used to pass the socket probe (or both start as secondaries) and
+/// mint-fight. The lock file lives beside the key, so a separate
+/// `TOKENSTAT_IDENTITY_DIR` is still a second machine.
+#[cfg(unix)]
+fn hold_identity_lock() -> Result<(), String> {
+    use std::fs::OpenOptions;
+    use std::io::{ErrorKind, Write};
+    use std::sync::Mutex;
+
+    static HELD: Mutex<Option<std::fs::File>> = Mutex::new(None);
+
+    let path = tokenstat_identity::identity_dir()
+        .map_err(|e| e.to_string())?
+        .join("host.lock");
+    for _ in 0..2 {
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                let _ = writeln!(&mut file, "{}", std::process::id());
+                *HELD.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+                return Ok(());
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                if lock_holder_is_gone(&path) {
+                    let _ = std::fs::remove_file(&path);
+                    continue;
+                }
+                return Err("identity already served".into());
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err("identity already served".into())
+}
+
+#[cfg(unix)]
+fn lock_holder_is_gone(path: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return true;
+    };
+    let Ok(pid) = text.trim().parse::<i32>() else {
+        return true;
+    };
+    #[link(name = "c")]
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    let rc = unsafe { kill(pid, 0) };
+    if rc == 0 {
+        return false;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(3)
+}
+
 pub fn refusal(socket: &std::path::Path) -> String {
     format!(
         "another tokenstat host is already serving this machine's identity, so this one \
