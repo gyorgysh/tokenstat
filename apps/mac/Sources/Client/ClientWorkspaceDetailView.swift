@@ -332,15 +332,18 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
-    /// True when the proxied page answered. Any HTTP status counts.
+    /// True when the harness answered. The local proxy writes 502 while the
+    /// peer port is still closed, so that status is "not yet", not ready.
     private static func waitForPage(_ url: URL, timeout: TimeInterval = 40) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            if Task.isCancelled { return false }
             var request = URLRequest(url: url)
             request.timeoutInterval = 1
             request.httpMethod = "GET"
             if let (_, response) = try? await URLSession.shared.data(for: request),
-               response is HTTPURLResponse {
+               let http = response as? HTTPURLResponse,
+               http.statusCode != 502 {
                 return true
             }
             try? await Task.sleep(for: .milliseconds(400))
