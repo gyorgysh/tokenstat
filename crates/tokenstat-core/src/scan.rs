@@ -409,7 +409,12 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
         .iter()
         .filter(|e| e.source == SourceId::ClaudeCodeRollup)
         .count() as u64;
-    report.events_new = store.insert_events(&all_events, tz)?;
+    const INSERT_CHUNK: usize = 4_096;
+    let mut inserted = 0u64;
+    for chunk in all_events.chunks(INSERT_CHUNK) {
+        inserted += store.insert_events(chunk, tz)?;
+    }
+    report.events_new = inserted;
     report.events_recovered = recovered;
     store.set_watermarks(&marks_to_store)?;
 
