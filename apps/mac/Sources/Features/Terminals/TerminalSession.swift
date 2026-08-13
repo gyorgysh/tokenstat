@@ -1066,7 +1066,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
 
         /// Fine enough to be invisible inside a frame, coarse enough that
         /// waiting is a parked task rather than a busy main thread.
-        private static let turnPoll: Duration = .microseconds(500)
+        private static let turnPoll: Duration = .milliseconds(4)
 
         /// Hand the turn on, weighted towards the session on screen.
         ///
