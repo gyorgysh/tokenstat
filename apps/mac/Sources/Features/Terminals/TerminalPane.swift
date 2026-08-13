@@ -769,7 +769,9 @@ private struct LaunchSurface: View {
 
     private var modelChoices: [(key: String, label: String, provider: String, model: String)] {
         localProviders.flatMap { provider -> [(key: String, label: String, provider: String, model: String)] in
-            guard provider.available else { return [] }
+            guard provider.available,
+                  modelPeer != nil || LocalProviderPreference.isEnabled(provider.id)
+            else { return [] }
             return provider.models.map { model in
                 (
                     key: "\(provider.id):\(model.id)",
@@ -858,6 +860,9 @@ private struct LaunchSurface: View {
                 } else {
                     try await Bridge.localModels()
                 }
+                if selectedModelKey.isEmpty {
+                    selectedModelKey = WorkspacePreference.localModel(for: folder.id) ?? ""
+                }
             } catch {
                 localProviders = []
             }
@@ -928,6 +933,9 @@ private struct LaunchSurface: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .onChange(of: selectedModelKey) { _, key in
+                    WorkspacePreference.setLocalModel(key, for: folder.id)
+                }
                 Text("Claude uses LM Studio's Anthropic-compatible endpoint. Codex and OpenCode use the OpenAI-compatible endpoint.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)

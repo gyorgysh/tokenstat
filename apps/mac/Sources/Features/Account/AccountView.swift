@@ -463,16 +463,24 @@ struct AccountView: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 Circle()
-                    .fill(provider.available ? Theme.accent : Theme.border)
+                    .fill(provider.available && localModels.isEnabled(provider.id) ? Theme.accent : Theme.border)
                     .frame(width: 8, height: 8)
                 Text(provider.name)
                     .font(.callout.weight(.medium))
                 Spacer()
-                Text(provider.available ? "Available" : "Not running")
+                Toggle("", isOn: Binding(
+                    get: { localModels.isEnabled(provider.id) },
+                    set: { localModels.setEnabled($0, for: provider.id) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            if !localModels.isEnabled(provider.id) {
+                Text("Disabled for local model selection")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            }
-            if provider.available {
+            } else if provider.available {
                 if provider.models.isEmpty {
                     Text("No models loaded")
                         .font(.caption)

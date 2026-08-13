@@ -17,6 +17,7 @@ import AppKit
 /// Keyed by workspace id so the same folder keeps its choices across launches.
 enum WorkspacePreference {
     private static let bypassKey = "workspace.bypassPermissions"
+    private static let localModelKey = "workspace.localModel"
 
     static func bypassPermissions(for workspaceID: String) -> Bool {
         UserDefaults.standard.bool(forKey: "\(bypassKey).\(workspaceID)")
@@ -24,6 +25,20 @@ enum WorkspacePreference {
 
     static func setBypassPermissions(_ on: Bool, for workspaceID: String) {
         UserDefaults.standard.set(on, forKey: "\(bypassKey).\(workspaceID)")
+    }
+
+    static func localModel(for workspaceID: String) -> String? {
+        UserDefaults.standard.string(forKey: "\(localModelKey).\(workspaceID)")
+    }
+
+    static func setLocalModel(_ key: String?, for workspaceID: String) {
+        let defaults = UserDefaults.standard
+        let fullKey = "\(localModelKey).\(workspaceID)"
+        if let key, !key.isEmpty {
+            defaults.set(key, forKey: fullKey)
+        } else {
+            defaults.removeObject(forKey: fullKey)
+        }
     }
 }
 

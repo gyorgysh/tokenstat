@@ -330,16 +330,19 @@ struct Wordmark: View {
         // drops a square glyph below the descender line. Centring on the text's
         // cap height is what actually looks aligned, and that is what a centred
         // stack gives once the mark's frame is its ink.
-        // The gap scales with the mark rather than sitting on the spacing
-        // scale. A lockup is one shape: 8 points beside a 17 point mark is
-        // right and beside a 22 point one is tight, which is what made the
-        // phone's larger wordmark read as mark-jammed-into-text.
-        HStack(alignment: .center, spacing: size * 0.5) {
+        // The website leaves a deliberate breath between the bars and the
+        // wordmark. A half-mark gap made the phone lockup look compressed.
+        HStack(alignment: .center, spacing: size * 0.75) {
             LogoMark(size: size)
-            Text("tokenstat")
-                .font(.system(size: size * 0.88, weight: .semibold))
-                // Lowercase, always. It is the command you type.
-                .textCase(.lowercase)
+            HStack(spacing: 0) {
+                Text("token")
+                    .foregroundStyle(.primary)
+                Text("stat")
+                    .foregroundStyle(Theme.accent)
+            }
+            .font(.system(size: size * 0.88, weight: .bold))
+            // Lowercase, always. It is the command you type.
+            .textCase(.lowercase)
             if fills {
                 Spacer()
             }
