@@ -130,7 +130,19 @@ fn client() -> Result<reqwest::blocking::Client, UpdateError> {
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
+        // Listing requests attach GITHUB_TOKEN. A 3xx must not forward it.
         .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
+/// Follows redirects. Asset bytes live on a storage host, and the
+/// browser download url is a 302. Never attach a token to this client.
+fn download_client() -> Result<reqwest::blocking::Client, UpdateError> {
+    Ok(reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
+        .user_agent(USER_AGENT)
+        .redirect(reqwest::redirect::Policy::limited(10))
         .build()?)
 }
 
@@ -328,7 +340,7 @@ fn download_asset(
     api_url: Option<&str>,
 ) -> Result<Vec<u8>, UpdateError> {
     let Some(token) = github_token() else {
-        return Ok(client
+        return Ok(download_client()?
             .get(browser_url)
             .send()?
             .error_for_status()?
@@ -336,14 +348,7 @@ fn download_asset(
             .to_vec());
     };
     let url = api_url.unwrap_or(browser_url);
-    let no_redirect = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .connect_timeout(Duration::from_secs(10))
-        .user_agent(USER_AGENT)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-
-    let resp = no_redirect
+    let resp = client
         .get(url)
         .header("authorization", format!("Bearer {token}"))
         .header("accept", "application/octet-stream")
@@ -358,7 +363,7 @@ fn download_asset(
             .to_string();
         // Deliberately unauthenticated: this is a pre-signed url on a storage
         // host, and attaching the token would hand it to a third party.
-        return Ok(client
+        return Ok(download_client()?
             .get(&location)
             .send()?
             .error_for_status()?
