@@ -41,6 +41,10 @@ use serde::Serialize;
 /// small enough that a runaway `yes` does not eat memory. The terminal emulator
 /// keeps its own scrollback; this is only the handoff window.
 const BUFFER_BYTES: usize = 8 * 1024 * 1024;
+/// How much one `pty.read` returns. The ring stays large so a slow viewer
+/// does not lose the middle. A single RPC that base64s the whole window
+/// is what froze a first attach, especially on a phone.
+const READ_CHUNK_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PtyError {
@@ -163,9 +167,11 @@ impl Buffer {
             ((offset - earliest) as usize, 0)
         };
         let start = start.min(self.data.len());
+        let take = (self.data.len() - start).min(READ_CHUNK_BYTES);
+        let end = start + take;
         Chunk {
-            bytes: self.data[start..].to_vec(),
-            next_offset: self.total,
+            bytes: self.data[start..end].to_vec(),
+            next_offset: earliest + end as u64,
             dropped,
             paused: self.data.len() >= BUFFER_BYTES,
         }
@@ -2303,9 +2309,13 @@ mod tests {
         b.push(&vec![b'a'; written]);
         let chunk = b.read_from(0);
         assert_eq!(chunk.dropped, 0);
-        assert_eq!(chunk.bytes.len(), BUFFER_BYTES);
-        assert_eq!(chunk.next_offset, written as u64);
+        assert_eq!(chunk.bytes.len(), READ_CHUNK_BYTES);
+        assert_eq!(chunk.next_offset, READ_CHUNK_BYTES as u64);
         assert!(chunk.paused);
+        let rest = b.read_from(chunk.next_offset);
+        assert_eq!(rest.bytes.len(), READ_CHUNK_BYTES);
+        assert_eq!(rest.next_offset, (READ_CHUNK_BYTES * 2) as u64);
+        assert_eq!(rest.dropped, 0);
     }
 
     #[test]

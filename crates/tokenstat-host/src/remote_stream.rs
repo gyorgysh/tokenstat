@@ -444,22 +444,30 @@ pub(crate) fn cached_pty_read(peer: &str, session: &str, offset: u64) -> Option<
         guard.buffer.drain(..count);
         guard.trimmed += count as u64;
     }
-    let (start, next_offset, dropped) = cache_window(guard.buffer.len(), guard.trimmed, offset);
+    let (start, take, next_offset, dropped) =
+        cache_window(guard.buffer.len(), guard.trimmed, offset);
     guard.space.notify_all();
     Some(json!({
-        "data": crate::base64::encode(&guard.buffer[start..]),
+        "data": crate::base64::encode(&guard.buffer[start..start + take]),
         "nextOffset": next_offset,
         "dropped": dropped,
         "paused": guard.buffer.len() >= PTY_CACHE_CAP,
     }))
 }
 
-fn cache_window(len: usize, trimmed: u64, offset: u64) -> (usize, u64, u64) {
+/// Cap one cached read the same way the owning `pty.read` does, so a phone
+/// attaching to a full window does not decode 8 MiB of JSON in one go.
+const READ_CHUNK_BYTES: usize = 256 * 1024;
+
+fn cache_window(len: usize, trimmed: u64, offset: u64) -> (usize, usize, u64, u64) {
     let len = len as u64;
-    let next_offset = trimmed.saturating_add(len);
     let dropped = trimmed.saturating_sub(offset);
     let start = offset.max(trimmed).saturating_sub(trimmed).min(len) as usize;
-    (start, next_offset, dropped)
+    let take = (len as usize).saturating_sub(start).min(READ_CHUNK_BYTES);
+    let next_offset = trimmed
+        .saturating_add(start as u64)
+        .saturating_add(take as u64);
+    (start, take, next_offset, dropped)
 }
 
 /// Send keystrokes to a subscribed remote session over its channel. Returns
@@ -563,14 +571,24 @@ mod tests {
     use tokenstat_identity::MachineIdentity;
     use tokenstat_remote::{handshake_initiator, handshake_responder};
 
-    use super::{cache_window, parse_handshake, proxy_error_response, pump_local, pump_proxy};
+    use super::{
+        READ_CHUNK_BYTES, cache_window, parse_handshake, proxy_error_response, pump_local,
+        pump_proxy,
+    };
 
     #[test]
     fn remote_cache_offsets_remain_absolute_after_trim() {
-        assert_eq!(cache_window(8, 100, 100), (0, 108, 0));
-        assert_eq!(cache_window(8, 100, 104), (4, 108, 0));
-        assert_eq!(cache_window(8, 100, 90), (0, 108, 10));
-        assert_eq!(cache_window(8, 100, 200), (8, 108, 0));
+        assert_eq!(cache_window(8, 100, 100), (0, 8, 108, 0));
+        assert_eq!(cache_window(8, 100, 104), (4, 4, 108, 0));
+        assert_eq!(cache_window(8, 100, 90), (0, 8, 108, 10));
+        assert_eq!(cache_window(8, 100, 200), (8, 0, 108, 0));
+    }
+
+    #[test]
+    fn a_cached_read_is_capped_so_attach_does_not_return_the_whole_window() {
+        let (start, take, next, dropped) = cache_window(READ_CHUNK_BYTES + 64, 0, 0);
+        assert_eq!((start, take, dropped), (0, READ_CHUNK_BYTES, 0));
+        assert_eq!(next, READ_CHUNK_BYTES as u64);
     }
 
     #[test]

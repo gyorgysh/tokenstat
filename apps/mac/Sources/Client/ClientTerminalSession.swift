@@ -252,14 +252,24 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     @MainActor
-    private func apply(_ chunk: PtyChunk) -> Bool {
+    private func apply(_ chunk: PtyChunk) async -> Bool {
         if outputPaused != chunk.paused { outputPaused = chunk.paused }
         if chunk.dropped > 0 { droppedOutput = true }
         if !chunk.bytes.isEmpty {
             offset = chunk.nextOffset
             hasOutput = true
             let bytes = [UInt8](chunk.bytes)
-            view.feed(byteArray: ArraySlice(bytes))
+            let slice = 24 * 1024
+            var start = 0
+            while start < bytes.count {
+                guard !removed else { return true }
+                let end = min(start + slice, bytes.count)
+                view.feed(byteArray: ArraySlice(bytes[start..<end]))
+                start = end
+                if start < bytes.count {
+                    try? await Task.sleep(for: .milliseconds(8))
+                }
+            }
         }
         return false
     }
@@ -299,7 +309,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         view.nativeForegroundColor = uiColor(foreground)
         view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         view.optionAsMetaKey = true
-        view.getTerminal().changeHistorySize(10_000)
+        view.getTerminal().changeHistorySize(4_000)
         view.terminalDelegate = delegate
         // Soft keyboard: TerminalView is a UIKeyInput scroll view.
         view.isUserInteractionEnabled = true
