@@ -53,9 +53,9 @@ struct ClientWorkspacesView: View {
                         ClientEmptyState(
                             kind: .needsAccount,
                             title: "Remote is on Supporter",
-                            message: "This phone already shares the account. Free lets you see "
-                                + "usage from a computer and a phone. Opening folders and "
-                                + "terminals on the computer is a paid feature.",
+                            message: "This phone already shares the account. Free covers two "
+                                + "devices. Opening folders and terminals on the computer "
+                                + "is a paid feature.",
                             actionTitle: "See plans",
                             action: {
                                 if let url = URL(string: "https://tokenstat.ai/pricing") {

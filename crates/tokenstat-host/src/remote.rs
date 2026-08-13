@@ -343,8 +343,8 @@ fn mint_hello_token_impl(
     mut register: impl FnMut(&str, &MachineIdentity, &str) -> Result<(), String>,
     mut mint: impl FnMut(&str) -> Result<tokenstat_sync::profile::TunnelToken, ProfileError>,
 ) -> Result<(String, Option<u64>), String> {
-    // Phones (no local-host) register as clients so they do not burn a host
-    // machine slot. Macs remain hosts.
+    // Phones (no local-host) register as clients so they do not upload usage.
+    // They still use a device slot. Macs remain hosts.
     #[cfg(feature = "local-host")]
     let kind = "host";
     #[cfg(not(feature = "local-host"))]
@@ -758,8 +758,8 @@ pub(crate) fn register_if_tunnel_enabled() {
     }
 }
 
-/// Publish this client's key and name to the account directory. Clients do not
-/// take a host slot, so this is safe to do whenever the name changes.
+/// Publish this client's key and name to the account directory. A refresh of
+/// an already-linked phone does not use a second slot.
 #[cfg(not(feature = "local-host"))]
 fn register_client_identity() {
     let outcome = (|| -> Result<(), String> {

@@ -333,7 +333,8 @@ pub fn device_start(host_flag: Option<&str>) -> Result<DeviceLogin, ProfileError
 
 /// Begin device login, declaring whether this is a host or a phone client.
 ///
-/// Clients do not burn a host machine slot when the code is approved.
+/// `kind` is `"host"` (uploads usage) or `"client"` (phone: no usage upload).
+/// Both use one device slot.
 pub fn device_start_kind(host_flag: Option<&str>, kind: &str) -> Result<DeviceLogin, ProfileError> {
     let host = resolve_api_host(host_flag)?;
     let machine = config::ensure_machine_id()?;
@@ -595,7 +596,7 @@ pub fn register_machine_identity(
 /// Register a host or a client on the account.
 ///
 /// `kind` is `"host"` (default, uploads usage) or `"client"` (phone: reaches
-/// hosts over the tunnel without burning a machine slot).
+/// hosts over the tunnel). Both use one device slot.
 pub fn register_machine_identity_kind(
     host_flag: Option<&str>,
     machine_id: &str,

@@ -303,7 +303,7 @@ struct MachinesView: View {
                                 : "Remote reach needs a signed-in Supporter or Patron account.")
                                 .font(.callout.weight(.medium))
                             Text(model.account?.signedIn == true
-                                ? "Free syncs two computers and the phone app, so you can see usage from both. Opening folders and terminals on this Mac from another device is on Supporter."
+                                ? "Free covers two devices, so you can see usage from a computer and a phone. Opening folders and terminals on this Mac from another device is on Supporter."
                                 : "Sign in with an account that includes it, then turn the switch on.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

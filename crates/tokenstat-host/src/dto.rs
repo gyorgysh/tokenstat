@@ -322,7 +322,7 @@ pub struct AccountDto {
     pub this_machine_id: Option<String>,
     pub machines: Vec<MachineDto>,
     pub schema_current: Option<u32>,
-    /// How many host computers this plan may link. Phones do not take a slot.
+    /// How many devices this plan may link. A computer, phone, or tablet each uses one.
     pub machine_limit: Option<u32>,
     pub hosts_linked: Option<u32>,
     /// Whether the relay will accept a HELLO from this account.

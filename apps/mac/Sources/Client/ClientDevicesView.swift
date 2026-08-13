@@ -40,7 +40,7 @@ struct ClientDevicesView: View {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "No devices yet",
-                            message: "Install tokenstat on a computer and sign in there. Free includes two computers and this phone. It shows up here after the first sync."
+                            message: "Install tokenstat on a computer and sign in there. Free includes two devices. This phone uses one of them."
                         )
                     }
                 } else {
@@ -166,8 +166,7 @@ struct ClientDevicesView: View {
 
     private var planLine: String? {
         guard let limit = account.account?.machineLimit else { return nil }
-        let hosts = machines.filter(\.isHost).count
-        return "\(hosts) of \(limit) computers. Phones do not use a slot."
+        return "\(machines.count) of \(limit) devices"
     }
 
     private var planRemoteLine: String? {

@@ -599,7 +599,7 @@ struct Account: Codable, Sendable, Hashable {
     /// decodes the few fields the UI shows and ignores the rest.
     var machines: [Machine]
     var schemaCurrent: UInt32?
-    /// Host computers this plan may link. Phones do not take a slot.
+    /// Devices this plan may link. A computer, phone, or tablet each uses one.
     var machineLimit: Int?
     var hostsLinked: Int?
     /// Whether the relay will accept a HELLO from this account.
