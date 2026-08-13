@@ -227,6 +227,58 @@ pub(crate) fn catalog() -> Value {
     Value::Array(available)
 }
 
+/// Build the environment for a local model selection.
+///
+/// Only harnesses with a known provider contract are accepted here. Passing a
+/// model choice through as arbitrary environment variables would make a remote
+/// client able to alter the whole process environment and would make failures
+/// look like unsupported harness configuration.
+pub(crate) fn model_environment(
+    command: &str,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> Result<Vec<(String, String)>, String> {
+    match (provider, model) {
+        (None, None) => return Ok(Vec::new()),
+        (Some(_), Some(model)) if valid_model_id(model) => {}
+        (Some(_), Some(_)) => {
+            return Err("local model id contains invalid control characters".into());
+        }
+        _ => return Err("local model selection needs both a provider and a model".into()),
+    }
+
+    let executable = Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command);
+    match (executable, provider) {
+        ("claude", Some("lmstudio")) => Ok(vec![
+            ("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into()),
+            ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
+        ]),
+        ("claude", Some("ollama")) => {
+            Err("Ollama does not provide the Anthropic-compatible endpoint Claude needs".into())
+        }
+        ("codex" | "opencode", Some("lmstudio")) => Ok(vec![
+            ("OPENAI_BASE_URL".into(), "http://127.0.0.1:1234/v1".into()),
+            ("OPENAI_API_KEY".into(), "lmstudio".into()),
+        ]),
+        ("codex" | "opencode", Some("ollama")) => Ok(vec![
+            ("OPENAI_BASE_URL".into(), "http://127.0.0.1:11434/v1".into()),
+            ("OPENAI_API_KEY".into(), "ollama".into()),
+            ("OLLAMA_HOST".into(), "http://127.0.0.1:11434".into()),
+        ]),
+        (_, Some(provider)) => Err(format!(
+            "local model selection is not configured for {executable} with {provider}"
+        )),
+        (_, None) => unreachable!("provider was checked with the model above"),
+    }
+}
+
+fn valid_model_id(model: &str) -> bool {
+    !model.is_empty() && model.len() <= 512 && !model.chars().any(char::is_control)
+}
+
 /// Where this profile's command actually is: the search path first, then the
 /// directory its own installer uses.
 ///
@@ -321,7 +373,7 @@ fn search_path() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROFILES, Profile, catalog, resolve_profile};
+    use super::{PROFILES, Profile, catalog, model_environment, resolve_profile};
     use std::path::Path;
     #[cfg(unix)]
     use std::path::PathBuf;
@@ -435,5 +487,27 @@ mod tests {
         assert_eq!(pi.name, "Pi");
         assert_eq!(pi.command, "pi");
         assert_eq!(pi.harness_id, Some("pi"));
+    }
+
+    #[test]
+    fn claude_gets_lm_studio_anthropic_environment() {
+        let env =
+            model_environment("claude", Some("lmstudio"), Some("qwen/model")).expect("environment");
+        assert!(env.contains(&("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into())));
+        assert!(env.contains(&("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into())));
+    }
+
+    #[test]
+    fn ollama_is_rejected_for_claude() {
+        let error = model_environment("claude", Some("ollama"), Some("llama3.2"))
+            .expect_err("unsupported provider");
+        assert!(error.contains("Anthropic-compatible"));
+    }
+
+    #[test]
+    fn model_selection_rejects_control_characters() {
+        let error = model_environment("codex", Some("ollama"), Some("llama\n3.2"))
+            .expect_err("invalid model");
+        assert!(error.contains("control characters"));
     }
 }

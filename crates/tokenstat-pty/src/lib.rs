@@ -247,6 +247,9 @@ pub struct Spawn {
     /// The emulator is painting a dark background. `None` when the client did
     /// not say, which keeps an older front end's spawns exactly as they were.
     pub dark: Option<bool>,
+    /// Environment overrides selected by a trusted launcher profile. These
+    /// are applied after the terminal defaults and never written to the archive.
+    pub environment: Vec<(String, String)>,
 }
 
 /// The process-wide manager.
@@ -367,6 +370,9 @@ impl Manager {
             apply_login_environment(&mut cmd, req);
         }
         apply_terminal_environment(&mut cmd, req);
+        for (key, value) in &req.environment {
+            cmd.env(key, value);
+        }
 
         let child = pair
             .slave
@@ -607,6 +613,7 @@ impl Manager {
             cols: 80,
             no_color: false,
             dark: None,
+            environment: Vec::new(),
         };
         let (session, _) = self.build_session(&req, self.next_session_id()).ok()?;
         if !prove_shell_ready(&session, POOL_READY_TIMEOUT) {
@@ -1748,6 +1755,7 @@ mod tests {
             cols: 100,
             no_color: false,
             dark: None,
+            environment: Vec::new(),
         }
     }
 
@@ -1991,6 +1999,7 @@ mod tests {
             cols: 80,
             no_color: false,
             dark: None,
+            environment: Vec::new(),
         })
         .expect("spawn")
     }

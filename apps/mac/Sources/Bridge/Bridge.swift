@@ -1001,6 +1001,11 @@ extension Bridge {
         try await background("local.models", patience: Patience.interactive, as: [LocalProvider].self)
     }
 
+    /// Discover local providers on the machine that owns a remote workspace.
+    static func localModels(onPeer peer: String) async throws -> [LocalProvider] {
+        try await onPeer(peer, "local.models", as: [LocalProvider].self)
+    }
+
     /// Launch a command in the workspace's folder. The process is owned by the
     /// host, so it outlives this window and any tab switch.
     static func ptySpawn(
@@ -1010,12 +1015,14 @@ extension Bridge {
         rows: Int,
         cols: Int,
         noColor: Bool = false,
-        dark: Bool
+        dark: Bool,
+        modelProvider: String? = nil,
+        modelID: String? = nil
     ) async throws -> PtySessionInfo {
         // Urgent: a person clicked Shell and is watching this round trip. It
         // must not queue behind sessions already polling when the pool is
         // saturated.
-        try await backgroundUrgent("pty.spawn", [
+        var params: [String: Any] = [
             "workspaceId": workspaceID,
             "command": command,
             "args": args,
@@ -1026,7 +1033,14 @@ extension Bridge {
             // emulator assumes dark, which is how a light window ended up
             // full of agents drawn for a black terminal.
             "dark": dark,
-        ], as: PtySessionInfo.self)
+        ]
+        if let modelProvider {
+            params["modelProvider"] = modelProvider
+        }
+        if let modelID {
+            params["modelId"] = modelID
+        }
+        return try await backgroundUrgent("pty.spawn", params, as: PtySessionInfo.self)
     }
 
     static func ptyList() async throws -> [PtySessionInfo] {

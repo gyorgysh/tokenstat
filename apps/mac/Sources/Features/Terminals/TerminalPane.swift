@@ -214,7 +214,8 @@ struct TerminalPane: View {
                         terminals: terminals,
                         workspaces: workspaces,
                         grid: spawnGrid,
-                        profiles: launcherProfiles
+                        profiles: launcherProfiles,
+                        modelPeer: peer
                     )
                         .frame(width: size.width, height: size.height)
                 } else if reviewingWorkingTree {
@@ -245,7 +246,8 @@ struct TerminalPane: View {
                         terminals: terminals,
                         workspaces: workspaces,
                         grid: spawnGrid,
-                        profiles: launcherProfiles
+                        profiles: launcherProfiles,
+                        modelPeer: peer
                     )
                         .frame(width: size.width, height: size.height)
                 }
@@ -746,6 +748,9 @@ private struct LaunchSurface: View {
     /// What can be launched: this machine's harnesses for a local folder, the
     /// owning machine's for a remote one.
     let profiles: [LaunchProfile]
+    /// The machine to probe for local model servers. A remote folder's model
+    /// picker must use the remote host, not the Mac displaying this surface.
+    let modelPeer: String?
 
     /// The tile that was pressed, while the host is still working on it.
     ///
@@ -754,6 +759,34 @@ private struct LaunchSurface: View {
     /// still empty and this whole surface is still on screen, so without this
     /// the click produced nothing at all and people clicked again.
     @State private var launching: String?
+    @State private var localProviders: [LocalProvider] = []
+    @State private var selectedModelKey = ""
+    @State private var loadingLocalModels = false
+
+    private var modelProfiles: [LaunchProfile] {
+        profiles.filter { ["claude_code", "codex", "opencode"].contains($0.id) }
+    }
+
+    private var modelChoices: [(key: String, label: String, provider: String, model: String)] {
+        localProviders.flatMap { provider -> [(key: String, label: String, provider: String, model: String)] in
+            guard provider.available else { return [] }
+            return provider.models.map { model in
+                (
+                    key: "\(provider.id):\(model.id)",
+                    label: "\(provider.name): \(model.name)",
+                    provider: provider.id,
+                    model: model.id
+                )
+            }
+        }
+    }
+
+    private var selectedModel: (provider: String, model: String)? {
+        guard let choice = modelChoices.first(where: { $0.key == selectedModelKey }) else {
+            return nil
+        }
+        return (choice.provider, choice.model)
+    }
 
     var body: some View {
         ScrollView {
@@ -784,6 +817,10 @@ private struct LaunchSurface: View {
                 }
                 .frame(maxWidth: 460, alignment: .leading)
 
+                if !modelProfiles.isEmpty {
+                    modelPicker
+                }
+
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                     spacing: Theme.Space.m
@@ -811,6 +848,20 @@ private struct LaunchSurface: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .task {
+            guard !modelProfiles.isEmpty else { return }
+            loadingLocalModels = true
+            defer { loadingLocalModels = false }
+            do {
+                localProviders = if let modelPeer {
+                    try await Bridge.localModels(onPeer: modelPeer)
+                } else {
+                    try await Bridge.localModels()
+                }
+            } catch {
+                localProviders = []
+            }
+        }
     }
 
     /// A slim line instead of a full card, so the launcher content below stays
@@ -855,8 +906,40 @@ private struct LaunchSurface: View {
         .frame(maxWidth: 460, alignment: .leading)
     }
 
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack {
+                Text("Local model")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                if loadingLocalModels {
+                    ProgressView().controlSize(.small)
+                }
+            }
+            if modelChoices.isEmpty {
+                Text("No local models discovered. Start LM Studio or Ollama, then open Account to refresh.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Local model", selection: $selectedModelKey) {
+                    Text("Use each tool's default").tag("")
+                    ForEach(modelChoices, id: \.key) { choice in
+                        Text(choice.label).tag(choice.key)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Claude uses LM Studio's Anthropic-compatible endpoint. Codex and OpenCode use the OpenAI-compatible endpoint.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: 460, alignment: .leading)
+    }
+
     private func launchButton(_ profile: LaunchProfile) -> some View {
-        LaunchTile(
+        let selection = modelProfiles.contains(where: { $0.id == profile.id }) ? selectedModel : nil
+        return LaunchTile(
             profile: profile,
             isLaunching: launching == profile.id,
             othersBusy: launching != nil && launching != profile.id,
@@ -866,6 +949,7 @@ private struct LaunchSurface: View {
                 let args = workspaces.bypassPermissions(for: folder.id)
                     ? profile.args + profile.bypassArgs
                     : profile.args
+                let modelArgs = selection.map { ["--model", $0.model] } ?? []
                 let session = terminals.begin(
                     workspace: folder,
                     command: profile.command,
@@ -876,9 +960,11 @@ private struct LaunchSurface: View {
                 Task {
                     _ = await terminals.complete(
                         session,
-                        args: args,
+                        args: args + modelArgs,
                         rows: grid.rows,
-                        cols: grid.cols
+                        cols: grid.cols,
+                        modelProvider: selection?.provider,
+                        modelID: selection?.model
                     )
                     launching = nil
                 }

@@ -222,6 +222,12 @@ struct PtySpawnParams {
     /// which then spawns exactly as it did before.
     #[serde(default)]
     dark: Option<bool>,
+    /// Optional local model selection. The host converts this to environment
+    /// variables for the selected harness and never persists it.
+    #[serde(default)]
+    model_provider: Option<String>,
+    #[serde(default)]
+    model_id: Option<String>,
 }
 
 /// Fold the activity sampler's verdict into a serialized session.
@@ -1574,6 +1580,8 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     "cols": p.cols,
                     "noColor": p.no_color,
                     "dark": p.dark,
+                    "modelProvider": p.model_provider,
+                    "modelId": p.model_id,
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
@@ -1584,6 +1592,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 return Ok(value);
             }
             let ws = crate::workspaces::folder(&p.workspace_id)?;
+            let environment = crate::launcher::model_environment(
+                &p.command,
+                p.model_provider.as_deref(),
+                p.model_id.as_deref(),
+            )?;
             let info = tokenstat_pty::manager()
                 .spawn(&tokenstat_pty::Spawn {
                     command: p.command.clone(),
@@ -1594,6 +1607,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     cols: p.cols,
                     no_color: p.no_color,
                     dark: p.dark,
+                    environment,
                 })
                 .map_err(|e| e.to_string())?;
             serde_json::to_value(info).map_err(|e| e.to_string())

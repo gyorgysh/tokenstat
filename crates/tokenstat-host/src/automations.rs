@@ -744,6 +744,7 @@ impl Store {
                 cols: 120,
                 no_color: false,
                 dark: None,
+                environment: Vec::new(),
             })
             .map_err(|e| e.to_string())?;
 
@@ -1207,6 +1208,7 @@ mod tests {
                 cols: 80,
                 no_color: false,
                 dark: None,
+                environment: Vec::new(),
             })
             .unwrap();
         let pty_id = info.id.clone();
@@ -1296,6 +1298,7 @@ mod tests {
                 cols: 80,
                 no_color: false,
                 dark: None,
+                environment: Vec::new(),
             })
             .unwrap();
         let pty_id = info.id.clone();

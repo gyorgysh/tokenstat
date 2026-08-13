@@ -220,7 +220,9 @@ final class TerminalsModel {
         _ session: TerminalSession,
         args: [String],
         rows: Int,
-        cols: Int
+        cols: Int,
+        modelProvider: String? = nil,
+        modelID: String? = nil
     ) async -> TerminalSession? {
         guard sessions.contains(where: { $0.id == session.id }) else { return nil }
         do {
@@ -233,7 +235,9 @@ final class TerminalsModel {
                 rows: rows,
                 cols: cols,
                 noColor: TerminalPreferences.disablesColor,
-                dark: Self.isDarkAppearance
+                dark: Self.isDarkAppearance,
+                modelProvider: modelProvider,
+                modelID: modelID
             )
             session.attach(info: info)
             dedupe(hostID: info.id, keeping: session)
