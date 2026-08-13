@@ -247,17 +247,26 @@ pub(crate) fn model_environment(
         _ => return Err("local model selection needs both a provider and a model".into()),
     }
 
-    let executable = Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command);
+    let executable = executable_name(command);
     match (executable, provider) {
-        ("claude", Some("lmstudio")) => Ok(vec![
-            ("ANTHROPIC_BASE_URL".into(), "http://127.0.0.1:1234".into()),
-            ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
-        ]),
+        ("claude", Some("lmstudio")) => {
+            let base = crate::local_models::origin("lmstudio")
+                .ok_or("LM Studio is not a known local provider")?;
+            Ok(vec![
+                ("ANTHROPIC_BASE_URL".into(), base),
+                ("ANTHROPIC_AUTH_TOKEN".into(), "lmstudio".into()),
+            ])
+        }
         ("claude", Some("ollama")) => {
             Err("Ollama does not provide the Anthropic-compatible endpoint Claude needs".into())
+        }
+        // Copilot takes the endpoint through its own variables rather than the
+        // generic OPENAI_* pair, and needs no key for a loopback server that
+        // asks for none.
+        ("copilot", Some(provider)) => {
+            let base = crate::local_models::api_base_url(provider)
+                .ok_or_else(|| format!("{provider} is not a known local provider"))?;
+            Ok(vec![("COPILOT_PROVIDER_BASE_URL".into(), base.into())])
         }
         // These CLIs receive their local provider through explicit launch
         // arguments. Their private config/auth handling must not be overridden
@@ -268,6 +277,49 @@ pub(crate) fn model_environment(
         )),
         (_, None) => unreachable!("provider was checked with the model above"),
     }
+}
+
+/// The launch arguments that name a local model to a harness.
+///
+/// Here rather than in a front end, beside the environment half of the same
+/// contract. A client that knew one and not the other would launch a session
+/// pointed at a local server while still asking it for a cloud model.
+///
+/// Returns nothing for a harness that carries the whole selection in its
+/// environment, and for one that has no selection at all. A harness that
+/// supports neither has already failed in [`model_environment`], which is the
+/// only place that decides what is supported.
+pub(crate) fn model_arguments(
+    command: &str,
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> Vec<String> {
+    let (Some(provider), Some(model)) = (provider, model) else {
+        return Vec::new();
+    };
+    match executable_name(command) {
+        // Codex names the provider itself, and refuses a local model without
+        // being told to leave its cloud account out of it.
+        "codex" => vec![
+            "--oss".into(),
+            "--local-provider".into(),
+            provider.into(),
+            "--model".into(),
+            model.into(),
+        ],
+        // OpenCode addresses every model as `provider/model`, local included.
+        "opencode" => vec!["--model".into(), format!("{provider}/{model}")],
+        "claude" | "copilot" => vec!["--model".into(), model.into()],
+        _ => Vec::new(),
+    }
+}
+
+/// The file name a command runs as, for matching a harness contract.
+fn executable_name(command: &str) -> &str {
+    Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
 }
 
 fn valid_model_id(model: &str) -> bool {
@@ -368,7 +420,7 @@ fn search_path() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROFILES, Profile, catalog, model_environment, resolve_profile};
+    use super::{PROFILES, Profile, catalog, model_arguments, model_environment, resolve_profile};
     use std::path::Path;
     #[cfg(unix)]
     use std::path::PathBuf;
@@ -511,5 +563,40 @@ mod tests {
         let env =
             model_environment("codex", Some("ollama"), Some("llama3.2")).expect("environment");
         assert!(env.is_empty());
+    }
+
+    #[test]
+    fn copilot_gets_the_providers_openai_endpoint() {
+        let env =
+            model_environment("copilot", Some("ollama"), Some("llama3.2")).expect("environment");
+        assert_eq!(
+            env,
+            vec![(
+                "COPILOT_PROVIDER_BASE_URL".to_string(),
+                "http://127.0.0.1:11434".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn codex_is_told_to_use_its_local_provider() {
+        assert_eq!(
+            model_arguments("/opt/homebrew/bin/codex", Some("lmstudio"), Some("qwen/a")),
+            vec!["--oss", "--local-provider", "lmstudio", "--model", "qwen/a"]
+        );
+    }
+
+    #[test]
+    fn opencode_addresses_a_model_by_provider() {
+        assert_eq!(
+            model_arguments("opencode", Some("lmstudio"), Some("qwen/a")),
+            vec!["--model", "lmstudio/qwen/a"]
+        );
+    }
+
+    #[test]
+    fn no_selection_means_no_arguments() {
+        assert!(model_arguments("claude", None, None).is_empty());
+        assert!(model_arguments("claude", Some("lmstudio"), None).is_empty());
     }
 }

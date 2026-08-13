@@ -1597,10 +1597,19 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 p.model_provider.as_deref(),
                 p.model_id.as_deref(),
             )?;
+            // The selection's arguments are appended here rather than sent by
+            // the caller, so the two halves of one harness contract are decided
+            // together and a remote spawn gets the peer's own mapping.
+            let mut args = p.args.clone();
+            args.extend(crate::launcher::model_arguments(
+                &p.command,
+                p.model_provider.as_deref(),
+                p.model_id.as_deref(),
+            ));
             let info = tokenstat_pty::manager()
                 .spawn(&tokenstat_pty::Spawn {
                     command: p.command.clone(),
-                    args: p.args.clone(),
+                    args,
                     cwd: ws.path.clone(),
                     workspace_id: Some(ws.id.clone()),
                     rows: p.rows,
