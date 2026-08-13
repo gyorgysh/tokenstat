@@ -707,6 +707,8 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var bypassArgs: [String]
     var harnessId: String?
     var symbol: String?
+    /// Loopback page the command starts, when the UI is a local web server.
+    var openUrl: String?
 }
 
 /// A model server discovered on this machine's loopback.
@@ -840,6 +842,7 @@ func harnessName(_ id: String) -> String {
     case "openclaw": return "OpenClaw"
     case "muse": return "Muse"
     case "pi": return "Pi"
+    case "dsh": return "DeepSeek Harness"
     case "zed": return "Zed"
     case "copilot": return "Copilot CLI"
     case "antigravity": return "Antigravity CLI"
@@ -858,7 +861,7 @@ func harnessName(_ id: String) -> String {
 func harnessBrandAsset(_ id: String) -> String? {
     let known: Set<String> = [
         "claude_code", "claude_code_rollup", "codex", "grok", "opencode",
-        "cline", "openclaw", "muse", "pi", "zed", "copilot", "antigravity",
+        "cline", "openclaw", "muse", "pi", "dsh", "zed", "copilot", "antigravity",
         "antigravity_ide", "cursor", "gemini",
     ]
     return known.contains(id) ? "brand_\(id)" : nil

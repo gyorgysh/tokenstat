@@ -39,6 +39,9 @@ struct Profile {
     /// here: the policy is to under-report rather than to guess, and a wrong
     /// absolute path is worse than a missing tile.
     install_dirs: &'static [&'static str],
+    /// A loopback page this command starts. The front end opens it after
+    /// spawn. None for a TTY session.
+    open_url: Option<&'static str>,
 }
 
 const PROFILES: &[Profile] = &[
@@ -51,6 +54,7 @@ const PROFILES: &[Profile] = &[
         harness_id: None,
         symbol: Some("terminal"),
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "claude_code",
@@ -61,6 +65,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("claude_code"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "codex",
@@ -71,6 +76,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("codex"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "opencode",
@@ -81,6 +87,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("opencode"),
         symbol: None,
         install_dirs: &[".opencode/bin"],
+        open_url: None,
     },
     Profile {
         id: "grok",
@@ -91,6 +98,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("grok"),
         symbol: None,
         install_dirs: &[".grok/bin"],
+        open_url: None,
     },
     Profile {
         id: "copilot",
@@ -101,6 +109,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("copilot"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "cline",
@@ -111,6 +120,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cline"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "openclaw",
@@ -121,6 +131,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("openclaw"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "muse",
@@ -131,6 +142,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("muse"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "pi",
@@ -141,6 +153,20 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("pi"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
+    },
+    Profile {
+        id: "dsh",
+        name: "DeepSeek Harness",
+        command: "npx",
+        args: &["--yes", "@deepseek-ai/dsh", "web"],
+        bypass_args: &[],
+        harness_id: Some("dsh"),
+        symbol: None,
+        install_dirs: &[],
+        // `npx @deepseek-ai/dsh web` serves the UI here. The session is the
+        // server process. The front end opens this URL once it answers.
+        open_url: Some("http://127.0.0.1:3080/"),
     },
     Profile {
         id: "zed",
@@ -151,6 +177,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("zed"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "antigravity",
@@ -161,6 +188,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("antigravity"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "cursor_agent",
@@ -171,6 +199,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cursor"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
     Profile {
         id: "cursor",
@@ -181,6 +210,7 @@ const PROFILES: &[Profile] = &[
         harness_id: Some("cursor"),
         symbol: None,
         install_dirs: &[],
+        open_url: None,
     },
 ];
 
@@ -211,6 +241,7 @@ pub(crate) fn catalog() -> Value {
                 "bypassArgs": profile.bypass_args,
                 "harnessId": profile.harness_id,
                 "symbol": profile.symbol,
+                "openUrl": profile.open_url,
             });
             if profile.id == "shell" {
                 value["command"] = json!(shell);
@@ -452,6 +483,7 @@ mod tests {
             harness_id: None,
             symbol: None,
             install_dirs,
+            open_url: None,
         }
     }
 
@@ -534,6 +566,22 @@ mod tests {
         assert_eq!(pi.name, "Pi");
         assert_eq!(pi.command, "pi");
         assert_eq!(pi.harness_id, Some("pi"));
+    }
+
+    #[test]
+    fn the_deepseek_harness_starts_its_web_ui() {
+        // Official start is `npx @deepseek-ai/dsh web`. `--yes` skips the
+        // first-run install prompt so a tile click does not hang the session.
+        // The UI is the page on :3080, not the TTY.
+        let dsh = PROFILES
+            .iter()
+            .find(|p| p.id == "dsh")
+            .expect("DeepSeek Harness must be in the catalog");
+        assert_eq!(dsh.name, "DeepSeek Harness");
+        assert_eq!(dsh.command, "npx");
+        assert_eq!(dsh.args, &["--yes", "@deepseek-ai/dsh", "web"]);
+        assert_eq!(dsh.harness_id, Some("dsh"));
+        assert_eq!(dsh.open_url, Some("http://127.0.0.1:3080/"));
     }
 
     #[test]

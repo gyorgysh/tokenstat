@@ -346,6 +346,45 @@ final class WorkspacesModel {
         browserTabs[workspaceID]?[index].url = url
     }
 
+    /// After a launch that starts a local web UI, wait for the port then open
+    /// it in the in-app browser. The session stays running as the server.
+    ///
+    /// The wait is the point: `npx` may still be fetching the package, and
+    /// opening a dead tab then is a failed load the user has to reload by
+    /// hand. Time out and open anyway, so a slow first run is not a stuck
+    /// terminal with no page.
+    func openHarnessPage(_ url: String, in folder: WorkspaceFolder) async {
+        guard let parsed = URL(string: url), let port = parsed.port else { return }
+        if folder.id.hasPrefix("remote:") {
+            try? await Task.sleep(for: .seconds(2))
+            await openRemotePort(port, in: folder)
+            return
+        }
+        _ = await Self.waitForLoopback(port: port)
+        let tab = showBrowser(in: folder.id)
+        setBrowserURL(url, in: folder.id, tabID: tab.id)
+    }
+
+    /// True when something on this machine's loopback answered.
+    ///
+    /// Any HTTP status counts, including 404. The question is whether the
+    /// process bound the port, not whether `/` is the document it serves.
+    private nonisolated static func waitForLoopback(port: Int, timeout: TimeInterval = 45) async -> Bool {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/") else { return false }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 1
+            request.httpMethod = "GET"
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               response is HTTPURLResponse {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        return false
+    }
+
     /// Open a browser tab pointed at a service on a remote machine's own
     /// localhost. The daemon binds a loopback port here and bridges it over
     /// the authenticated stream, so the tab is an ordinary local URL.

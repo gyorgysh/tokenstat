@@ -114,14 +114,19 @@ struct ClientWorkspaceDetailView: View {
                         // catalog is loading. Once it arrives, it supplies the
                         // host's actual shell and the Shell tile is not added a
                         // second time here.
-                        launchChip(name: "Shell", command: "/bin/zsh", args: ["-l"])
+                        launchChip(RemoteLaunchProfile(
+                            id: "shell",
+                            name: "Shell",
+                            command: "/bin/zsh",
+                            args: ["-l"],
+                            bypassArgs: [],
+                            harnessId: nil,
+                            symbol: "terminal",
+                            openUrl: nil
+                        ))
                     } else {
                         ForEach(catalog, id: \.id) { profile in
-                            launchChip(
-                                name: profile.name,
-                                command: profile.command,
-                                args: profile.args
-                            )
+                            launchChip(profile)
                         }
                     }
                 }
@@ -129,11 +134,11 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
-    private func launchChip(name: String, command: String, args: [String]) -> some View {
+    private func launchChip(_ profile: RemoteLaunchProfile) -> some View {
         Button {
-            Task { await launch(command: command, args: args) }
+            Task { await launch(profile) }
         } label: {
-            Text(name)
+            Text(profile.name)
                 .font(ClientType.caption.weight(.semibold))
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
@@ -276,14 +281,14 @@ struct ClientWorkspaceDetailView: View {
         openSession = ClientTerminalSession(peer: peer, info: info)
     }
 
-    private func launch(command: String, args: [String]) async {
+    private func launch(_ profile: RemoteLaunchProfile) async {
         isLaunching = true
         defer { isLaunching = false }
         errorMessage = nil
         let dark = UITraitCollection.current.userInterfaceStyle == .dark
         let pending = ClientTerminalSession(
             peer: peer,
-            pendingCommand: command,
+            pendingCommand: profile.command,
             cwd: folder.path,
             rows: 40,
             cols: 100
@@ -293,8 +298,8 @@ struct ClientWorkspaceDetailView: View {
             let info = try await ClientRemote.ptySpawn(
                 peer: peer,
                 workspaceID: workspaceID,
-                command: command,
-                args: args,
+                command: profile.command,
+                args: profile.args,
                 rows: 40,
                 cols: 100,
                 dark: dark
@@ -305,7 +310,42 @@ struct ClientWorkspaceDetailView: View {
             pending.stop()
             openSession = nil
             errorMessage = error.localizedDescription
+            return
         }
+        // The process is already up. A failed port forward must not kill it.
+        guard let page = profile.openUrl, let port = URL(string: page)?.port else { return }
+        do {
+            try? await Task.sleep(for: .seconds(2))
+            let result = try await Bridge.proxyListen(
+                peer: peer,
+                host: "127.0.0.1",
+                port: port
+            )
+            forwardedPort = port
+            if let proxy = URL(string: result.url) {
+                _ = await Self.waitForPage(proxy)
+            }
+            openSession = nil
+            browserURL = result.url
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// True when the proxied page answered. Any HTTP status counts.
+    private static func waitForPage(_ url: URL, timeout: TimeInterval = 40) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 1
+            request.httpMethod = "GET"
+            if let (_, response) = try? await URLSession.shared.data(for: request),
+               response is HTTPURLResponse {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(400))
+        }
+        return false
     }
 
     private func openPort() async {

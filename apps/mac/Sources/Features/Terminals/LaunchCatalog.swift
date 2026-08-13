@@ -36,6 +36,10 @@ struct LaunchProfile: Identifiable, Sendable {
     /// have to keep the first moments of a launch honest, so a tool the user
     /// plainly installed does not flicker in.
     var installDirs: [String] = []
+    /// A loopback page this command starts. The session is the server
+    /// process. After spawn the pane waits for the port and opens this URL
+    /// in the in-app browser. Nil for a TTY session.
+    var openUrl: String? = nil
 
     /// Whether pointing this harness at a local model server means anything.
     ///
@@ -100,6 +104,16 @@ struct LaunchProfile: Identifiable, Sendable {
         LaunchProfile(
             id: "pi", name: "Pi", command: "pi", args: [],
             bypassArgs: [], harnessID: "pi", symbol: nil
+        ),
+        LaunchProfile(
+            id: "dsh",
+            name: "DeepSeek Harness",
+            command: "npx",
+            args: ["--yes", "@deepseek-ai/dsh", "web"],
+            bypassArgs: [],
+            harnessID: "dsh",
+            symbol: nil,
+            openUrl: "http://127.0.0.1:3080/"
         ),
         LaunchProfile(
             id: "zed", name: "Zed", command: "zed", args: [],
@@ -216,7 +230,8 @@ final class LaunchCatalog {
             args: dto.args,
             bypassArgs: dto.bypassArgs,
             harnessID: dto.harnessId,
-            symbol: dto.symbol
+            symbol: dto.symbol,
+            openUrl: dto.openUrl
         )
     }
 

@@ -520,6 +520,9 @@ struct TerminalPane: View {
                 modelProvider: selection?.provider,
                 modelID: selection?.model
             )
+            if let url = profile.openUrl {
+                await workspaces.openHarnessPage(url, in: folder)
+            }
         }
     }
 
@@ -942,6 +945,9 @@ private struct LaunchSurface: View {
                         modelProvider: selection?.provider,
                         modelID: selection?.model
                     )
+                    if let url = profile.openUrl {
+                        await workspaces.openHarnessPage(url, in: folder)
+                    }
                     launching = nil
                 }
             }
