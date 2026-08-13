@@ -164,19 +164,19 @@ pub fn ensure_may_serve(socket: &Path) -> Result<Role, String> {
     Ok(role)
 }
 
-/// What to print when a secondary refuses to start.
+/// Exclusive lock on this identity directory.
 ///
-/// The message has to carry the repair, because the person reading it is
-/// almost always in the middle of testing something and the obvious next move
-/// (run it again) is the one that does not work.
-/// Exclusive lock on this identity directory. Two daemons with the same
-/// key used to pass the socket probe (or both start as secondaries) and
-/// mint-fight. The lock file lives beside the key, so a separate
-/// `TOKENSTAT_IDENTITY_DIR` is still a second machine.
+/// An OS advisory lock on a file beside the key, held for the process
+/// lifetime. A PID file plus unlink-if-empty let two starters both win
+/// (the winner writes the pid after create, so the file is empty for a
+/// real window) and a reused pid after a crash blocked a healthy restart.
+/// `flock` dies with the process, so a crash cannot leave a stale owner.
+/// A separate `TOKENSTAT_IDENTITY_DIR` is still a second machine.
 #[cfg(unix)]
 fn hold_identity_lock() -> Result<(), String> {
     use std::fs::OpenOptions;
-    use std::io::{ErrorKind, Write};
+    use std::io::Write;
+    use std::os::unix::io::AsRawFd;
     use std::sync::Mutex;
 
     static HELD: Mutex<Option<std::fs::File>> = Mutex::new(None);
@@ -184,45 +184,34 @@ fn hold_identity_lock() -> Result<(), String> {
     let path = tokenstat_identity::identity_dir()
         .map_err(|e| e.to_string())?
         .join("host.lock");
-    for _ in 0..2 {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let _ = writeln!(&mut file, "{}", std::process::id());
-                *HELD.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
-                return Ok(());
-            }
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
-                if lock_holder_is_gone(&path) {
-                    let _ = std::fs::remove_file(&path);
-                    continue;
-                }
-                return Err("identity already served".into());
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Err("identity already served".into())
-}
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
 
-#[cfg(unix)]
-fn lock_holder_is_gone(path: &std::path::Path) -> bool {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return true;
-    };
-    let Ok(pid) = text.trim().parse::<i32>() else {
-        return true;
-    };
     #[link(name = "c")]
     unsafe extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
+        fn flock(fd: i32, operation: i32) -> i32;
     }
-    let rc = unsafe { kill(pid, 0) };
-    if rc == 0 {
-        return false;
+    // LOCK_EX | LOCK_NB. Same values on macOS and Linux.
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+    let rc = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
+    if rc != 0 {
+        return Err("identity already served".into());
     }
-    std::io::Error::last_os_error().raw_os_error() == Some(3)
+    let _ = writeln!(&mut file, "{}", std::process::id());
+    *HELD.lock().unwrap_or_else(|e| e.into_inner()) = Some(file);
+    Ok(())
 }
 
+/// What to print when a secondary refuses to start.
+///
+/// The message has to carry the repair, because the person reading it is
+/// almost always in the middle of testing something and the obvious next move
+/// (run it again) is the one that does not work.
 pub fn refusal(socket: &std::path::Path) -> String {
     format!(
         "another tokenstat host is already serving this machine's identity, so this one \
