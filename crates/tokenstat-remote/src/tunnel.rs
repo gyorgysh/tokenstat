@@ -14,15 +14,17 @@
 
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use tokenstat_identity::{MachineIdentity, PublicKey, hex};
+use tungstenite::client::IntoClientRequest;
+use tungstenite::client_tls_with_config;
 use tungstenite::stream::MaybeTlsStream;
-use tungstenite::{Message, WebSocket, connect};
+use tungstenite::{HandshakeError, Message, WebSocket};
 
 use crate::{RemoteError, Transport};
 
@@ -62,6 +64,12 @@ const DIAL_ID_BASE: u32 = 1 << 30;
 /// hammering.
 const RECONNECT_FLOOR: Duration = Duration::from_secs(1);
 const RECONNECT_CEILING: Duration = Duration::from_secs(30);
+/// DNS + TCP + TLS + the WebSocket handshake, and then HELLO/READY. A
+/// blackholed network used to sit in `connect` until the OS TCP timeout
+/// (often a minute). `nudge` cannot cut that short. Ten seconds is long
+/// enough for a slow path and short enough that sleep/wake reconnects.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many times in a row a fresh credential earns an immediate retry.
 ///
 /// One covers the ordinary case: the credential expired, a new one was minted,
@@ -88,6 +96,10 @@ pub struct TunnelSession {
     channels: Mutex<HashMap<u32, Arc<ChannelState>>>,
     /// The current socket, so shutdown can interrupt a parked supervisor.
     socket: Mutex<Option<Socket>>,
+    /// The raw TCP stream while TLS / HELLO is still in flight. `shutdown`
+    /// closes it so a turn-off during connect does not leave a live socket
+    /// that the IO loop would then store.
+    connecting: Mutex<Option<TcpStream>>,
     /// What the relay connection is doing right now, for the screen that
     /// reports it. The supervisor owns this; the host reads it.
     status: Mutex<TunnelStatus>,
@@ -190,6 +202,7 @@ impl TunnelSession {
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),
             socket: Mutex::new(None),
+            connecting: Mutex::new(None),
             status: Mutex::new(TunnelStatus::default()),
             renew: Mutex::new(None),
             wake: Mutex::new(Some(wake_tx)),
@@ -310,6 +323,14 @@ impl TunnelSession {
     pub fn shutdown(&self) {
         self.stopped.store(true, Ordering::Relaxed);
         self.nudge();
+        if let Some(stream) = self
+            .connecting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
         if let Some(mut socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = socket.close(None);
         }
@@ -590,14 +611,91 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
     }
 }
 
+fn drop_connecting(session: &TunnelSession) {
+    *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+struct ConnectingGuard<'a>(&'a TunnelSession);
+
+impl Drop for ConnectingGuard<'_> {
+    fn drop(&mut self) {
+        drop_connecting(self.0);
+    }
+}
+
+fn ensure_running(session: &TunnelSession) -> Result<(), RemoteError> {
+    if session.stopped.load(Ordering::Relaxed) {
+        Err(RemoteError::Tunnel("tunnel is stopped".into()))
+    } else {
+        Ok(())
+    }
+}
+
+/// TCP + TLS + the WebSocket handshake, bounded so a dead relay cannot park
+/// the supervisor until the OS gives up.
+fn connect_relay(endpoint: &str) -> Result<(Socket, TcpStream), RemoteError> {
+    let request = endpoint.into_client_request().map_err(tunnel_error)?;
+    let host = request
+        .uri()
+        .host()
+        .ok_or_else(|| RemoteError::Tunnel("tunnel url has no host".into()))?
+        .to_string();
+    let host_for_addr = host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
+    let is_tls = match request.uri().scheme_str() {
+        Some("wss") => true,
+        Some("ws") => false,
+        other => {
+            return Err(RemoteError::Tunnel(format!(
+                "unsupported tunnel scheme: {other:?}"
+            )));
+        }
+    };
+    let port = request
+        .uri()
+        .port_u16()
+        .unwrap_or(if is_tls { 443 } else { 80 });
+    let addr = (host_for_addr.as_str(), port)
+        .to_socket_addrs()
+        .map_err(RemoteError::Io)?
+        .next()
+        .ok_or_else(|| RemoteError::Tunnel(format!("{host_for_addr} resolves to nothing")))?;
+    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).map_err(RemoteError::Io)?;
+    stream.set_nodelay(true).map_err(RemoteError::Io)?;
+    stream
+        .set_read_timeout(Some(HELLO_TIMEOUT))
+        .map_err(RemoteError::Io)?;
+    stream
+        .set_write_timeout(Some(HELLO_TIMEOUT))
+        .map_err(RemoteError::Io)?;
+    let raw = stream.try_clone().map_err(RemoteError::Io)?;
+    let (socket, _) =
+        client_tls_with_config(request, stream, None, None).map_err(|error| match error {
+            HandshakeError::Failure(failure) => tunnel_error(failure),
+            HandshakeError::Interrupted(_) => {
+                RemoteError::Tunnel("websocket handshake was interrupted".into())
+            }
+        })?;
+    Ok((socket, raw))
+}
+
 /// Connect, register, and pump until the socket dies.
 fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
+    ensure_running(session)?;
     let token = session
         .token
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .clone();
-    let (mut socket, _) = connect(&session.endpoint).map_err(tunnel_error)?;
+    let (mut socket, raw) = connect_relay(&session.endpoint)?;
+    *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) = Some(raw);
+    let _connecting = ConnectingGuard(session);
+    if let Err(error) = ensure_running(session) {
+        let _ = socket.close(None);
+        return Err(error);
+    }
     socket
         .send(Message::Text(
             format!("HELLO {} {} V2", session.key_hex, token).into(),
@@ -647,6 +745,11 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
             )));
         }
     }
+    drop(_connecting);
+    if let Err(error) = ensure_running(session) {
+        let _ = socket.close(None);
+        return Err(error);
+    }
     // One IO thread owns the socket. It must never block inside a read or a
     // flush: a read that waits is a read that cannot drain the writer queue,
     // and a flush that waits is a write the relay is not draining, either of
@@ -668,6 +771,9 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
     // read nor the flush can stall the loop.
     let mut writer_blocked = false;
     loop {
+        if session.stopped.load(Ordering::Relaxed) {
+            break;
+        }
         if writer_blocked {
             let flush_result = {
                 let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
@@ -982,12 +1088,47 @@ mod tests {
             inbound_rx: Mutex::new(Some(inbound_rx)),
             channels: Mutex::new(HashMap::new()),
             socket: Mutex::new(None),
+            connecting: Mutex::new(None),
             status: Mutex::new(TunnelStatus::default()),
             renew: Mutex::new(None),
             wake: Mutex::new(None),
             renewed: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
         })
+    }
+
+    #[test]
+    fn shutdown_closes_a_connect_that_has_not_stored_the_socket() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let session = inert_session();
+        let stream = TcpStream::connect(addr).expect("connect");
+        *session.connecting.lock().unwrap_or_else(|e| e.into_inner()) = Some(stream);
+        session.shutdown();
+        assert!(session.stopped.load(Ordering::Relaxed));
+        assert!(
+            session
+                .connecting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_none()
+        );
+        listener.set_nonblocking(true).expect("nonblocking accept");
+        let (mut peer, _) = listener.accept().expect("accepted");
+        let mut buf = [0u8; 8];
+        let n = peer.read(&mut buf).unwrap_or(0);
+        assert_eq!(n, 0, "shutdown must close the half-open connect");
+    }
+
+    #[test]
+    fn a_refused_relay_fails_before_the_connect_budget() {
+        let started = Instant::now();
+        let error = connect_relay("ws://127.0.0.1:1").expect_err("nothing listens on port 1");
+        assert!(started.elapsed() < CONNECT_TIMEOUT);
+        assert!(
+            matches!(error, RemoteError::Io(_)),
+            "refused connect is an io error, got {error}"
+        );
     }
 
     fn opened_frame(id: u32) -> Vec<u8> {
