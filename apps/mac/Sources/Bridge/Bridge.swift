@@ -260,14 +260,18 @@ enum Bridge {
                 return result
             } catch {
                 attempt += 1
-                if Self.isHostRecoveryError(error) {
+                let repairing = Self.isRepairable(error)
+                if repairing {
                     Self.postHostRecoveryStarted()
                 }
                 guard route.isHosted,
-                      Self.isRepairable(error),
+                      repairing,
                       attempt < maxHostRepairAttempts,
                       Self.repairHost()
                 else {
+                    if repairing {
+                        Self.postHostRecoveryFinished()
+                    }
                     throw error
                 }
             }
