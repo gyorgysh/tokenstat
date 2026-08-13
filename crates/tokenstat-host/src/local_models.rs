@@ -115,10 +115,32 @@ pub(crate) fn discover() -> Result<Vec<LocalProvider>, String> {
         .collect())
 }
 
+/// Why a probe failed, in words a person can act on.
+///
+/// A refused or timed-out connect is "the app is not running". The OS
+/// string (`os error 61`) is noise on the settings row and the launcher
+/// menu, so it stays out of the common case.
+fn connect_error(error: std::io::Error) -> String {
+    match error.kind() {
+        std::io::ErrorKind::ConnectionRefused
+        | std::io::ErrorKind::TimedOut
+        | std::io::ErrorKind::ConnectionReset => "not running".into(),
+        _ => {
+            let text = error.to_string();
+            let lower = text.to_ascii_lowercase();
+            if lower.contains("connection refused") || lower.contains("timed out") {
+                "not running".into()
+            } else {
+                format!("not running ({text})")
+            }
+        }
+    }
+}
+
 fn get_json(port: u16, path: &str) -> Result<Value, String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT)
-        .map_err(|error| format!("not running ({error})"))?;
+    let mut stream =
+        TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(connect_error)?;
     stream
         .set_read_timeout(Some(READ_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -251,6 +273,14 @@ mod tests {
         .expect("models");
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, "qwen/qwen3.5-27b");
+    }
+
+    #[test]
+    fn a_refused_connect_is_just_not_running() {
+        let refused = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "os error 61");
+        assert_eq!(super::connect_error(refused), "not running");
+        let other = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        assert!(super::connect_error(other).contains("denied"));
     }
 
     #[test]

@@ -99,11 +99,15 @@ struct LocalModelControl: View {
                     }
                 }
             }
-            Divider()
-            // Unavailable providers are listed, not hidden. The reason a menu
-            // is short is the most useful thing it can say.
-            ForEach(unavailable, id: \.id) { provider in
-                Text("\(provider.name): \(provider.error ?? "not running")")
+            if !statusRows.isEmpty {
+                Divider()
+                ForEach(statusRows, id: \.self) { row in
+                    Text(row)
+                }
+            }
+            if let errorMessage {
+                Divider()
+                Text("Could not read local models: \(errorMessage)")
             }
             Button("Refresh") { Task { await load() } }
         } label: {
@@ -129,13 +133,46 @@ struct LocalModelControl: View {
         }
     }
 
-    private var unavailable: [LocalProvider] {
-        providers.filter { !$0.available }
+    /// Providers that cannot be picked: not running, empty, or disabled here.
+    ///
+    /// Listed in the menu so a short picker says why, instead of looking like
+    /// nothing is installed.
+    private var statusRows: [String] {
+        providers.compactMap { provider in
+            if !provider.available {
+                return "\(provider.name): \(localProviderStatus(provider))"
+            }
+            if provider.models.isEmpty {
+                return "\(provider.name): no models loaded"
+            }
+            if peer == nil && !LocalProviderPreference.isEnabled(provider.id) {
+                return "\(provider.name): turned off in Settings"
+            }
+            return nil
+        }
+    }
+
+    private func localProviderStatus(_ provider: LocalProvider) -> String {
+        let raw = provider.error ?? "not running"
+        if raw == "not running" || raw.hasPrefix("not running") {
+            return provider.id == "lmstudio"
+                ? "not running (start the app, local server on port 1234)"
+                : "not running (start the app, port 11434)"
+        }
+        return raw
     }
 
     private var helpText: String {
         if let errorMessage {
             return "Local model servers could not be read: \(errorMessage)"
+        }
+        if choices.isEmpty {
+            return """
+            No local model is ready. Start LM Studio (port 1234) or Ollama \
+            (port 11434), load a model, and refresh. Claude uses LM Studio's \
+            Anthropic-compatible endpoint. Codex and OpenCode receive an \
+            explicit local provider and model.
+            """
         }
         return """
         Which model the next session starts on. Claude uses LM Studio's \

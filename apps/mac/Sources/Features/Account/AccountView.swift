@@ -445,11 +445,11 @@ struct AccountView: View {
     private var localModelsCard: some View {
         Card(
             title: "Local models",
-            subtitle: "Models served by LM Studio or Ollama on this Mac"
+            subtitle: "LM Studio on port 1234, Ollama on port 11434"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack {
-                    Text("Nothing is sent to tokenstat. These checks use loopback only.")
+                    Text("Nothing is sent to tokenstat. These checks use loopback only. Start the app, load a model, then refresh.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
@@ -472,7 +472,7 @@ struct AccountView: View {
                         .font(.caption)
                         .foregroundStyle(Theme.danger)
                 } else if localModels.providers.isEmpty && !localModels.isLoading {
-                    Text("Check for local model servers to see their models here.")
+                    Text("LM Studio (port 1234) and Ollama (port 11434) could not be checked. Start one and tap refresh.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 } else {
@@ -510,7 +510,9 @@ struct AccountView: View {
                     .foregroundStyle(.secondary)
             } else if provider.available {
                 if provider.models.isEmpty {
-                    Text("No models loaded")
+                    Text(provider.id == "lmstudio"
+                         ? "Server is up. Load a model in LM Studio to use it here."
+                         : "Server is up. Pull or run a model in Ollama to use it here.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -529,14 +531,24 @@ struct AccountView: View {
                         }
                     }
                 }
-            } else if let error = provider.error {
-                Text(error)
+            } else {
+                Text(localProviderHint(provider))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
-                    .lineLimit(2)
+                    .lineLimit(3)
             }
         }
         .padding(.vertical, Theme.Space.xs)
+    }
+
+    private func localProviderHint(_ provider: LocalProvider) -> String {
+        let raw = provider.error ?? "not running"
+        if raw == "not running" || raw.hasPrefix("not running") {
+            return provider.id == "lmstudio"
+                ? "Not running. Open LM Studio and turn on the local server (port 1234)."
+                : "Not running. Start Ollama (port 11434)."
+        }
+        return raw
     }
     #endif
 
