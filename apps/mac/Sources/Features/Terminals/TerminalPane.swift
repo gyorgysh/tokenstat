@@ -21,6 +21,7 @@ struct TerminalPane: View {
     /// hierarchy so paint is not lost; focus and keystroke-speed polling only
     /// apply when this is true.
     var isSurfaceActive: Bool = true
+    @State private var closingSession: TerminalSession?
 
     private var sessions: [TerminalSession] {
         terminals.sessions(in: folder.id)
@@ -163,6 +164,24 @@ struct TerminalPane: View {
             Button("Cancel", role: .cancel) { workspaces.pendingClose = nil }
         } message: { pending in
             Text("\(pending.path) has changes that are not written to disk.")
+        }
+        .confirmationDialog(
+            "Stop this session?",
+            isPresented: Binding(
+                get: { closingSession != nil },
+                set: { if !$0 { closingSession = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Stop and close", role: .destructive) {
+                if let session = closingSession {
+                    closingSession = nil
+                    Task { await terminals.close(session) }
+                }
+            }
+            Button("Cancel", role: .cancel) { closingSession = nil }
+        } message: {
+            Text("The process will be killed. A stopped session can still close in one click.")
         }
         .alert("Could not start session", isPresented: launchFailed) {
             Button("OK", role: .cancel) {}
@@ -328,7 +347,11 @@ struct TerminalPane: View {
                     workspaces.showTerminal(in: folder.id)
                     terminals.select(session)
                 } onClose: {
-                    Task { await terminals.close(session) }
+                    if session.alive {
+                        closingSession = session
+                    } else {
+                        Task { await terminals.close(session) }
+                    }
                 }
             }
 
