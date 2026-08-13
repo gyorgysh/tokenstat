@@ -98,12 +98,9 @@ final class AccountModel {
     /// warning rather than a failure: the sync machinery works, the account
     /// simply may not upload again yet.
     ///
-    /// A success cooldown must not count. One click is one usage POST, and
-    /// the footer must agree with the settings toast about that.
-    var isRateLimited: Bool {
-        if lastSyncWasRateLimited { return true }
-        return syncNotice.map(Self.isRateLimitMessage) ?? false
-    }
+    /// Only the last attempt's classification. The notice used to be scanned
+    /// as well, and "Sent 429 rows" from a success matched the bare "429".
+    var isRateLimited: Bool { lastSyncWasRateLimited }
 
     func load() async {
         // A second load while one is in flight (connectivity restored + manual
@@ -319,7 +316,7 @@ final class AccountModel {
             lastSyncWasRateLimited = rateLimited
             showSyncNotice(message, isError: !rateLimited)
             if rateLimited {
-                startSyncCooldown(fromRateLimit: true)
+                startSyncCooldown(fromRateLimit: true, message: message)
             }
         }
     }
@@ -341,9 +338,10 @@ final class AccountModel {
     ///
     /// After a success this is only a debounce, capped at five minutes, so a
     /// free-plan hour does not look like a stuck button. After a real 429 the
-    /// plan interval is used, so a second press is not sent into a gate that
-    /// just refused.
-    private func syncCooldownSeconds(fromRateLimit: Bool) -> TimeInterval {
+    /// remaining wait in the gate message is used, capped at the plan
+    /// interval, so a press four minutes into a five-minute window is not
+    /// held for another full five.
+    private func syncCooldownSeconds(fromRateLimit: Bool, message: String? = nil) -> TimeInterval {
         let plan: TimeInterval
         if let secs = account?.syncInterval, secs > 0 {
             plan = TimeInterval(secs)
@@ -351,13 +349,16 @@ final class AccountModel {
             plan = 5 * 60
         }
         if fromRateLimit {
+            if let remaining = message.flatMap(Self.retryAfterSeconds(from:)) {
+                return min(max(remaining, 1), plan)
+            }
             return plan
         }
         return min(plan, 5 * 60)
     }
 
-    private func startSyncCooldown(fromRateLimit: Bool) {
-        let seconds = syncCooldownSeconds(fromRateLimit: fromRateLimit)
+    private func startSyncCooldown(fromRateLimit: Bool, message: String? = nil) {
+        let seconds = syncCooldownSeconds(fromRateLimit: fromRateLimit, message: message)
         let until = Date().addingTimeInterval(seconds)
         syncCooldownUntil = until
         Task { @MainActor [weak self] in
@@ -377,13 +378,34 @@ final class AccountModel {
 
     /// The words the host uses when the plan gate refuses, plus the usual
     /// HTTP phrasings a proxy puts in front of the same answer.
+    ///
+    /// A bare "429" is not enough: a success toast is "Sent 429 rows for …".
     static func isRateLimitMessage(_ raw: String) -> Bool {
         let lower = raw.lowercased()
         return lower.contains("may sync once every")
             || lower.contains("not accepting a sync")
             || lower.contains("too many requests")
             || lower.contains("rate limit")
-            || lower.contains("429")
+            || lower.contains("http 429")
+            || lower.contains("status 429")
+    }
+
+    /// Remaining wait from "Try again in N minute(s).", or nil.
+    static func retryAfterSeconds(from raw: String) -> TimeInterval? {
+        let lower = raw.lowercased()
+        guard let regex = try? NSRegularExpression(
+            pattern: #"try again in (\d+)\s+(minutes?|hours?|seconds?)"#
+        ) else { return nil }
+        let ns = lower as NSString
+        guard let match = regex.firstMatch(in: lower, range: NSRange(location: 0, length: ns.length)),
+              match.numberOfRanges >= 3,
+              let n = Int(ns.substring(with: match.range(at: 1))),
+              n > 0
+        else { return nil }
+        let unit = ns.substring(with: match.range(at: 2))
+        if unit.hasPrefix("hour") { return TimeInterval(n) * 3600 }
+        if unit.hasPrefix("second") { return TimeInterval(n) }
+        return TimeInterval(n) * 60
     }
 }
 
