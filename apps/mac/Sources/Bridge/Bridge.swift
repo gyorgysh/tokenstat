@@ -260,6 +260,7 @@ enum Bridge {
                 return result
             } catch {
                 attempt += 1
+                Self.noteHostCallFailure(error)
                 let repairing = Self.isRepairable(error)
                 if repairing {
                     Self.postHostRecoveryStarted()
@@ -270,7 +271,7 @@ enum Bridge {
                       Self.repairHost()
                 else {
                     if repairing {
-                        Self.postHostRecoveryFinished()
+                        Self.postHostBecameUnreachable()
                     }
                     throw error
                 }
@@ -286,9 +287,19 @@ enum Bridge {
     private static func postHostRecoveryFinished() {
         NotificationCenter.default.post(name: .hostRecoveryFinished, object: nil)
     }
+
+    private static func postHostBecameSilent() {
+        NotificationCenter.default.post(name: .hostBecameSilent, object: nil)
+    }
+
+    private static func postHostBecameUnreachable() {
+        NotificationCenter.default.post(name: .hostBecameUnreachable, object: nil)
+    }
     #else
     private static func postHostRecoveryStarted() {}
     private static func postHostRecoveryFinished() {}
+    private static func postHostBecameSilent() {}
+    private static func postHostBecameUnreachable() {}
     #endif
 
     /// The urgent variant of `call`: same repair-and-retry loop, urgent
@@ -301,22 +312,47 @@ enum Bridge {
         var attempt = 0
         while true {
             do {
-                return try currentRoute.transport.callUrgent(
+                let result = try currentRoute.transport.callUrgent(
                     method: method,
                     params: params,
                     patience: patience
                 )
+                Self.postHostRecoveryFinished()
+                return result
             } catch {
                 attempt += 1
+                Self.noteHostCallFailure(error)
+                let repairing = Self.isRepairable(error)
+                if repairing {
+                    Self.postHostRecoveryStarted()
+                }
                 guard currentRoute.isHosted,
-                      Self.isRepairable(error),
+                      repairing,
                       attempt < maxHostRepairAttempts,
                       Self.repairHost()
                 else {
+                    if repairing {
+                        Self.postHostBecameUnreachable()
+                    }
                     throw error
                 }
             }
         }
+    }
+
+    /// A timeout is not repairable, but it is still something the footer
+    /// should show. Repairable failures start their own recovery card.
+    private static func noteHostCallFailure(_ error: Error) {
+        if isTimeout(error) {
+            postHostBecameSilent()
+        }
+    }
+
+    private static func isTimeout(_ error: Error) -> Bool {
+        guard let bridge = error as? BridgeError, case let .core(code, _) = bridge else {
+            return false
+        }
+        return code == "host_timeout"
     }
 
     /// Whether a transport error means the daemon is gone rather than busy.

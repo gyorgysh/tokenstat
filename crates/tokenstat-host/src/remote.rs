@@ -1237,6 +1237,20 @@ fn settings() -> RemoteSettings {
     load_settings()
 }
 
+/// Whether the multiplexed tunnel socket is up right now.
+///
+/// `pty.list` uses this to skip dialling peers while the network is gone or
+/// the supervisor is still reconnecting. Waiting on those dials is what made
+/// the host silent for ten seconds after a path change.
+#[cfg(feature = "local-host")]
+pub(crate) fn tunnel_is_connected() -> bool {
+    tunnel_session()
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(|session| session.status().connected))
+        .unwrap_or(false)
+}
+
 /// Peers this machine may dial right now: approved, with remote reach on. The
 /// same rule the app's sidebar applies, so sweeps like `pty.list` that want
 /// "all the machines" see exactly the machines they can reach.

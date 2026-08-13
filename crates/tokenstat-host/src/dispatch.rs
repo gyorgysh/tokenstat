@@ -1821,11 +1821,11 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             }
             if include_remote {
                 // One level deep on purpose: each peer is asked with
-                // includeRemote=false, so the account cannot recurse A→B→A,
-                // and cached so the app's parity poll does not dial every
-                // peer on every tick. Remote items already carry the peer's
-                // own reading, measured on the machine the process is on,
-                // which is the only machine that can measure it.
+                // includeRemote=false, so the account cannot recurse A→B→A.
+                // The merge is served from cache and refreshed off this
+                // thread: a tunnel redial after a path change must not hold
+                // the local list (the app's patience is 10s, the channel
+                // open is also 10s).
                 items.extend(crate::remote_stream::remote_pty_lists());
             }
             Ok(Value::Array(items))

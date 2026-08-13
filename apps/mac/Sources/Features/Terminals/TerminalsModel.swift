@@ -129,6 +129,12 @@ final class TerminalsModel {
             }
             errorMessage = nil
         } catch {
+            // A quiet or unreachable host is not a failed launch. The sidebar
+            // footer owns that state. Putting it on `errorMessage` used to
+            // raise "Could not start session" every time this 10-second
+            // reconcile timed out, which is how a network flap looked like
+            // a spawn error on a timer.
+            if Bridge.isHostRecoveryError(error) { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -245,7 +251,11 @@ final class TerminalsModel {
             errorMessage = nil
             return session
         } catch {
-            errorMessage = error.localizedDescription
+            // Host silence belongs on the footer card. A real spawn rejection
+            // (missing binary, bad args) stays on the launch surface.
+            if !Bridge.isHostRecoveryError(error) {
+                errorMessage = error.localizedDescription
+            }
             session.stop()
             sessions.removeAll { $0.id == session.id }
             return nil

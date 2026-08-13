@@ -40,6 +40,12 @@ extension Notification.Name {
     static let hostRecoveryStarted = Notification.Name("ai.tokenstat.hostRecoveryStarted")
     /// A local host call answered after a recovery attempt.
     static let hostRecoveryFinished = Notification.Name("ai.tokenstat.hostRecoveryFinished")
+    /// The host stayed silent past the call's patience. Not the same as being
+    /// gone: it is usually busy, or the tunnel is mid-reconnect after a path
+    /// change.
+    static let hostBecameSilent = Notification.Name("ai.tokenstat.hostBecameSilent")
+    /// The host was unreachable and the repair did not bring it back.
+    static let hostBecameUnreachable = Notification.Name("ai.tokenstat.hostBecameUnreachable")
 }
 
 @main

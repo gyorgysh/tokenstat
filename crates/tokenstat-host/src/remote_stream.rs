@@ -23,6 +23,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
@@ -529,40 +530,23 @@ type PtyListCache = HashMap<String, (i64, Vec<Value>)>;
 static PTY_LISTS: OnceLock<Mutex<PtyListCache>> = OnceLock::new();
 
 /// The pty sessions of every reachable peer, renamespaced, cached per peer.
+///
+/// Never dials on this thread. A cache miss used to call the peer inline, and
+/// after a network flap that wait is the relay's 10s channel-open timeout.
+/// The app's `pty.list` patience is also 10s, so the host said nothing, the
+/// socket timed out, and the Mac app raised "Could not start session". Serve
+/// whatever we already know and refresh in the background.
 pub(crate) fn remote_pty_lists() -> Vec<Value> {
     let cache = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let snapshot = {
+        let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        remote_pty_snapshot(&crate::remote::reachable_peers(), &guard, pty_list_now_ms())
+    };
+    if crate::remote::tunnel_is_connected() && !snapshot.stale.is_empty() {
+        schedule_remote_pty_refresh(snapshot.stale);
+    }
     let mut out = Vec::new();
-    for peer in crate::remote::reachable_peers() {
-        let cached = {
-            let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
-            guard
-                .get(&peer)
-                .filter(|(at_ms, _)| pty_list_is_fresh(*at_ms))
-                .map(|(_, items)| items.clone())
-        };
-        let items = match cached {
-            Some(items) => items,
-            None => {
-                // Cache hits **and** misses. A peer that is offline used to be
-                // redialled on every `pty.list` (the app polls this for session
-                // parity), and each dial retries the tunnel with backoff. That
-                // turned every local terminal poll cycle into multi-second
-                // stalls whenever a machine on the account was asleep.
-                let items = match crate::remote::call_peer_result(
-                    &peer,
-                    "pty.list",
-                    r#"{"includeRemote":false}"#,
-                ) {
-                    Ok(Value::Array(items)) => items,
-                    _ => Vec::new(),
-                };
-                cache
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(peer.clone(), (pty_list_now_ms(), items.clone()));
-                items
-            }
-        };
+    for (peer, items) in snapshot.served {
         for mut item in items {
             crate::dispatch::renamespace_session(&mut item, &peer);
             out.push(item);
@@ -571,25 +555,104 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
     out
 }
 
-/// Drop a peer's cached pty list, so a session that just spawned or closed on
-/// it is seen immediately instead of after the cache TTL.
+/// Cached remote lists to return now, and the peers whose entries are missing
+/// or older than the TTL.
+struct RemotePtySnapshot {
+    served: Vec<(String, Vec<Value>)>,
+    stale: Vec<String>,
+}
+
+fn remote_pty_snapshot(peers: &[String], cache: &PtyListCache, now_ms: i64) -> RemotePtySnapshot {
+    let ttl_ms = PTY_LIST_TTL.as_millis() as i64;
+    let mut served = Vec::new();
+    let mut stale = Vec::new();
+    for peer in peers {
+        match cache.get(peer) {
+            Some((at_ms, items)) => {
+                served.push((peer.clone(), items.clone()));
+                if now_ms.saturating_sub(*at_ms) >= ttl_ms {
+                    stale.push(peer.clone());
+                }
+            }
+            None => stale.push(peer.clone()),
+        }
+    }
+    RemotePtySnapshot { served, stale }
+}
+
+fn schedule_remote_pty_refresh(peers: Vec<String>) {
+    static IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+    if peers.is_empty() {
+        return;
+    }
+    if IN_FLIGHT.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let started = std::thread::Builder::new()
+        .name("tokenstat-pty-list".into())
+        .spawn(move || {
+            for peer in peers {
+                refresh_remote_pty_list(&peer);
+            }
+            IN_FLIGHT.store(false, Ordering::SeqCst);
+        });
+    if started.is_err() {
+        IN_FLIGHT.store(false, Ordering::SeqCst);
+    }
+}
+
+fn refresh_remote_pty_list(peer: &str) {
+    let cache = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new()));
+    match crate::remote::call_peer_result(peer, "pty.list", r#"{"includeRemote":false}"#) {
+        Ok(Value::Array(items)) => {
+            cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(peer.to_string(), (pty_list_now_ms(), items));
+        }
+        Ok(_) => {
+            cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(peer.to_string(), (pty_list_now_ms(), Vec::new()));
+        }
+        Err(_) => {
+            // Keep the last known list. Stamp the time so a dead peer is not
+            // redialled on every local reconcile; a later nudge marks it
+            // stale again.
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((at_ms, _)) = guard.get_mut(peer) {
+                *at_ms = pty_list_now_ms();
+            } else {
+                guard.insert(peer.to_string(), (pty_list_now_ms(), Vec::new()));
+            }
+        }
+    }
+}
+
 fn pty_list_now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
-fn pty_list_is_fresh(at_ms: i64) -> bool {
-    pty_list_now_ms().saturating_sub(at_ms) < PTY_LIST_TTL.as_millis() as i64
-}
-
+/// Mark one peer's list stale so the next `pty.list` refreshes it. The last
+/// known sessions stay on screen while that fetch runs.
 pub(crate) fn invalidate_pty_list(peer: &str) {
     if let Ok(mut cache) = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
-        cache.remove(peer);
+        if let Some((at_ms, _)) = cache.get_mut(peer) {
+            *at_ms = 0;
+        }
     }
 }
 
+/// Mark every cached list stale. Used on `remote.nudge` after the network
+/// comes back: the old sessions are still the best guess, but they must be
+/// fetched again. Clearing the map used to force the next `pty.list` to
+/// block on a tunnel that was still reconnecting.
 pub(crate) fn invalidate_all_pty_lists() {
     if let Ok(mut cache) = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
-        cache.clear();
+        for (at_ms, _) in cache.values_mut() {
+            *at_ms = 0;
+        }
     }
 }
 
@@ -602,9 +665,46 @@ mod tests {
     use tokenstat_remote::{handshake_initiator, handshake_responder};
 
     use super::{
-        READ_CHUNK_BYTES, cache_window, parse_handshake, proxy_error_response, pump_local,
-        pump_proxy,
+        PTY_LIST_TTL, READ_CHUNK_BYTES, cache_window, parse_handshake, proxy_error_response,
+        pump_local, pump_proxy, remote_pty_snapshot,
     };
+
+    #[test]
+    fn a_fresh_pty_list_is_served_and_not_marked_stale() {
+        let peer = "aa".repeat(32);
+        let now = 1_000_000;
+        let mut cache = super::PtyListCache::new();
+        cache.insert(
+            peer.clone(),
+            (now, vec![serde_json::json!({"id": "pty-1"})]),
+        );
+        let snap = remote_pty_snapshot(std::slice::from_ref(&peer), &cache, now);
+        assert_eq!(snap.served.len(), 1);
+        assert!(snap.stale.is_empty());
+    }
+
+    #[test]
+    fn a_stale_pty_list_is_still_served() {
+        let peer = "bb".repeat(32);
+        let now = 1_000_000;
+        let stale_at = now - PTY_LIST_TTL.as_millis() as i64;
+        let mut cache = super::PtyListCache::new();
+        cache.insert(
+            peer.clone(),
+            (stale_at, vec![serde_json::json!({"id": "pty-2"})]),
+        );
+        let snap = remote_pty_snapshot(std::slice::from_ref(&peer), &cache, now);
+        assert_eq!(snap.served[0].1.len(), 1);
+        assert_eq!(snap.stale, vec![peer]);
+    }
+
+    #[test]
+    fn a_missing_pty_list_is_stale_and_not_invented() {
+        let peer = "cc".repeat(32);
+        let snap = remote_pty_snapshot(std::slice::from_ref(&peer), &super::PtyListCache::new(), 1);
+        assert!(snap.served.is_empty());
+        assert_eq!(snap.stale, vec![peer]);
+    }
 
     #[test]
     fn remote_cache_offsets_remain_absolute_after_trim() {

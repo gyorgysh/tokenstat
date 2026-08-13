@@ -183,11 +183,6 @@ struct TerminalPane: View {
         } message: {
             Text("The process will be killed. A stopped session can still close in one click.")
         }
-        .alert("Could not start session", isPresented: launchFailed) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(terminals.errorMessage ?? "")
-        }
     }
 
     /// Every session in this folder, mounted at once, with the selected one in
@@ -305,13 +300,6 @@ struct TerminalPane: View {
         Binding(
             get: { workspaces.pendingClose != nil },
             set: { if !$0 { workspaces.pendingClose = nil } }
-        )
-    }
-
-    private var launchFailed: Binding<Bool> {
-        Binding(
-            get: { terminals.errorMessage != nil },
-            set: { if !$0 { terminals.errorMessage = nil } }
         )
     }
 
