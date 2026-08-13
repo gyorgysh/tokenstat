@@ -23,7 +23,14 @@ enum DesktopSyncScheduler {
                 do {
                     let status = try await Bridge.syncScheduleStatus()
                     if status.loggedIn && !status.cliScheduleActive && status.due {
-                        _ = try? await Bridge.sync()
+                        // Re-read due immediately before posting. A Sync now
+                        // that landed while this loop was between ticks would
+                        // otherwise send a second usage POST into the same
+                        // gate the account just accepted.
+                        let again = try await Bridge.syncScheduleStatus()
+                        if again.due {
+                            _ = try? await Bridge.sync()
+                        }
                     }
                 } catch {
                     // The next minute retries. Sync errors belong on the next

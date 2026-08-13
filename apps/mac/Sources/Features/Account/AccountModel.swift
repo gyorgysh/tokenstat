@@ -33,7 +33,16 @@ final class AccountModel {
     var lastSyncSummary: String?
     var syncNotice: String?
     var syncNoticeIsError = false
+    /// After any accepted sync, and after a real 429, the next manual press
+    /// would be refused. Used to disable the button. Not the same as a rate
+    /// limit: success also starts this clock.
     var syncCooldownUntil: Date?
+    /// True only when the last attempt was refused by the plan gate.
+    ///
+    /// A successful sync used to flip `isRateLimited` because it shared this
+    /// cooldown, so Account settings said "synced" while the sidebar footer
+    /// said "Rate limited" for the next five minutes.
+    var lastSyncWasRateLimited = false
 
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
@@ -88,9 +97,12 @@ final class AccountModel {
     /// Whether the last sync was refused by the plan's rate gate, which is a
     /// warning rather than a failure: the sync machinery works, the account
     /// simply may not upload again yet.
+    ///
+    /// A success cooldown must not count. One click is one usage POST, and
+    /// the footer must agree with the settings toast about that.
     var isRateLimited: Bool {
-        if syncCooldownUntil != nil { return true }
-        return syncNotice?.contains("may sync once every") ?? false
+        if lastSyncWasRateLimited { return true }
+        return syncNotice.map(Self.isRateLimitMessage) ?? false
     }
 
     func load() async {
@@ -151,6 +163,7 @@ final class AccountModel {
         }
         errorMessage = nil
         lastSyncSummary = nil
+        clearSyncPacing()
 
         pollTask = Task {
             defer { pollTask = nil }
@@ -258,6 +271,7 @@ final class AccountModel {
             lastSyncSummary = nil
             errorMessage = nil
             authCheckError = nil
+            clearSyncPacing()
             // Drop the signed-in snapshot immediately so the client root can
             // swap to the login door without waiting on a second network call.
             // load() still runs to refresh host defaults and clear any cache.
@@ -292,14 +306,21 @@ final class AccountModel {
         do {
             let result = try await Bridge.sync()
             lastSyncSummary = "Sent \(result.rows) rows for \(result.from) to \(result.to)."
+            lastSyncWasRateLimited = false
             showSyncNotice(lastSyncSummary!, isError: false)
-            startSyncCooldown()
             await load()
+            startSyncCooldown(fromRateLimit: false)
         } catch {
             // Sync failures are action feedback, not account state. Keep them
             // in the transient notice so a plan cooldown cannot pin the footer.
             errorMessage = nil
-            showSyncNotice(error.localizedDescription, isError: true)
+            let message = error.localizedDescription
+            let rateLimited = Self.isRateLimitMessage(message)
+            lastSyncWasRateLimited = rateLimited
+            showSyncNotice(message, isError: !rateLimited)
+            if rateLimited {
+                startSyncCooldown(fromRateLimit: true)
+            }
         }
     }
 
@@ -316,14 +337,53 @@ final class AccountModel {
         }
     }
 
-    private func startSyncCooldown() {
-        let until = Date().addingTimeInterval(5 * 60)
+    /// Seconds the Sync now button stays quiet.
+    ///
+    /// After a success this is only a debounce, capped at five minutes, so a
+    /// free-plan hour does not look like a stuck button. After a real 429 the
+    /// plan interval is used, so a second press is not sent into a gate that
+    /// just refused.
+    private func syncCooldownSeconds(fromRateLimit: Bool) -> TimeInterval {
+        let plan: TimeInterval
+        if let secs = account?.syncInterval, secs > 0 {
+            plan = TimeInterval(secs)
+        } else {
+            plan = 5 * 60
+        }
+        if fromRateLimit {
+            return plan
+        }
+        return min(plan, 5 * 60)
+    }
+
+    private func startSyncCooldown(fromRateLimit: Bool) {
+        let seconds = syncCooldownSeconds(fromRateLimit: fromRateLimit)
+        let until = Date().addingTimeInterval(seconds)
         syncCooldownUntil = until
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(5 * 60))
+            try? await Task.sleep(for: .seconds(seconds))
             guard let self, self.syncCooldownUntil == until else { return }
             self.syncCooldownUntil = nil
+            self.lastSyncWasRateLimited = false
         }
+    }
+
+    private func clearSyncPacing() {
+        syncNotice = nil
+        syncNoticeIsError = false
+        syncCooldownUntil = nil
+        lastSyncWasRateLimited = false
+    }
+
+    /// The words the host uses when the plan gate refuses, plus the usual
+    /// HTTP phrasings a proxy puts in front of the same answer.
+    static func isRateLimitMessage(_ raw: String) -> Bool {
+        let lower = raw.lowercased()
+        return lower.contains("may sync once every")
+            || lower.contains("not accepting a sync")
+            || lower.contains("too many requests")
+            || lower.contains("rate limit")
+            || lower.contains("429")
     }
 }
 

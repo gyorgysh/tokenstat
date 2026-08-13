@@ -90,7 +90,9 @@ struct AccountView: View {
         #endif
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.syncNotice,
-                           severity: model.syncNoticeIsError ? .danger : .success)
+                           severity: model.isRateLimited
+                               ? .warning
+                               : (model.syncNoticeIsError ? .danger : .success))
                 .padding(Theme.Space.l)
         }
         .task { if model.account == nil { await model.load() } }

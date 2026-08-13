@@ -15,6 +15,10 @@ import SwiftUI
 /// update that could not install itself. Success is the accent, rate limiting
 /// is amber, a real failure is red, and all three are the same card so the
 /// footer reads as one language instead of a caption plus a card.
+///
+/// A success also starts a button cooldown so a second press is not sent
+/// into the same gate. That cooldown is not a rate limit, and this card
+/// must not say it is.
 struct SyncCard: View {
     var account: AccountModel
 
@@ -50,10 +54,10 @@ struct SyncCard: View {
                     tint: Theme.accent
                 )
             }
-        } else if account.syncCooldownUntil != nil {
-            // The notice has already faded, but the cooldown still means a
-            // manual Sync now would be refused. Say so instead of letting the
-            // button look broken.
+        } else if account.isRateLimited {
+            // The 429 notice has faded, but the gate is still shut. Keep the
+            // warning until the remembered wait elapses. A success cooldown
+            // does not come through here.
             status(
                 title: "Rate limited",
                 subtitle: "This plan allows a sync every few minutes. Try again shortly.",
