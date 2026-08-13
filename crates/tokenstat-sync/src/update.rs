@@ -130,7 +130,7 @@ fn client() -> Result<reqwest::blocking::Client, UpdateError> {
         .timeout(Duration::from_secs(120))
         .connect_timeout(Duration::from_secs(10))
         .user_agent(USER_AGENT)
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(reqwest::redirect::Policy::none())
         .build()?)
 }
 
