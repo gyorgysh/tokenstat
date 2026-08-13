@@ -55,9 +55,9 @@ settings:
     # upload, and bump alongside MARKETING_VERSION in the same commit on each
     # release.
     #
-    # 22 has been uploaded, so the next upload of any marketing version needs
-    # 23, even if 0.3.6 never reaches the store.
-    CURRENT_PROJECT_VERSION: "23"
+    # 23 has been uploaded, so the next upload of any marketing version needs
+    # 24, even if 0.3.7 never reaches the store.
+    CURRENT_PROJECT_VERSION: "24"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
