@@ -353,8 +353,8 @@ struct Wordmark: View {
 /// The tier, as the silhouette the website puts beside a name.
 ///
 /// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crown for
-/// Patron, a star for Supporter, a chevron badge for Legend. SF Symbols was the first
-/// attempt and it is the wrong call for a badge. `crown.fill` is Apple's crown,
+/// Patron, a star for Supporter, a crest shield for Legend. SF Symbols was the
+/// first attempt and it is the wrong call for a badge. `crown.fill` is Apple's crown,
 /// not this brand's, and a mark that is nearly the website's is worse than one
 /// that is obviously different, because it reads as the same badge rendered badly.
 ///
@@ -460,14 +460,24 @@ struct BadgeShape: Shape {
             path.addLine(to: point(9.3, 8.5))
             path.closeSubpath()
         case .badge:
-            // Left-pointing chevron, same path as Profile.jsx BADGE_PATH.legend.
-            // The open back is what keeps it from reading as a triangle at 12–18px.
-            path.move(to: point(20.8, 3.8))
-            path.addLine(to: point(3.2, 12))
-            path.addLine(to: point(20.8, 20.2))
-            path.addLine(to: point(20.8, 15))
-            path.addLine(to: point(10.4, 12))
-            path.addLine(to: point(20.8, 9))
+            // Crest shield with a chevron cut out of it, same path as
+            // Profile.jsx BADGE_PATH.legend. The cut is wound against the
+            // shield, so it stays open under either fill rule, and at 12px it
+            // closes up and leaves a plain shield rather than mush.
+            path.move(to: point(12, 2.1))
+            path.addLine(to: point(20.4, 4.9))
+            path.addLine(to: point(20.4, 11))
+            path.addCurve(to: point(12, 21.9), control1: point(20.4, 16.1), control2: point(16.8, 20.2))
+            path.addCurve(to: point(3.6, 11), control1: point(7.2, 20.2), control2: point(3.6, 16.1))
+            path.addLine(to: point(3.6, 4.9))
+            path.closeSubpath()
+
+            path.move(to: point(7.9, 9.2))
+            path.addLine(to: point(7.9, 11.9))
+            path.addLine(to: point(12, 16))
+            path.addLine(to: point(16.1, 11.9))
+            path.addLine(to: point(16.1, 9.2))
+            path.addLine(to: point(12, 13.3))
             path.closeSubpath()
         case .seal:
             path.addEllipse(
