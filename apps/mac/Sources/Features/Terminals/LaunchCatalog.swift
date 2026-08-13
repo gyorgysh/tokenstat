@@ -37,6 +37,17 @@ struct LaunchProfile: Identifiable, Sendable {
     /// plainly installed does not flicker in.
     var installDirs: [String] = []
 
+    /// Whether pointing this harness at a local model server means anything.
+    ///
+    /// The host decides what a selection turns into, in
+    /// `tokenstat-host::launcher::model_environment`, and refuses a pair it
+    /// has no contract for. This list only decides whether to offer the
+    /// choice, so a harness missing here costs a menu entry, never a bad
+    /// launch. Keep the two in step when a harness gains local support.
+    static func acceptsLocalModel(_ profileID: String) -> Bool {
+        ["claude_code", "codex", "opencode", "copilot"].contains(profileID)
+    }
+
     static let all: [LaunchProfile] = [
         LaunchProfile(
             id: "shell",

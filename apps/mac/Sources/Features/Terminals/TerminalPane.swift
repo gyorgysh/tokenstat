@@ -83,6 +83,13 @@ struct TerminalPane: View {
         peer == nil ? launcher.available : launcher.remoteAvailable
     }
 
+    /// The harnesses a local model selection means anything to. With none of
+    /// them installed the model control has nothing to act on, so it is not
+    /// drawn at all.
+    private var modelProfiles: [LaunchProfile] {
+        launcherProfiles.filter { LaunchProfile.acceptsLocalModel($0.id) }
+    }
+
     /// Size of the terminal area, measured rather than assumed.
     @State private var paneSize: CGSize = .zero
 
@@ -446,6 +453,15 @@ struct TerminalPane: View {
             }
 
             Spacer()
+
+            // What the next launch will do, on the row that launches it. Both
+            // apply to every way of starting a session, including this strip's
+            // own menu, so they sit beside it rather than on a surface that
+            // disappears once anything is running.
+            if !modelProfiles.isEmpty {
+                LocalModelControl(folder: folder, peer: peer)
+            }
+            BypassPermissionsControl(folder: folder, workspaces: workspaces)
         }
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, 4)
@@ -465,13 +481,21 @@ struct TerminalPane: View {
         let args = workspaces.bypassPermissions(for: folder.id)
             ? profile.args + profile.bypassArgs
             : profile.args
+        // The strip's own menu honours the model selection too. It used to
+        // ignore it, so the same harness started on a different model
+        // depending on which button opened it.
+        let selection = LaunchProfile.acceptsLocalModel(profile.id)
+            ? LocalModelSelection.stored(for: folder.id)
+            : nil
         Task {
             await terminals.start(
                 workspace: folder,
                 command: profile.command,
                 args: args,
                 rows: grid.rows,
-                cols: grid.cols
+                cols: grid.cols,
+                modelProvider: selection?.provider,
+                modelID: selection?.model
             )
         }
     }
@@ -759,35 +783,16 @@ private struct LaunchSurface: View {
     /// still empty and this whole surface is still on screen, so without this
     /// the click produced nothing at all and people clicked again.
     @State private var launching: String?
-    @State private var localProviders: [LocalProvider] = []
-    @State private var selectedModelKey = ""
-    @State private var loadingLocalModels = false
 
     private var modelProfiles: [LaunchProfile] {
-        profiles.filter { ["claude_code", "codex", "opencode"].contains($0.id) }
+        profiles.filter { LaunchProfile.acceptsLocalModel($0.id) }
     }
 
-    private var modelChoices: [(key: String, label: String, provider: String, model: String)] {
-        localProviders.flatMap { provider -> [(key: String, label: String, provider: String, model: String)] in
-            guard provider.available,
-                  modelPeer != nil || LocalProviderPreference.isEnabled(provider.id)
-            else { return [] }
-            return provider.models.map { model in
-                (
-                    key: "\(provider.id):\(model.id)",
-                    label: "\(provider.name): \(model.name)",
-                    provider: provider.id,
-                    model: model.id
-                )
-            }
-        }
-    }
-
+    /// The workspace's stored selection. The list itself lives in the chrome
+    /// row's control, which owns loading it and is on screen whether or not
+    /// this surface is.
     private var selectedModel: (provider: String, model: String)? {
-        guard let choice = modelChoices.first(where: { $0.key == selectedModelKey }) else {
-            return nil
-        }
-        return (choice.provider, choice.model)
+        LocalModelSelection.stored(for: folder.id)
     }
 
     var body: some View {
@@ -809,19 +814,11 @@ private struct LaunchSurface: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
 
-                // In the default view, not buried under the grid: a setting
-                // nobody can see is a setting that does not exist. The
-                // dividers keep it from blending into the intro and the grid.
-                VStack(spacing: Theme.Space.s) {
-                    Divider()
-                    bypassToggle
-                    Divider()
-                }
-                .frame(maxWidth: 460, alignment: .leading)
-
-                if !modelProfiles.isEmpty {
-                    modelPicker
-                }
+                // Both settings live in the strip above, where they stay
+                // reachable once a session is running. This line is what is
+                // left of them here: enough to find them, without a column of
+                // controls between the intro and the tiles.
+                settingsHint
 
                 LazyVGrid(
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
@@ -850,23 +847,18 @@ private struct LaunchSurface: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
-        .task {
-            guard !modelProfiles.isEmpty else { return }
-            loadingLocalModels = true
-            defer { loadingLocalModels = false }
-            do {
-                localProviders = if let modelPeer {
-                    try await Bridge.localModels(onPeer: modelPeer)
-                } else {
-                    try await Bridge.localModels()
-                }
-                if selectedModelKey.isEmpty {
-                    selectedModelKey = WorkspacePreference.localModel(for: folder.id) ?? ""
-                }
-            } catch {
-                localProviders = []
-            }
-        }
+    }
+
+    /// Where the launch settings went, in one line.
+    private var settingsHint: some View {
+        Label(
+            modelProfiles.isEmpty
+                ? "Permission bypass is in the bar above."
+                : "Model and permission bypass are in the bar above.",
+            systemImage: "arrow.up"
+        )
+        .font(.caption)
+        .foregroundStyle(.tertiary)
     }
 
     /// A slim line instead of a full card, so the launcher content below stays
@@ -894,57 +886,6 @@ private struct LaunchSurface: View {
         )
     }
 
-    private var bypassToggle: some View {
-        Toggle(isOn: Binding(
-            get: { workspaces.bypassPermissions(for: folder.id) },
-            set: { workspaces.setBypassPermissions($0, for: folder.id) }
-        )) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Bypass permission prompts")
-                    .font(.callout.weight(.medium))
-                Text("Agents run without asking for permission. Remembered for this workspace. Only agents with a bypass flag are affected.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .toggleStyle(.checkbox)
-        .frame(maxWidth: 460, alignment: .leading)
-    }
-
-    private var modelPicker: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack {
-                Text("Local model")
-                    .font(.callout.weight(.medium))
-                Spacer()
-                if loadingLocalModels {
-                    ProgressView().controlSize(.small)
-                }
-            }
-            if modelChoices.isEmpty {
-                Text("No local models discovered. Start LM Studio or Ollama, then open Account to refresh.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Picker("Local model", selection: $selectedModelKey) {
-                    Text("Use each tool's default").tag("")
-                    ForEach(modelChoices, id: \.key) { choice in
-                        Text(choice.label).tag(choice.key)
-                    }
-                }
-                .pickerStyle(.menu)
-                .onChange(of: selectedModelKey) { _, key in
-                    WorkspacePreference.setLocalModel(key, for: folder.id)
-                }
-                Text("Claude uses LM Studio's Anthropic-compatible endpoint. Codex and OpenCode receive an explicit local provider and model.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: 460, alignment: .leading)
-    }
-
     private func launchButton(_ profile: LaunchProfile) -> some View {
         let selection = modelProfiles.contains(where: { $0.id == profile.id }) ? selectedModel : nil
         return LaunchTile(
@@ -957,7 +898,6 @@ private struct LaunchSurface: View {
                 let args = workspaces.bypassPermissions(for: folder.id)
                     ? profile.args + profile.bypassArgs
                     : profile.args
-                let modelArgs = modelArguments(for: profile, selection: selection)
                 let session = terminals.begin(
                     workspace: folder,
                     command: profile.command,
@@ -966,9 +906,14 @@ private struct LaunchSurface: View {
                 )
                 workspaces.showTerminal(in: folder.id)
                 Task {
+                    // The selection's own arguments are added by the host,
+                    // beside the environment half of the same contract. A
+                    // front end that mapped one and not the other could point
+                    // a session at a local server and still ask it for a
+                    // cloud model.
                     _ = await terminals.complete(
                         session,
-                        args: args + modelArgs,
+                        args: args,
                         rows: grid.rows,
                         cols: grid.cols,
                         modelProvider: selection?.provider,
@@ -978,23 +923,6 @@ private struct LaunchSurface: View {
                 }
             }
         )
-    }
-
-    private func modelArguments(
-        for profile: LaunchProfile,
-        selection: (provider: String, model: String)?
-    ) -> [String] {
-        guard let selection else { return [] }
-        switch profile.id {
-        case "claude_code":
-            return ["--model", selection.model]
-        case "codex":
-            return ["--oss", "--local-provider", selection.provider, "--model", selection.model]
-        case "opencode":
-            return ["--model", "\(selection.provider)/\(selection.model)"]
-        default:
-            return []
-        }
     }
 
     private func utilityButton(

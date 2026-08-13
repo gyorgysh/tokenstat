@@ -259,10 +259,19 @@ final class TerminalsModel {
         command: String,
         args: [String],
         rows: Int = 24,
-        cols: Int = 80
+        cols: Int = 80,
+        modelProvider: String? = nil,
+        modelID: String? = nil
     ) async -> TerminalSession? {
         let session = begin(workspace: workspace, command: command, rows: rows, cols: cols)
-        return await complete(session, args: args, rows: rows, cols: cols)
+        return await complete(
+            session,
+            args: args,
+            rows: rows,
+            cols: cols,
+            modelProvider: modelProvider,
+            modelID: modelID
+        )
     }
 
     /// Kill the process and forget the session. The host's buffer goes with it.
