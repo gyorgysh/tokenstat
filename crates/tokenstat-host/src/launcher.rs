@@ -259,15 +259,10 @@ pub(crate) fn model_environment(
         ("claude", Some("ollama")) => {
             Err("Ollama does not provide the Anthropic-compatible endpoint Claude needs".into())
         }
-        ("codex" | "opencode", Some("lmstudio")) => Ok(vec![
-            ("OPENAI_BASE_URL".into(), "http://127.0.0.1:1234/v1".into()),
-            ("OPENAI_API_KEY".into(), "lmstudio".into()),
-        ]),
-        ("codex" | "opencode", Some("ollama")) => Ok(vec![
-            ("OPENAI_BASE_URL".into(), "http://127.0.0.1:11434/v1".into()),
-            ("OPENAI_API_KEY".into(), "ollama".into()),
-            ("OLLAMA_HOST".into(), "http://127.0.0.1:11434".into()),
-        ]),
+        // These CLIs receive their local provider through explicit launch
+        // arguments. Their private config/auth handling must not be overridden
+        // by guessed OPENAI_* variables.
+        ("codex" | "opencode", Some("lmstudio" | "ollama")) => Ok(Vec::new()),
         (_, Some(provider)) => Err(format!(
             "local model selection is not configured for {executable} with {provider}"
         )),
@@ -509,5 +504,12 @@ mod tests {
         let error = model_environment("codex", Some("ollama"), Some("llama\n3.2"))
             .expect_err("invalid model");
         assert!(error.contains("control characters"));
+    }
+
+    #[test]
+    fn codex_local_providers_do_not_get_guessed_environment() {
+        let env =
+            model_environment("codex", Some("ollama"), Some("llama3.2")).expect("environment");
+        assert!(env.is_empty());
     }
 }

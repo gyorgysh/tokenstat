@@ -936,7 +936,7 @@ private struct LaunchSurface: View {
                 .onChange(of: selectedModelKey) { _, key in
                     WorkspacePreference.setLocalModel(key, for: folder.id)
                 }
-                Text("Claude uses LM Studio's Anthropic-compatible endpoint. Codex and OpenCode use the OpenAI-compatible endpoint.")
+                Text("Claude uses LM Studio's Anthropic-compatible endpoint. Codex and OpenCode receive an explicit local provider and model.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -957,7 +957,7 @@ private struct LaunchSurface: View {
                 let args = workspaces.bypassPermissions(for: folder.id)
                     ? profile.args + profile.bypassArgs
                     : profile.args
-                let modelArgs = selection.map { ["--model", $0.model] } ?? []
+                let modelArgs = modelArguments(for: profile, selection: selection)
                 let session = terminals.begin(
                     workspace: folder,
                     command: profile.command,
@@ -978,6 +978,23 @@ private struct LaunchSurface: View {
                 }
             }
         )
+    }
+
+    private func modelArguments(
+        for profile: LaunchProfile,
+        selection: (provider: String, model: String)?
+    ) -> [String] {
+        guard let selection else { return [] }
+        switch profile.id {
+        case "claude_code":
+            return ["--model", selection.model]
+        case "codex":
+            return ["--oss", "--local-provider", selection.provider, "--model", selection.model]
+        case "opencode":
+            return ["--model", "\(selection.provider)/\(selection.model)"]
+        default:
+            return []
+        }
     }
 
     private func utilityButton(
