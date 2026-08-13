@@ -690,14 +690,45 @@ fn connect_relay_to(
         .uri()
         .port_u16()
         .unwrap_or(if is_tls { 443 } else { 80 });
-    let addr = resolve_relay_addrs(&host_for_addr, port, CONNECT_TIMEOUT)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| RemoteError::Tunnel(format!("{host_for_addr} resolves to nothing")))?;
-    if let Some(session) = session {
-        ensure_running(session)?;
+    // IPv4 first: a dual-stack lookup often returns a blackholed AAAA,
+    // and using only that address spent the whole budget on a path
+    // that cannot work. Still try every address inside the budget.
+    let addrs = prefer_ipv4(resolve_relay_addrs(&host_for_addr, port, CONNECT_TIMEOUT)?);
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    let count = addrs.len();
+    let mut last_err = None;
+    for (i, addr) in addrs.into_iter().enumerate() {
+        if let Some(session) = session {
+            ensure_running(session)?;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        let left = (count - i) as u32;
+        let slice = remaining / left.max(1);
+        match handshake_relay(endpoint, addr, slice, session) {
+            Ok(pair) => return Ok(pair),
+            Err(error) => last_err = Some(error),
+        }
     }
-    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).map_err(RemoteError::Io)?;
+    Err(last_err
+        .unwrap_or_else(|| RemoteError::Tunnel(format!("{host_for_addr} resolves to nothing"))))
+}
+
+fn prefer_ipv4(mut addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    addrs.sort_by_key(|addr| if addr.is_ipv4() { 0 } else { 1 });
+    addrs
+}
+
+fn handshake_relay(
+    endpoint: &str,
+    addr: SocketAddr,
+    tcp_timeout: Duration,
+    session: Option<&TunnelSession>,
+) -> Result<(Socket, TcpStream), RemoteError> {
+    let request = endpoint.into_client_request().map_err(tunnel_error)?;
+    let stream = TcpStream::connect_timeout(&addr, tcp_timeout).map_err(RemoteError::Io)?;
     stream.set_nodelay(true).map_err(RemoteError::Io)?;
     stream
         .set_read_timeout(Some(HELLO_TIMEOUT))
