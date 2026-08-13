@@ -25,7 +25,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokenstat_remote::{Connection, StreamWriter};
@@ -515,8 +515,10 @@ pub(crate) fn write_pty_input(peer: &str, session: &str, bytes: &[u8]) -> Result
 /// fast, so a short cache absorbs the polling.
 const PTY_LIST_TTL: Duration = Duration::from_secs(30);
 
-/// Per-peer cached pty lists: when they were fetched and the sessions.
-type PtyListCache = HashMap<String, (Instant, Vec<Value>)>;
+/// Per-peer cached pty lists: wall-clock fetch time and the sessions.
+/// `Instant` does not advance while a Mac sleeps, so an empty list fetched
+/// just before the lid closed stayed "fresh" after wake.
+type PtyListCache = HashMap<String, (i64, Vec<Value>)>;
 
 static PTY_LISTS: OnceLock<Mutex<PtyListCache>> = OnceLock::new();
 
@@ -529,7 +531,7 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
             let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
             guard
                 .get(&peer)
-                .filter(|(at, _)| at.elapsed() < PTY_LIST_TTL)
+                .filter(|(at_ms, _)| pty_list_is_fresh(*at_ms))
                 .map(|(_, items)| items.clone())
         };
         let items = match cached {
@@ -551,7 +553,7 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
                 cache
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .insert(peer.clone(), (Instant::now(), items.clone()));
+                    .insert(peer.clone(), (pty_list_now_ms(), items.clone()));
                 items
             }
         };
@@ -565,9 +567,23 @@ pub(crate) fn remote_pty_lists() -> Vec<Value> {
 
 /// Drop a peer's cached pty list, so a session that just spawned or closed on
 /// it is seen immediately instead of after the cache TTL.
+fn pty_list_now_ms() -> i64 {
+    jiff::Timestamp::now().as_millisecond()
+}
+
+fn pty_list_is_fresh(at_ms: i64) -> bool {
+    pty_list_now_ms().saturating_sub(at_ms) < PTY_LIST_TTL.as_millis() as i64
+}
+
 pub(crate) fn invalidate_pty_list(peer: &str) {
     if let Ok(mut cache) = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
         cache.remove(peer);
+    }
+}
+
+pub(crate) fn invalidate_all_pty_lists() {
+    if let Ok(mut cache) = PTY_LISTS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        cache.clear();
     }
 }
 

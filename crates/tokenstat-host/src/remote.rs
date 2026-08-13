@@ -452,10 +452,12 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
         eprintln!("remote: tunnel is enabled but unavailable: {error}");
         set_tunnel_state(|state| {
             state.connected = false;
-            state.error = Some(error);
+            state.error = Some(error.clone());
         });
         tunnel_running().store(false, Ordering::Release);
-        retry_start_later(Arc::clone(&session));
+        if !is_permanent_start_error(&error) {
+            retry_start_later(Arc::clone(&session));
+        }
         return;
     }
     let identity = match MachineIdentity::load_or_create() {
@@ -475,14 +477,16 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             set_tunnel_state(|state| {
                 state.registered = false;
                 state.connected = false;
-                state.error = Some(error);
+                state.error = Some(error.clone());
             });
             tunnel_running().store(false, Ordering::Release);
             // A daemon that starts before the network is up, or while the
             // account host is having a minute, used to stay off until somebody
             // opened Machines and toggled the switch. Remote reach is meant to
             // be the state of the machine, not the state of the last attempt.
-            retry_start_later(session);
+            if !is_permanent_start_error(&error) {
+                retry_start_later(session);
+            }
             return;
         }
     };
@@ -588,6 +592,16 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
 /// thing that was wrong stopped being wrong. One attempt a minute is nothing
 /// to an account host, and five minutes of "offline" is a long time to somebody
 /// looking at their own laptop.
+fn is_permanent_start_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("sign in")
+        || lower.contains("paid-plan")
+        || lower.contains("not on this plan")
+        || lower.contains("not_on_this_plan")
+        || lower.contains("no longer includes remote")
+        || lower.contains("device limit")
+}
+
 fn retry_start_later(session: Arc<Mutex<Session>>) {
     static RETRYING: AtomicBool = AtomicBool::new(false);
     if RETRYING.swap(true, Ordering::AcqRel) {
@@ -1398,6 +1412,7 @@ fn nudge() -> Result<Value, String> {
     // back with this one is dialled at once rather than waiting out a backoff
     // it earned while the network was down.
     clear_all_unreachable();
+    crate::remote_stream::invalidate_all_pty_lists();
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
         session.nudge();
         return Ok(json!({"nudged": true}));
@@ -1627,6 +1642,17 @@ mod tests {
         assert_eq!(token, "tsk_deadbeef_secret");
         assert_eq!(registers, 1);
         assert_eq!(mints, 2);
+    }
+
+    #[test]
+    fn signed_out_is_not_retried_as_a_network_blip() {
+        assert!(is_permanent_start_error(
+            "sign in to tokenstat.ai before enabling remote reach"
+        ));
+        assert!(is_permanent_start_error(
+            "remote reach is a paid-plan feature"
+        ));
+        assert!(!is_permanent_start_error("connection refused"));
     }
 
     /// The floor has to outlast the app's own retry for the cache to suppress
