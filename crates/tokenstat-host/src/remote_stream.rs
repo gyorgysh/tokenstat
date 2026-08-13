@@ -328,12 +328,16 @@ fn pty_subscriptions() -> &'static Mutex<HashMap<String, Arc<Mutex<PtySubscripti
 pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
     let key = format!("{peer}:{session}");
     {
-        let map = match pty_subscriptions().lock() {
+        let mut map = match pty_subscriptions().lock() {
             Ok(map) => map,
             Err(_) => return,
         };
-        if map.contains_key(&key) {
-            return;
+        if let Some(existing) = map.get(&key) {
+            let active = existing.lock().ok().is_some_and(|guard| guard.active);
+            if active {
+                return;
+            }
+            map.remove(&key);
         }
     }
     let cache = Arc::new(Mutex::new(PtySubscription {
@@ -356,9 +360,16 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
     let peer = peer.to_string();
     let session = session.to_string();
     std::thread::spawn(move || {
-        let fail = |cache: &Arc<Mutex<PtySubscription>>| {
+        let forget = |cache: &Arc<Mutex<PtySubscription>>| {
             if let Ok(mut guard) = cache.lock() {
                 guard.active = false;
+                guard.writer = None;
+                guard.buffer.clear();
+            }
+            if let Ok(mut map) = pty_subscriptions().lock()
+                && map.get(&key).is_some_and(|entry| Arc::ptr_eq(entry, cache))
+            {
+                map.remove(&key);
             }
         };
         let params = json!({"kind": "pty.subscribe", "id": session});
@@ -367,25 +378,25 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                 Ok(result) => result,
                 Err(error) => {
                     eprintln!("remote pty: subscribe to {session} failed: {error}");
-                    fail(&cache);
+                    forget(&cache);
                     return;
                 }
             };
         let Some(token) = result.get("token").and_then(Value::as_str) else {
-            fail(&cache);
+            forget(&cache);
             return;
         };
         let mut connection = match crate::remote::dial_peer(&peer) {
             Ok(connection) => connection,
             Err(error) => {
                 eprintln!("remote pty: dial for {session} failed: {error}");
-                fail(&cache);
+                forget(&cache);
                 return;
             }
         };
         let handshake = json!({"stream": token});
         if connection.send(handshake.to_string().as_bytes()).is_err() {
-            fail(&cache);
+            forget(&cache);
             return;
         }
         let (reader, writer) = connection.split();
@@ -420,11 +431,8 @@ pub(crate) fn ensure_pty_subscription(peer: &str, session: &str) {
                 Err(_) => break,
             }
         }
-        if let Ok(mut guard) = cache.lock() {
-            guard.active = false;
-            guard.writer = None;
-        }
         reader.close();
+        forget(&cache);
     });
 }
 
