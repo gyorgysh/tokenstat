@@ -483,8 +483,37 @@ fn transcript_touched(harness: &str, cwd: &str) -> Option<Duration> {
         "codex" => return None,
         _ => return None,
     };
-    let newest = newest_write(&dir.to_string_lossy(), 1)?;
+    let newest = newest_write_cached(&dir.to_string_lossy(), 1)?;
     Some(SystemTime::now().duration_since(newest).unwrap_or_default())
+}
+
+/// The 1 Hz sampler used to walk the same Claude project dir once per live
+/// session. Share one mtime for a short tick so four Claudes in one folder
+/// do not do four `read_dir`s.
+fn newest_write_cached(dir: &str, depth: usize) -> Option<SystemTime> {
+    struct Cached {
+        at: Instant,
+        value: Option<SystemTime>,
+    }
+    static CACHE: OnceLock<Mutex<HashMap<String, Cached>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(hit) = guard.get(dir)
+        && hit.at.elapsed() < Duration::from_millis(900)
+    {
+        return hit.value;
+    }
+    let value = newest_write(dir, depth);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(
+            dir.to_string(),
+            Cached {
+                at: Instant::now(),
+                value,
+            },
+        );
+    }
+    value
 }
 
 /// Newest modification time under a directory, descending at most `depth`
