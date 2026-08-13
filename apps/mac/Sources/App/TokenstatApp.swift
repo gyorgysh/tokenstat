@@ -62,7 +62,15 @@ struct TokenstatApp: App {
         // renders every value as unknown, and on a platform with no CLI and no
         // daemon the bundled book is the only one there will be until a refresh
         // lands. Never replaces a fetched book, so this is safe every launch.
-        Task { await Bridge.pricingSeed() }
+        Task {
+            await Bridge.pricingSeed()
+            // Seed only copies the bundled book when none exists. A machine
+            // with no CLI still needs a fetch, or Home prices against that
+            // snapshot until someone types `tokenstat pricing --refresh`.
+            // hostd and DesktopSyncScheduler keep going after this. One shot
+            // here covers iPhone and iPad, which have neither loop.
+            _ = try? await Bridge.pricingRefresh()
+        }
         #if os(macOS)
         DesktopSyncScheduler.start()
         #endif
