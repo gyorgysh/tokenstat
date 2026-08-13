@@ -166,7 +166,7 @@ struct MachinesView: View {
             EmptyState(
                 symbol: "iphone.and.arrow.forward",
                 title: "A phone does not need this",
-                message: "Sign in on the phone with the same account. It sees usage without remote reach. Pairing another computer for folders and terminals is on Supporter."
+                message: "Sign in on the phone with the same account. It sees usage without remote reach. Pairing another computer for folders and terminals is on Patron."
             ) {
                 Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
                     .buttonStyle(SecondaryButtonStyle())
@@ -300,10 +300,10 @@ struct MachinesView: View {
                         VStack(alignment: .leading, spacing: Theme.Space.s) {
                             Text(model.account?.signedIn == true
                                 ? "This computer and a phone already share the account."
-                                : "Remote reach needs a signed-in Supporter or Patron account.")
+                                : "Remote reach needs a signed-in Patron account.")
                                 .font(.callout.weight(.medium))
                             Text(model.account?.signedIn == true
-                                ? "Free covers two devices, so you can see usage from a computer and a phone. Opening folders and terminals on this Mac from another device is on Supporter."
+                                ? "Free and Supporter add up usage from every device you link. Opening folders and terminals on this Mac from another device is on Patron."
                                 : "Sign in with an account that includes it, then turn the switch on.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

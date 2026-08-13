@@ -24,7 +24,7 @@ struct ClientWorkspacesView: View {
     private var remoteAllowed: Bool {
         if let remote = account.account?.canRemote { return remote }
         let tier = account.account?.tier?.lowercased()
-        return ["supporter", "patron", "legend"].contains(tier)
+        return ["patron", "legend"].contains(tier)
     }
 
     var body: some View {
@@ -52,10 +52,10 @@ struct ClientWorkspacesView: View {
                     if !remoteAllowed, account.signedIn {
                         ClientEmptyState(
                             kind: .needsAccount,
-                            title: "Remote is on Supporter",
-                            message: "This phone already shares the account. Free covers two "
-                                + "devices. Opening folders and terminals on the computer "
-                                + "is a paid feature.",
+                            title: "Remote is on Patron",
+                            message: "This phone already shares the account and sees the usage "
+                                + "from every device on it. Opening folders and terminals on "
+                                + "the computer is a paid feature.",
                             actionTitle: "See plans",
                             action: {
                                 if let url = URL(string: "https://tokenstat.ai/pricing") {

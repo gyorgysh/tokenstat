@@ -171,7 +171,7 @@ struct ClientDevicesView: View {
 
     private var planRemoteLine: String? {
         if account.account?.canRemote == false {
-            return "Remote control is on Supporter. Usage from every linked device is already here."
+            return "Remote control is on Patron. Usage from every linked device is already here."
         }
         return nil
     }
