@@ -23,6 +23,7 @@
 //! The assertion is `PreventUserIdleSystemSleep`. Closing the lid is still
 //! the user's choice. Nothing here calls `pmset` or holds a Keepresso lease.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -82,6 +83,12 @@ pub(crate) fn should_hold(streams: u32, grace_until_ms: i64, now_ms: i64) -> boo
     streams > 0 || grace_until_ms > now_ms
 }
 
+/// `should_hold`, plus the worker that expires grace. Without that
+/// thread, a true here would lock sleep until hostd restarts.
+pub(crate) fn may_assert(worker: bool, streams: u32, grace_until_ms: i64, now_ms: i64) -> bool {
+    worker && should_hold(streams, grace_until_ms, now_ms)
+}
+
 /// Look at one inbound request line and, if it is workspace / pty work,
 /// extend the grace window.
 pub(crate) fn note_inbound(line: &str) {
@@ -102,13 +109,13 @@ pub(crate) fn note_inbound(line: &str) {
 }
 
 fn note_work() {
+    let _ = ensure_worker();
     {
         let mut inner = lock_inner();
         inner.grace_until_ms = now_ms().saturating_add(GRACE_MS);
         apply(&mut inner);
     }
     state().poke.notify_one();
-    ensure_worker();
 }
 
 /// Held for the life of an inbound `pty.subscribe` pump. The far side is
@@ -122,13 +129,13 @@ pub(crate) struct StreamHold {
 #[cfg(feature = "local-host")]
 impl StreamHold {
     pub(crate) fn acquire() -> Self {
+        let _ = ensure_worker();
         {
             let mut inner = lock_inner();
             inner.streams = inner.streams.saturating_add(1);
             apply(&mut inner);
         }
         state().poke.notify_one();
-        ensure_worker();
         Self { _private: () }
     }
 }
@@ -146,7 +153,12 @@ impl Drop for StreamHold {
 }
 
 fn apply(inner: &mut Inner) {
-    let hold = should_hold(inner.streams, inner.grace_until_ms, now_ms());
+    let hold = may_assert(
+        worker_started(),
+        inner.streams,
+        inner.grace_until_ms,
+        now_ms(),
+    );
     if hold {
         take_assertion(inner);
     } else {
@@ -154,13 +166,43 @@ fn apply(inner: &mut Inner) {
     }
 }
 
-fn ensure_worker() {
-    static START: std::sync::Once = std::sync::Once::new();
-    START.call_once(|| {
-        let _ = std::thread::Builder::new()
-            .name("tokenstat-keep-awake".into())
-            .spawn(worker);
-    });
+fn worker_started() -> bool {
+    worker_flag().load(Ordering::Acquire)
+}
+
+fn worker_flag() -> &'static AtomicBool {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    &STARTED
+}
+
+/// Start the grace-expiry thread if it is not already running.
+///
+/// The flag is set only after spawn succeeds. A `Once` that swallowed a
+/// failed spawn would never retry, and an assertion taken on this thread
+/// would then live until hostd restarted. Concurrent callers wait on the
+/// gate so nobody treats a still-spawning worker as live.
+fn ensure_worker() -> bool {
+    static GATE: Mutex<()> = Mutex::new(());
+    if worker_started() {
+        return true;
+    }
+    let _gate = GATE.lock().unwrap_or_else(PoisonError::into_inner);
+    if worker_started() {
+        return true;
+    }
+    match std::thread::Builder::new()
+        .name("tokenstat-keep-awake".into())
+        .spawn(worker)
+    {
+        Ok(_) => {
+            worker_flag().store(true, Ordering::Release);
+            true
+        }
+        Err(error) => {
+            eprintln!("keep-awake: worker failed to start: {error}");
+            false
+        }
+    }
 }
 
 fn worker() {
@@ -289,7 +331,7 @@ mod macos {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRACE_MS, counts_as_work, should_hold};
+    use super::{GRACE_MS, counts_as_work, may_assert, should_hold};
 
     #[test]
     fn list_polls_do_not_count() {
@@ -331,6 +373,15 @@ mod tests {
         assert!(should_hold(0, 5_000, 1_000));
         assert!(!should_hold(0, 1_000, 1_000));
         assert!(!should_hold(0, 0, 1_000));
+    }
+
+    #[test]
+    fn assertion_requires_a_worker() {
+        assert!(!may_assert(false, 1, 5_000, 1_000));
+        assert!(!may_assert(false, 0, 5_000, 1_000));
+        assert!(may_assert(true, 1, 0, 1_000));
+        assert!(may_assert(true, 0, 5_000, 1_000));
+        assert!(!may_assert(true, 0, 0, 1_000));
     }
 
     #[test]

@@ -40,8 +40,8 @@ struct ClientOnboarding: View {
             art: .heatmap,
             title: "Your AI Heatmap",
             body: "Every day, every model, every tool, as one year you can "
-                + "read. Tokens and list-rate value stay on the devices that "
-                + "counted them."
+                + "read. Counts stay on the devices that made them unless "
+                + "you opt to sync totals."
         ),
         OnboardingPage(
             art: .devices,
@@ -66,8 +66,8 @@ struct ClientOnboarding: View {
             art: .workspaces,
             title: "Workspaces",
             body: "The folders you registered on the Mac. Browse the tree, "
-                + "read a file, stage, commit, and push. Nothing happens that "
-                + "you did not ask for."
+                + "read a file, save an edit. Nothing happens that you did "
+                + "not ask for."
         ),
         OnboardingPage(
             art: .sessions,
@@ -87,8 +87,8 @@ struct ClientOnboarding: View {
             title: "We never see your files",
             body: "The tunnel is end to end encrypted. We cannot read the "
                 + "files you open or the terminals you type in. Counting "
-                + "happens on your machine. Only totals you opt to sync ever "
-                + "leave it."
+                + "happens on your machine. Only aggregate totals you opt to "
+                + "sync are eligible for the account."
         ),
         OnboardingPage(
             art: .control,
@@ -132,8 +132,7 @@ struct ClientOnboarding: View {
         .padding(.top, Theme.Space.s)
     }
 
-    /// How far through, as a bar. Ten dots would be a second piece of chrome
-    /// and a promise that this is long. The fill is the honest remaining.
+    /// How far through, as a bar. A bar scales to ten pages. Dots do not.
     private var progress: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
