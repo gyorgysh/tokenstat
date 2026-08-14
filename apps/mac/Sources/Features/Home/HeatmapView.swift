@@ -182,7 +182,8 @@ struct HeatmapView: View {
                             cornerRadius: corner
                         )
                         let level = min(max(day.level, 0), heat.count - 1)
-                        context.fill(path, with: .color(heat[level]))
+                        let fill = heat[level].opacity(day.isLocked ? 0.28 : 1)
+                        context.fill(path, with: .color(fill))
                     }
                 }
             }
@@ -216,7 +217,9 @@ struct HeatmapView: View {
                 .gesture(
                     SpatialTapGesture()
                         .onEnded { event in
-                            guard let slot = layout.slot(at: event.location, in: calendar.rows) else {
+                            guard let slot = layout.slot(at: event.location, in: calendar.rows),
+                                  !slot.day.isLocked
+                            else {
                                 return
                             }
                             onSelect?(slot.day)
@@ -253,7 +256,7 @@ struct HeatmapView: View {
         var out: [(day: HeatCell, row: Int, column: Int)] = []
         for (row, cells) in calendar.rows.enumerated() {
             for (column, day) in cells.enumerated() {
-                if let day {
+                if let day, !day.isLocked {
                     out.append((day, row, column))
                 }
             }
@@ -280,32 +283,37 @@ struct HeatmapView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: Theme.Space.s) {
-            if let day = hovered?.day {
-                Text("\(day.date)")
-                    .font(Theme.numeric(11))
-                    .foregroundStyle(.secondary)
-                Text(formatSpend(day.value))
-                    .font(Theme.numeric(11, weight: .medium))
-            } else {
-                Text("\(calendar.first) to \(calendar.last)")
-                    .font(Theme.numeric(11))
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if calendar.isHistoryLocked {
+                HistoryLockBanner(days: calendar.historyDays ?? 30)
+            }
+            HStack(spacing: Theme.Space.s) {
+                if let day = hovered?.day {
+                    Text("\(day.date)")
+                        .font(Theme.numeric(11))
+                        .foregroundStyle(.secondary)
+                    Text(formatSpend(day.value))
+                        .font(Theme.numeric(11, weight: .medium))
+                } else {
+                    Text("\(calendar.first) to \(calendar.last)")
+                        .font(Theme.numeric(11))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                Text("Less")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                ForEach(0 ..< Theme.heat.count, id: \.self) { level in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Theme.heat[level])
+                        .frame(width: 9, height: 9)
+                }
+                Text("More")
+                    .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
-
-            Spacer()
-
-            Text("Less")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            ForEach(0 ..< Theme.heat.count, id: \.self) { level in
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(Theme.heat[level])
-                    .frame(width: 9, height: 9)
-            }
-            Text("More")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
         }
     }
 
@@ -367,7 +375,7 @@ private struct GridLayout {
         let localX = point.x - CGFloat(column) * stride
         let localY = point.y - CGFloat(row) * stride
         guard localX <= cell, localY <= cell else { return nil }
-        guard let day = rows[row][column] else { return nil }
+        guard let day = rows[row][column], !day.isLocked else { return nil }
         return HoveredSlot(day: day, row: row, column: column)
     }
 }

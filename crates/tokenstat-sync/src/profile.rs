@@ -760,15 +760,32 @@ pub struct SeriesRow {
 /// Not logged in is a plain error, not a panic and not an empty result: an
 /// empty grid and "we could not ask" are different answers and the caller has
 /// to be able to tell them apart.
+/// Intensity-only day for a locked Free year.
+///
+/// Exact counts stay off the wire. A shade is enough to keep the year shape
+/// from reading as a month of empty squares.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct LockedDay {
+    pub d: String,
+    #[serde(default)]
+    pub level: u8,
+}
+
 pub struct SeriesResult {
     pub rows: Vec<SeriesRow>,
     /// The window the service actually covered.
     ///
-    /// Not the window that was asked for. A plan's history span narrows it, and
-    /// a caller that drew the days outside it would be showing days it was
-    /// never sent as days on which nothing happened.
+    /// Not the window that was asked for. A plan's history span narrows the
+    /// exact rows. Older days, when the plan locks them, arrive as
+    /// intensity-only stubs on [`locked`] so the grid can keep a year of
+    /// squares instead of shrinking to a month.
     pub from: Option<String>,
     pub to: Option<String>,
+    /// First unlocked day. Days before this are year-shape only.
+    pub unlock_from: Option<String>,
+    pub history_locked: bool,
+    pub history_days: Option<u16>,
+    pub locked: Vec<LockedDay>,
 }
 
 pub fn account_series(
@@ -829,10 +846,32 @@ pub fn account_series(
             .and_then(|v| v.as_str())
             .map(str::to_string)
     };
+    let unlock_from = raw
+        .get("unlockFrom")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| field("from"));
+    let history_locked = raw
+        .get("historyLocked")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let history_days = raw
+        .get("historyDays")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u16::try_from(n).ok());
+    let locked = raw
+        .get("locked")
+        .cloned()
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
     Ok(SeriesResult {
         rows: serde_json::from_value(rows)?,
         from: field("from"),
         to: field("to"),
+        unlock_from,
+        history_locked,
+        history_days,
+        locked,
     })
 }
 

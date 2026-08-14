@@ -74,6 +74,13 @@ pub struct HeatCell {
     /// did not happen. Set from a vendor's own activity record, which outlives
     /// its token counts.
     pub unmeasured: bool,
+    /// Older than the plan's unlocked window.
+    ///
+    /// Free account grids keep a year of squares so the card does not stretch
+    /// a month into a wall of cells. A locked day may still carry a shade
+    /// (intensity only). Its value is zero, so totals, streaks and hover stay
+    /// on the unlocked days.
+    pub locked: bool,
 }
 
 impl HeatCalendar {
@@ -104,6 +111,61 @@ impl HeatCalendar {
         }
     }
 
+    /// Mute every day strictly before `unlock_from`.
+    ///
+    /// Free account grids keep the year shape while exact counts stay in the
+    /// recent window. Locked cells drop their value so totals, streaks and
+    /// hover stay on the unlocked days. `levels` is optional intensity for
+    /// those days (`0..=4`): a shade without a number, which is what the
+    /// public profile already ships.
+    pub fn lock_before(&mut self, unlock_from: jiff::civil::Date, levels: &[(String, u8)]) {
+        use std::collections::HashMap;
+        let by_date: HashMap<jiff::civil::Date, u8> = levels
+            .iter()
+            .filter_map(|(d, level)| {
+                d.parse::<jiff::civil::Date>()
+                    .ok()
+                    .map(|d| (d, (*level).min(4)))
+            })
+            .collect();
+        let mut changed = false;
+        for row in &mut self.rows {
+            for cell in row.iter_mut().flatten() {
+                if cell.date < unlock_from {
+                    let level = by_date.get(&cell.date).copied().unwrap_or(cell.level);
+                    *cell = HeatCell {
+                        date: cell.date,
+                        value: 0,
+                        level,
+                        unmeasured: false,
+                        locked: true,
+                    };
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return;
+        }
+        self.recount();
+        // Spend and busiest have to drop any day that just lost its value.
+        // `recount` leaves them alone because marking a day unmeasured is
+        // not a pricing change.
+        let mut total = 0u64;
+        let mut busiest: Option<HeatCell> = None;
+        for cell in self.days() {
+            if cell.locked || cell.value == 0 {
+                continue;
+            }
+            total = total.saturating_add(cell.value);
+            if busiest.is_none_or(|b| cell.value > b.value) {
+                busiest = Some(*cell);
+            }
+        }
+        self.total = total;
+        self.busiest = busiest;
+    }
+
     /// Redo the counts that treat a day as worked or not.
     ///
     /// Marking a cell is not a drawing change. "Active days" and both streaks
@@ -120,7 +182,7 @@ impl HeatCalendar {
             .iter()
             .flatten()
             .flatten()
-            .map(|c| (c.date, c.value > 0 || c.unmeasured))
+            .map(|c| (c.date, !c.locked && (c.value > 0 || c.unmeasured)))
             .collect();
         days.sort_by_key(|(d, _)| *d);
         self.active_days = days.iter().filter(|(_, worked)| *worked).count();
@@ -253,6 +315,7 @@ pub fn calendar(
             value,
             level: scale.level(value),
             unmeasured: false,
+            locked: false,
         };
         if value > 0 {
             total += value;
@@ -593,6 +656,66 @@ mod tests {
         );
         assert_ne!(scale.level(44), scale.level(144));
         assert_eq!(scale.level(300), 4);
+    }
+
+    #[test]
+    fn locking_older_days_keeps_the_year_and_drops_their_value() {
+        // Free keeps a year of squares. Exact counts live in the last month.
+        // A 4-week strip was the other answer, and it read as the grid
+        // zoomed in rather than as a year with a locked past.
+        let days: Vec<_> = (1..=29)
+            .map(|d| (format!("2026-07-{d:02}"), 100u64))
+            .collect();
+        let mut cal = calendar(&days, 53, anchor()).expect("calendar");
+        assert_eq!(cal.weeks, 53);
+        assert_eq!(cal.active_days, 29);
+        assert_eq!(cal.total, 2900);
+
+        cal.lock_before(
+            jiff::civil::date(2026, 7, 20),
+            &[("2026-07-10".to_string(), 3)],
+        );
+        assert_eq!(cal.weeks, 53, "the year shape stays");
+        assert_eq!(cal.active_days, 10, "1st-19th locked, 20th-29th live");
+        assert_eq!(cal.total, 1000);
+        let locked = cal
+            .days()
+            .find(|c| c.date.to_string() == "2026-07-10")
+            .expect("day");
+        assert!(locked.locked);
+        assert_eq!(locked.value, 0);
+        assert_eq!(locked.level, 3, "intensity survives without the number");
+        let live = cal
+            .days()
+            .find(|c| c.date.to_string() == "2026-07-20")
+            .expect("day");
+        assert!(!live.locked);
+        assert_eq!(live.value, 100);
+        // Same amount every live day. The walk is oldest first and keeps the
+        // first maximum, so the 20th wins rather than the 29th.
+        assert_eq!(
+            cal.busiest.map(|b| b.date.to_string()).as_deref(),
+            Some("2026-07-20")
+        );
+    }
+
+    #[test]
+    fn locking_does_not_count_a_locked_day_as_worked() {
+        let days = vec![
+            ("2026-07-20".to_string(), 50u64),
+            ("2026-07-21".to_string(), 50),
+            ("2026-07-28".to_string(), 50),
+            ("2026-07-29".to_string(), 50),
+        ];
+        let mut cal = calendar(&days, 4, anchor()).expect("calendar");
+        cal.lock_before(jiff::civil::date(2026, 7, 25), &[]);
+        assert_eq!(cal.active_days, 2);
+        assert_eq!(cal.streak_current, 2);
+        assert!(
+            cal.days()
+                .filter(|c| c.date.to_string() == "2026-07-20")
+                .all(|c| c.locked && c.value == 0)
+        );
     }
 
     #[test]

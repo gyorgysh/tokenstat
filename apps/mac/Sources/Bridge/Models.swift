@@ -191,8 +191,13 @@ struct HeatCell: Codable, Sendable, Hashable, Identifiable {
     /// `0...4`. Zero is a day inside the range with no usage, which has to read
     /// as "nothing happened" and not as "no data".
     var level: Int
+    /// Older than the plan's unlocked window. Shade may remain. Value is
+    /// zero. Missing on an older host, which is not locked.
+    var locked: Bool?
 
     var id: String { date }
+
+    var isLocked: Bool { locked == true }
 }
 
 struct MonthLabel: Codable, Sendable, Hashable, Identifiable {
@@ -233,6 +238,19 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     /// (the account does not include it), `"other"`. Absent when the grid is
     /// the one asked for.
     var noticeCode: String?
+    /// First unlocked day (`YYYY-MM-DD`). Days before this keep the year
+    /// shape only. Missing when the whole grid is live.
+    var unlockFrom: String?
+    /// Free year: last month exact, older days muted. Same treatment as
+    /// the public profile. Missing or false on a paid grid and on local.
+    var historyLocked: Bool?
+    /// How many recent days stay exact. The banner names this number.
+    var historyDays: Int?
+    /// Offer an upgrade under the grid. The app is the owner, so this is
+    /// true whenever the year is locked.
+    var historyUpgrade: Bool?
+
+    var isHistoryLocked: Bool { historyLocked == true }
 }
 
 // MARK: - Day detail

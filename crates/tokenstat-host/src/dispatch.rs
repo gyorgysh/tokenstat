@@ -686,12 +686,14 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                             } else {
                                 (None, None)
                             };
-                            return serde_json::to_value(
-                                CalendarDto::from(calendar)
-                                    .scoped("account", notice, code)
-                                    .fetched_at(account.fetched_at_ms),
-                            )
-                            .envelope();
+                            let mut dto = CalendarDto::from(calendar)
+                                .scoped("account", notice, code)
+                                .fetched_at(account.fetched_at_ms);
+                            if let Some(lock) = account.lock {
+                                dto = dto
+                                    .history_lock(lock.unlock_from.to_string(), lock.history_days);
+                            }
+                            return serde_json::to_value(dto).envelope();
                         }
                         // The account exists and has nothing in it. Not an
                         // error, and not a reason to show this machine's grid

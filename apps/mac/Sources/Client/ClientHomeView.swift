@@ -152,12 +152,18 @@ struct ClientHomeView: View {
             }
             PhoneHeatmap(
                 calendar: calendar,
-                onSelect: { day in selectedDay = day },
+                onSelect: { day in
+                    guard !day.isLocked else { return }
+                    selectedDay = day
+                },
                 // The page holds still while a day is being picked. A grid
                 // scrubbed with a finger inside a page that scrolls under it
                 // is two gestures fighting over one touch.
                 onScrub: { pickingADay = $0 }
             )
+            if calendar.isHistoryLocked {
+                HistoryLockBanner(days: calendar.historyDays ?? 30)
+            }
         }
         .padding(Theme.Space.m)
         .cardSurface()

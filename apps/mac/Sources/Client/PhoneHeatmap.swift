@@ -150,11 +150,16 @@ struct PhoneHeatmap: View {
     }
 
     private var summary: String {
-        "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at list rates, "
+        var text = "\(calendar.activeDays) active days, \(formatSpend(calendar.total)) at list rates, "
             + "\(spokenDate(calendar.first)) to \(spokenDate(calendar.last)). "
-            // Says what is inside, because what is inside is not every square.
-            // See `accessibleDays`.
-            + "Days with activity are listed."
+        if calendar.isHistoryLocked {
+            let days = calendar.historyDays ?? 30
+            text += "Last \(days) days are clear. Older days keep the year shape only on Free. "
+        }
+        // Says what is inside, because what is inside is not every square.
+        // See `accessibleDays`.
+        text += "Days with activity are listed."
+        return text
     }
 
     /// The activity ramp, with a quiet day that can actually be seen.
@@ -229,7 +234,7 @@ struct PhoneHeatmap: View {
                     let level = min(max(day.level, 0), ramp.count - 1)
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: corner),
-                        with: .color(ramp[level])
+                        with: .color(ramp[level].opacity(day.isLocked ? 0.28 : 1))
                     )
                 }
             }
@@ -406,7 +411,7 @@ struct PhoneHeatmap: View {
         guard row >= 0, row < calendar.rows.count else { return nil }
         let cells = calendar.rows[row]
         guard column >= 0, column < cells.count else { return nil }
-        guard let day = cells[column] ?? nil else { return nil }
+        guard let day = cells[column] ?? nil, !day.isLocked else { return nil }
         let rect = CGRect(
             x: CGFloat(column) * step,
             y: CGFloat(row) * step,
@@ -432,7 +437,7 @@ struct PhoneHeatmap: View {
     /// any day at all.
     private var accessibleDays: [HeatCell] {
         calendar.rows.flatMap { $0.compactMap { $0 } }
-            .filter { $0.value > 0 }
+            .filter { $0.value > 0 && !$0.isLocked }
             .sorted { $0.date > $1.date }
     }
 

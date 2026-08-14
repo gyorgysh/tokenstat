@@ -484,6 +484,21 @@ pub struct CalendarDto {
     /// growing stale inside a string.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fetched_at_ms: Option<i64>,
+    /// First unlocked day (`YYYY-MM-DD`). Days before this keep the year
+    /// shape only. Absent when the whole grid is live.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unlock_from: Option<String>,
+    /// The grid is a year with a locked past, the public profile's Free
+    /// treatment. A client draws muted cells rather than shrinking to a month.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub history_locked: bool,
+    /// How many recent days stay exact. The banner names this number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_days: Option<u16>,
+    /// The signed-in owner should be offered an upgrade. Public pages mute
+    /// older days without pitching. The app is always the owner.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub history_upgrade: bool,
 }
 
 fn local_scope() -> String {
@@ -585,6 +600,10 @@ pub struct HeatCellDto {
     /// `0..=4`. Zero is a day inside the range with no usage, which reads as
     /// "nothing happened" and not as "no data".
     pub level: u8,
+    /// Older than the plan's unlocked window. Shade may remain. Value is
+    /// zero. A missing field is not locked, so an older host stays drawable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -600,6 +619,7 @@ impl From<&tokenstat_core::activity::HeatCell> for HeatCellDto {
             date: c.date.to_string(),
             value: c.value,
             level: c.level,
+            locked: c.locked,
         }
     }
 }
@@ -636,6 +656,10 @@ impl From<tokenstat_core::activity::HeatCalendar> for CalendarDto {
             notice: None,
             notice_code: None,
             fetched_at_ms: None,
+            unlock_from: None,
+            history_locked: false,
+            history_days: None,
+            history_upgrade: false,
         }
     }
 }
@@ -657,6 +681,16 @@ impl CalendarDto {
     /// Date the account's numbers, so a client can say how old they are.
     pub fn fetched_at(mut self, at_ms: i64) -> CalendarDto {
         self.fetched_at_ms = (at_ms > 0).then_some(at_ms);
+        self
+    }
+
+    /// Mark a Free year: older days stay as shape, the recent window is live.
+    pub fn history_lock(mut self, unlock_from: String, history_days: u16) -> CalendarDto {
+        self.unlock_from = Some(unlock_from);
+        self.history_locked = true;
+        self.history_days = Some(history_days);
+        // The app is the owner looking at their own grid.
+        self.history_upgrade = true;
         self
     }
 }

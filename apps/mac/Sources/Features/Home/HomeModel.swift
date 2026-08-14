@@ -278,7 +278,7 @@ final class HomeModel {
     /// no value has nothing to show.
     func hover(day: HeatCell?) {
         dayDetailTask?.cancel()
-        guard let day, day.value > 0 else {
+        guard let day, day.value > 0, !day.isLocked else {
             hoveredDay = nil
             hoveredDetail = nil
             isLoadingDayDetail = false

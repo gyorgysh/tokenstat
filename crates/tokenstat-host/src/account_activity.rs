@@ -28,7 +28,7 @@ use tokenstat_core::activity::{self, HeatCalendar};
 use tokenstat_core::model::Counters;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable};
 use tokenstat_core::store::DayPart;
-use tokenstat_sync::profile::{self, SeriesRow};
+use tokenstat_sync::profile::{self, LockedDay, SeriesRow};
 
 /// How long a fetched series stays good.
 ///
@@ -100,6 +100,10 @@ struct Cache {
     /// The oldest day the service actually covered. A plan's history span, not
     /// what was asked for.
     covered_from: Option<String>,
+    unlock_from: Option<String>,
+    history_locked: bool,
+    history_days: Option<u16>,
+    locked: Vec<LockedDay>,
     fetched_at: Instant,
     /// The same moment on the wall clock, which is the only one that survives
     /// the process. `Instant` has no meaning across a restart, and on a phone a
@@ -108,6 +112,21 @@ struct Cache {
     /// Set when the last attempt failed, so the message can be shown without
     /// asking again immediately.
     last_error: Option<(String, Instant)>,
+}
+
+impl Cache {
+    fn fetched(&self, stale: bool) -> Fetched {
+        Fetched {
+            rows: self.rows.clone(),
+            covered_from: self.covered_from.clone(),
+            unlock_from: self.unlock_from.clone(),
+            history_locked: self.history_locked,
+            history_days: self.history_days,
+            locked: self.locked.clone(),
+            fetched_at_ms: self.fetched_at_ms,
+            stale,
+        }
+    }
 }
 
 fn cache() -> &'static Mutex<Option<Cache>> {
@@ -162,6 +181,14 @@ mod stored {
         pub fetched_at_ms: i64,
         pub covered_from: Option<String>,
         pub rows: Vec<SeriesRow>,
+        #[serde(default)]
+        pub unlock_from: Option<String>,
+        #[serde(default)]
+        pub history_locked: bool,
+        #[serde(default)]
+        pub history_days: Option<u16>,
+        #[serde(default)]
+        pub locked: Vec<tokenstat_sync::profile::LockedDay>,
     }
 
     fn path() -> Option<PathBuf> {
@@ -226,10 +253,11 @@ mod stored {
 /// `Err` means we could not ask, which is a different answer and the caller
 /// must not draw it as an empty year.
 ///
-/// The returned `weeks` can be narrower than the `weeks` asked for. A plan's
-/// history span decides how far back the service will go, and a grid drawn
-/// wider than that would render days it was never sent as days on which
-/// nothing happened. Narrower and honest beats wider and wrong.
+/// The grid is always the `weeks` asked for (a rolling year). A Free plan's
+/// history span is thirty days of exact counts. Older days stay on the
+/// calendar as locked cells so the card keeps a year shape, the same
+/// treatment as the public profile. Shrinking to the unlocked month made
+/// four weeks fill a year-sized card.
 pub fn calendar(
     prices: &PriceTable,
     tz: &jiff::tz::TimeZone,
@@ -240,7 +268,13 @@ pub fn calendar(
     let fetched_at_ms = fetched.fetched_at_ms;
     let stale = fetched.stale;
     let rows = fetched.rows;
-    let weeks = covered_weeks(weeks, today, fetched.covered_from.as_deref());
+    let lock = history_lock(
+        today,
+        fetched.history_locked,
+        fetched.unlock_from.as_deref(),
+        fetched.covered_from.as_deref(),
+        fetched.history_days,
+    );
 
     // Priced, then folded by day. Per model rather than per day, because a
     // rate belongs to a model: summing tokens across models first and pricing
@@ -263,11 +297,27 @@ pub fn calendar(
         *by_day.entry(row.day.clone()).or_insert(0) += micros;
     }
 
-    let days: Vec<(String, u64)> = by_day.into_iter().collect();
+    let mut days: Vec<(String, u64)> = by_day.into_iter().collect();
+    // Intensity stubs with no exact rows still need a year to sit on.
+    // A brand new Free account has a 30-day window and no stubs: that
+    // is empty, not a year of muted squares.
+    if days.is_empty() && !fetched.locked.is_empty() {
+        days.push((today.to_string(), 0));
+    }
+    let mut calendar = activity::calendar(&days, weeks, today);
+    if let (Some(cal), Some(lock)) = (calendar.as_mut(), lock.as_ref()) {
+        let levels: Vec<(String, u8)> = fetched
+            .locked
+            .iter()
+            .map(|d| (d.d.clone(), d.level))
+            .collect();
+        cal.lock_before(lock.unlock_from, &levels);
+    }
     Ok(AccountCalendar {
-        calendar: activity::calendar(&days, weeks, today),
+        calendar,
         fetched_at_ms,
         stale,
+        lock,
     })
 }
 
@@ -283,6 +333,15 @@ pub struct AccountCalendar {
     pub fetched_at_ms: i64,
     /// The refresh failed and this is the remembered answer.
     pub stale: bool,
+    /// Free year lock, when the plan's exact window is shorter than a year.
+    pub lock: Option<HistoryLock>,
+}
+
+/// The recent window a Free grid may show in full.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryLock {
+    pub unlock_from: jiff::civil::Date,
+    pub history_days: u16,
 }
 
 /// One day's `model × source` rows from the account's series, largest first.
@@ -683,20 +742,44 @@ fn add_counters(a: Counters, b: Counters) -> Counters {
     }
 }
 
-/// How many whole weeks the service actually covered, capped at what was asked.
-fn covered_weeks(asked: usize, today: jiff::civil::Date, covered_from: Option<&str>) -> usize {
-    let Some(from) = covered_from.and_then(|d| d.parse::<jiff::civil::Date>().ok()) else {
-        return asked;
-    };
-    let days = (today - from).get_days().max(0) as usize;
-    // Round down: a partial week at the far edge is a column with days in it
-    // that were never covered, which is the thing this exists to prevent.
-    (days / 7).clamp(1, asked)
+/// Display cap shared with the public profile: a year. Shorter than this
+/// is a locked past, not a shorter grid.
+const HISTORY_DISPLAY_CAP_DAYS: u16 = 365;
+
+/// Whether this series should draw a year with a locked past.
+///
+/// The service's `historyLocked` flag wins when the reply is new enough to
+/// carry it. Older replies (and a remembered cache) infer the same thing
+/// from the covered window: thirty days is Free, a year is not.
+fn history_lock(
+    today: jiff::civil::Date,
+    flagged: bool,
+    unlock_from: Option<&str>,
+    covered_from: Option<&str>,
+    history_days: Option<u16>,
+) -> Option<HistoryLock> {
+    let from = unlock_from
+        .or(covered_from)
+        .and_then(|d| d.parse::<jiff::civil::Date>().ok())?;
+    let spanned = history_days
+        .unwrap_or_else(|| u16::try_from((today - from).get_days().max(0) + 1).unwrap_or(u16::MAX));
+    if flagged || spanned < HISTORY_DISPLAY_CAP_DAYS {
+        Some(HistoryLock {
+            unlock_from: from,
+            history_days: spanned.max(1),
+        })
+    } else {
+        None
+    }
 }
 
 pub struct Fetched {
     rows: Vec<SeriesRow>,
     covered_from: Option<String>,
+    unlock_from: Option<String>,
+    history_locked: bool,
+    history_days: Option<u16>,
+    locked: Vec<LockedDay>,
     /// When these numbers came off the service, in unix milliseconds.
     pub fetched_at_ms: i64,
     /// This is a remembered answer, served because the refresh failed. The
@@ -733,6 +816,10 @@ fn adopted(snapshot: stored::Snapshot) -> Cache {
     Cache {
         rows: snapshot.rows,
         covered_from: snapshot.covered_from,
+        unlock_from: snapshot.unlock_from,
+        history_locked: snapshot.history_locked,
+        history_days: snapshot.history_days,
+        locked: snapshot.locked,
         // `checked_sub` because a process younger than FRESH_FOR has no
         // `Instant` that far back, and saturating at "now" would make an
         // adopted answer look fresh on exactly the launches this exists for.
@@ -755,12 +842,7 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
         adopt_stored(&mut guard);
         if let Some(c) = guard.as_ref() {
             if c.fetched_at.elapsed() < FRESH_FOR {
-                return Ok(Fetched {
-                    rows: c.rows.clone(),
-                    covered_from: c.covered_from.clone(),
-                    fetched_at_ms: c.fetched_at_ms,
-                    stale: false,
-                });
+                return Ok(c.fetched(false));
             }
             // A recent failure is reported from here rather than by dialling
             // again. Nothing about being signed out changes in a second.
@@ -770,12 +852,7 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                     // beats a blank one, and on a client there is no local
                     // archive to fall back to.
                     if !c.rows.is_empty() {
-                        return Ok(Fetched {
-                            rows: c.rows.clone(),
-                            covered_from: c.covered_from.clone(),
-                            fetched_at_ms: c.fetched_at_ms,
-                            stale: true,
-                        });
+                        return Ok(c.fetched(true));
                     }
                     return Err(FetchError::new(message.clone()));
                 }
@@ -795,30 +872,32 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
     match profile::account_series(None, Some(&from), Some(&to), None) {
         Ok(result) => {
             let fetched_at_ms = now_ms();
-            if let Ok(mut guard) = cache().lock() {
-                *guard = Some(Cache {
-                    rows: result.rows.clone(),
-                    covered_from: result.from.clone(),
-                    fetched_at: Instant::now(),
-                    fetched_at_ms,
-                    last_error: None,
-                });
-            }
-            // Kept for the next cold start. Best effort on purpose: a cache
-            // that cannot be written is a slower launch, not a failure, and
-            // refusing the answer in hand over it would be absurd.
+            let entry = Cache {
+                rows: result.rows,
+                covered_from: result.from.clone(),
+                unlock_from: result.unlock_from.clone(),
+                history_locked: result.history_locked,
+                history_days: result.history_days,
+                locked: result.locked,
+                fetched_at: Instant::now(),
+                fetched_at_ms,
+                last_error: None,
+            };
             stored::save(&stored::Snapshot {
                 v: 1,
                 fetched_at_ms,
-                covered_from: result.from.clone(),
-                rows: result.rows.clone(),
+                covered_from: entry.covered_from.clone(),
+                rows: entry.rows.clone(),
+                unlock_from: entry.unlock_from.clone(),
+                history_locked: entry.history_locked,
+                history_days: entry.history_days,
+                locked: entry.locked.clone(),
             });
-            Ok(Fetched {
-                rows: result.rows,
-                covered_from: result.from,
-                fetched_at_ms,
-                stale: false,
-            })
+            let fetched = entry.fetched(false);
+            if let Ok(mut guard) = cache().lock() {
+                *guard = Some(entry);
+            }
+            Ok(fetched)
         }
         Err(e) => {
             let message = e.to_string();
@@ -831,18 +910,17 @@ fn series(weeks: usize, today: jiff::civil::Date) -> Result<Fetched, FetchError>
                     Some(c) => {
                         c.last_error = Some((message.clone(), Instant::now()));
                         if !c.rows.is_empty() {
-                            remembered = Some(Fetched {
-                                rows: c.rows.clone(),
-                                covered_from: c.covered_from.clone(),
-                                fetched_at_ms: c.fetched_at_ms,
-                                stale: true,
-                            });
+                            remembered = Some(c.fetched(true));
                         }
                     }
                     None => {
                         *guard = Some(Cache {
                             rows: Vec::new(),
                             covered_from: None,
+                            unlock_from: None,
+                            history_locked: false,
+                            history_days: None,
+                            locked: Vec::new(),
                             fetched_at: Instant::now()
                                 .checked_sub(FRESH_FOR)
                                 .unwrap_or_else(Instant::now),
@@ -934,6 +1012,10 @@ mod tests {
             fetched_at_ms: now_ms() - 60_000,
             covered_from: Some("2026-01-01".into()),
             rows: vec![a_row("2026-08-11")],
+            unlock_from: None,
+            history_locked: false,
+            history_days: None,
+            locked: Vec::new(),
         });
         assert_eq!(cache.rows.len(), 1);
         assert!(cache.last_error.is_none());
@@ -956,6 +1038,13 @@ mod tests {
             fetched_at_ms: 1_786_000_000_000,
             covered_from: Some("2026-07-01".into()),
             rows: vec![a_row("2026-08-10"), a_row("2026-08-11")],
+            unlock_from: Some("2026-07-16".into()),
+            history_locked: true,
+            history_days: Some(30),
+            locked: vec![tokenstat_sync::profile::LockedDay {
+                d: "2026-07-01".into(),
+                level: 2,
+            }],
         };
         let text = serde_json::to_string(&snapshot).expect("encode");
         let back: stored::Snapshot = serde_json::from_str(&text).expect("decode");
@@ -965,6 +1054,32 @@ mod tests {
         assert_eq!(back.rows.len(), 2);
         assert_eq!(back.rows[0].cw1, 5, "the cache split must survive");
         assert_eq!(back.rows[1].day, "2026-08-11");
+        assert!(back.history_locked);
+        assert_eq!(back.history_days, Some(30));
+        assert_eq!(back.locked.len(), 1);
+        assert_eq!(back.locked[0].level, 2);
+    }
+
+    #[test]
+    fn a_thirty_day_window_locks_the_year() {
+        let today = jiff::civil::date(2026, 8, 14);
+        let lock = history_lock(today, false, None, Some("2026-07-16"), None)
+            .expect("free window is locked");
+        assert_eq!(lock.unlock_from.to_string(), "2026-07-16");
+        assert_eq!(lock.history_days, 30);
+        assert!(
+            history_lock(today, false, None, Some("2025-08-15"), None).is_none(),
+            "a year of coverage is not a lock"
+        );
+        let flagged = history_lock(
+            today,
+            true,
+            Some("2026-07-16"),
+            Some("2026-07-16"),
+            Some(30),
+        )
+        .expect("server flag wins");
+        assert_eq!(flagged.history_days, 30);
     }
 
     #[test]
