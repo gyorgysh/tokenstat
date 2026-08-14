@@ -324,6 +324,9 @@ struct Wordmark: View {
     /// Take the leading edge and push everything else right, which is what a
     /// sidebar header wants and a centred toolbar item does not.
     var fills = true
+    /// Draw the bars as well as the name. A lockup that already placed the
+    /// mark above the letters wants the word only, or the bars appear twice.
+    var showsMark = true
 
     var body: some View {
         // `.firstTextBaseline` would sit the mark on the text's baseline, which
@@ -333,7 +336,9 @@ struct Wordmark: View {
         // The website leaves a deliberate breath between the bars and the
         // wordmark. A half-mark gap made the phone lockup look compressed.
         HStack(alignment: .center, spacing: size * 0.75) {
-            LogoMark(size: size)
+            if showsMark {
+                LogoMark(size: size)
+            }
             HStack(spacing: 0) {
                 Text("token")
                     .foregroundStyle(.primary)
@@ -352,8 +357,8 @@ struct Wordmark: View {
 
 /// The tier, as the silhouette the website puts beside a name.
 ///
-/// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crown for
-/// Patron, a star for Supporter, a crest shield for Legend. SF Symbols was the
+/// The paths are the site's own (`BADGE_PATH` in `Profile.jsx`): a crest shield
+/// for Patron, a star for Supporter, a crown for Legend. SF Symbols was the
 /// first attempt and it is the wrong call for a badge. `crown.fill` is Apple's crown,
 /// not this brand's, and a mark that is nearly the website's is worse than one
 /// that is obviously different, because it reads as the same badge rendered badly.
@@ -410,8 +415,8 @@ struct BadgeShape: Shape {
 
     init?(tier: String) {
         switch tier.lowercased() {
-        case "legend": kind = .badge
-        case "patron": kind = .crown
+        case "legend": kind = .crown
+        case "patron": kind = .badge
         case "supporter": kind = .star
         case "free", "": return nil
         default: kind = .seal
@@ -461,7 +466,7 @@ struct BadgeShape: Shape {
             path.closeSubpath()
         case .badge:
             // Crest shield with a chevron cut out of it, same path as
-            // Profile.jsx BADGE_PATH.legend. The cut is wound against the
+            // Profile.jsx BADGE_PATH.patron. The cut is wound against the
             // shield, so it stays open under either fill rule, and at 12px it
             // closes up and leaves a plain shield rather than mush.
             path.move(to: point(12, 2.1))

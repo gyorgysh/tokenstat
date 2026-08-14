@@ -29,8 +29,9 @@ struct ClientLoginView: View {
             Spacer()
 
             VStack(spacing: Theme.Space.m) {
-                LogoMark(size: 46)
-                Text("Sign in to tokenstat")
+                LogoMark(size: 52)
+                Wordmark(size: 28, fills: false, showsMark: false)
+                Text("Sign in")
                     .font(.system(.title, design: .rounded).weight(.semibold))
                     .multilineTextAlignment(.center)
                 Text("Your usage across every device on your account, wherever you are.")

@@ -16,10 +16,10 @@ import SwiftUI
 /// that: one card on an empty screen, asking for a sign-in before saying what
 /// the app was for. Nobody signs into a product they have not been told about.
 ///
-/// So: three pages, swipeable, then Get started. Deliberately three. It is
-/// enough to say what this is, what it costs you, and what to do next, and it
-/// is few enough that people reach the end. Signing in is not this screen's
-/// job: that is the next door, and it waits for a deliberate tap.
+/// Ten pages, swipeable, then Get started. Usage, plan windows, workspaces,
+/// live sessions, the phone-to-Mac link, and the privacy switches. Signing in
+/// is not this screen's job: that is the next door, and it waits for a
+/// deliberate tap.
 ///
 /// Shown once. `hasOnboarded` is `@AppStorage`, so the second launch goes
 /// straight to the sign-in card, and a signed-in phone never sees this at all.
@@ -30,40 +30,87 @@ struct ClientOnboarding: View {
 
     private static let pages: [OnboardingPage] = [
         OnboardingPage(
-            symbol: "square.grid.3x3.fill",
-            title: "Every device, one number",
-            body: "What your agents used, across every laptop on your account, "
-                + "with all of them asleep."
+            art: .intro,
+            title: "What tokenstat is",
+            body: "One place for the AI coding tools you already use. Usage, "
+                + "plan windows, workspaces, and live sessions, on the computers "
+                + "you work on and on this phone."
         ),
         OnboardingPage(
-            symbol: "gauge.with.dots.needle.33percent",
-            title: "Know what is left",
-            body: "How much of each plan you have used, and when the window "
-                + "resets. Always with the date it was read."
+            art: .heatmap,
+            title: "Your AI Heatmap",
+            body: "Every day, every model, every tool, as one year you can "
+                + "read. Tokens and list-rate value stay on the devices that "
+                + "counted them."
         ),
         OnboardingPage(
-            symbol: "lock.fill",
-            title: "It stays yours",
-            body: "Counting happens on your own devices. Only totals are "
-                + "eligible to sync, never prompts, code or file names."
+            art: .devices,
+            title: "All your devices",
+            body: "Laptops and phones share one account. Open the phone while "
+                + "every computer is asleep, and the numbers are still there."
+        ),
+        OnboardingPage(
+            art: .spend,
+            title: "Where it went",
+            body: "Split by tool, model, and project. See what actually used "
+                + "the tokens, not a single total that hides the expensive day."
+        ),
+        OnboardingPage(
+            art: .remaining,
+            title: "What is left",
+            body: "How much of each plan window you have used, and when it "
+                + "resets. Plan usage is not a bill. A number with no date "
+                + "is not shown."
+        ),
+        OnboardingPage(
+            art: .workspaces,
+            title: "Workspaces",
+            body: "The folders you registered on the Mac. Browse the tree, "
+                + "read a file, stage, commit, and push. Nothing happens that "
+                + "you did not ask for."
+        ),
+        OnboardingPage(
+            art: .sessions,
+            title: "Sessions",
+            body: "Live terminals on the host, from the desktop or from this "
+                + "phone. Spawn an agent, watch it work, type when you need to."
+        ),
+        OnboardingPage(
+            art: .onTheGo,
+            title: "On the go",
+            body: "This phone is a client of a Mac that is on. Folders and "
+                + "sessions travel over an encrypted tunnel. Usage is already "
+                + "on the account, so the heatmap does not need the laptop open."
+        ),
+        OnboardingPage(
+            art: .privacy,
+            title: "We never see your files",
+            body: "The tunnel is end to end encrypted. We cannot read the "
+                + "files you open or the terminals you type in. Counting "
+                + "happens on your machine. Only totals you opt to sync ever "
+                + "leave it."
+        ),
+        OnboardingPage(
+            art: .control,
+            title: "You are in control",
+            body: "The account is private until you turn a profile on. Sync "
+                + "is opt in. Remote reach is a switch you flip. Most of this "
+                + "stays off until you ask."
         ),
     ]
 
     var body: some View {
         VStack(spacing: 0) {
             header
+            progress
             TabView(selection: $page) {
                 ForEach(Array(Self.pages.enumerated()), id: \.offset) { index, page in
                     OnboardingPageView(page: page)
                         .tag(index)
                 }
             }
-            // The system's own dots are drawn for a dark scheme, so on this
-            // background they were three grey marks nobody could see. Ours are
-            // the accent, which also makes the position obvious at a glance.
             .tabViewStyle(.page(indexDisplayMode: .never))
 
-            dots
             footer
         }
         .background(Theme.background)
@@ -85,20 +132,23 @@ struct ClientOnboarding: View {
         .padding(.top, Theme.Space.s)
     }
 
-    /// Where you are, and how much is left. Three dots is also the honest
-    /// promise that this ends soon.
-    private var dots: some View {
-        HStack(spacing: 7) {
-            ForEach(0..<Self.pages.count, id: \.self) { index in
+    /// How far through, as a bar. Ten dots would be a second piece of chrome
+    /// and a promise that this is long. The fill is the honest remaining.
+    private var progress: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(index == page ? Theme.accent : Theme.accent.opacity(0.22))
-                    // The current one is a short bar rather than a bigger dot:
-                    // size alone is hard to judge at seven points across.
-                    .frame(width: index == page ? 20 : 7, height: 7)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.8), value: page)
+                    .fill(Theme.accent.opacity(0.16))
+                Capsule()
+                    .fill(Theme.accent)
+                    .frame(width: geo.size.width * CGFloat(page + 1) / CGFloat(Self.pages.count))
             }
         }
-        .padding(.bottom, Theme.Space.l)
+        .frame(height: 4)
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.top, Theme.Space.m)
+        .padding(.bottom, Theme.Space.s)
+        .animation(.easeInOut(duration: 0.28), value: page)
         .accessibilityElement()
         .accessibilityLabel("Page \(page + 1) of \(Self.pages.count)")
     }
@@ -113,9 +163,7 @@ struct ClientOnboarding: View {
             } else {
                 // Get started only marks the intro done. Sign-in is a separate
                 // choice on the next screen: opening the browser from here made
-                // finishing the welcome feel like an auto-login, and a second
-                // "Not now" next to "Sign in" was too close: two opposing
-                // actions with no real space between them.
+                // finishing the welcome feel like an auto-login.
                 Button("Get started") { finish() }
                     .buttonStyle(.glassProminent)
             }
@@ -133,7 +181,7 @@ struct ClientOnboarding: View {
 }
 
 private struct OnboardingPage {
-    let symbol: String
+    let art: OnboardingArtKind
     let title: String
     let body: String
 }
@@ -141,42 +189,26 @@ private struct OnboardingPage {
 private struct OnboardingPageView: View {
     let page: OnboardingPage
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var shown = false
 
     var body: some View {
-        VStack(spacing: Theme.Space.m) {
-            Spacer()
-            Image(systemName: page.symbol)
-                .font(.system(size: 64, weight: .light))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [Theme.accent, Theme.secondary],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                // One small arrival, once per page. Off under Reduce Motion,
-                // where it becomes a plain appearance.
-                .scaleEffect(reduceMotion || shown ? 1 : 0.86)
-                .opacity(reduceMotion || shown ? 1 : 0)
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: shown)
-            Text(page.title)
-                .font(.system(.title, design: .rounded).weight(.semibold))
-                .multilineTextAlignment(.center)
-            Text(page.body)
-                .font(ClientType.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
-            // One Spacer above and one below, weighted so the block sits a
-            // little above centre. Two below pushed everything into the top
-            // third and left the bottom of the screen empty.
-            Spacer()
-            Spacer().frame(height: 40)
+        ScrollView {
+            VStack(spacing: Theme.Space.m) {
+                ClientOnboardingArt(kind: page.art, reduceMotion: reduceMotion)
+                    .padding(.top, Theme.Space.s)
+                Text(page.title)
+                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(page.body)
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+                Spacer(minLength: Theme.Space.l)
+            }
+            .padding(.horizontal, Theme.Space.l)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, Theme.Space.l)
-        .frame(maxWidth: .infinity)
-        .onAppear { shown = true }
+        .scrollBounceBehavior(.basedOnSize)
         .accessibilityElement(children: .combine)
     }
 }
