@@ -146,14 +146,24 @@ struct FriendlyError {
                 raw: raw
             )
         }
+        if lower.contains("this mac is asleep") || lower.contains("host_asleep") {
+            return FriendlyError(
+                title: "This Mac is asleep",
+                message: "Open tokenstat on that Mac, or turn on Always-on host in Account "
+                    + "if other devices should still reach it after you quit.",
+                symbol: "moon.zzz",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
         if lower.contains("connection refused") || lower.contains("os error 61")
             || lower.contains("no such file or directory") && lower.contains("sock")
             || lower.contains("host daemon") || lower.contains("hostd")
         {
             return FriendlyError(
                 title: "The helper is not running",
-                message: "tokenstat's background helper handles your archive and your devices. It "
-                    + "starts at login and can be started again from here.",
+                message: "tokenstat's background helper handles your archive and your devices. "
+                    + "Open the app to start it, or turn on Always-on host to keep it running.",
                 symbol: "gearshape.arrow.trianglehead.2.clockwise.rotate.90",
                 actionTitle: "Start it",
                 raw: raw

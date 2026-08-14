@@ -47,6 +47,18 @@ struct MachinesView: View {
                     if let message = model.errorMessage {
                         ErrorBanner(message: message) { Task { await model.load() } }
                     }
+                    #if os(macOS)
+                    if model.showAlwaysOnNotice {
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Banner(
+                                text: "tokenstat no longer keeps this Mac reachable after you quit. Turn on Always-on host in Account if other devices should still reach it.",
+                                severity: .info
+                            )
+                            Button("Got it") { model.dismissAlwaysOnNotice() }
+                                .buttonStyle(SecondaryButtonStyle(small: true))
+                        }
+                    }
+                    #endif
                     if !Bridge.isHosted {
                         hostSetup
                     }

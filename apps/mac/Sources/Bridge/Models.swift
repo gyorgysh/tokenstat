@@ -1641,3 +1641,11 @@ struct RemoteStatus: Codable, Sendable {
 struct TunnelOutcome: Codable, Sendable {
     let tunnel: Bool
 }
+
+/// Whether this Mac's host helper outlives the app.
+struct HostPolicy: Codable, Sendable {
+    var alwaysOn: Bool
+    var defaultAlwaysOn: Bool
+    var hasInternalBattery: Bool
+    var hostingActive: Bool
+}

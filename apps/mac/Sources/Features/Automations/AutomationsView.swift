@@ -13,8 +13,8 @@ import SwiftUI
 ///
 /// A job is a backend, a prompt, a workspace and a schedule, exactly like
 /// launching `claude -p "…"` in a terminal but owned by the daemon and stopped
-/// at a budget. It runs whether this window is open or not, which is the whole
-/// point of it living in the daemon.
+/// at a budget. With Always-on host it runs after this window closes. On a
+/// laptop that switch is off, so a job runs while tokenstat is open.
 struct AutomationsView: View {
     @Bindable var model: AutomationsModel
     /// The registered folders, shared with the workspaces screen. Passed in so
@@ -296,8 +296,8 @@ struct AutomationsView: View {
                 title: "No automations yet",
                 message: """
                 An automation is an agent given a prompt, a folder and a time to \
-                run. The daemon runs it whether this window is open or not, and \
-                stops it at a budget you set.
+                run. The host helper runs it, and stops it at a budget you set. \
+                On a laptop that helper stops when you quit tokenstat unless Always-on host is on.
                 """
             ) {
                 if folders.isEmpty {
@@ -321,7 +321,7 @@ struct AutomationsView: View {
     private var automationsCard: some View {
         Card(
             title: "Automations",
-            subtitle: "Owned by the daemon. They run whether this window is open or not.",
+            subtitle: "Owned by the host helper. They run after you quit only if Always-on host is on.",
             accessory: AnyView(
                 Button { creating = true } label: {
                     Label("New", systemImage: "plus")

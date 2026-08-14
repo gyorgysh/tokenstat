@@ -21,6 +21,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = AppRelocator.relocateIfNeeded()
         }
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Stop hostd before dropping the lock, so launchd does not win a
+        // race with the helper's own watch thread.
+        HostAgentInstaller.stopIfNotAlwaysOn()
+        HostOwnerLock.release()
+    }
 }
 #endif
 
@@ -78,6 +85,7 @@ struct TokenstatApp: App {
             _ = try? await Bridge.pricingRefresh()
         }
         #if os(macOS)
+        HostOwnerLock.acquire()
         DesktopSyncScheduler.start()
         #endif
         // Host bring-up is owned by `LaunchState.prepare` (the splash in

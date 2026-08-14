@@ -49,6 +49,21 @@ final class LaunchState {
             guard !Task.isCancelled else { return }
         }
 
+        #if os(macOS)
+        // First launch of a build that knows about Always-on writes host.json
+        // and rewrites the launch agent. Do it after the host answers so the
+        // default comes from one battery check, not a second Swift one.
+        if let policy = try? await Bridge.hostPolicy() {
+            HostAgentInstaller.applyPolicy(alwaysOn: policy.alwaysOn)
+            let again = ContinuousClock.now + .seconds(4)
+            while ContinuousClock.now < again {
+                if (try? await Bridge.info()) != nil { break }
+                try? await Task.sleep(for: .milliseconds(80))
+                guard !Task.isCancelled else { return }
+            }
+        }
+        #endif
+
         let elapsed = ContinuousClock.now - started
         if elapsed < Self.minimumSplash {
             try? await Task.sleep(for: Self.minimumSplash - elapsed)

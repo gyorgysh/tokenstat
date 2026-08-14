@@ -149,6 +149,10 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         crate::sync_scheduler::start(Arc::clone(&shared));
     }
 
+    // Policy first: if hosting is off, the pause flag is set before the
+    // tunnel thread can start, so a closed-lid or no-app start cannot
+    // accept a remote shell for a beat and then drop it.
+    crate::host_policy::start_runtime();
     // Only if the user turned it on. Binding a port is a decision, not a
     // default: a remote client can spawn processes and write files.
     crate::remote::start_if_enabled(Arc::clone(&shared));

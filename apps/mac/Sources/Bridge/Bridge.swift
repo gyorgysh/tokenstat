@@ -1377,6 +1377,14 @@ extension Bridge {
         try await background("remote.status", as: RemoteStatus.self)
     }
 
+    static func hostPolicy() async throws -> HostPolicy {
+        try await background("host.policy", as: HostPolicy.self)
+    }
+
+    static func setHostPolicy(alwaysOn: Bool) async throws -> HostPolicy {
+        try await background("host.setPolicy", ["alwaysOn": alwaysOn], as: HostPolicy.self)
+    }
+
     /// Bind a loopback port on this machine and bridge it to a service on a
     /// peer's own localhost. The browser tab opens the returned URL as if the
     /// service ran here.

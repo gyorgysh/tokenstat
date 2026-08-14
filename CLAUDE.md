@@ -199,10 +199,12 @@ cargo build --release -p tokenstat-host
 printf '{"id":1,"method":"info"}\n' | nc -U /tmp/ts.sock
 ```
 
-Lifetime belongs to launchd, not to the binary: `scripts/install-host-agent.sh`
-installs it as a user agent with `KeepAlive`. A daemon the app spawns dies with
-the window, and an Automation that stops when you close a window is not an
-automation.
+Lifetime follows Always-on host. On a Mac mini, Studio or Pro (no internal
+battery) the default is on: `scripts/install-host-agent.sh` installs a user
+agent with `KeepAlive` and `RunAtLoad`. On a laptop the default is off: the
+helper runs while Tokenstat is open, then stops, so the Mac can sleep and a
+closed lid cannot start remote shells. ProcessType stays Interactive either
+way. Background throttles terminals and is not a sleep lock.
 
 Unix socket paths are capped near 104 bytes. The default under the data
 directory is well inside that, but a deep sandbox or temp path is not, so

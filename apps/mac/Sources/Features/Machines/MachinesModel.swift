@@ -31,6 +31,11 @@ final class MachinesModel {
     private(set) var account: Account?
     private(set) var loading = false
     private(set) var settingUpHelper = false
+    #if os(macOS)
+    private(set) var hostPolicy: HostPolicy?
+    /// One-time copy on a battery Mac after the default flipped to off.
+    var showAlwaysOnNotice = false
+    #endif
     var errorMessage: String?
     /// Set after an action that worked, so the screen confirms rather than
     /// leaving somebody wondering whether the button did anything.
@@ -198,6 +203,9 @@ final class MachinesModel {
                 accountMachines = []
             }
             errorMessage = nil
+            #if os(macOS)
+            await refreshAlwaysOnNotice()
+            #endif
             await reconsiderPlanIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
@@ -240,6 +248,23 @@ final class MachinesModel {
             errorMessage = error.localizedDescription
         }
     }
+
+    #if os(macOS)
+    private static let alwaysOnNoticeKey = "host.alwaysOnLaptopNoticeDismissed"
+
+    private func refreshAlwaysOnNotice() async {
+        guard let policy = try? await Bridge.hostPolicy() else { return }
+        hostPolicy = policy
+        showAlwaysOnNotice = policy.hasInternalBattery
+            && !policy.alwaysOn
+            && !UserDefaults.standard.bool(forKey: Self.alwaysOnNoticeKey)
+    }
+
+    func dismissAlwaysOnNotice() {
+        UserDefaults.standard.set(true, forKey: Self.alwaysOnNoticeKey)
+        showAlwaysOnNotice = false
+    }
+    #endif
 
     func setupHelper() async {
         #if os(macOS)

@@ -414,8 +414,34 @@ fn clear_held_credential() {
 /// waits here then re-checks and sees the finished session instead.
 static STARTING: Mutex<()> = Mutex::new(());
 
-fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
+fn tunnel_paused() -> &'static AtomicBool {
+    static PAUSED: AtomicBool = AtomicBool::new(false);
+    &PAUSED
+}
+
+/// Drop the tunnel socket without writing the user's switch off.
+///
+/// Used when hosting is paused (lid closed, app gone). `remote.json` stays
+/// as the user left it, so opening the lid or the app brings the tunnel back.
+pub(crate) fn pause_tunnel() {
+    tunnel_paused().store(true, Ordering::Release);
+    stop_tunnel();
+}
+
+/// Start the tunnel again if the user still has remote reach on.
+pub(crate) fn resume_tunnel_if_enabled() {
+    tunnel_paused().store(false, Ordering::Release);
+    let settings = load_settings();
     if !settings.tunnel {
+        return;
+    }
+    if let Ok(session) = session_for_serving() {
+        start_tunnel_if_enabled(session, &settings);
+    }
+}
+
+fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
+    if !settings.tunnel || tunnel_paused().load(Ordering::Acquire) {
         return;
     }
     // Hold the whole start, network mints included. A second caller blocks
@@ -626,7 +652,7 @@ fn retry_start_later(session: Arc<Mutex<Session>>) {
         loop {
             std::thread::sleep(delay);
             let settings = load_settings();
-            if !settings.tunnel {
+            if !settings.tunnel || tunnel_paused().load(Ordering::Acquire) {
                 break;
             }
             if tunnel_running().load(Ordering::Acquire) {
@@ -1037,6 +1063,9 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
 /// remote request is known to be inbound, which is the only time the Mac
 /// should stay awake for a closed app.
 fn respond_remote(line: &str, session: &Mutex<Session>) -> String {
+    if crate::host_policy::should_refuse_inbound(line) {
+        return crate::host_policy::refuse_inbound(line);
+    }
     crate::keep_awake::note_inbound(line);
     crate::server::respond(line, session)
 }

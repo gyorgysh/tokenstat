@@ -55,9 +55,11 @@ enum HostAgentInstaller {
         }
         // Nothing loaded, or the loaded job runs some other copy (an earlier
         // install at another path). Tear down a stale registration and load
-        // the plist this app owns.
+        // the plist this app owns. RunAtLoad is off when Always-on is off,
+        // so bootstrap alone does not start the process.
         _ = try? run("/bin/launchctl", ["bootout", service])
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
+        _ = try? run("/bin/launchctl", ["kickstart", service])
     }
 
     /// Install the helper and (re)load the launch agent.
@@ -101,15 +103,15 @@ enum HostAgentInstaller {
         #endif
 
         let plist = launchAgents.appendingPathComponent("\(label).plist")
-        // ProcessType is Interactive on purpose. Background throttles the
-        // whole process tree (measured ~5s Claude first paint under hostd vs
-        // ~0.3s for the same binary in a normal shell). The daemon owns live
-        // terminals the user types into, so it is not a pure background job.
+        let alwaysOn = resolvedAlwaysOn()
+        // ProcessType stays Interactive either way. Background throttles a
+        // live terminal. KeepAlive and RunAtLoad are the always-on switch:
+        // off, the helper dies with the app and does not start at login.
         let contents: [String: Any] = [
             "Label": label,
             "ProgramArguments": [helper.path],
-            "KeepAlive": true,
-            "RunAtLoad": true,
+            "KeepAlive": alwaysOn,
+            "RunAtLoad": alwaysOn,
             "ProcessType": "Interactive",
             "StandardOutPath": logs.appendingPathComponent("hostd.out.log").path,
             "StandardErrorPath": logs.appendingPathComponent("hostd.err.log").path
@@ -141,13 +143,16 @@ enum HostAgentInstaller {
             // install at another path). `kickstart -k` would only restart the
             // process under that stale definition, so unload the job and load
             // the plist. The daemon owns live terminals either way: replacing
-            // it means restarting it.
+            // it means restarting it. RunAtLoad follows Always-on, so
+            // bootstrap does not start the process on a laptop.
             _ = try? run("/bin/launchctl", ["bootout", service])
             try run("/bin/launchctl", ["bootstrap", domain, plist.path])
+            _ = try? run("/bin/launchctl", ["kickstart", service])
             return
         }
 
         try run("/bin/launchctl", ["bootstrap", domain, plist.path])
+        _ = try? run("/bin/launchctl", ["kickstart", service])
     }
 
     /// Reinstall the helper when this build carries a different one.
@@ -249,6 +254,51 @@ enum HostAgentInstaller {
         guard let left = attributes(a), let right = attributes(b) else { return true }
         if left.0 != right.0 || left.1 != right.1 { return true }
         return isVersionNewer(version(of: a), than: version(of: b))
+    }
+
+    /// Last policy this process applied, so quit does not reread a stale file.
+    private static var cachedAlwaysOn: Bool?
+
+    /// Whether hostd should outlive the app. Missing file: off, the laptop-safe default.
+    static func resolvedAlwaysOn() -> Bool {
+        cachedAlwaysOn ?? storedAlwaysOn() ?? false
+    }
+
+    static func storedAlwaysOn() -> Bool? {
+        let url = identityDirectory.appendingPathComponent("host.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = object["alwaysOn"] as? Bool
+        else { return nil }
+        return value
+    }
+
+    private static var identityDirectory: URL {
+        FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first?
+            .appendingPathComponent("ai.tokenstat.tokenstat/identity", isDirectory: true)
+            ?? FileManager.default.temporaryDirectory
+    }
+
+    /// Rewrite the launch agent so KeepAlive matches the switch.
+    ///
+    /// Changing KeepAlive requires unloading the job. That restarts hostd.
+    /// Call this after `host.setPolicy`, while the app is open and will
+    /// reconnect.
+    static func applyPolicy(alwaysOn: Bool) {
+        cachedAlwaysOn = alwaysOn
+        try? installAndStart()
+    }
+
+    /// Stop hostd when Always-on is off. Leaves the job loaded so the next
+    /// app launch can kickstart it. KeepAlive must already be false on the
+    /// loaded job, or launchd will start it again.
+    static func stopIfNotAlwaysOn() {
+        guard !resolvedAlwaysOn() else { return }
+        let service = "gui/\(getuid())/\(label)"
+        _ = try? run("/bin/launchctl", ["kill", "SIGTERM", service])
     }
 
     /// The version a hostd reports when run with the version flag, for

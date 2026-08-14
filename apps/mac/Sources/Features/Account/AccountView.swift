@@ -56,6 +56,7 @@ struct AccountView: View {
                     }
 
                     #if os(macOS)
+                    hostCard
                     terminalCard
                     localModelsCard
                     #endif
@@ -412,6 +413,50 @@ struct AccountView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
+
+    #if os(macOS)
+    private var hostCard: some View {
+        Card(
+            title: "This Mac",
+            subtitle: "Whether the host helper stays up after you quit"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let policy = model.hostPolicy {
+                    toggleRow(
+                        "Always-on host",
+                        detail: alwaysOnDetail(policy),
+                        isOn: Binding(
+                            get: { policy.alwaysOn },
+                            set: { on in Task { await model.setAlwaysOnHost(on) } }
+                        )
+                    )
+                    .disabled(model.isSavingHostPolicy)
+                    if policy.alwaysOn && policy.hasInternalBattery {
+                        Text("Uses more power.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !policy.alwaysOn {
+                        Text("Automations run only while tokenstat is open.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("The host helper has not answered yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func alwaysOnDetail(_ policy: HostPolicy) -> String {
+        if policy.alwaysOn {
+            return "The host helper keeps running after you quit tokenstat, so other devices can reach this Mac. This Mac will not idle-sleep. A laptop still sleeps when you close the lid."
+        }
+        return "The host helper stops when you quit tokenstat, so this Mac can sleep. Other devices cannot open folders or terminals here until you open the app again."
+    }
+    #endif
 
     private var terminalCard: some View {
         Card(

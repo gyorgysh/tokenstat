@@ -1776,6 +1776,10 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         return Some(answer);
     }
 
+    if let Some(answer) = crate::host_policy::call(method, params) {
+        return Some(answer);
+    }
+
     // Serving and reaching other machines. None of these read the archive, and
     // a call being forwarded to an idle machine must not queue behind a scan
     // running on this one.
@@ -2747,6 +2751,7 @@ mod tests {
             // Asked before a client has a connection to ask over, so it can
             // never be behind a session.
             "host.socketPath",
+            "host.policy",
             // The Machines screen has to answer on a machine whose archive
             // will not open, because that is when somebody goes looking at it.
             "machine.peers",
@@ -2990,6 +2995,51 @@ mod tests {
         assert_eq!(cleared["result"]["key"], key);
 
         unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn host_policy_persists_and_reads_back() {
+        let _identity_guard = IDENTITY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-host-policy-dispatch-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        unsafe { std::env::set_var("TOKENSTAT_IDENTITY_DIR", &dir) };
+        crate::host_policy::set_battery_override_for_tests(Some(true));
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                crate::host_policy::set_battery_override_for_tests(None);
+                crate::host_policy::reset_settings_cache_for_tests();
+                unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+            }
+        }
+        let _reset = Reset;
+
+        let first: Value =
+            serde_json::from_str(&call_sessionless("host.policy", "{}").expect("sessionless"))
+                .expect("json");
+        assert!(first["ok"].as_bool().unwrap_or(false), "{first}");
+        assert_eq!(first["result"]["hasInternalBattery"], true, "{first}");
+        assert_eq!(first["result"]["defaultAlwaysOn"], false, "{first}");
+
+        let set: Value = serde_json::from_str(
+            &call_sessionless("host.setPolicy", r#"{"alwaysOn":true}"#).expect("sessionless"),
+        )
+        .expect("json");
+        assert!(set["ok"].as_bool().unwrap_or(false), "{set}");
+        assert_eq!(set["result"]["alwaysOn"], true, "{set}");
+
+        let again: Value =
+            serde_json::from_str(&call_sessionless("host.policy", "{}").expect("sessionless"))
+                .expect("json");
+        assert_eq!(again["result"]["alwaysOn"], true, "{again}");
+
+        let written = std::fs::read_to_string(dir.join("host.json")).expect("host.json");
+        assert!(written.contains("\"alwaysOn\": true"), "{written}");
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

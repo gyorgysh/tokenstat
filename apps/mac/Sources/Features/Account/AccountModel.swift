@@ -28,6 +28,11 @@ final class AccountModel {
     var isSigningOut = false
     /// P2: post plan-limit readings after sync / limits refresh. Opt-in.
     var limitsSyncEnabled = false
+    #if os(macOS)
+    /// Nil until the host has answered. The switch must not flash the wrong default.
+    var hostPolicy: HostPolicy?
+    var isSavingHostPolicy = false
+    #endif
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
@@ -117,6 +122,7 @@ final class AccountModel {
             authChecked = true
             #if os(macOS)
             limitsSyncEnabled = (try? await Bridge.limitsSyncEnabled()) ?? false
+            hostPolicy = try? await Bridge.hostPolicy()
             #endif
             await Self.broadcastIfEntitlementChanged(from: previous, to: next)
         } catch {
@@ -132,6 +138,19 @@ final class AccountModel {
     }
 
     #if os(macOS)
+    func setAlwaysOnHost(_ on: Bool) async {
+        isSavingHostPolicy = true
+        defer { isSavingHostPolicy = false }
+        do {
+            let next = try await Bridge.setHostPolicy(alwaysOn: on)
+            hostPolicy = next
+            HostAgentInstaller.applyPolicy(alwaysOn: next.alwaysOn)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func setLimitsSync(_ on: Bool) async {
         do {
             try await Bridge.setLimitsSyncEnabled(on)

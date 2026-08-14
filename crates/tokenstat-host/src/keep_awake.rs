@@ -13,12 +13,12 @@
 //! is not a sleep lock. `ProcessType=Interactive` is the scheduler class
 //! so a live terminal is not throttled. It is also not a sleep lock.
 //!
-//! The Mac app being closed must leave the laptop free to sleep. A tunnel
-//! that is merely present, a sync, a `workspace.list` / `pty.list` poll,
-//! and a local terminal must do the same. Sleep is prevented only while a
-//! remote peer is actually using a workspace or a terminal on this machine:
-//! an inbound `pty.subscribe` stream, or a short grace after an inbound
-//! workspace / pty RPC that is not a list.
+//! The Mac app being closed must leave the laptop free to sleep, unless
+//! Always-on host is on. A tunnel that is merely present, a sync, a
+//! `workspace.list` / `pty.list` poll, and a local terminal must do the
+//! same. Sleep is prevented only while a remote peer is actually using a
+//! workspace or a terminal on this machine, or for the life of hostd when
+//! Always-on host is on.
 //!
 //! The assertion is `PreventUserIdleSystemSleep`. Closing the lid is still
 //! the user's choice. Nothing here calls `pmset` or holds a Keepresso lease.
@@ -83,10 +83,48 @@ pub(crate) fn should_hold(streams: u32, grace_until_ms: i64, now_ms: i64) -> boo
     streams > 0 || grace_until_ms > now_ms
 }
 
-/// `should_hold`, plus the worker that expires grace. Without that
-/// thread, a true here would lock sleep until hostd restarts.
-pub(crate) fn may_assert(worker: bool, streams: u32, grace_until_ms: i64, now_ms: i64) -> bool {
-    worker && should_hold(streams, grace_until_ms, now_ms)
+/// Always-on holds for the life of hostd. Otherwise only inbound work, and
+/// only while this Mac is actually hosting. The worker must be live: without
+/// it a true here would lock sleep until hostd restarts.
+pub(crate) fn assertion_wanted(
+    worker: bool,
+    policy_hold: bool,
+    hosting_active: bool,
+    streams: u32,
+    grace_until_ms: i64,
+    now_ms: i64,
+) -> bool {
+    worker && (policy_hold || (hosting_active && should_hold(streams, grace_until_ms, now_ms)))
+}
+
+fn policy_hold() -> bool {
+    POLICY_HOLD.load(Ordering::Acquire)
+}
+
+fn hosting_active() -> bool {
+    HOSTING_ACTIVE.load(Ordering::Acquire)
+}
+
+static POLICY_HOLD: AtomicBool = AtomicBool::new(false);
+static HOSTING_ACTIVE: AtomicBool = AtomicBool::new(true);
+
+/// Always-on host: hold idle-sleep for the life of this process.
+pub(crate) fn set_policy_hold(on: bool) {
+    POLICY_HOLD.store(on, Ordering::Release);
+    if on {
+        let _ = ensure_worker();
+    }
+    let mut inner = lock_inner();
+    apply(&mut inner);
+    state().poke.notify_one();
+}
+
+/// When hosting is paused (lid closed, app gone) inbound work must not pin sleep.
+pub(crate) fn set_hosting_active(on: bool) {
+    HOSTING_ACTIVE.store(on, Ordering::Release);
+    let mut inner = lock_inner();
+    apply(&mut inner);
+    state().poke.notify_one();
 }
 
 /// Look at one inbound request line and, if it is workspace / pty work,
@@ -103,6 +141,9 @@ pub(crate) fn note_inbound(line: &str) {
         .and_then(|params| params.get("kind"))
         .and_then(Value::as_str);
     if !counts_as_work(method, kind) {
+        return;
+    }
+    if !hosting_active() {
         return;
     }
     note_work();
@@ -153,8 +194,10 @@ impl Drop for StreamHold {
 }
 
 fn apply(inner: &mut Inner) {
-    let hold = may_assert(
+    let hold = assertion_wanted(
         worker_started(),
+        policy_hold(),
+        hosting_active(),
         inner.streams,
         inner.grace_until_ms,
         now_ms(),
@@ -331,7 +374,7 @@ mod macos {
 
 #[cfg(test)]
 mod tests {
-    use super::{GRACE_MS, counts_as_work, may_assert, should_hold};
+    use super::{GRACE_MS, assertion_wanted, counts_as_work, should_hold};
 
     #[test]
     fn list_polls_do_not_count() {
@@ -377,11 +420,19 @@ mod tests {
 
     #[test]
     fn assertion_requires_a_worker() {
-        assert!(!may_assert(false, 1, 5_000, 1_000));
-        assert!(!may_assert(false, 0, 5_000, 1_000));
-        assert!(may_assert(true, 1, 0, 1_000));
-        assert!(may_assert(true, 0, 5_000, 1_000));
-        assert!(!may_assert(true, 0, 0, 1_000));
+        assert!(!assertion_wanted(false, false, true, 1, 5_000, 1_000));
+        assert!(!assertion_wanted(false, true, false, 0, 0, 1_000));
+        assert!(assertion_wanted(true, false, true, 1, 0, 1_000));
+        assert!(assertion_wanted(true, false, true, 0, 5_000, 1_000));
+        assert!(!assertion_wanted(true, false, true, 0, 0, 1_000));
+    }
+
+    #[test]
+    fn always_on_holds_without_inbound_work() {
+        assert!(assertion_wanted(true, true, false, 0, 0, 1_000));
+        assert!(!assertion_wanted(true, false, false, 1, 5_000, 1_000));
+        assert!(assertion_wanted(true, false, true, 1, 0, 1_000));
+        assert!(!assertion_wanted(true, false, true, 0, 0, 1_000));
     }
 
     #[test]
