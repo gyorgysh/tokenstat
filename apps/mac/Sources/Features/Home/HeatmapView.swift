@@ -298,6 +298,11 @@ struct HeatmapView: View {
                     Text("\(calendar.first) to \(calendar.last)")
                         .font(Theme.numeric(11))
                         .foregroundStyle(.tertiary)
+                    if let freshness = calendar.freshness {
+                        Text("· \(freshness)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(calendar.isStaleGrid ? Theme.warning : Color.secondary.opacity(0.8))
+                    }
                 }
 
                 Spacer()

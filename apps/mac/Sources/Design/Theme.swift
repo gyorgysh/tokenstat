@@ -266,6 +266,10 @@ extension Color {
 struct Card<Content: View>: View {
     var title: String
     var subtitle: String?
+    /// Brand mark or other leading tile, same place the website and the
+    /// phone put a vendor mark: left of the title, not in the trailing
+    /// accessory.
+    var leading: AnyView?
     /// Trailing accessory in the header, for a count or a control.
     var accessory: AnyView?
     /// Take all the height offered rather than only what the content needs.
@@ -283,12 +287,14 @@ struct Card<Content: View>: View {
     init(
         title: String,
         subtitle: String? = nil,
+        leading: AnyView? = nil,
         accessory: AnyView? = nil,
         fillsHeight: Bool = false,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.subtitle = subtitle
+        self.leading = leading
         self.accessory = accessory
         self.fillsHeight = fillsHeight
         self.content = content()
@@ -296,7 +302,10 @@ struct Card<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: leading == nil ? .firstTextBaseline : .center) {
+                if let leading {
+                    leading
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: DisplayFit.dp(13), weight: .semibold))

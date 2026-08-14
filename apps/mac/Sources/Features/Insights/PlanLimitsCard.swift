@@ -63,6 +63,7 @@ struct PlanLimitPanel: View {
         Card(
             title: harnessName(provider.source),
             subtitle: subtitle,
+            leading: AnyView(HarnessMark(id: provider.source, size: 22)),
             accessory: AnyView(header),
             fillsHeight: fillsHeight
         ) {
@@ -119,7 +120,6 @@ struct PlanLimitPanel: View {
                     .foregroundStyle(Theme.warning)
                     .help("Cached. The vendor could not be reached on the last refresh.")
             }
-            HarnessMark(id: provider.source, size: 18)
             Button(action: refresh) {
                 if isLoading {
                     ProgressView().controlSize(.small)

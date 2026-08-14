@@ -146,9 +146,16 @@ struct ClientHomeView: View {
                 Text("Activity")
                     .font(ClientType.sectionTitle)
                 Spacer()
-                Text("\(calendar.activeDays) active days")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(calendar.activeDays) active days")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                    if let freshness = calendar.freshness {
+                        Text(freshness)
+                            .font(ClientType.caption)
+                            .foregroundStyle(calendar.isStaleGrid ? Theme.warning : .tertiary)
+                    }
+                }
             }
             PhoneHeatmap(
                 calendar: calendar,
