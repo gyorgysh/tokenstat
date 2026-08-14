@@ -34,6 +34,8 @@ const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 /// Recent Claude Code builds also write `Claude Code-credentials-<8 hex>`.
 /// The un-suffixed item is often only MCP plugin tokens.
+/// Gated with the dump parser: production only on macOS, tests everywhere.
+#[cfg(any(target_os = "macos", test))]
 const KEYCHAIN_SERVICE_PREFIX: &str = "Claude Code-credentials";
 
 #[derive(Debug, Deserialize)]
@@ -497,6 +499,7 @@ fn keychain_services() -> Vec<String> {
 }
 
 /// Pull `Claude Code-credentials` and its suffixed siblings out of a dump.
+#[cfg(any(target_os = "macos", test))]
 fn keychain_services_from_dump(dump: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = std::collections::HashSet::new();
