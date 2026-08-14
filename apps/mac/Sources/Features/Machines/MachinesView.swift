@@ -33,11 +33,13 @@ struct MachinesView: View {
     var body: some View {
         VStack(spacing: 0) {
             DetailChromeBar {
-                ToolbarIconButton(
-                    systemImage: "plus",
-                    help: "Paste a key from another device to pair it"
-                ) {
-                    addingDevice = true
+                if model.remoteReachAllowed {
+                    ToolbarIconButton(
+                        systemImage: "plus",
+                        help: "Paste a key from another device to pair it"
+                    ) {
+                        addingDevice = true
+                    }
                 }
             }
             ScrollView {
@@ -48,21 +50,11 @@ struct MachinesView: View {
                     if !Bridge.isHosted {
                         hostSetup
                     }
-                    // First, because it is the only thing here that is waiting on a
-                    // person. Everything else can be read at leisure.
-                    if !model.pending.isEmpty {
-                        waitingForApproval
+                    if model.remoteReachAllowed {
+                        remoteReadyContent
+                    } else {
+                        remoteLockedContent
                     }
-
-                    thisMachine
-                    if !model.accountMachines.isEmpty {
-                        accountDevices
-                    }
-                    if !model.known.isEmpty {
-                        knownMachines
-                    }
-                    addDeviceAction
-                    encryptionNote
                 }
                 .padding(Theme.Space.m)
             }
@@ -144,37 +136,122 @@ struct MachinesView: View {
         }
     }
 
+    /// The full pairing screen: approvals, this machine, peers, add, e2e.
     @ViewBuilder
-    private var addDeviceAction: some View {
-        if model.remoteReachAllowed {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add a device")
-                        .font(.callout.weight(.medium))
-                    Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Add device") { addingDevice = true }
-                    .buttonStyle(AccentButtonStyle())
-            }
-            .padding(Theme.Space.m)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-        } else if model.account?.signedIn == true {
-            EmptyState(
-                symbol: "iphone.and.arrow.forward",
-                title: "A phone does not need this",
-                message: "Sign in on the phone with the same account. It sees usage without remote reach. Pairing another computer for folders and terminals is on Patron."
-            ) {
-                Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
-                    .buttonStyle(SecondaryButtonStyle())
-            }
-            .padding(Theme.Space.m)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    private var remoteReadyContent: some View {
+        // First, because it is the only thing here that is waiting on a
+        // person. Everything else can be read at leisure.
+        if !model.pending.isEmpty {
+            waitingForApproval
         }
+        thisMachine
+        if !model.accountMachines.isEmpty {
+            accountDevices
+        }
+        if !model.known.isEmpty {
+            knownMachines
+        }
+        addDeviceAction
+        encryptionNote
+    }
+
+    /// Free and Supporter already share usage. The pairing chrome, the
+    /// disabled tunnel switch and a See plans link at the foot of a long
+    /// scroll are the wrong empty state: the action that ends it never
+    /// reaches the first screenful. Match the phone Remote tab: one
+    /// upgrade card, the machine list, then e2e.
+    @ViewBuilder
+    private var remoteLockedContent: some View {
+        remotePlanEmpty
+        if !model.accountMachines.isEmpty {
+            lockedMachineList
+        }
+        encryptionNote
+    }
+
+    private var remotePlanEmpty: some View {
+        EmptyState(
+            symbol: "lock.laptopcomputer",
+            title: "Remote is on Patron",
+            message: model.account?.signedIn == true
+                ? "This Mac already shares the account and sees usage from every device on it. Opening folders and terminals from another device is a paid feature."
+                : "Sign in with a Patron or Legend account to open folders and terminals on this Mac from another device."
+        ) {
+            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+                .buttonStyle(AccentButtonStyle())
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    /// Names and presence only. Connect, revoke and forget belong on
+    /// the plan that can actually open a tunnel.
+    private var lockedMachineList: some View {
+        Card(
+            title: "Devices on this account",
+            subtitle: "Usage from every linked device is already here."
+        ) {
+            VStack(spacing: 0) {
+                ForEach(model.listedAccountMachines) { machine in
+                    lockedMachineRow(machine)
+                    if machine.id != model.listedAccountMachines.last?.id {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    private func lockedMachineRow(_ machine: Machine) -> some View {
+        let isSelf = machine.machineID == model.account?.thisMachineID
+            || machine.publicIdentity == model.identity?.key
+        let resolved = model.resolvedName(for: machine)
+        let symbol = machine.isHost
+            ? (isSelf ? "laptopcomputer" : "desktopcomputer")
+            : "iphone"
+        return HStack(spacing: Theme.Space.s) {
+            Image(systemName: symbol)
+                .foregroundStyle(isSelf ? Theme.accent : .secondary)
+                .frame(width: 24)
+            if isSelf {
+                Circle()
+                    .fill(Theme.accent)
+                    .frame(width: 8, height: 8)
+            } else {
+                StatusDot(online: machine.online)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(resolved
+                    ?? machine.machineID.map { "Machine \($0)" }
+                    ?? "Unnamed device")
+                    .font(.callout.weight(.medium))
+                Text(statusLine(for: machine, isSelf: isSelf))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, Theme.Space.s)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var addDeviceAction: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add a device")
+                    .font(.callout.weight(.medium))
+                Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Add device") { addingDevice = true }
+                .buttonStyle(AccentButtonStyle())
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var hostSetup: some View {
