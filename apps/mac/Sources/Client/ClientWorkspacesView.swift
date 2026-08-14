@@ -501,12 +501,18 @@ final class ClientWorkspacesModel {
 
     func closeSession(_ info: PtySessionInfo) async {
         guard let peer = connectedKey else { return }
-        if activeTerminal?.hostID == info.id {
-            await activeTerminal?.close()
-            activeTerminal = nil
+        do {
+            if activeTerminal?.hostID == info.id {
+                try await activeTerminal?.close()
+                activeTerminal = nil
+            } else {
+                try await ClientRemote.ptyClose(peer: peer, id: info.id)
+            }
+            sessions.removeAll { $0.id == info.id }
+        } catch {
+            let host = hosts.first { $0.peerKey == peer }?.name
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: host)
         }
-        try? await ClientRemote.ptyClose(peer: peer, id: info.id)
-        sessions.removeAll { $0.id == info.id }
     }
 
     private func reloadRemote(peerKey: String) async {

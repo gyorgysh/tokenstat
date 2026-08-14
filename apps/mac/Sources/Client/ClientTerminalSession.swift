@@ -40,6 +40,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     @ObservationIgnored private var writerTask: Task<Void, Never>?
     @ObservationIgnored private var removed = false
     @ObservationIgnored private var isPending = false
+    /// Close was tapped before spawn returned. Kill the real id on attach.
+    @ObservationIgnored private var closeWhenAttached = false
     @ObservationIgnored private var lastInfoAt = Date.distantPast
     @ObservationIgnored private var inForeground = true
 
@@ -85,13 +87,21 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     func attach(info: PtySessionInfo) {
-        guard isPending, !removed else { return }
+        guard isPending else { return }
+        if removed && !closeWhenAttached { return }
         hostID = info.id
         alive = info.alive
         exitCode = info.exitCode
         rows = info.rows
         cols = info.cols
         isPending = false
+        if closeWhenAttached || removed {
+            let peer = peer
+            let id = info.id
+            Task { try? await ClientRemote.ptyClose(peer: peer, id: id) }
+            endLocalWork()
+            return
+        }
         _ = view
         start()
     }
@@ -113,11 +123,27 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// Stop the process on the host, then drop the phone's hold.
     ///
     /// Done only detaches. Close is what the Mac tab close does.
-    func close() async {
-        removed = true
-        if !isPending, !hostID.isEmpty {
-            try? await ClientRemote.ptyClose(peer: peer, id: hostID)
+    /// Throws when the host never heard the close, so the caller can keep
+    /// the row instead of pretending the process is gone.
+    func close() async throws {
+        if isPending {
+            closeWhenAttached = true
+            removed = true
+            endLocalWork()
+            return
         }
+        guard !hostID.isEmpty else {
+            removed = true
+            endLocalWork()
+            return
+        }
+        do {
+            try await ClientRemote.ptyClose(peer: peer, id: hostID)
+        } catch {
+            transportError = error.localizedDescription
+            throw error
+        }
+        removed = true
         endLocalWork()
     }
 
@@ -508,10 +534,14 @@ struct ClientTerminalScreen: View {
         ) {
             Button("Close", role: .destructive) {
                 Task {
-                    await session.close()
-                    onClosedProcess?()
-                    onClose?()
-                    dismiss()
+                    do {
+                        try await session.close()
+                        onClosedProcess?()
+                        onClose?()
+                        dismiss()
+                    } catch {
+                        // Keep the screen. The process is still running.
+                    }
                 }
             }
             Button("Keep it", role: .cancel) {}

@@ -332,12 +332,17 @@ struct ClientWorkspaceDetailView: View {
     }
 
     private func closeSession(_ info: PtySessionInfo) async {
-        if openSession?.hostID == info.id {
-            await openSession?.close()
-            openSession = nil
+        do {
+            if openSession?.hostID == info.id {
+                try await openSession?.close()
+                openSession = nil
+            } else {
+                try await ClientRemote.ptyClose(peer: peer, id: info.id)
+            }
+            sessions.removeAll { $0.id == info.id }
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
-        try? await ClientRemote.ptyClose(peer: peer, id: info.id)
-        sessions.removeAll { $0.id == info.id }
     }
 
     private func launch(_ profile: RemoteLaunchProfile) async {

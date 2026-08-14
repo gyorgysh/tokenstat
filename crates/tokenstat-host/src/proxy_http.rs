@@ -31,6 +31,8 @@ pub(crate) fn bridge(
     listen_port: u16,
 ) {
     let _ = local.set_nodelay(true);
+    // Only the header wait is timed. A 101 upgrade or a long-lived TCP
+    // stream must sit idle without the socket treating that as EOF.
     let _ = local.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = local.set_write_timeout(Some(Duration::from_secs(30)));
     let mut local = local;
@@ -38,6 +40,7 @@ pub(crate) fn bridge(
         Ok(buf) if !buf.is_empty() => buf,
         _ => return,
     };
+    clear_timeouts(&local);
     if !looks_like_http(&first) {
         pump_raw(local, connection, Some(first));
         return;
@@ -99,7 +102,7 @@ fn pump_one_http(
         return Ok(());
     }
 
-    if meta.can_rewrite_html()
+    if meta.can_rewrite_body()
         && let Some(len) = meta.content_length
         && len <= MAX_HTML_REWRITE
     {
@@ -163,6 +166,18 @@ fn pump_raw(local: TcpStream, connection: Connection, prefix: Option<Vec<u8>>) {
     pump_split(local, reader, writer);
 }
 
+fn clear_timeouts(stream: &TcpStream) {
+    let _ = stream.set_read_timeout(None);
+    let _ = stream.set_write_timeout(None);
+}
+
+fn is_idle(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+    )
+}
+
 fn pump_split(
     tcp: TcpStream,
     reader: tokenstat_remote::StreamReader,
@@ -190,6 +205,7 @@ fn pump_split(
                             break;
                         }
                     }
+                    Err(err) if is_idle(&err) => continue,
                     Err(_) => break,
                 }
             }
@@ -324,16 +340,25 @@ fn looks_like_http(buf: &[u8]) -> bool {
 #[derive(Debug, Default)]
 struct ResponseMeta {
     content_length: Option<usize>,
-    is_html: bool,
+    is_rewritable: bool,
     compressed: bool,
     chunked: bool,
     is_upgrade: bool,
 }
 
 impl ResponseMeta {
-    fn can_rewrite_html(&self) -> bool {
-        self.is_html && !self.compressed && !self.chunked && self.content_length.is_some()
+    fn can_rewrite_body(&self) -> bool {
+        self.is_rewritable && !self.compressed && !self.chunked && self.content_length.is_some()
     }
+}
+
+fn content_type_is_rewritable(ct: &str) -> bool {
+    let ct = ct.to_ascii_lowercase();
+    ct.contains("text/html")
+        || ct.contains("text/javascript")
+        || ct.contains("application/javascript")
+        || ct.contains("application/x-javascript")
+        || ct.contains("text/css")
 }
 
 fn header_map(block: &str) -> Option<(String, Vec<(String, String)>)> {
@@ -431,7 +456,7 @@ fn rewrite_response_headers(
         meta.content_length = len.parse().ok();
     }
     if let Some(ct) = header_ci(&headers, "Content-Type") {
-        meta.is_html = ct.to_ascii_lowercase().contains("text/html");
+        meta.is_rewritable = content_type_is_rewritable(ct);
     }
     if let Some(enc) = header_ci(&headers, "Content-Encoding") {
         let enc = enc.to_ascii_lowercase();
@@ -540,9 +565,18 @@ const ws = "ws://localhost:5173/";"#;
     fn compressed_html_is_not_a_rewrite_candidate() {
         let raw = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Encoding: gzip\r\nContent-Length: 12\r\n\r\n";
         let (_, meta) = rewrite_response_headers(raw, 5173, 9).unwrap();
-        assert!(meta.is_html);
+        assert!(meta.is_rewritable);
         assert!(meta.compressed);
-        assert!(!meta.can_rewrite_html());
+        assert!(!meta.can_rewrite_body());
+    }
+
+    #[test]
+    fn javascript_is_a_rewrite_candidate() {
+        let raw =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 40\r\n\r\n";
+        let (_, meta) = rewrite_response_headers(raw, 5173, 9).unwrap();
+        assert!(meta.is_rewritable);
+        assert!(meta.can_rewrite_body());
     }
 
     #[test]

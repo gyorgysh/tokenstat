@@ -244,19 +244,43 @@ final class ClientStore {
     }
 
     func refreshSubscriptionStatus() async {
+        var liveProductID: String?
+        var liveAutoRenewID: String?
+        var liveWillRenew = false
+        var liveExpiration: Date?
+        var foundLive = false
         for product in products {
-            guard let statuses = try? await product.subscription?.status else { continue }
+            guard let statuses = try? await product.subscription?.status, !statuses.isEmpty else {
+                continue
+            }
             for status in statuses {
-                if let info = try? checkVerified(status.renewalInfo) {
-                    autoRenewProductID = info.autoRenewPreference
-                    willAutoRenew = info.willAutoRenew
-                }
-                if let transaction = try? checkVerified(status.transaction) {
-                    currentProductID = transaction.productID
-                    expirationDate = transaction.expirationDate
+                switch status.state {
+                case .subscribed, .inGracePeriod, .inBillingRetryPeriod:
+                    foundLive = true
+                    if let info = try? checkVerified(status.renewalInfo) {
+                        liveAutoRenewID = info.autoRenewPreference
+                        liveWillRenew = info.willAutoRenew
+                    }
+                    if let transaction = try? checkVerified(status.transaction) {
+                        liveProductID = transaction.productID
+                        liveExpiration = transaction.expirationDate
+                    }
+                default:
+                    break
                 }
             }
-            return
+            if foundLive { break }
+        }
+        if foundLive {
+            currentProductID = liveProductID
+            autoRenewProductID = liveAutoRenewID
+            willAutoRenew = liveWillRenew
+            expirationDate = liveExpiration
+        } else {
+            currentProductID = nil
+            autoRenewProductID = nil
+            willAutoRenew = false
+            expirationDate = nil
         }
     }
 

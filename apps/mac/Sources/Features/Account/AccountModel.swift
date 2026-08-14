@@ -399,22 +399,33 @@ final class AccountModel {
     /// A purchase on the phone, or a Paddle checkout in the browser, lands
     /// here on the next `account.status`. Home's ten-minute series cache and
     /// hostd's `not_on_this_plan` stop must not outlive that answer.
+    ///
+    /// The first snapshot after launch is not a plan change. Remint then
+    /// only if the tunnel is still sitting on a plan refusal.
     private static func broadcastIfEntitlementChanged(from previous: Account?, to next: Account) async {
         guard next.signedIn else { return }
-        let wasAllowed = remoteAllowed(previous)
         let nowAllowed = remoteAllowed(next)
+        if previous == nil {
+            if nowAllowed, await tunnelRefusedForPlan() {
+                _ = try? await Bridge.reconsiderPlan()
+            }
+            return
+        }
+        let wasAllowed = remoteAllowed(previous)
         let tierChanged = (previous?.tier ?? "") != (next.tier ?? "")
-        let flipped = wasAllowed != nowAllowed || tierChanged
-        let firstLoadWhileEntitled = previous == nil && nowAllowed
-        guard flipped || firstLoadWhileEntitled else { return }
-        // Remint before anyone redraws. Home's refresh listens for the
-        // notification and must not race a leftover `not_on_this_plan`.
+        guard wasAllowed != nowAllowed || tierChanged else { return }
         if nowAllowed {
             _ = try? await Bridge.reconsiderPlan()
         }
-        if flipped {
-            NotificationCenter.default.post(name: .tokenstatEntitlementDidChange, object: nil)
-        }
+        NotificationCenter.default.post(name: .tokenstatEntitlementDidChange, object: nil)
+    }
+
+    private static func tunnelRefusedForPlan() async -> Bool {
+        guard let error = try? await Bridge.remoteStatus().tunnelError else { return false }
+        let lower = error.lowercased()
+        return lower.contains("not_on_this_plan")
+            || lower.contains("paid-plan")
+            || lower.contains("not on this plan")
     }
 
     private static func remoteAllowed(_ account: Account?) -> Bool {

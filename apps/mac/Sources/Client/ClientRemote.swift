@@ -19,6 +19,8 @@ enum ClientTunnelCopy {
         return lower.contains("no_such_peer")
             || lower.contains("not on the tunnel")
             || lower.contains("did not pair the channel")
+            || lower.contains("tunnel is not connected")
+            || lower.contains("tunnel disconnected")
     }
 
     static func waiting(_ name: String?) -> String {
@@ -153,7 +155,7 @@ enum ClientRemote {
 
     static func ptyClose(peer: String, id: String) async throws {
         struct Ack: Codable, Sendable { let closed: Bool? }
-        _ = try? await Bridge.onPeer(peer, "pty.close", ["id": id], as: Ack.self)
+        _ = try await Bridge.onPeer(peer, "pty.close", ["id": id], as: Ack.self)
     }
 
     static func launcherCatalog(peer: String) async throws -> [RemoteLaunchProfile] {

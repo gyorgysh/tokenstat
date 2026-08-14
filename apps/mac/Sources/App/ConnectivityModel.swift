@@ -63,6 +63,8 @@ final class ConnectivityModel {
     /// bound to the old route.
     private var lastPathKey = ""
     private var sawPath = false
+    /// A VPN flap can fire several path updates. One redial per burst.
+    private var lastRouteRestoreAt = Date.distantPast
 
     func start() {
         guard !started else { return }
@@ -105,7 +107,11 @@ final class ConnectivityModel {
         pathSatisfied = satisfied
         if satisfied {
             if routeChanged && isOnline {
-                NotificationCenter.default.post(name: .connectivityRestored, object: self)
+                let now = Date()
+                if now.timeIntervalSince(lastRouteRestoreAt) >= 2 {
+                    lastRouteRestoreAt = now
+                    NotificationCenter.default.post(name: .connectivityRestored, object: self)
+                }
             }
             scheduleProbe()
         } else {
@@ -122,8 +128,6 @@ final class ConnectivityModel {
         if path.usesInterfaceType(.wifi) { parts.append("wifi") }
         if path.usesInterfaceType(.cellular) { parts.append("cell") }
         if path.usesInterfaceType(.wiredEthernet) { parts.append("eth") }
-        if path.usesInterfaceType(.other) { parts.append("other") }
-        if path.usesInterfaceType(.loopback) { parts.append("lo") }
         return parts.joined(separator: ",")
     }
 
