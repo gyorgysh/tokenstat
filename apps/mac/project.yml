@@ -39,7 +39,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.3.8"
+    MARKETING_VERSION: "0.3.9"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -56,7 +56,7 @@ settings:
     # release.
     #
     # 24 has been uploaded, so the next upload of any marketing version needs
-    # 25, even if 0.3.8 never reaches the store.
+    # 25, even if 0.3.9 never reaches the store.
     CURRENT_PROJECT_VERSION: "25"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
