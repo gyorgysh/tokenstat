@@ -32,6 +32,9 @@ const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
+/// Recent Claude Code builds also write `Claude Code-credentials-<8 hex>`.
+/// The un-suffixed item is often only MCP plugin tokens.
+const KEYCHAIN_SERVICE_PREFIX: &str = "Claude Code-credentials";
 
 #[derive(Debug, Deserialize)]
 struct StoredCredentials {
@@ -103,7 +106,8 @@ pub fn fetch() -> ProviderLimits {
         None => {
             return ProviderLimits::unavailable(
                 "claude_code",
-                "The stored Claude Code credentials hold no login.",
+                "Claude Code's Keychain item has no login, only plugin tokens. \
+                 Run `claude` in a terminal so it rewrites the login, then refresh.",
             );
         }
     };
@@ -221,7 +225,12 @@ fn parse_iso_ms(raw: &str) -> Option<i64> {
 /// would leave Claude Code reading whichever one this did not touch.
 enum Store {
     #[cfg(target_os = "macos")]
-    Keychain,
+    Keychain {
+        /// The service the blob was read from, so a refresh writes back
+        /// there rather than inventing a second item Claude Code will not
+        /// see.
+        service: String,
+    },
     File(std::path::PathBuf),
 }
 
@@ -247,23 +256,59 @@ impl Stored {
 /// The credentials Claude Code stored, from wherever it put them.
 ///
 /// The Keychain first, because that is where it puts them on a Mac, then the
-/// file it falls back to.
+/// file it falls back to. Recent builds keep MCP plugin tokens in the
+/// historical `Claude Code-credentials` item and the actual login in a
+/// suffixed sibling, so every matching service is tried until one parses as
+/// a login. A blob that is only plugins is not a login.
 fn stored_credentials() -> Option<Stored> {
     #[cfg(target_os = "macos")]
-    if let Some(raw) = keychain_blob() {
-        return Some(Stored {
-            raw,
-            store: Store::Keychain,
-        });
+    {
+        let mut plugin_only = None;
+        for (service, raw) in keychain_blobs() {
+            let stored = Stored {
+                raw,
+                store: Store::Keychain { service },
+            };
+            if stored.token().is_some() {
+                return Some(stored);
+            }
+            if plugin_only.is_none() {
+                plugin_only = Some(stored);
+            }
+        }
+        if let Some(stored) = plugin_only {
+            // So the caller can say "no login" rather than "not signed in".
+            // The file fallback still runs: an older Claude Code put the
+            // login there when the Keychain only held plugins.
+            let path = credentials_file_path();
+            if let Some(path) = path {
+                if let Ok(raw) = std::fs::read_to_string(&path) {
+                    let file = Stored {
+                        raw,
+                        store: Store::File(path),
+                    };
+                    if file.token().is_some() {
+                        return Some(file);
+                    }
+                }
+            }
+            return Some(stored);
+        }
     }
-    let path = directories::UserDirs::new()?
-        .home_dir()
-        .join(".claude/.credentials.json");
+    let path = credentials_file_path()?;
     let raw = std::fs::read_to_string(&path).ok()?;
     Some(Stored {
         raw,
         store: Store::File(path),
     })
+}
+
+fn credentials_file_path() -> Option<std::path::PathBuf> {
+    Some(
+        directories::UserDirs::new()?
+            .home_dir()
+            .join(".claude/.credentials.json"),
+    )
 }
 
 /// Trade the refresh token for a new access token, and hand the result back to
@@ -353,7 +398,7 @@ fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
     let updated = renewed_blob(&stored.raw, fresh)?;
     match &stored.store {
         #[cfg(target_os = "macos")]
-        Store::Keychain => write_keychain(&updated),
+        Store::Keychain { service } => write_keychain(service, &updated),
         Store::File(path) => {
             crate::snapshot::write_private_atomically(path, &updated).map_err(|e| e.to_string())?;
             Ok(())
@@ -367,12 +412,12 @@ fn write_back(stored: &Stored, fresh: &RefreshedToken) -> Result<(), String> {
 /// it twice the way it would ask a person. An argument would put a live token
 /// in the process table for anything reading `ps` to pick up.
 #[cfg(target_os = "macos")]
-fn write_keychain(blob: &str) -> Result<(), String> {
+fn write_keychain(service: &str, blob: &str) -> Result<(), String> {
     use std::io::Write;
 
     let account = std::env::var("USER").map_err(|e| e.to_string())?;
     let mut child = std::process::Command::new("security")
-        .args(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a"])
+        .args(["add-generic-password", "-U", "-s", service, "-a"])
         .arg(&account)
         .arg("-w")
         .stdin(std::process::Stdio::piped())
@@ -394,17 +439,35 @@ fn write_keychain(blob: &str) -> Result<(), String> {
         .ok_or_else(|| "the Keychain refused the renewed login".to_string())
 }
 
-/// The Keychain copy, on the platform that has one.
+/// Every Claude Code Keychain blob, historical name first.
 ///
 /// No stub for the others: the only caller is behind the same condition, and a
 /// version of this that always answers "nothing" is a function the compiler is
 /// right to complain about.
 #[cfg(target_os = "macos")]
-fn keychain_blob() -> Option<String> {
-    let account = std::env::var("USER").ok()?;
+fn keychain_blobs() -> Vec<(String, String)> {
+    let account = match std::env::var("USER") {
+        Ok(a) if !a.is_empty() => a,
+        _ => return Vec::new(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut blobs = Vec::new();
+    for service in keychain_services() {
+        if !seen.insert(service.clone()) {
+            continue;
+        }
+        if let Some(raw) = keychain_blob_for(&service, &account) {
+            blobs.push((service, raw));
+        }
+    }
+    blobs
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_blob_for(service: &str, account: &str) -> Option<String> {
     let out = std::process::Command::new("security")
-        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a"])
-        .arg(&account)
+        .args(["find-generic-password", "-s", service, "-a"])
+        .arg(account)
         .arg("-w")
         .output()
         .ok()?;
@@ -412,6 +475,47 @@ fn keychain_blob() -> Option<String> {
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Service names Claude Code has used on this Mac, historical one first.
+#[cfg(target_os = "macos")]
+fn keychain_services() -> Vec<String> {
+    let mut names = vec![KEYCHAIN_SERVICE.to_string()];
+    let out = std::process::Command::new("security")
+        .arg("dump-keychain")
+        .output();
+    let Ok(out) = out else {
+        return names;
+    };
+    let dump = String::from_utf8_lossy(&out.stdout);
+    for service in keychain_services_from_dump(&dump) {
+        if service != KEYCHAIN_SERVICE {
+            names.push(service);
+        }
+    }
+    names
+}
+
+/// Pull `Claude Code-credentials` and its suffixed siblings out of a dump.
+fn keychain_services_from_dump(dump: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in dump.lines() {
+        let Some(start) = line.find("\"svce\"<blob>=\"") else {
+            continue;
+        };
+        let rest = &line[start + "\"svce\"<blob>=\"".len()..];
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        let service = &rest[..end];
+        if (service == KEYCHAIN_SERVICE || service.starts_with(KEYCHAIN_SERVICE_PREFIX))
+            && seen.insert(service.to_string())
+        {
+            names.push(service.to_string());
+        }
+    }
+    names
 }
 
 #[cfg(test)]
@@ -468,6 +572,24 @@ mod tests {
     fn a_blob_without_an_oauth_section_is_not_a_login() {
         let creds: StoredCredentials = serde_json::from_str(r#"{"somethingElse":{}}"#).unwrap();
         assert!(creds.claude_ai_oauth.is_none());
+    }
+
+    #[test]
+    fn a_keychain_dump_lists_the_suffixed_claude_code_items() {
+        let dump = r#"
+    "svce"<blob>="Claude Code-credentials"
+    "svce"<blob>="Claude Code-credentials-0a8c883c"
+    "svce"<blob>="something-else"
+    "svce"<blob>="Claude Code-credentials"
+"#;
+        let names = keychain_services_from_dump(dump);
+        assert_eq!(
+            names,
+            vec![
+                "Claude Code-credentials".to_string(),
+                "Claude Code-credentials-0a8c883c".to_string()
+            ]
+        );
     }
 
     #[test]
