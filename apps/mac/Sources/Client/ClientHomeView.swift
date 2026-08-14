@@ -153,7 +153,7 @@ struct ClientHomeView: View {
                     if let freshness = calendar.freshness {
                         Text(freshness)
                             .font(ClientType.caption)
-                            .foregroundStyle(calendar.isStaleGrid ? Theme.warning : .tertiary)
+                            .foregroundStyle(calendar.isStaleGrid ? Theme.warning : Color.secondary.opacity(0.8))
                     }
                 }
             }
