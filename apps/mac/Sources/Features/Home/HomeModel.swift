@@ -143,7 +143,9 @@ final class HomeModel {
     /// - Parameter quiet: when true (and content is already on screen), do not
     ///   set `isLoading`, so the heatmap stays put while numbers update. Used
     ///   for toolbar refresh, returning to Home, app activation, and post-scan.
-    func load(quiet: Bool = false) async {
+    /// - Parameter refreshAccountGrid: drop the host's ten-minute series cache
+    ///   so a pull after a plan change cannot redraw Free's locked year.
+    func load(quiet: Bool = false, refreshAccountGrid: Bool = false) async {
         let soft = quiet && calendar != nil
         if soft {
             guard !isRefreshing, !isLoading else { return }
@@ -156,7 +158,10 @@ final class HomeModel {
             isRefreshing = false
         }
         do {
-            async let calendar = Bridge.activityCalendar(scope: scope.wire)
+            async let calendar = Bridge.activityCalendar(
+                scope: scope.wire,
+                force: refreshAccountGrid
+            )
             // Plan usage still comes from the local archive. The iOS client
             // has none. `archiveOnly` turns that refusal into empty rather
             // than into an error banner over a heatmap that loaded well.
@@ -231,7 +236,7 @@ final class HomeModel {
     /// Explicit re-read from the toolbar. Always hits the host; also refreshes
     /// plan limit cards so one control covers the whole Home surface.
     func refresh() async {
-        await load(quiet: true)
+        await load(quiet: true, refreshAccountGrid: true)
         await loadPlanLimits()
     }
 

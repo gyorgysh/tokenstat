@@ -171,17 +171,33 @@ private struct ClientAccountContent: View {
         let apple = billing?.isApple == true && billing?.blocksOtherStore == true
         let paddle = billing?.isPaddle == true && billing?.blocksOtherStore == true
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Plan")
-                .font(ClientType.sectionTitle)
+            HStack(spacing: Theme.Space.s) {
+                if let tier = account.tier, !tier.isEmpty {
+                    TierMark(tier: tier, size: 22)
+                }
+                Text("Plan")
+                    .font(ClientType.sectionTitle)
+            }
+            if let tier = account.tier, !tier.isEmpty {
+                Text(tier.capitalized
+                    + (account.billing?.periodEnd.map { " · until \(Self.shortDay($0))" } ?? ""))
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+            }
             if apple {
-                Text("This plan was bought on the App Store. Change or cancel it there.")
+                Text("Bought on the App Store. See every plan here, then change or cancel in Apple ID subscriptions.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if let next = account.billing?.scheduledTier, !next.isEmpty {
+                    Text("Switches to \(next.capitalized) at the next renewal.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.accent)
+                }
                 Button {
                     store.showPaywall = true
                 } label: {
-                    Text("Manage subscription")
+                    Text("See plans")
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -487,6 +503,15 @@ private struct ClientAccountContent: View {
 
     private static var defaultDeletionURL: URL {
         ClientWebPages.accountDeletion()
+    }
+
+    private static func shortDay(_ raw: String) -> String {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = iso.date(from: raw)
+            ?? ISO8601DateFormatter().date(from: raw)
+        guard let date else { return raw }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 
     private func openAccountDeletion() {

@@ -58,13 +58,20 @@ final class ConnectivityModel {
     private var probeTask: Task<Void, Never>?
     private var started = false
     private var pathSatisfied = false
+    /// Last observed route (wifi / cellular / ethernet). A satisfied path
+    /// that changes interface is still "online", but the tunnel socket is
+    /// bound to the old route.
+    private var lastPathKey = ""
+    private var sawPath = false
 
     func start() {
         guard !started else { return }
         started = true
         monitor.pathUpdateHandler = { [weak self] path in
+            let key = Self.routeKey(path)
+            let satisfied = path.status == .satisfied
             Task { @MainActor [weak self] in
-                self?.pathDidChange(satisfied: path.status == .satisfied)
+                self?.pathDidChange(satisfied: satisfied, routeKey: key)
             }
         }
         monitor.start(queue: queue)
@@ -87,15 +94,37 @@ final class ConnectivityModel {
 
     /// The path changed. A satisfied path does not prove egress, so confirm
     /// with a probe before announcing online. An unsatisfied path is
-    /// definitive.
-    private func pathDidChange(satisfied: Bool) {
+    /// definitive. A satisfied path that merely changes interface (Wi-Fi to
+    /// cellular) stays online, and that is exactly when the tunnel must
+    /// redial rather than wait for a keepalive timeout.
+    private func pathDidChange(satisfied: Bool, routeKey: String) {
+        let alreadyHadPath = sawPath
+        let routeChanged = alreadyHadPath && routeKey != lastPathKey
+        sawPath = true
+        lastPathKey = routeKey
         pathSatisfied = satisfied
         if satisfied {
+            if routeChanged && isOnline {
+                NotificationCenter.default.post(name: .connectivityRestored, object: self)
+            }
             scheduleProbe()
         } else {
             probeTask?.cancel()
             setOffline()
         }
+    }
+
+    /// Enough of a path to tell Wi-Fi from cellular from ethernet. Quality
+    /// flaps on the same interface must not look like a new route.
+    /// Called from `NWPathMonitor`'s queue, so this cannot hop to MainActor.
+    nonisolated private static func routeKey(_ path: NWPath) -> String {
+        var parts: [String] = [String(describing: path.status)]
+        if path.usesInterfaceType(.wifi) { parts.append("wifi") }
+        if path.usesInterfaceType(.cellular) { parts.append("cell") }
+        if path.usesInterfaceType(.wiredEthernet) { parts.append("eth") }
+        if path.usesInterfaceType(.other) { parts.append("other") }
+        if path.usesInterfaceType(.loopback) { parts.append("lo") }
+        return parts.joined(separator: ",")
     }
 
     private func setOffline() {

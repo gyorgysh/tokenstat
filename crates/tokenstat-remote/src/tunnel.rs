@@ -15,10 +15,10 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokenstat_identity::{MachineIdentity, PublicKey, hex};
 use tungstenite::client::IntoClientRequest;
@@ -76,6 +76,11 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// try it. More than a couple in a row means the replacement is being refused
 /// too, which minting again cannot fix, so the backoff takes over.
 const MAX_IMMEDIATE_RENEWALS: u32 = 2;
+/// How long a live socket may go without a read before `nudge` treats it as
+/// half-open and closes it. Matches the relay's default `TUNNEL_KEEPALIVE_MS`
+/// (25s). Wall clock, not `Instant`: a Mac asleep stops `Instant` and would
+/// otherwise look freshly read after the lid opens.
+const KEEPALIVE_STALE_MS: u64 = 25_000;
 
 /// The one long-lived tunnel connection a daemon keeps.
 pub struct TunnelSession {
@@ -116,6 +121,9 @@ pub struct TunnelSession {
     /// supervisor takes it and retries immediately instead of waiting.
     renewed: AtomicBool,
     stopped: AtomicBool,
+    /// Wall-clock ms of the last successful socket read. 0 means never.
+    /// Used by `nudge` to tell a live socket from a NAT half-open.
+    last_read_ms: AtomicU64,
 }
 
 #[derive(Clone)]
@@ -208,6 +216,7 @@ impl TunnelSession {
             wake: Mutex::new(Some(wake_tx)),
             renewed: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
+            last_read_ms: AtomicU64::new(0),
         });
         let weak = Arc::downgrade(&session);
         std::thread::spawn(move || supervisor(weak, wake_rx));
@@ -340,13 +349,53 @@ impl TunnelSession {
     ///
     /// Called when the network comes back or the machine wakes from sleep, so a
     /// reconnect that would otherwise wait out its backoff starts immediately
-    /// instead. A no-op while the supervisor is connecting or connected: the
-    /// next wait simply runs at the floor, which is what a healthy network is
-    /// owed anyway.
+    /// instead. If the socket has not read in one keepalive it is treated as
+    /// half-open and closed so the supervisor reconnects now, rather than
+    /// waiting for the relay to notice.
     pub fn nudge(&self) {
+        self.wake_supervisor();
+        if self.read_is_stale() {
+            self.close_live_socket();
+        }
+    }
+
+    /// Same as `nudge`, but always drop a live socket.
+    ///
+    /// A path change (Wi-Fi to cellular) leaves a socket that still looks
+    /// fresh: the last ping was seconds ago, on the old route. Closing it
+    /// here is what makes the next HELLO land on the new path.
+    pub fn reconnect_now(&self) {
+        self.wake_supervisor();
+        self.close_live_socket();
+    }
+
+    fn wake_supervisor(&self) {
         if let Some(tx) = self.wake.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             let _ = tx.send(());
         }
+    }
+
+    fn close_live_socket(&self) {
+        if let Some(socket) = self
+            .socket
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_mut()
+        {
+            let _ = socket.close(None);
+        }
+    }
+
+    fn mark_read(&self) {
+        self.last_read_ms.store(wall_ms(), Ordering::Release);
+    }
+
+    fn read_is_stale(&self) -> bool {
+        let last = self.last_read_ms.load(Ordering::Acquire);
+        if last == 0 {
+            return self.status().connected;
+        }
+        wall_ms().saturating_sub(last) >= KEEPALIVE_STALE_MS
     }
 
     /// What the connection is doing right now.
@@ -786,6 +835,7 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
                 connected: true,
                 error: None,
             };
+            session.mark_read();
         }
         Message::Text(text) => {
             // A refusal the machine can answer itself is answered here, before
@@ -900,9 +950,18 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
         let mut guard = session.socket.lock().unwrap_or_else(|e| e.into_inner());
         let Some(socket) = guard.as_mut() else { break };
         let frame = match socket.read() {
-            Ok(Message::Binary(frame)) => Some(frame),
+            Ok(Message::Binary(frame)) => {
+                session.mark_read();
+                Some(frame)
+            }
             Ok(Message::Close(_)) => break,
-            Ok(_) => None,
+            Ok(_) => {
+                // Ping, Pong, Text. A ping is the relay's keepalive: counting
+                // it as a read is what keeps a quiet machine from looking
+                // half-open to `nudge`.
+                session.mark_read();
+                None
+            }
             Err(tungstenite::Error::Io(error))
                 if error.kind() == io::ErrorKind::TimedOut
                     || error.kind() == io::ErrorKind::WouldBlock =>
@@ -1051,6 +1110,13 @@ fn renewable_denial(text: &str) -> bool {
 /// not, so the mapping lives here once instead of in every screen that shows a
 /// tunnel status. An unknown code is passed through rather than swallowed: a
 /// new relay reason should read oddly, not disappear.
+fn wall_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 fn denial_message(text: &str) -> String {
     let Some(reason) = text.strip_prefix("DENIED ") else {
         return text.to_string();
@@ -1173,7 +1239,29 @@ mod tests {
             wake: Mutex::new(None),
             renewed: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
+            last_read_ms: AtomicU64::new(0),
         })
+    }
+
+    #[test]
+    fn a_connected_socket_with_no_read_is_stale() {
+        let session = inert_session();
+        assert!(
+            !session.read_is_stale(),
+            "a socket that is not connected is not half-open"
+        );
+        *session.status.lock().unwrap() = TunnelStatus {
+            connected: true,
+            error: None,
+        };
+        assert!(session.read_is_stale(), "READY without a read is stale");
+        session.mark_read();
+        assert!(!session.read_is_stale());
+        session.last_read_ms.store(
+            wall_ms().saturating_sub(KEEPALIVE_STALE_MS + 1),
+            Ordering::Release,
+        );
+        assert!(session.read_is_stale());
     }
 
     #[test]

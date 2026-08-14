@@ -110,10 +110,11 @@ pub use creds::{AuthStatus, clear_token, has_token, save_token, token_for};
 pub use profile::{
     AccountLimitProvider, AccountLimitWindow, DeviceLogin, DeviceStatus, JITTER_WINDOW_SECS,
     LoginResult, ProfileError, ScheduledOutcome, SchedulingInfo, StatusResult, SyncOptions,
-    SyncResult, TunnelToken, apple_activate, cli_sync_schedule_active, device_poll, device_start,
-    device_start_kind, fetch_account_limits, jitter_offset, login, login_with_code, logout,
-    mint_tunnel_token, post_limits, register_machine_identity, register_machine_identity_kind,
-    scheduling_info, sync, sync_scheduled, sync_scheduled_now, sync_status,
+    SyncResult, TunnelToken, apple_activate, apple_renewal, cli_sync_schedule_active, device_poll,
+    device_start, device_start_kind, fetch_account_limits, jitter_offset, login, login_with_code,
+    logout, mint_tunnel_token, post_limits, register_machine_identity,
+    register_machine_identity_kind, scheduling_info, sync, sync_scheduled, sync_scheduled_now,
+    sync_status,
 };
 pub use update::{
     ApplyReport, ScheduledUpdate, UPDATE_JITTER_WINDOW_SECS, UpdateCheck, UpdateError,

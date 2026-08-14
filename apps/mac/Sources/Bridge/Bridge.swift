@@ -611,11 +611,12 @@ enum Bridge {
     /// assumed otherwise would label one machine's year as everybody's.
     static func activityCalendar(
         weeks: Int = 53,
-        scope: String = "local"
+        scope: String = "local",
+        force: Bool = false
     ) async throws -> ActivityCalendar? {
         try await backgroundOptional(
             "activity.calendar",
-            ["weeks": weeks, "scope": scope],
+            ["weeks": weeks, "scope": scope, "force": force],
             // Longer than the default: an account grid is a network call on the
             // host's side, and this one is on the screen that opens first.
             patience: Patience.long,
@@ -725,6 +726,16 @@ extension Bridge {
         try await background(
             "account.appleActivate",
             ["signedTransaction": signedTransaction],
+            patience: Patience.standard,
+            as: Account.self
+        )
+    }
+
+    /// Record a StoreKit renewal preference (queued downgrade, auto-renew off).
+    static func appleRenewal(signedRenewalInfo: String) async throws -> Account {
+        try await background(
+            "account.appleRenewal",
+            ["signedRenewalInfo": signedRenewalInfo],
             patience: Patience.standard,
             as: Account.self
         )
@@ -1401,8 +1412,22 @@ extension Bridge {
 
     /// Tell the daemon the network is back or the machine woke, so the tunnel
     /// supervisor stops waiting out its reconnect backoff and tries now.
-    static func nudgeTunnel() async {
-        _ = try? await background("remote.nudge", as: Nudged.self)
+    ///
+    /// `reconnect` drops a live socket: a path change (Wi-Fi to cellular)
+    /// leaves a socket that still looks fresh on the old route.
+    static func nudgeTunnel(reconnect: Bool = false) async {
+        if reconnect {
+            _ = try? await background("remote.nudge", ["reconnect": true], as: Nudged.self)
+        } else {
+            _ = try? await background("remote.nudge", as: Nudged.self)
+        }
+    }
+
+    /// Ask hostd to remint after a plan change. A `not_on_this_plan` refusal
+    /// is off the retry loop; this is the call that tries again.
+    @discardableResult
+    static func reconsiderPlan() async throws -> ReconsideredPlan {
+        try await background("remote.reconsiderPlan", as: ReconsideredPlan.self)
     }
 
     /// Ask a peer a question, through this machine's daemon.
@@ -1445,3 +1470,10 @@ extension Bridge {
 private struct Changed: Codable, Sendable { let changed: Bool }
 private struct Forgotten: Codable, Sendable { let forgotten: Bool }
 private struct Nudged: Codable, Sendable { let nudged: Bool }
+
+struct ReconsideredPlan: Codable, Sendable {
+    let reconsidered: Bool
+    let tunnel: Bool?
+    let allowed: Bool?
+    let error: String?
+}

@@ -37,9 +37,59 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
 
     var summary: String {
         switch self {
-        case .supporter: return "A year of history and three devices."
-        case .patron: return "Full history, more devices, remote management."
-        case .legend: return "The top plan: more devices, faster sync, the read API."
+        case .supporter: return "A yearly plan. More devices, a longer history, and a nicer profile."
+        case .patron: return "For people running agents on everything they own, and reaching those machines from anywhere."
+        case .legend: return "The top plan. More devices, a faster page, the read API, and first in line when something new lands."
+        }
+    }
+
+    /// Same ladder as the website and the StoreKit group.
+    var rank: Int {
+        switch self {
+        case .supporter: return 1
+        case .patron: return 2
+        case .legend: return 3
+        }
+    }
+
+    /// Website `TIERS[].feats`, shortened for a phone. Same words.
+    var feats: [String] {
+        switch self {
+        case .supporter:
+            return [
+                "Everything in Free",
+                "4 devices, added up into one profile",
+                "A year of history on your profile, not 30 days",
+                "Profile updates every 30 minutes, not hourly",
+                "The supporter star next to your name",
+            ]
+        case .patron:
+            return [
+                "Everything in Supporter",
+                "Remote management: your other devices, from the app",
+                "6 devices, added up into one profile",
+                "Every day you have ever synced, with no window",
+                "Profile updates every 10 minutes",
+                "The patron badge next to your name",
+            ]
+        case .legend:
+            return [
+                "Everything in Patron",
+                "10 devices, added up into one profile",
+                "Profile updates every 5 minutes",
+                "The legend crown next to your name",
+                "Read API: your numbers as JSON or CSV",
+                "First in line when something new lands",
+            ]
+        }
+    }
+
+    static func from(tier: String?) -> ClientStoreProduct? {
+        switch tier?.lowercased() {
+        case "supporter": return .supporter
+        case "patron": return .patron
+        case "legend": return .legend
+        default: return nil
         }
     }
 }
@@ -59,6 +109,12 @@ final class ClientStore {
     var errorMessage: String?
     var showPaywall = false
     var showManageSheet = false
+    /// StoreKit's current product in the `tokenstat.plans` group.
+    var currentProductID: String?
+    /// What will renew next. Lower than current means a queued downgrade.
+    var autoRenewProductID: String?
+    var willAutoRenew = true
+    var expirationDate: Date?
 
     /// Written by the root so a successful purchase updates the same account
     /// model the rest of the app is already reading.
@@ -95,6 +151,7 @@ final class ClientStore {
             products = try await Product.products(for: ids)
                 .sorted { $0.price < $1.price }
             errorMessage = nil
+            await refreshSubscriptionStatus()
         } catch {
             errorMessage = "Could not load App Store plans."
         }
@@ -116,6 +173,7 @@ final class ClientStore {
             switch result {
             case .success(let verification):
                 try await activate(verification)
+                await reportRenewal()
             case .userCancelled:
                 break
             case .pending:
@@ -142,6 +200,7 @@ final class ClientStore {
             if !activated {
                 errorMessage = "No App Store purchase found for this Apple ID."
             }
+            await reportRenewal()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -163,12 +222,60 @@ final class ClientStore {
         let account = try await Bridge.appleActivate(signedTransaction: result.jwsRepresentation)
         onAccountChange?(account)
         await transaction.finish()
+        await refreshSubscriptionStatus()
     }
 
-    private func checkVerified(_ result: VerificationResult<Transaction>) throws -> Transaction {
+    /// What StoreKit will do at the next renewal. A downgrade often has no
+    /// new transaction until then, so this is the only way the website sees
+    /// the queued drop immediately.
+    func reportRenewal() async {
+        await refreshSubscriptionStatus()
+        for product in products {
+            guard let statuses = try? await product.subscription?.status else { continue }
+            for status in statuses {
+                if let account = try? await Bridge.appleRenewal(
+                    signedRenewalInfo: status.renewalInfo.jwsRepresentation
+                ) {
+                    onAccountChange?(account)
+                    return
+                }
+            }
+        }
+    }
+
+    func refreshSubscriptionStatus() async {
+        for product in products {
+            guard let statuses = try? await product.subscription?.status else { continue }
+            for status in statuses {
+                if let info = try? checkVerified(status.renewalInfo) {
+                    autoRenewProductID = info.autoRenewPreference
+                    willAutoRenew = info.willAutoRenew
+                }
+                if let transaction = try? checkVerified(status.transaction) {
+                    currentProductID = transaction.productID
+                    expirationDate = transaction.expirationDate
+                }
+            }
+            return
+        }
+    }
+
+    func currentProduct(from account: Account) -> ClientStoreProduct? {
+        if let id = currentProductID {
+            return ClientStoreProduct(rawValue: id)
+        }
+        return ClientStoreProduct.from(tier: account.tier)
+    }
+
+    func queuedProduct() -> ClientStoreProduct? {
+        guard let id = autoRenewProductID, id != currentProductID else { return nil }
+        return ClientStoreProduct(rawValue: id)
+    }
+
+    private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {
         switch result {
-        case .verified(let transaction):
-            return transaction
+        case .verified(let value):
+            return value
         case .unverified(_, let error):
             throw error
         }

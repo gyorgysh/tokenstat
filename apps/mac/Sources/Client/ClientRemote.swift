@@ -12,6 +12,28 @@ import Foundation
 /// Helpers for the phone machine plane: every call goes to a peer over the
 /// tunnel. Local `pty.*` and `workspace.*` do not exist without `local-host`.
 
+/// Copy for a tunnel that is mid-reconnect, not gone.
+enum ClientTunnelCopy {
+    static func isAbsent(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        return lower.contains("no_such_peer")
+            || lower.contains("not on the tunnel")
+            || lower.contains("did not pair the channel")
+    }
+
+    static func waiting(_ name: String?) -> String {
+        let host = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if host.isEmpty {
+            return "Waiting for the computer to come back on the tunnel."
+        }
+        return "Waiting for \(host) to come back on the tunnel."
+    }
+
+    static func display(_ message: String, host: String?) -> String {
+        isAbsent(message) ? waiting(host) : message
+    }
+}
+
 enum ClientRemote {
     /// Split a folder id from `Bridge.remoteWorkspaces` (`remote:<peer>:<id>`).
     static func parts(of folder: WorkspaceFolder) -> (peer: String, workspace: String)? {

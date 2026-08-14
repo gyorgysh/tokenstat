@@ -10,6 +10,9 @@ import SwiftUI
 extension Notification.Name {
     /// Open the in-app plan sheet. iOS only uses this. Mac keeps the website.
     static let tokenstatOpenPaywall = Notification.Name("ai.tokenstat.openPaywall")
+    /// The signed-in account just changed tier or remote entitlement.
+    /// Home and Devices refetch instead of keeping a Free lock on screen.
+    static let tokenstatEntitlementDidChange = Notification.Name("ai.tokenstat.entitlementDidChange")
 }
 
 /// The same Free-year note the public profile puts under the heatmap.

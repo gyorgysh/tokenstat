@@ -19,7 +19,9 @@ struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model = ClientWorkspacesModel()
+    @State private var pendingClose: PtySessionInfo?
 
     private var remoteAllowed: Bool {
         if let remote = account.account?.canRemote { return remote }
@@ -119,14 +121,28 @@ struct ClientWorkspacesView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 2)
                                 .padding(.top, Theme.Space.s)
-                            ForEach(model.sessions) { session in
-                                Button {
-                                    model.openSession(session)
-                                } label: {
-                                    sessionRow(session)
+                            List {
+                                ForEach(model.sessions) { session in
+                                    Button {
+                                        model.openSession(session)
+                                    } label: {
+                                        sessionRow(session)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
+                                    .listRowSeparator(.hidden)
+                                    .listRowBackground(Color.clear)
+                                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                        Button("Close", role: .destructive) {
+                                            pendingClose = session
+                                        }
+                                    }
                                 }
-                                .buttonStyle(.plain)
                             }
+                            .listStyle(.plain)
+                            .scrollDisabled(true)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: CGFloat(model.sessions.count) * 78)
                         }
                     }
                 }
@@ -139,6 +155,7 @@ struct ClientWorkspacesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .refreshable {
                 await ClientRefresh.pull("workspaces") {
+                    await account.load()
                     await model.refresh(account: account.account)
                 }
             }
@@ -146,12 +163,44 @@ struct ClientWorkspacesView: View {
                 await model.refresh(account: account.account)
             }
             .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+                Task { await model.recoverAfterNetworkChange(account: account.account) }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                Task { await model.recoverAfterNetworkChange(account: account.account) }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
                 Task { await model.refresh(account: account.account) }
             }
             .fullScreenCover(item: $model.activeTerminal) { session in
-                ClientTerminalScreen(session: session) {
-                    model.activeTerminal = nil
+                ClientTerminalScreen(
+                    session: session,
+                    hostName: model.hosts.first { $0.peerKey == model.connectedKey }?.name ?? "",
+                    onClose: { model.activeTerminal = nil },
+                    onClosedProcess: {
+                        Task { await model.refresh(account: account.account) }
+                    }
+                )
+            }
+            .confirmationDialog(
+                "Close this session?",
+                isPresented: Binding(
+                    get: { pendingClose != nil },
+                    set: { if !$0 { pendingClose = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Close", role: .destructive) {
+                    if let session = pendingClose {
+                        Task { await model.closeSession(session) }
+                    }
+                    pendingClose = nil
                 }
+                Button("Keep it", role: .cancel) { pendingClose = nil }
+            } message: {
+                Text(model.hosts.first { $0.peerKey == model.connectedKey }.map {
+                    "Stops the process on \($0.name)."
+                } ?? "Stops the process on the computer.")
             }
     }
 
@@ -299,6 +348,7 @@ final class ClientWorkspacesModel {
     private(set) var thisDeviceName: String?
     /// Full-screen terminal currently shown from the all-sessions list.
     var activeTerminal: ClientTerminalSession?
+    @ObservationIgnored private var lastRecoverAt = Date.distantPast
 
     func refresh(account: Account?) async {
         errorMessage = nil
@@ -340,45 +390,92 @@ final class ClientWorkspacesModel {
     private(set) var infoMessage: String?
 
     func connect(_ host: ClientHost) async {
+        await connect(host, recovering: false)
+    }
+
+    /// Redial the current host after a path change. Keeps the connected
+    /// surface up and retries `no_such_peer` at 1/2/4s instead of pinning
+    /// a red error that only a force-quit used to clear.
+    func recoverAfterNetworkChange(account: Account?) async {
+        let now = Date()
+        if now.timeIntervalSince(lastRecoverAt) < 1.5 { return }
+        lastRecoverAt = now
+        await refresh(account: account)
+        guard let key = connectedKey,
+              let host = hosts.first(where: { $0.peerKey == key })
+        else { return }
+        await connect(host, recovering: true)
+        activeTerminal?.clearTransientTunnelError()
+    }
+
+    func connect(_ host: ClientHost, recovering: Bool) async {
         guard host.online != false else {
-            errorMessage = "\(host.name) is offline."
+            errorMessage = "\(host.name) is asleep."
             infoMessage = nil
+            if !recovering {
+                connectedKey = nil
+                folders = []
+                sessions = []
+            }
             return
         }
         isConnecting = host.peerKey
         defer { isConnecting = nil }
-        errorMessage = nil
-        infoMessage = nil
-        do {
-            // Make sure the host sees a named device and not "iPhone", even if
-            // the naming at launch happened before this phone had a host.
-            await ClientDeviceName.publish()
-            let peer = try await Bridge.pair(
-                key: host.peerKey,
-                label: host.name,
-                address: ""
-            )
-            // Keep the tunnel up: reconnect supervisor owns the socket.
-            _ = try await Bridge.setTunnel(true)
-            folders = try await Bridge.remoteWorkspaces(peer: peer)
-            sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
-            connectedKey = host.peerKey
+        if !recovering {
             errorMessage = nil
             infoMessage = nil
-        } catch {
-            let text = error.localizedDescription
-            if Self.isApprovalNeeded(text) {
-                // Same-account auto-approve should cover most cases; if the
-                // host is offline from the directory or older, guide the user.
-                infoMessage = "Approve this phone on \(host.name): open Machines "
-                    + "and tap Approve next to this device. Then Connect again."
+        }
+        let delays: [UInt64] = [0, 1, 2, 4]
+        for (index, delay) in delays.enumerated() {
+            if delay > 0 {
+                infoMessage = ClientTunnelCopy.waiting(host.name)
                 errorMessage = nil
-            } else {
-                errorMessage = text
+                try? await Task.sleep(for: .seconds(delay))
             }
-            connectedKey = nil
-            folders = []
-            sessions = []
+            do {
+                await ClientDeviceName.publish()
+                let peer = try await Bridge.pair(
+                    key: host.peerKey,
+                    label: host.name,
+                    address: ""
+                )
+                _ = try await Bridge.setTunnel(true)
+                folders = try await Bridge.remoteWorkspaces(peer: peer)
+                sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
+                connectedKey = host.peerKey
+                errorMessage = nil
+                infoMessage = nil
+                return
+            } catch {
+                let text = error.localizedDescription
+                if Self.isApprovalNeeded(text) {
+                    infoMessage = "Approve this phone on \(host.name): open Machines "
+                        + "and tap Approve next to this device. Then Connect again."
+                    errorMessage = nil
+                    if !recovering {
+                        connectedKey = nil
+                        folders = []
+                        sessions = []
+                    }
+                    return
+                }
+                if ClientTunnelCopy.isAbsent(text), index < delays.count - 1 {
+                    continue
+                }
+                if ClientTunnelCopy.isAbsent(text) {
+                    infoMessage = ClientTunnelCopy.waiting(host.name)
+                    errorMessage = nil
+                } else {
+                    errorMessage = text
+                    infoMessage = nil
+                }
+                if !recovering {
+                    connectedKey = nil
+                    folders = []
+                    sessions = []
+                }
+                return
+            }
         }
     }
 
@@ -400,6 +497,16 @@ final class ClientWorkspacesModel {
     func openSession(_ info: PtySessionInfo) {
         guard let peer = connectedKey else { return }
         activeTerminal = ClientTerminalSession(peer: peer, info: info)
+    }
+
+    func closeSession(_ info: PtySessionInfo) async {
+        guard let peer = connectedKey else { return }
+        if activeTerminal?.hostID == info.id {
+            await activeTerminal?.close()
+            activeTerminal = nil
+        }
+        try? await ClientRemote.ptyClose(peer: peer, id: info.id)
+        sessions.removeAll { $0.id == info.id }
     }
 
     private func reloadRemote(peerKey: String) async {

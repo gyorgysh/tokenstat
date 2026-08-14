@@ -27,6 +27,8 @@ struct ClientWorkspaceDetailView: View {
     @State private var browserURL: String?
     @State private var forwardedPort: Int?
     @State private var isLoading = false
+    @State private var pendingClose: PtySessionInfo?
+    @Environment(\.scenePhase) private var scenePhase
 
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
@@ -57,8 +59,37 @@ struct ClientWorkspaceDetailView: View {
             await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
         }
         .task { await reload() }
+        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await recoverAfterNetworkChange() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task { await recoverAfterNetworkChange() }
+        }
         .fullScreenCover(item: $openSession) { session in
-            ClientTerminalScreen(session: session)
+            ClientTerminalScreen(
+                session: session,
+                hostName: hostName,
+                onClosedProcess: { Task { await reload() } }
+            )
+        }
+        .confirmationDialog(
+            "Close this session?",
+            isPresented: Binding(
+                get: { pendingClose != nil },
+                set: { if !$0 { pendingClose = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                if let session = pendingClose {
+                    Task { await closeSession(session) }
+                }
+                pendingClose = nil
+            }
+            Button("Keep it", role: .cancel) { pendingClose = nil }
+        } message: {
+            Text("Stops the process on \(hostName).")
         }
         .sheet(isPresented: $showFiles) {
             NavigationStack {
@@ -161,29 +192,43 @@ struct ClientWorkspaceDetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .cardSurface()
             } else {
-                ForEach(sessions) { session in
-                    Button {
-                        openExisting(session)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(URL(fileURLWithPath: session.command).lastPathComponent)
-                                    .font(ClientType.label.weight(.medium))
-                                    .foregroundStyle(.primary)
-                                Text(session.alive ? "Running · tap to open" : "Stopped · tap to open")
-                                    .font(ClientType.caption)
-                                    .foregroundStyle(.secondary)
+                List {
+                    ForEach(sessions) { session in
+                        Button {
+                            openExisting(session)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(URL(fileURLWithPath: session.command).lastPathComponent)
+                                        .font(ClientType.label.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    Text(session.alive ? "Running · tap to open" : "Stopped · tap to open")
+                                        .font(ClientType.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "terminal")
+                                    .foregroundStyle(Theme.accent)
                             }
-                            Spacer()
-                            Image(systemName: "terminal")
-                                .foregroundStyle(Theme.accent)
+                            .padding(Theme.Space.m)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .cardSurface()
                         }
-                        .padding(Theme.Space.m)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .cardSurface()
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Close", role: .destructive) {
+                                pendingClose = session
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .scrollContentBackground(.hidden)
+                .frame(minHeight: CGFloat(sessions.count) * 78)
             }
         }
     }
@@ -273,12 +318,26 @@ struct ClientWorkspaceDetailView: View {
                 catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? []
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+    }
+
+    private func recoverAfterNetworkChange() async {
+        openSession?.clearTransientTunnelError()
+        await reload()
     }
 
     private func openExisting(_ info: PtySessionInfo) {
         openSession = ClientTerminalSession(peer: peer, info: info)
+    }
+
+    private func closeSession(_ info: PtySessionInfo) async {
+        if openSession?.hostID == info.id {
+            await openSession?.close()
+            openSession = nil
+        }
+        try? await ClientRemote.ptyClose(peer: peer, id: info.id)
+        sessions.removeAll { $0.id == info.id }
     }
 
     private func launch(_ profile: RemoteLaunchProfile) async {
@@ -309,7 +368,7 @@ struct ClientWorkspaceDetailView: View {
         } catch {
             pending.stop()
             openSession = nil
-            errorMessage = error.localizedDescription
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             return
         }
         // The process is already up. A failed port forward must not kill it.
@@ -359,9 +418,12 @@ struct ClientWorkspaceDetailView: View {
             let result = try await Bridge.proxyListen(peer: peer, host: "127.0.0.1", port: Int(port))
             showPort = false
             forwardedPort = Int(port)
+            if let proxy = URL(string: result.url) {
+                _ = await Self.waitForPage(proxy)
+            }
             browserURL = result.url
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             showPort = false
         }
     }

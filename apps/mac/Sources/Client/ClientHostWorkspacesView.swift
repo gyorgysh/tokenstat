@@ -102,9 +102,10 @@ struct ClientHostWorkspacesView: View {
         }
         .task { await model.connect(peerKey: peerKey, name: hostName) }
         .fullScreenCover(item: $model.activeTerminal) { session in
-            ClientTerminalScreen(session: session) {
-                model.activeTerminal = nil
-            }
+            ClientTerminalScreen(
+                session: session,
+                onClose: { model.activeTerminal = nil }
+            )
         }
     }
 

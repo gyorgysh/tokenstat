@@ -362,7 +362,7 @@ struct RootView: View {
                 await appUpdate.checkAndInstall()
             }
             Task { await workspaces.loadRemote() }
-            Task { await Bridge.nudgeTunnel() }
+            Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         // Waking from sleep is the same story as the network coming back: the
         // machine's egress is only just arriving, so the tunnel supervisor

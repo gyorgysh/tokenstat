@@ -14,7 +14,7 @@
 //! proxy stream on the peer, pump bytes.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -69,7 +69,9 @@ pub(crate) fn listen(peer: &str, host: &str, target: u16) -> Result<Value, Strin
                 Ok((tcp, _)) => {
                     let _ = tcp.set_nodelay(true);
                     match open_proxy_stream(&peer, &host, target) {
-                        Ok(connection) => pump_tcp(tcp, connection),
+                        Ok(connection) => {
+                            crate::proxy_http::bridge(tcp, connection, &host, target, port)
+                        }
                         Err(error) => {
                             eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
                             write_proxy_error(tcp, &error);
@@ -128,58 +130,4 @@ fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Connection, St
         .send(handshake.to_string().as_bytes())
         .map_err(|e| e.to_string())?;
     Ok(connection)
-}
-
-fn pump_tcp(tcp: TcpStream, connection: Connection) {
-    let (reader, writer) = connection.split();
-    let tcp_reader = match tcp.try_clone() {
-        Ok(clone) => clone,
-        Err(_) => {
-            let _ = tcp.shutdown(std::net::Shutdown::Both);
-            return;
-        }
-    };
-    let reader = Arc::new(reader);
-    let writer = Arc::new(writer);
-
-    let to_remote = {
-        let mut tcp_reader = tcp_reader;
-        let writer = Arc::clone(&writer);
-        std::thread::spawn(move || {
-            let mut buffer = [0u8; 64 * 1024];
-            loop {
-                match tcp_reader.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if writer.write(&buffer[..n]).is_err() {
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-            let _ = writer.write(&[]);
-            writer.close();
-        })
-    };
-
-    let to_tcp = std::thread::spawn(move || {
-        let mut tcp = tcp;
-        loop {
-            match reader.read(1 << 20) {
-                Ok(data) if data.is_empty() => break,
-                Ok(data) => {
-                    if tcp.write_all(&data).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        reader.close();
-        let _ = tcp.shutdown(std::net::Shutdown::Both);
-    });
-
-    let _ = to_remote.join();
-    let _ = to_tcp.join();
 }

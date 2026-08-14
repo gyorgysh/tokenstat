@@ -38,7 +38,10 @@ struct HomeView: View {
                         isBusy: model.isRefreshing,
                         isEnabled: !model.isLoading && !model.isRefreshing
                     ) {
-                        Task { await model.refresh() }
+                        Task {
+                            await account.load()
+                            await model.refresh()
+                        }
                     }
                 }
             }
@@ -105,6 +108,9 @@ struct HomeView: View {
         // showing yesterday's heatmap until the window is reopened.
         .onReceive(NotificationCenter.default.publisher(for: .archiveDidChange)) { _ in
             Task { await model.load(quiet: true) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
+            Task { await model.refresh() }
         }
     }
 

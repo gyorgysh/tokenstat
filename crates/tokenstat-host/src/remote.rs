@@ -432,6 +432,10 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                     if let Some(existing) = guard.as_ref() {
                         existing.set_token(&hello_token);
                     }
+                    // A later successful mint must not leave a previous
+                    // plan-refusal sitting in `tunnelError`. The panel
+                    // reads that field even when the socket is up.
+                    set_tunnel_state(|state| state.error = None);
                 }
                 return;
             }
@@ -537,6 +541,9 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
             }
         }
     };
+    // The mint is the plan gate. Once it succeeds the previous refusal is
+    // stale, even before the first inbound channel or READY lands.
+    set_tunnel_state(|state| state.error = None);
     // Refresh the short-lived token at half-life so HELLO never races expiry.
     if let Some(ttl) = expires_in {
         let refresh_tunnel = Arc::clone(&tunnel);
@@ -594,12 +601,19 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
 /// looking at their own laptop.
 fn is_permanent_start_error(error: &str) -> bool {
     let lower = error.to_lowercase();
-    lower.contains("sign in")
-        || lower.contains("paid-plan")
+    // Plan refusals stay off the tight retry loop so a free account does
+    // not mint every ten seconds. They are not permanent across an
+    // entitlement change: `nudge` and `reconsider_plan` try again.
+    lower.contains("sign in") || is_plan_start_error(error) || lower.contains("device limit")
+}
+
+/// The account host refused a mint because this plan cannot open a tunnel.
+fn is_plan_start_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("paid-plan")
         || lower.contains("not on this plan")
         || lower.contains("not_on_this_plan")
         || lower.contains("no longer includes remote")
-        || lower.contains("device limit")
 }
 
 fn retry_start_later(session: Arc<Mutex<Session>>) {
@@ -1058,6 +1072,10 @@ const MAX_IDLE_PER_PEER: usize = 4;
 /// about rather than the normal one.
 const UNREACHABLE_FLOOR_MS: i64 = 45_000;
 const UNREACHABLE_CEILING_MS: i64 = 120_000;
+/// After a local path change, the first few `no_such_peer` answers are the
+/// far machine reconnecting, not proof it is gone. Suppressing on those
+/// would hide it for 45s–2min while the phone retries at 1/2/4s.
+const ABSENCE_GRACE_MS: i64 = 15_000;
 
 /// One peer's absence: when it was last answered `no_such_peer`, and how many
 /// times in a row.
@@ -1111,29 +1129,55 @@ impl Absence {
 /// was down, that meant a fresh `no_such_peer` channel open per poll on the relay.
 /// Inside the TTL the dial fails fast instead, with the same words, without
 /// another round trip.
-fn unreachable_peers() -> &'static Mutex<HashMap<String, Absence>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Absence>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+struct Unreachable {
+    cache: HashMap<String, Absence>,
+    /// Wall clock until which `no_such_peer` is not recorded. A local path
+    /// change starts this so the far machine's reconnect is not a 45s floor.
+    grace_until_ms: i64,
+}
+
+fn unreachable() -> &'static Mutex<Unreachable> {
+    static STATE: OnceLock<Mutex<Unreachable>> = OnceLock::new();
+    STATE.get_or_init(|| {
+        Mutex::new(Unreachable {
+            cache: HashMap::new(),
+            grace_until_ms: 0,
+        })
+    })
+}
+
+fn begin_absence_grace() {
+    if let Ok(mut state) = unreachable().lock() {
+        state.grace_until_ms = jiff::Timestamp::now().as_millisecond() + ABSENCE_GRACE_MS;
+    }
+}
+
+fn note_unreachable_locked(state: &mut Unreachable, peer_hex: &str) {
+    if jiff::Timestamp::now().as_millisecond() < state.grace_until_ms {
+        return;
+    }
+    // A strike only counts against an absence still inside its window. A
+    // peer that was missing an hour ago and is missing again now is not on
+    // its second consecutive miss, it is on its first.
+    let strikes = state
+        .cache
+        .get(peer_hex)
+        .filter(|previous| previous.worth_keeping())
+        .map_or(0, |previous| previous.strikes.saturating_add(1));
+    state.cache.insert(
+        peer_hex.to_string(),
+        Absence {
+            since_ms: jiff::Timestamp::now().as_millisecond(),
+            strikes,
+        },
+    );
 }
 
 /// Remember that the relay says this peer is not on the tunnel, and lengthen
 /// the wait if it has said so before.
 fn note_unreachable(peer_hex: &str) {
-    if let Ok(mut cache) = unreachable_peers().lock() {
-        // A strike only counts against an absence still inside its window. A
-        // peer that was missing an hour ago and is missing again now is not on
-        // its second consecutive miss, it is on its first.
-        let strikes = cache
-            .get(peer_hex)
-            .filter(|previous| previous.worth_keeping())
-            .map_or(0, |previous| previous.strikes.saturating_add(1));
-        cache.insert(
-            peer_hex.to_string(),
-            Absence {
-                since_ms: jiff::Timestamp::now().as_millisecond(),
-                strikes,
-            },
-        );
+    if let Ok(mut state) = unreachable().lock() {
+        note_unreachable_locked(&mut state, peer_hex);
     }
 }
 
@@ -1141,8 +1185,8 @@ fn note_unreachable(peer_hex: &str) {
 /// next failure should start from the floor rather than from where the last
 /// outage left off.
 fn clear_unreachable(peer_hex: &str) {
-    if let Ok(mut cache) = unreachable_peers().lock() {
-        cache.remove(peer_hex);
+    if let Ok(mut state) = unreachable().lock() {
+        state.cache.remove(peer_hex);
     }
 }
 
@@ -1150,8 +1194,8 @@ fn clear_unreachable(peer_hex: &str) {
 /// (the network came back, the machine woke), so what the relay said about a
 /// peer thirty seconds ago is no longer worth trusting.
 fn clear_all_unreachable() {
-    if let Ok(mut cache) = unreachable_peers().lock() {
-        cache.clear();
+    if let Ok(mut state) = unreachable().lock() {
+        state.cache.clear();
     }
 }
 
@@ -1291,12 +1335,12 @@ fn tunnel_dial(
         return Err(format!("could not reach {label} directly: {direct_error}"));
     }
     let peer_hex = tokenstat_identity::hex(&peer);
-    if unreachable_peers()
+    if unreachable()
         .lock()
         .ok()
-        .and_then(|mut cache| {
-            cache.retain(|_, absence| absence.worth_keeping());
-            cache.get(&peer_hex).copied()
+        .and_then(|mut state| {
+            state.cache.retain(|_, absence| absence.worth_keeping());
+            state.cache.get(&peer_hex).copied()
         })
         .is_some_and(|absence| absence.suppresses())
     {
@@ -1400,7 +1444,8 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
         "remote.status" => status(),
         "remote.serve" => serve(params),
         "remote.call" => forward(params),
-        "remote.nudge" => nudge(),
+        "remote.nudge" => nudge(params),
+        "remote.reconsiderPlan" => reconsider_plan(),
         _ => return None,
     })
 }
@@ -1412,6 +1457,15 @@ struct ServeParams {
     port: Option<u16>,
     tunnel: Option<bool>,
     tunnel_endpoint: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct NudgeParams {
+    /// Drop a live socket and reconnect. A path change (Wi-Fi to cellular)
+    /// leaves a socket that still looks fresh: the last ping was seconds ago
+    /// on the old route.
+    reconnect: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1431,19 +1485,40 @@ struct ForwardParams {
 /// dead. A connectivity restore means it is not, so the next reconnect should
 /// not wait out the rest of that backoff. When no session is live, this tries
 /// the same start a retry tick would, now rather than later.
-fn nudge() -> Result<Value, String> {
+fn nudge(params: &str) -> Result<Value, String> {
+    let p: NudgeParams = if params.trim().is_empty() {
+        NudgeParams::default()
+    } else {
+        serde_json::from_str(params.trim()).unwrap_or_default()
+    };
     // What the relay said about a peer a minute ago was true of a network that
     // has since changed. Every absence is forgotten here so a machine that came
     // back with this one is dialled at once rather than waiting out a backoff
     // it earned while the network was down.
     clear_all_unreachable();
+    begin_absence_grace();
     // Client builds have no pty list cache. The stream stack that owns it
     // is compiled out with `local-host`.
     #[cfg(feature = "local-host")]
     crate::remote_stream::invalidate_all_pty_lists();
+    // A plan refusal is off the retry loop on purpose. Foreground, wake and
+    // connectivity restore must still ask again: the account may have
+    // become Patron since the last mint.
+    let last_was_plan = tunnel_state()
+        .lock()
+        .ok()
+        .and_then(|state| state.error.clone())
+        .is_some_and(|error| is_plan_start_error(&error));
+    if last_was_plan {
+        return reconsider_plan();
+    }
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
-        session.nudge();
-        return Ok(json!({"nudged": true}));
+        if p.reconnect {
+            session.reconnect_now();
+        } else {
+            session.nudge();
+        }
+        return Ok(json!({"nudged": true, "reconnect": p.reconnect}));
     }
     let settings = load_settings();
     if settings.tunnel
@@ -1451,7 +1526,73 @@ fn nudge() -> Result<Value, String> {
     {
         start_tunnel_if_enabled(session, &settings);
     }
-    Ok(json!({"nudged": true}))
+    Ok(json!({"nudged": true, "reconnect": p.reconnect}))
+}
+
+/// Re-check the plan gate after entitlement changes.
+///
+/// `not_on_this_plan` stops the start retry loop so a free account does not
+/// hammer the mint. After a purchase (or after `/me` shows Patron) this is
+/// the one call that remints and, if the user left the switch on, brings
+/// the socket up without anybody flipping it.
+fn reconsider_plan() -> Result<Value, String> {
+    let settings = load_settings();
+    if !settings.tunnel {
+        return Ok(json!({"reconsidered": true, "tunnel": false}));
+    }
+    // Already READY: drop a leftover plan refusal and leave the mint alone.
+    // Every app launch used to remint here, which spent the hourly budget
+    // replacing a credential that was working.
+    if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
+        if session.status().connected {
+            set_tunnel_state(|state| {
+                state.connected = true;
+                state.error = None;
+            });
+            return Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}));
+        }
+    }
+    match tunnel_hello_token(true) {
+        Ok((hello_token, _)) => {
+            set_tunnel_state(|state| state.error = None);
+            if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
+                session.set_token(&hello_token);
+                session.nudge();
+            } else if let Ok(session) = session_for_serving() {
+                start_tunnel_if_enabled(session, &settings);
+            }
+            Ok(json!({"reconsidered": true, "tunnel": true, "allowed": true}))
+        }
+        Err(error) => {
+            set_tunnel_state(|state| {
+                state.connected = false;
+                state.error = Some(error.clone());
+            });
+            Ok(json!({
+                "reconsidered": true,
+                "tunnel": true,
+                "allowed": false,
+                "error": error,
+            }))
+        }
+    }
+}
+
+/// Overlay the live socket onto the last recorded start/mint state.
+///
+/// A successful READY must drop a stale `not_on_this_plan` (or any other
+/// leftover). Merging `live.error` only when it is set used to keep a plan
+/// refusal on screen after the socket had already come up.
+fn merge_live_tunnel_status(
+    stored: &mut TunnelState,
+    live: &tokenstat_remote::tunnel::TunnelStatus,
+) {
+    stored.connected = live.connected;
+    if live.connected {
+        stored.error = None;
+    } else if let Some(error) = live.error.clone() {
+        stored.error = Some(error);
+    }
 }
 
 fn status() -> Result<Value, String> {
@@ -1463,11 +1604,7 @@ fn status() -> Result<Value, String> {
     // otherwise report "not connected" while its socket is up. Merge the
     // live status over it.
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
-        let live = session.status();
-        tunnel_state.connected = live.connected;
-        if let Some(error) = live.error {
-            tunnel_state.error = Some(error);
-        }
+        merge_live_tunnel_status(&mut tunnel_state, &session.status());
     }
     Ok(json!({
         // What the user chose, and what is actually true. They differ while
@@ -1680,7 +1817,42 @@ mod tests {
         assert!(is_permanent_start_error(
             "remote reach is a paid-plan feature"
         ));
+        assert!(is_plan_start_error(
+            "could not mint a tunnel credential: not_on_this_plan"
+        ));
+        assert!(!is_plan_start_error(
+            "sign in to tokenstat.ai before enabling remote reach"
+        ));
         assert!(!is_permanent_start_error("connection refused"));
+    }
+
+    #[test]
+    fn a_ready_socket_drops_a_stale_plan_error() {
+        let mut stored = TunnelState {
+            connected: false,
+            error: Some("could not mint a tunnel credential: not_on_this_plan".into()),
+            registered: true,
+        };
+        merge_live_tunnel_status(
+            &mut stored,
+            &tokenstat_remote::tunnel::TunnelStatus {
+                connected: true,
+                error: None,
+            },
+        );
+        assert!(stored.connected);
+        assert_eq!(stored.error, None);
+
+        stored.error = Some("stale".into());
+        merge_live_tunnel_status(
+            &mut stored,
+            &tokenstat_remote::tunnel::TunnelStatus {
+                connected: false,
+                error: Some("connection refused".into()),
+            },
+        );
+        assert!(!stored.connected);
+        assert_eq!(stored.error.as_deref(), Some("connection refused"));
     }
 
     /// The floor has to outlast the app's own retry for the cache to suppress
@@ -1766,15 +1938,38 @@ mod tests {
     #[test]
     fn connecting_forgets_an_absence() {
         let peer = "cd".repeat(32);
-        note_unreachable(&peer);
-        note_unreachable(&peer);
-        assert!(unreachable_peers().lock().unwrap()[&peer].suppresses());
-        clear_unreachable(&peer);
-        assert!(!unreachable_peers().lock().unwrap().contains_key(&peer));
-        note_unreachable(&peer);
-        let strikes = unreachable_peers().lock().unwrap()[&peer].strikes;
-        assert_eq!(strikes, 0, "a cleared peer starts over");
-        clear_all_unreachable();
+        let mut state = unreachable().lock().unwrap();
+        state.grace_until_ms = 0;
+        state.cache.clear();
+        note_unreachable_locked(&mut state, &peer);
+        note_unreachable_locked(&mut state, &peer);
+        assert!(state.cache[&peer].suppresses());
+        state.cache.remove(&peer);
+        assert!(!state.cache.contains_key(&peer));
+        note_unreachable_locked(&mut state, &peer);
+        assert_eq!(state.cache[&peer].strikes, 0, "a cleared peer starts over");
+        state.cache.clear();
+    }
+
+    /// A local path change must not start the 45s floor on the first miss:
+    /// that miss is the far machine reconnecting, and the phone retries at
+    /// 1/2/4s inside this window.
+    #[test]
+    fn a_nudge_opens_a_grace_before_absences_count() {
+        let peer = "ab".repeat(32);
+        let mut state = unreachable().lock().unwrap();
+        state.cache.clear();
+        state.grace_until_ms = jiff::Timestamp::now().as_millisecond() + ABSENCE_GRACE_MS;
+        note_unreachable_locked(&mut state, &peer);
+        note_unreachable_locked(&mut state, &peer);
+        assert!(
+            !state.cache.contains_key(&peer),
+            "grace swallows the first misses after a path change"
+        );
+        state.grace_until_ms = 0;
+        note_unreachable_locked(&mut state, &peer);
+        assert_eq!(state.cache[&peer].strikes, 0);
+        state.cache.clear();
     }
 
     #[test]

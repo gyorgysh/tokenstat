@@ -101,7 +101,11 @@ struct ClientRootView: View {
             // sits there after a successful approval, on top of a screen that
             // has already signed in behind it.
             account.signInDismisser = { ClientWebAuth.shared.cancel() }
-            store.onAccountChange = { account.account = $0 }
+            store.onAccountChange = { updated in
+                account.account = updated
+                NotificationCenter.default.post(name: .tokenstatEntitlementDidChange, object: nil)
+                Task { _ = try? await Bridge.reconsiderPlan() }
+            }
             store.start()
             await launch.prepare()
             // Name this phone before anything asks the account who is on it.
@@ -114,7 +118,7 @@ struct ClientRootView: View {
             // want a fresh me after the network returns, and the tunnel session
             // this phone holds should reconnect now, not after its backoff.
             Task { await account.load() }
-            Task { await Bridge.nudgeTunnel() }
+            Task { await Bridge.nudgeTunnel(reconnect: true) }
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }

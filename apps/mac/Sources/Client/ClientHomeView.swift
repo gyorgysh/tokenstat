@@ -86,7 +86,10 @@ struct ClientHomeView: View {
         .scrollBounceBehavior(.always, axes: .vertical)
         .scrollDisabled(pickingADay)
         .refreshable {
-            await ClientRefresh.pull("home") { await model.refresh() }
+            await ClientRefresh.pull("home") {
+                await account.load()
+                await model.refresh()
+            }
         }
         .task {
             // Account scope always. There is no local archive to fall back to,
@@ -102,6 +105,9 @@ struct ClientHomeView: View {
         // looking at an offline card on a phone that is plainly online again,
         // which is the moment they would otherwise force-quit the app.
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            Task { await model.refresh() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
             Task { await model.refresh() }
         }
         .sheet(item: $selectedDay) { day in

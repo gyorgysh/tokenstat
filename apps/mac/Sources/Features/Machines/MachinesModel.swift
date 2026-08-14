@@ -198,6 +198,7 @@ final class MachinesModel {
                 accountMachines = []
             }
             errorMessage = nil
+            await reconsiderPlanIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -234,6 +235,7 @@ final class MachinesModel {
                 accountMachines = accountResult.machines
             }
             errorMessage = nil
+            await reconsiderPlanIfNeeded()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -474,6 +476,22 @@ final class MachinesModel {
         if !remoteReachAllowed { return false }
         if status?.tunnel != true { return false }
         return true
+    }
+
+    /// After a purchase the 5s refresh sees `canRemote`, but hostd may still
+    /// be sitting on a `not_on_this_plan` stop. Remint when the switch is on
+    /// and the last answer was a plan refusal or the socket is down.
+    private func reconsiderPlanIfNeeded() async {
+        guard remoteReachAllowed, status?.tunnel == true else { return }
+        let planError = status?.tunnelError.map {
+            $0.contains("not_on_this_plan")
+                || $0.contains("paid-plan")
+                || $0.localizedCaseInsensitiveContains("not on this plan")
+        } ?? false
+        // Only a leftover plan refusal. A connecting socket is not a remint.
+        guard planError else { return }
+        _ = try? await Bridge.reconsiderPlan()
+        status = try? await Bridge.remoteStatus()
     }
 
     private func change(_ peer: Peer, _ action: () async throws -> Void) async {

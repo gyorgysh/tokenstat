@@ -204,9 +204,17 @@ pub(crate) fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Con
 }
 
 /// Bridge a local TCP socket to a claimed stream connection. The local half
-/// of `proxy.listen`, mirrored from the owning side's `pump_proxy`.
-pub(crate) fn pump_local(tcp: TcpStream, connection: Connection) {
-    pump_tcp_connection(tcp, connection);
+/// of `proxy.listen`. HTTP is rewritten so a page served on the far
+/// machine's port still works when the browser is on this machine's
+/// random loopback port.
+pub(crate) fn pump_local(
+    tcp: TcpStream,
+    connection: Connection,
+    target_host: &str,
+    target_port: u16,
+    listen_port: u16,
+) {
+    crate::proxy_http::bridge(tcp, connection, target_host, target_port, listen_port);
 }
 
 /// Return a readable HTTP response when the tunnel or target service fails.
@@ -1029,7 +1037,7 @@ mod tests {
         let local_port = local.local_addr().expect("its port").port();
         let local_side = std::thread::spawn(move || {
             let (tcp, _) = local.accept().expect("a local client");
-            pump_local(tcp, connection);
+            pump_local(tcp, connection, "127.0.0.1", echo_port, local_port);
         });
 
         let mut client = TcpStream::connect(("127.0.0.1", local_port)).expect("connect locally");

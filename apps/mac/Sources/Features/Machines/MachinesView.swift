@@ -114,6 +114,9 @@ struct MachinesView: View {
                 model.markDisconnected(key)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
+            Task { await model.load() }
+        }
         .sheet(isPresented: $addingDevice) {
             VStack(spacing: 0) {
                 HStack {

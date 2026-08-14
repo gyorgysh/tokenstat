@@ -109,13 +109,16 @@ final class AccountModel {
         isLoading = true
         defer { isLoading = false }
         do {
-            account = try await Bridge.account()
+            let previous = account
+            let next = try await Bridge.account()
+            account = next
             errorMessage = nil
             authCheckError = nil
             authChecked = true
             #if os(macOS)
             limitsSyncEnabled = (try? await Bridge.limitsSyncEnabled()) ?? false
             #endif
+            await Self.broadcastIfEntitlementChanged(from: previous, to: next)
         } catch {
             // Keep any previous signed-in snapshot. A later offline refresh
             // must not wipe a working session from the screen.
@@ -389,6 +392,35 @@ final class AccountModel {
             || lower.contains("rate limit")
             || lower.contains("http 429")
             || lower.contains("status 429")
+    }
+
+    /// Tell the rest of the app (and hostd) when `/me` shows a new plan.
+    ///
+    /// A purchase on the phone, or a Paddle checkout in the browser, lands
+    /// here on the next `account.status`. Home's ten-minute series cache and
+    /// hostd's `not_on_this_plan` stop must not outlive that answer.
+    private static func broadcastIfEntitlementChanged(from previous: Account?, to next: Account) async {
+        guard next.signedIn else { return }
+        let wasAllowed = remoteAllowed(previous)
+        let nowAllowed = remoteAllowed(next)
+        let tierChanged = (previous?.tier ?? "") != (next.tier ?? "")
+        let flipped = wasAllowed != nowAllowed || tierChanged
+        let firstLoadWhileEntitled = previous == nil && nowAllowed
+        guard flipped || firstLoadWhileEntitled else { return }
+        // Remint before anyone redraws. Home's refresh listens for the
+        // notification and must not race a leftover `not_on_this_plan`.
+        if nowAllowed {
+            _ = try? await Bridge.reconsiderPlan()
+        }
+        if flipped {
+            NotificationCenter.default.post(name: .tokenstatEntitlementDidChange, object: nil)
+        }
+    }
+
+    private static func remoteAllowed(_ account: Account?) -> Bool {
+        if let remote = account?.canRemote { return remote }
+        guard let tier = account?.tier?.lowercased() else { return false }
+        return ["patron", "legend"].contains(tier)
     }
 
     /// Remaining wait from "Try again in N minute(s).", or nil.

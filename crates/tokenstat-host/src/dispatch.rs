@@ -81,6 +81,10 @@ struct CalendarParams {
     /// grid cannot. The caller picks, and is told which one it got.
     #[serde(default)]
     scope: Option<String>,
+    /// Drop the ten-minute series cache first. A pull-to-refresh after a
+    /// plan change must not redraw Free's locked year.
+    #[serde(default)]
+    force: bool,
 }
 
 impl Default for CalendarParams {
@@ -89,6 +93,7 @@ impl Default for CalendarParams {
             weeks: default_weeks(),
             query: QueryDto::default(),
             scope: None,
+            force: false,
         }
     }
 }
@@ -370,6 +375,12 @@ struct AppleActivateParams {
     signed_transaction: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppleRenewalParams {
+    signed_renewal_info: String,
+}
+
 fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
     let b = raw.get("billing")?;
     if b.is_null() {
@@ -395,6 +406,11 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
             .get("cancel_scheduled")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        scheduled_tier: b
+            .get("scheduled_tier")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         trial_used: b
             .get("trial_used")
             .and_then(|v| v.as_bool())
@@ -753,6 +769,9 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 // failing: an empty Home because the network is down is a worse
                 // answer than this machine's own year with a line saying so.
                 if wants_account {
+                    if p.force {
+                        crate::account_activity::invalidate();
+                    }
                     let today = tokenstat_core::activity::today(b.timezone());
                     match crate::account_activity::calendar(&b.prices, b.timezone(), p.weeks) {
                         Ok(account) if account.calendar.is_some() => {
@@ -1062,6 +1081,26 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 ));
             }
             tokenstat_sync::apple_activate(None, &p.signed_transaction).envelope()?;
+            // The Home grid caches Free's lock for ten minutes. A purchase
+            // just changed that answer, so the next calendar read must hit
+            // the account rather than replay the locked year.
+            crate::account_activity::invalidate();
+            let s = tokenstat_sync::sync_status(None).envelope()?;
+            serde_json::to_value(account_dto_from_status(s)).envelope()
+        }
+
+        // StoreKit queued a downgrade or turned auto-renew off. No new
+        // transaction yet. The signed renewal info is the proof.
+        "account.appleRenewal" => {
+            let p: AppleRenewalParams = serde_json::from_str(params.trim()).envelope()?;
+            if p.signed_renewal_info.trim().is_empty() {
+                return Err(DispatchError::new(
+                    "invalid",
+                    "signedRenewalInfo is required",
+                ));
+            }
+            tokenstat_sync::apple_renewal(None, &p.signed_renewal_info).envelope()?;
+            crate::account_activity::invalidate();
             let s = tokenstat_sync::sync_status(None).envelope()?;
             serde_json::to_value(account_dto_from_status(s)).envelope()
         }
@@ -2401,7 +2440,9 @@ fn proxy_listen(params: &str) -> Result<Value, String> {
                 Ok((tcp, _)) => {
                     let _ = tcp.set_nodelay(true);
                     match crate::remote_stream::open_proxy_stream(&peer, &host, target) {
-                        Ok(connection) => crate::remote_stream::pump_local(tcp, connection),
+                        Ok(connection) => {
+                            crate::remote_stream::pump_local(tcp, connection, &host, target, port)
+                        }
                         Err(error) => {
                             eprintln!("remote proxy: {peer} {host}:{target} failed: {error}");
                             crate::remote_stream::write_proxy_error(tcp, &error);
@@ -3329,6 +3370,16 @@ mod tests {
     }
 
     #[test]
+    fn a_calendar_refresh_can_ask_to_drop_the_series_cache() {
+        let parsed: CalendarParams =
+            serde_json::from_str(r#"{"scope":"account","force":true}"#).unwrap();
+        assert_eq!(parsed.scope.as_deref(), Some("account"));
+        assert!(parsed.force);
+        let quiet: CalendarParams = serde_json::from_str(r#"{"scope":"account"}"#).unwrap();
+        assert!(!quiet.force);
+    }
+
+    #[test]
     fn account_methods_answer_without_a_network() {
         let mut s = session();
         // No server is reachable in a test run, so these must fail as an
@@ -3339,6 +3390,7 @@ mod tests {
             "account.deviceStart",
             "account.devicePoll",
             "account.appleActivate",
+            "account.appleRenewal",
         ] {
             let out = call(&mut s, method, "{}");
             let v: Value = serde_json::from_str(&out)

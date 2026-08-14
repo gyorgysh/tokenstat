@@ -345,6 +345,7 @@ pub struct AccountBillingDto {
     pub entitled: bool,
     pub period_end: Option<String>,
     pub cancel_scheduled: bool,
+    pub scheduled_tier: Option<String>,
     pub trial_used: bool,
     pub has_live_sub: bool,
     pub app_account_token: Option<String>,

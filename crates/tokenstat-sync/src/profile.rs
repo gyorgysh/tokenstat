@@ -615,6 +615,42 @@ pub fn apple_activate(
     Ok(raw)
 }
 
+/// Post StoreKit signed renewal info so a queued downgrade or a cancelled
+/// auto-renew shows on the website before Apple issues a new transaction.
+pub fn apple_renewal(
+    host_flag: Option<&str>,
+    signed_renewal_info: &str,
+) -> Result<Value, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/billing/apple/renewal"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "signedRenewalInfo": signed_renewal_info }))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+                    .or_else(|| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            })
+            .unwrap_or(text);
+        return Err(ProfileError::Message(detail));
+    }
+    let raw: Value = serde_json::from_str(&text)?;
+    Ok(raw)
+}
+
 /// Register this machine's remote-reach identity on its account record.
 ///
 /// Called by the host daemon when "Reach machines from anywhere" is on: the

@@ -119,6 +119,16 @@ struct ClientDevicesView: View {
                 )
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatEntitlementDidChange)) { _ in
+            Task {
+                await account.load()
+                await model.load(
+                    machines: machines,
+                    days: DeviceHistory.days(for: account.account?.tier),
+                    force: true
+                )
+            }
+        }
     }
 
     /// This device first, then the busiest. Somebody scanning this list is

@@ -675,6 +675,7 @@ struct AccountBilling: Codable, Sendable, Hashable {
     var entitled: Bool?
     var periodEnd: String?
     var cancelScheduled: Bool?
+    var scheduledTier: String?
     var trialUsed: Bool?
     var hasLiveSub: Bool?
     var appAccountToken: String?

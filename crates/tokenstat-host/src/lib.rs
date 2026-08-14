@@ -63,6 +63,7 @@ mod machine;
 /// Which daemon speaks for this machine, when more than one is running.
 pub mod ownership;
 pub mod pricing;
+mod proxy_http;
 pub mod remote;
 /// Loopback proxy for phones that dial a host service (no full stream stack).
 /// Host builds use `remote_stream` instead.

@@ -107,6 +107,21 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
             let peer = peer
             Task.detached { try? await ClientRemote.ptyDetach(peer: peer, id: id) }
         }
+        endLocalWork()
+    }
+
+    /// Stop the process on the host, then drop the phone's hold.
+    ///
+    /// Done only detaches. Close is what the Mac tab close does.
+    func close() async {
+        removed = true
+        if !isPending, !hostID.isEmpty {
+            try? await ClientRemote.ptyClose(peer: peer, id: hostID)
+        }
+        endLocalWork()
+    }
+
+    private func endLocalWork() {
         pollTask?.cancel()
         pollTask = nil
         writerTask?.cancel()
@@ -119,6 +134,14 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     /// the supervisor instead of waiting out a leftover backoff.
     func setForeground(_ active: Bool) {
         inForeground = active
+    }
+
+    /// A path change is not a dead process. Drop the last transport error so
+    /// the next poll can reattach by pty id over a new dial.
+    func clearTransientTunnelError() {
+        if let error = transportError, ClientTunnelCopy.isAbsent(error) {
+            transportError = nil
+        }
     }
 
     private func start() {
@@ -400,7 +423,11 @@ struct ClientTerminalScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let session: ClientTerminalSession
+    var hostName: String = ""
     var onClose: (() -> Void)?
+    var onClosedProcess: (() -> Void)?
+
+    @State private var confirmClose = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -421,6 +448,10 @@ struct ClientTerminalScreen: View {
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
                 }
+                Button("Close", role: .destructive) {
+                    confirmClose = true
+                }
+                .font(ClientType.caption.weight(.semibold))
                 Button("Done") {
                     onClose?()
                     dismiss()
@@ -441,9 +472,11 @@ struct ClientTerminalScreen: View {
             }
 
             if let error = session.transportError {
-                Text(error)
+                Text(ClientTunnelCopy.display(error, host: hostName))
                     .font(ClientType.caption)
-                    .foregroundStyle(Theme.danger)
+                    .foregroundStyle(
+                        ClientTunnelCopy.isAbsent(error) ? Theme.warning : Theme.danger
+                    )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.xs)
@@ -467,6 +500,25 @@ struct ClientTerminalScreen: View {
             // Full-screen dismiss: stop draining when nobody is watching.
             // Re-open attaches a fresh session from pty.list.
             session.stop()
+        }
+        .confirmationDialog(
+            "Close this session?",
+            isPresented: $confirmClose,
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                Task {
+                    await session.close()
+                    onClosedProcess?()
+                    onClose?()
+                    dismiss()
+                }
+            }
+            Button("Keep it", role: .cancel) {}
+        } message: {
+            Text(hostName.isEmpty
+                ? "Stops the process on the computer."
+                : "Stops the process on \(hostName).")
         }
     }
 }
