@@ -149,8 +149,8 @@ struct FriendlyError {
         if lower.contains("this mac is asleep") || lower.contains("host_asleep") {
             return FriendlyError(
                 title: "This Mac is asleep",
-                message: "Open tokenstat on that Mac, or turn on Always-on host in Account "
-                    + "if other devices should still reach it after you quit.",
+                message: "That Mac has its lid closed, or tokenstat is not open. Open the app, "
+                    + "open the lid, or turn on Always-on host in Account to keep it reachable.",
                 symbol: "moon.zzz",
                 actionTitle: "Try again",
                 raw: raw
@@ -163,7 +163,8 @@ struct FriendlyError {
             return FriendlyError(
                 title: "The helper is not running",
                 message: "tokenstat's background helper handles your archive and your devices. "
-                    + "Open the app to start it, or turn on Always-on host to keep it running.",
+                    + "Open the app to start it, or turn on Always-on host to keep it running "
+                    + "after you quit or close the lid.",
                 symbol: "gearshape.arrow.trianglehead.2.clockwise.rotate.90",
                 actionTitle: "Start it",
                 raw: raw

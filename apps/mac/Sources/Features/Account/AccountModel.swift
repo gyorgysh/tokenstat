@@ -141,11 +141,21 @@ final class AccountModel {
     func setAlwaysOnHost(_ on: Bool) async {
         isSavingHostPolicy = true
         defer { isSavingHostPolicy = false }
+        let previous = hostPolicy
         do {
             let next = try await Bridge.setHostPolicy(alwaysOn: on)
-            hostPolicy = next
-            HostAgentInstaller.applyPolicy(alwaysOn: next.alwaysOn)
-            errorMessage = nil
+            do {
+                try HostAgentInstaller.applyPolicy(alwaysOn: next.alwaysOn)
+                hostPolicy = next
+                errorMessage = nil
+            } catch {
+                if let previous {
+                    _ = try? await Bridge.setHostPolicy(alwaysOn: previous.alwaysOn)
+                    try? HostAgentInstaller.applyPolicy(alwaysOn: previous.alwaysOn)
+                    hostPolicy = previous
+                }
+                errorMessage = error.localizedDescription
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

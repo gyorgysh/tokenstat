@@ -8,10 +8,10 @@
 
 //! System-sleep assertion for inbound remote workspace work.
 //!
-//! `hostd` is a launchd user agent with `KeepAlive`. That is process
-//! lifetime: the daemon comes back if it dies, and it starts at login. It
-//! is not a sleep lock. `ProcessType=Interactive` is the scheduler class
-//! so a live terminal is not throttled. It is also not a sleep lock.
+//! `hostd` is a launchd user agent. Always-on host is what sets
+//! `KeepAlive` and `RunAtLoad`. Neither is a sleep lock.
+//! `ProcessType=Interactive` is the scheduler class so a live terminal
+//! is not throttled. It is also not a sleep lock.
 //!
 //! The Mac app being closed must leave the laptop free to sleep, unless
 //! Always-on host is on. A tunnel that is merely present, a sync, a

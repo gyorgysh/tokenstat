@@ -50,11 +50,10 @@ final class LaunchState {
         }
 
         #if os(macOS)
-        // First launch of a build that knows about Always-on writes host.json
-        // and rewrites the launch agent. Do it after the host answers so the
-        // default comes from one battery check, not a second Swift one.
+        // After hostd answers, so the default is one battery check. A
+        // changed KeepAlive bootouts the job. Wait until it is back.
         if let policy = try? await Bridge.hostPolicy() {
-            HostAgentInstaller.applyPolicy(alwaysOn: policy.alwaysOn)
+            try? HostAgentInstaller.applyPolicy(alwaysOn: policy.alwaysOn)
             let again = ContinuousClock.now + .seconds(4)
             while ContinuousClock.now < again {
                 if (try? await Bridge.info()) != nil { break }

@@ -259,9 +259,18 @@ enum HostAgentInstaller {
     /// Last policy this process applied, so quit does not reread a stale file.
     private static var cachedAlwaysOn: Bool?
 
-    /// Whether hostd should outlive the app. Missing file: off, the laptop-safe default.
+    /// Whether hostd should outlive the app.
+    ///
+    /// Missing `host.json`: keep the loaded plist's KeepAlive so a first
+    /// launch does not flip a desktop install to off before hostd writes
+    /// the hardware default. No plist either: off, the laptop-safe default.
     static func resolvedAlwaysOn() -> Bool {
-        cachedAlwaysOn ?? storedAlwaysOn() ?? false
+        cachedAlwaysOn ?? storedAlwaysOn() ?? loadedPlistKeepAlive() ?? false
+    }
+
+    private static func loadedPlistKeepAlive() -> Bool? {
+        guard let existing = NSDictionary(contentsOf: launchAgentPlistURL) else { return nil }
+        return existing["KeepAlive"] as? Bool
     }
 
     static func storedAlwaysOn() -> Bool? {
@@ -286,10 +295,17 @@ enum HostAgentInstaller {
     ///
     /// Changing KeepAlive requires unloading the job. That restarts hostd.
     /// Call this after `host.setPolicy`, while the app is open and will
-    /// reconnect.
-    static func applyPolicy(alwaysOn: Bool) {
+    /// reconnect. Fails rather than caching a value the loaded job does
+    /// not honour: KeepAlive still true plus hostd `exit(0)` is a restart loop.
+    static func applyPolicy(alwaysOn: Bool) throws {
+        let previous = cachedAlwaysOn
         cachedAlwaysOn = alwaysOn
-        try? installAndStart()
+        do {
+            try installAndStart()
+        } catch {
+            cachedAlwaysOn = previous
+            throw error
+        }
     }
 
     /// Stop hostd when Always-on is off. Leaves the job loaded so the next

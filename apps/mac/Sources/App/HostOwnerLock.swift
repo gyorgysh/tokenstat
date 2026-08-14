@@ -28,11 +28,14 @@ enum HostOwnerLock {
         )
         let opened = open(path, O_RDWR | O_CREAT, 0o600)
         guard opened >= 0 else { return }
-        fd = opened
         // Shared: two Tokenstat processes (debug and the installed app) must
         // both count as an owner. hostd's exclusive probe fails while either
         // holds this.
-        _ = flock(fd, LOCK_SH)
+        guard flock(opened, LOCK_SH) == 0 else {
+            close(opened)
+            return
+        }
+        fd = opened
         let pid = String(ProcessInfo.processInfo.processIdentifier)
         _ = pid.withCString { pointer in
             _ = ftruncate(fd, 0)

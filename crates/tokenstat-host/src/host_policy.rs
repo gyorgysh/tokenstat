@@ -8,14 +8,10 @@
 
 //! Whether this Mac stays a host after the app quits.
 //!
-//! `hostd` used to outlive the window for everyone: launchd `KeepAlive` plus
-//! `RunAtLoad`. That is right on a Mac mini. It is wrong on a laptop, where
-//! the helper staying up (and still answering the tunnel) lets a phone start
-//! shells after the lid is closed.
-//!
-//! Always-on is the switch. Off by default when this machine has an internal
-//! battery, on when it does not. The process type stays Interactive either
-//! way. Background throttles terminals, and it is not a sleep lock.
+//! Always-on selects launchd `KeepAlive` and `RunAtLoad`. Off by default
+//! when this machine has an internal battery, on when it does not.
+//! ProcessType stays Interactive either way. Background throttles
+//! terminals and is not a sleep lock.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -282,6 +278,27 @@ fn apply_now() {
     apply_hosting(hosting_active_now());
 }
 
+/// True when the installed launch agent would start this process again
+/// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
+#[cfg(not(test))]
+fn launch_agent_restarts_on_clean_exit() -> bool {
+    let Some(home) = std::env::var_os("HOME") else {
+        return true;
+    };
+    let path = PathBuf::from(home).join("Library/LaunchAgents/ai.tokenstat.hostd.plist");
+    match fs::read_to_string(path) {
+        Ok(text) => plist_restarts_on_clean_exit(&text),
+        Err(_) => true,
+    }
+}
+
+pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
+    let Some(rest) = text.split("<key>KeepAlive</key>").nth(1) else {
+        return false;
+    };
+    rest.trim_start().starts_with("<true")
+}
+
 /// Watch the owner lock and the lid. Only the hostd process calls this.
 ///
 /// The in-process bridge must not: an exit here would take the app with it.
@@ -315,6 +332,12 @@ fn watch() {
         match gone_since {
             None => gone_since = Some(Instant::now()),
             Some(started) if started.elapsed() >= OWNER_GRACE => {
+                if launch_agent_restarts_on_clean_exit() {
+                    // KeepAlive is still true. exit(0) would bounce us.
+                    // Stay up, hosting already inactive.
+                    gone_since = None;
+                    continue;
+                }
                 eprintln!(
                     "tokenstat-hostd: always-on host is off and Tokenstat is not running, so this helper is stopping"
                 );
@@ -541,6 +564,21 @@ mod tests {
             std::env::temp_dir().join(format!("tokenstat-no-owner-{}.lock", std::process::id()));
         let _ = fs::remove_file(&path);
         assert!(!owner_present_at(&path));
+    }
+
+    #[test]
+    fn keepalive_true_would_restart_a_clean_exit() {
+        let on = r#"
+            <key>KeepAlive</key>
+            <true/>
+        "#;
+        let off = r#"
+            <key>KeepAlive</key>
+            <false/>
+        "#;
+        assert!(plist_restarts_on_clean_exit(on));
+        assert!(!plist_restarts_on_clean_exit(off));
+        assert!(!plist_restarts_on_clean_exit("<plist></plist>"));
     }
 
     #[test]
