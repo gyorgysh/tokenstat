@@ -112,7 +112,13 @@ struct ClientErrorCard: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: Theme.Space.m) {
-                if let retry, let actionTitle = error.actionTitle {
+                if error.opensPlans {
+                    Button(error.actionTitle ?? "See plans") {
+                        NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
+                    }
+                    .font(ClientType.caption.weight(.semibold))
+                    .tint(Theme.accent)
+                } else if let retry, let actionTitle = error.actionTitle {
                     Button(actionTitle, action: retry)
                         .font(ClientType.caption.weight(.semibold))
                         .tint(Theme.accent)

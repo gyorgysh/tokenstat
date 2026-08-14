@@ -55,6 +55,5 @@ struct HistoryLockBanner: View {
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isStaticText)
     }
 }

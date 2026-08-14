@@ -111,7 +111,7 @@ final class ClientStore {
         errorMessage = nil
         defer { purchasingProductID = nil }
         do {
-            var options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
+            let options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
             let result = try await product.purchase(options: options)
             switch result {
             case .success(let verification):

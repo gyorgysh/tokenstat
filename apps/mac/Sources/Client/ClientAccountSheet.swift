@@ -168,8 +168,8 @@ private struct ClientAccountContent: View {
 
     private func planCard(_ account: Account) -> some View {
         let billing = account.billing
-        let apple = billing?.isApple == true && (billing?.entitled == true || billing?.isLive == true)
-        let paddle = billing?.isPaddle == true && billing?.entitled == true
+        let apple = billing?.isApple == true && billing?.blocksOtherStore == true
+        let paddle = billing?.isPaddle == true && billing?.blocksOtherStore == true
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Plan")
                 .font(ClientType.sectionTitle)
@@ -434,7 +434,12 @@ private struct ClientAccountContent: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Delete this account")
                 .font(ClientType.sectionTitle)
-            Text("Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright.")
+            Text(
+                model.account?.billing?.isApple == true
+                    && model.account?.billing?.blocksOtherStore == true
+                    ? "Cancel the App Store plan in Apple ID subscriptions first. Deleting the account cannot stop Apple from charging."
+                    : "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright."
+            )
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

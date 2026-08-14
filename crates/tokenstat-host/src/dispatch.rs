@@ -399,6 +399,10 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
             .get("trial_used")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        has_live_sub: b
+            .get("has_live_sub")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         app_account_token: b
             .get("app_account_token")
             .and_then(|v| v.as_str())

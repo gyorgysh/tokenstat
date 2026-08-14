@@ -31,6 +31,8 @@ struct FriendlyError {
     var actionTitle: String?
     /// The original text, for the detail line.
     var raw: String
+    /// The button should open plans, not retry. iOS uses the in-app paywall.
+    var opensPlans: Bool = false
 
     /// Whether this is something the user can fix now, as opposed to something
     /// that has to be waited out.
@@ -64,7 +66,8 @@ struct FriendlyError {
                     + "else keeps working exactly as it does now.",
                 symbol: "star.circle",
                 actionTitle: "See plans",
-                raw: raw
+                raw: raw,
+                opensPlans: true
             )
         }
         // Before the sign-in case, and deliberately: a refused tunnel

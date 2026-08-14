@@ -78,9 +78,9 @@ struct ClientPaywallView: View {
     @ViewBuilder
     private func content(for signed: Account) -> some View {
         let billing = signed.billing
-        if billing?.isPaddle == true && billing?.entitled == true {
+        if billing?.isPaddle == true && billing?.blocksOtherStore == true {
             paddleCard
-        } else if billing?.isApple == true && (billing?.entitled == true || billing?.isLive == true) {
+        } else if billing?.isApple == true && billing?.blocksOtherStore == true {
             appleManagedCard(signed)
         } else {
             buyCards(signed)

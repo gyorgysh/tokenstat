@@ -676,16 +676,20 @@ struct AccountBilling: Codable, Sendable, Hashable {
     var periodEnd: String?
     var cancelScheduled: Bool?
     var trialUsed: Bool?
+    var hasLiveSub: Bool?
     var appAccountToken: String?
 
     var isApple: Bool { provider == "apple" }
     var isPaddle: Bool { provider == "paddle" }
     var isLive: Bool {
         switch status {
-        case "active", "trialing", "past_due": return entitled == true || status != nil
+        case "active", "trialing", "past_due": return true
         default: return entitled == true
         }
     }
+
+    /// The other store must not sell while this row is still the live one.
+    var blocksOtherStore: Bool { hasLiveSub ?? isLive }
 }
 
 /// A machine on the account.
