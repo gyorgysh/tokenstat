@@ -249,8 +249,25 @@ struct ActivityCalendar: Codable, Sendable, Hashable {
     /// Offer an upgrade under the grid. The app is the owner, so this is
     /// true whenever the year is locked.
     var historyUpgrade: Bool?
+    /// When an account grid's numbers came off the service. Absent on a
+    /// local grid, which is read from disk and is never a remembered answer.
+    var fetchedAtMs: Int64?
 
     var isHistoryLocked: Bool { historyLocked == true }
+
+    var fetchedAt: Date? {
+        guard let fetchedAtMs, fetchedAtMs > 0 else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(fetchedAtMs) / 1000)
+    }
+
+    var isStaleGrid: Bool { noticeCode == "stale" }
+
+    /// How current the account grid is, in the same words the limit cards use.
+    var freshness: String? {
+        guard let fetchedAt else { return nil }
+        let ago = fetchedAt.formatted(.relative(presentation: .named))
+        return isStaleGrid ? "stale, last updated \(ago)" : "updated \(ago)"
+    }
 }
 
 // MARK: - Day detail
@@ -623,6 +640,8 @@ struct Account: Codable, Sendable, Hashable {
     /// Whether the relay will accept a HELLO from this account.
     var canRemote: Bool?
     var syncInterval: Int?
+    /// Who billed the current plan. Present when signed in, even on Free.
+    var billing: AccountBilling?
 
     /// `thisMachineId` on the wire. Spelling the acronym without saying so
     /// left it nil on every decode, so no row in the machine list was ever
@@ -632,6 +651,7 @@ struct Account: Codable, Sendable, Hashable {
         case thisMachineID = "thisMachineId"
         case machines, schemaCurrent
         case machineLimit, hostsLinked, canRemote, syncInterval
+        case billing
     }
 
     var hostMachines: [Machine] { machines.filter(\.isHost) }
@@ -642,6 +662,29 @@ struct Account: Codable, Sendable, Hashable {
         let name = displayName?.trimmingCharacters(in: .whitespaces)
         if let name, !name.isEmpty { return name }
         return handle
+    }
+}
+
+/// Cross-store billing snapshot from `/api/v1/me`.
+///
+/// iOS uses this to pick the paywall, the App Store manage sheet, or the
+/// "you subscribed on the website" card. Mac ignores it and keeps Paddle.
+struct AccountBilling: Codable, Sendable, Hashable {
+    var provider: String?
+    var status: String?
+    var entitled: Bool?
+    var periodEnd: String?
+    var cancelScheduled: Bool?
+    var trialUsed: Bool?
+    var appAccountToken: String?
+
+    var isApple: Bool { provider == "apple" }
+    var isPaddle: Bool { provider == "paddle" }
+    var isLive: Bool {
+        switch status {
+        case "active", "trialing", "past_due": return entitled == true || status != nil
+        default: return entitled == true
+        }
     }
 }
 
@@ -877,12 +920,19 @@ func harnessName(_ id: String) -> String {
 /// Vendor marks, not ours. See TRADEMARK.md. A missing one falls back to a
 /// letter tile rather than borrowing another tool's logo.
 func harnessBrandAsset(_ id: String) -> String? {
+    // Estimate / rollup rows belong to the same brand as the live source.
+    let assetId: String
+    switch id {
+    case "claude_code_estimate", "claude_code_rollup": assetId = "claude_code"
+    case "antigravity_ide": assetId = "antigravity"
+    default: assetId = id
+    }
     let known: Set<String> = [
-        "claude_code", "claude_code_rollup", "codex", "grok", "opencode",
+        "claude_code", "codex", "grok", "opencode",
         "cline", "openclaw", "muse", "pi", "dsh", "zed", "copilot", "antigravity",
-        "antigravity_ide", "cursor", "gemini",
+        "cursor", "gemini",
     ]
-    return known.contains(id) ? "brand_\(id)" : nil
+    return known.contains(assetId) ? "brand_\(assetId)" : nil
 }
 
 // MARK: - Workspaces

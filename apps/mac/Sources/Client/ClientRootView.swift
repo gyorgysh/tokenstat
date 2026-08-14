@@ -43,6 +43,7 @@ struct ClientRootView: View {
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.
     @State private var showAccount = false
+    @State private var store = ClientStore()
 
     /// Set once the intro has been seen or skipped. A signed-in phone never
     /// sees it, so a reinstall onto an account that already exists does not get
@@ -90,6 +91,7 @@ struct ClientRootView: View {
         .tint(Theme.accent)
         .environment(account)
         .environment(connectivity)
+        .environment(store)
         .task {
             connectivity.start()
             // Sign-in presents over the app rather than handing the URL to
@@ -99,6 +101,8 @@ struct ClientRootView: View {
             // sits there after a successful approval, on top of a screen that
             // has already signed in behind it.
             account.signInDismisser = { ClientWebAuth.shared.cancel() }
+            store.onAccountChange = { account.account = $0 }
+            store.start()
             await launch.prepare()
             // Name this phone before anything asks the account who is on it.
             // See `ClientDeviceName`.
@@ -119,6 +123,18 @@ struct ClientRootView: View {
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()
                 .environment(account)
+                .environment(store)
+        }
+        .sheet(isPresented: Binding(
+            get: { store.showPaywall },
+            set: { store.showPaywall = $0 }
+        )) {
+            ClientPaywallView()
+                .environment(account)
+                .environment(store)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .tokenstatOpenPaywall)) { _ in
+            store.showPaywall = true
         }
     }
 

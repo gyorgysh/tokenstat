@@ -50,7 +50,7 @@ struct ClientAccountSheet: View {
 /// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(ClientStore.self) private var store
 
     @State private var showLicenses = false
     @State private var showDeletionWeb = false
@@ -72,6 +72,7 @@ private struct ClientAccountContent: View {
 
                 if model.signedIn, let account = model.account {
                     identity(account)
+                    planCard(account)
                     lastSync(account)
                     devices(account)
                     signOutButton
@@ -151,6 +152,57 @@ private struct ClientAccountContent: View {
             if let handle = account.handle, let url = URL(string: "\(account.host)/\(handle)") {
                 Link(destination: url) {
                     Label("View public profile", systemImage: "arrow.up.right.square")
+                        .font(ClientType.label.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    private func planCard(_ account: Account) -> some View {
+        let billing = account.billing
+        let apple = billing?.isApple == true && (billing?.entitled == true || billing?.isLive == true)
+        let paddle = billing?.isPaddle == true && billing?.entitled == true
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Plan")
+                .font(ClientType.sectionTitle)
+            if apple {
+                Text("This plan was bought on the App Store. Change or cancel it there.")
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    store.showPaywall = true
+                } label: {
+                    Text("Manage subscription")
+                        .font(ClientType.label.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else if paddle {
+                Text("You subscribed on the website. Manage that plan there.")
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("The app stays free. A yearly plan unlocks more devices, longer history, and remote management.")
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    store.showPaywall = true
+                } label: {
+                    Text("See plans")
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -325,9 +377,9 @@ private struct ClientAccountContent: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Terms and privacy")
                 .font(ClientType.sectionTitle)
-            legalLink("Privacy policy", url: "https://tokenstat.ai/privacy")
+            legalLink("Privacy policy", url: ClientWebPages.privacy())
             Divider()
-            legalLink("Terms of service", url: "https://tokenstat.ai/terms")
+            legalLink("Terms of service", url: ClientWebPages.terms())
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -335,25 +387,23 @@ private struct ClientAccountContent: View {
     }
 
     @ViewBuilder
-    private func legalLink(_ title: String, url: String) -> some View {
-        if let destination = URL(string: url) {
-            Button {
-                legalURL = destination
-            } label: {
-                HStack {
-                    Text(title)
-                        .font(ClientType.label)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(minHeight: 44)
-                .contentShape(.rect)
+    private func legalLink(_ title: String, url: URL) -> some View {
+        Button {
+            legalURL = url
+        } label: {
+            HStack {
+                Text(title)
+                    .font(ClientType.label)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .buttonStyle(.plain)
+            .frame(minHeight: 44)
+            .contentShape(.rect)
         }
+        .buttonStyle(.plain)
     }
 
     private var licensesCard: some View {
@@ -431,13 +481,12 @@ private struct ClientAccountContent: View {
     }
 
     private static var defaultDeletionURL: URL {
-        URL(string: "https://tokenstat.ai/settings/data#delete")!
+        ClientWebPages.accountDeletion()
     }
 
     private func openAccountDeletion() {
-        let host = model.account?.host ?? "https://tokenstat.ai"
-        guard let url = URL(string: "\(host)/settings/data#delete") else { return }
-        deletionURL = url
+        let host = model.account?.host ?? ClientWebPages.host
+        deletionURL = ClientWebPages.accountDeletion(host: host)
         showDeletionWeb = true
     }
 }

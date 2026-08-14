@@ -577,6 +577,44 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
     })
 }
 
+/// Bind a StoreKit transaction JWS to the signed-in account.
+///
+/// The website verifies Apple's signature and the `appAccountToken`. This
+/// crate only carries the bearer token and the JWS. No StoreKit types here.
+pub fn apple_activate(
+    host_flag: Option<&str>,
+    signed_transaction: &str,
+) -> Result<Value, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/billing/apple/activate"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "signedTransaction": signed_transaction }))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+                    .or_else(|| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+            })
+            .unwrap_or(text);
+        return Err(ProfileError::Message(detail));
+    }
+    let raw: Value = serde_json::from_str(&text)?;
+    Ok(raw)
+}
+
 /// Register this machine's remote-reach identity on its account record.
 ///
 /// Called by the host daemon when "Reach machines from anywhere" is on: the

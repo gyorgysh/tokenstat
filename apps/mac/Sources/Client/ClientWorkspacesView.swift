@@ -18,7 +18,7 @@ import SwiftUI
 struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
-    @Environment(\.openURL) private var openURL
+    @Environment(ClientStore.self) private var store
     @State private var model = ClientWorkspacesModel()
 
     private var remoteAllowed: Bool {
@@ -58,9 +58,7 @@ struct ClientWorkspacesView: View {
                                 + "the computer is a paid feature.",
                             actionTitle: "See plans",
                             action: {
-                                if let url = URL(string: "https://tokenstat.ai/pricing") {
-                                    openURL(url)
-                                }
+                                store.showPaywall = true
                             }
                         )
                     } else if model.hosts.isEmpty {

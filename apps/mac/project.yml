@@ -75,6 +75,9 @@ targets:
     # they share these sources and branch on `#if os(macOS)` where the chrome
     # genuinely differs.
     supportedDestinations: [macOS, iOS]
+    scheme:
+      # Local StoreKit products so the iOS simulator can buy without ASC review.
+      storeKitConfiguration: Tokenstat.storekit
     preBuildScripts:
       # Third-party attribution for the bundled dependencies. The Cargo side
       # is generated from the resolved dependency graph (see xtask notices);

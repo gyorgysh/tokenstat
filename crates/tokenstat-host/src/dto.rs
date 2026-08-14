@@ -329,6 +329,24 @@ pub struct AccountDto {
     pub can_remote: Option<bool>,
     /// Minimum seconds between accepted syncs from one host.
     pub sync_interval: Option<u32>,
+    /// Who billed the current plan, and the token StoreKit must send.
+    ///
+    /// Absent when signed out. Present when signed in even on Free, so the
+    /// iOS paywall can stamp `appAccountToken` before a first purchase.
+    pub billing: Option<AccountBillingDto>,
+}
+
+/// Cross-store billing snapshot from `GET /api/v1/me`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountBillingDto {
+    pub provider: Option<String>,
+    pub status: Option<String>,
+    pub entitled: bool,
+    pub period_end: Option<String>,
+    pub cancel_scheduled: bool,
+    pub trial_used: bool,
+    pub app_account_token: Option<String>,
 }
 
 /// Outcome of a sync.

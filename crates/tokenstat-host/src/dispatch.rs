@@ -32,9 +32,9 @@ use crate::automations::Automation;
 #[cfg(feature = "local-host")]
 use crate::dto::WorkspaceDto;
 use crate::dto::{
-    AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto, DayDetailDto, DayPartDto,
-    DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto, MachineDto, MachineUsageDto, QueryDto,
-    ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
+    AccountBillingDto, AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto,
+    DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto, MachineDto,
+    MachineUsageDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
 };
 use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
@@ -361,6 +361,93 @@ impl HighlightParams {
             Some(id) => tokenstat_highlight::Language::from_id(id),
             None => tokenstat_highlight::Language::detect(&self.path),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppleActivateParams {
+    signed_transaction: String,
+}
+
+fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
+    let b = raw.get("billing")?;
+    if b.is_null() {
+        return None;
+    }
+    Some(AccountBillingDto {
+        provider: b
+            .get("provider")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        status: b
+            .get("status")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        entitled: b.get("entitled").and_then(|v| v.as_bool()).unwrap_or(false),
+        period_end: b
+            .get("period_end")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        cancel_scheduled: b
+            .get("cancel_scheduled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        trial_used: b
+            .get("trial_used")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        app_account_token: b
+            .get("app_account_token")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    })
+}
+
+fn account_dto_from_status(s: tokenstat_sync::StatusResult) -> AccountDto {
+    AccountDto {
+        signed_in: true,
+        avatar: avatar_url(&s.host, &s.raw),
+        host: s.host,
+        handle: s.handle,
+        display_name: s
+            .raw
+            .get("display_name")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string),
+        tier: s.tier,
+        last_sync_at: s.last_sync_at.clone().or_else(|| latest_sync(&s.machines)),
+        this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
+        machines: s.machines.iter().map(MachineDto::from_value).collect(),
+        schema_current: s.schema_current,
+        machine_limit: s
+            .raw
+            .get("sync")
+            .and_then(|v| v.get("machine_limit"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        hosts_linked: s
+            .raw
+            .get("sync")
+            .and_then(|v| v.get("hosts_linked"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        can_remote: s
+            .raw
+            .get("sync")
+            .and_then(|v| v.get("remote"))
+            .and_then(|v| v.as_bool()),
+        sync_interval: s
+            .raw
+            .get("sync")
+            .and_then(|v| v.get("min_interval"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32),
+        billing: billing_from_raw(&s.raw),
     }
 }
 
@@ -937,50 +1024,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         "account.status" => {
             let host = tokenstat_sync::profile::resolve_api_host(None).envelope()?;
             match tokenstat_sync::sync_status(None) {
-                Ok(s) => serde_json::to_value(AccountDto {
-                    signed_in: true,
-                    avatar: avatar_url(&s.host, &s.raw),
-                    host: s.host,
-                    handle: s.handle,
-                    display_name: s
-                        .raw
-                        .get("display_name")
-                        .and_then(|v| v.as_str())
-                        .filter(|v| !v.is_empty())
-                        .map(str::to_string),
-                    tier: s.tier,
-                    last_sync_at: s.last_sync_at.clone().or_else(|| latest_sync(&s.machines)),
-                    // Which of the machines below is the one you are sitting
-                    // at. Without it the list is a set of opaque ids and the
-                    // only machine anyone can act on is unidentifiable.
-                    this_machine_id: tokenstat_sync::config::ensure_machine_id().ok(),
-                    machines: s.machines.iter().map(MachineDto::from_value).collect(),
-                    schema_current: s.schema_current,
-                    machine_limit: s
-                        .raw
-                        .get("sync")
-                        .and_then(|v| v.get("machine_limit"))
-                        .and_then(|v| v.as_u64())
-                        .map(|n| n as u32),
-                    hosts_linked: s
-                        .raw
-                        .get("sync")
-                        .and_then(|v| v.get("hosts_linked"))
-                        .and_then(|v| v.as_u64())
-                        .map(|n| n as u32),
-                    can_remote: s
-                        .raw
-                        .get("sync")
-                        .and_then(|v| v.get("remote"))
-                        .and_then(|v| v.as_bool()),
-                    sync_interval: s
-                        .raw
-                        .get("sync")
-                        .and_then(|v| v.get("min_interval"))
-                        .and_then(|v| v.as_u64())
-                        .map(|n| n as u32),
-                })
-                .envelope(),
+                Ok(s) => serde_json::to_value(account_dto_from_status(s)).envelope(),
                 Err(e) if e.is_unauthenticated() => serde_json::to_value(AccountDto {
                     signed_in: false,
                     host,
@@ -996,10 +1040,26 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     hosts_linked: None,
                     can_remote: None,
                     sync_interval: None,
+                    billing: None,
                 })
                 .envelope(),
                 Err(e) => Err(e.to_string().into()),
             }
+        }
+
+        // Bind a StoreKit transaction to the signed-in account, then return
+        // a fresh status so the paywall can redraw without a second round trip.
+        "account.appleActivate" => {
+            let p: AppleActivateParams = serde_json::from_str(params.trim()).envelope()?;
+            if p.signed_transaction.trim().is_empty() {
+                return Err(DispatchError::new(
+                    "invalid",
+                    "signedTransaction is required",
+                ));
+            }
+            tokenstat_sync::apple_activate(None, &p.signed_transaction).envelope()?;
+            let s = tokenstat_sync::sync_status(None).envelope()?;
+            serde_json::to_value(account_dto_from_status(s)).envelope()
         }
 
         // Begin a device authorization. Returns the code to show and the URL to
@@ -3274,6 +3334,7 @@ mod tests {
             "account.status",
             "account.deviceStart",
             "account.devicePoll",
+            "account.appleActivate",
         ] {
             let out = call(&mut s, method, "{}");
             let v: Value = serde_json::from_str(&out)

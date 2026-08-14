@@ -1,0 +1,115 @@
+{
+  "identifier" : "A91E2C70",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_storeKitErrors" : [
+
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "C3E81B04",
+      "localizations" : [
+        {
+          "description" : "tokenstat hosted plans",
+          "displayName" : "Plans",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "tokenstat.plans",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "10.00",
+          "familyShareable" : false,
+          "groupNumber" : 3,
+          "internalID" : "A1000001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly Supporter plan. A year of history and three devices.",
+              "displayName" : "Supporter",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.tokenstat.supporter.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Supporter Yearly",
+          "subscriptionGroupID" : "C3E81B04",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "20.00",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "A1000002",
+          "introductoryOffer" : {
+            "displayPrice" : "0",
+            "internalID" : "A1000004",
+            "numberOfPeriods" : 1,
+            "paymentMode" : "free",
+            "subscriptionPeriod" : "P3D"
+          },
+          "localizations" : [
+            {
+              "description" : "Yearly Patron plan. Full history, more devices, remote management.",
+              "displayName" : "Patron",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.tokenstat.patron.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Patron Yearly",
+          "subscriptionGroupID" : "C3E81B04",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "60.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A1000003",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Yearly Legend plan. More devices, faster sync, the read API.",
+              "displayName" : "Legend",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.tokenstat.legend.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Legend Yearly",
+          "subscriptionGroupID" : "C3E81B04",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

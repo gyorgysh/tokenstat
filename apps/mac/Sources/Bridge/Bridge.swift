@@ -718,6 +718,18 @@ extension Bridge {
         try await background("account.status", as: Account.self)
     }
 
+    /// Bind a StoreKit transaction JWS to the signed-in account.
+    ///
+    /// iOS only. The Mac stays on the website and Paddle.
+    static func appleActivate(signedTransaction: String) async throws -> Account {
+        try await background(
+            "account.appleActivate",
+            ["signedTransaction": signedTransaction],
+            patience: Patience.standard,
+            as: Account.self
+        )
+    }
+
     /// Begin a device authorization. Returns the code to show and the URL to
     /// open. Opening the browser is this side's job.
     static func startLogin() async throws -> DeviceLogin {

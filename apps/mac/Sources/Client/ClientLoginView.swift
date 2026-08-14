@@ -82,9 +82,9 @@ struct ClientLoginView: View {
                 // govern it belong on this screen and not only in Settings.
                 HStack(spacing: 4) {
                     Text("By signing in you accept the")
-                    legal("Terms", url: "https://tokenstat.ai/terms")
+                    legal("Terms", url: ClientWebPages.terms())
                     Text("and")
-                    legal("Privacy policy", url: "https://tokenstat.ai/privacy")
+                    legal("Privacy policy", url: ClientWebPages.privacy())
                 }
                 .font(ClientType.caption)
                 .foregroundStyle(.tertiary)
@@ -109,14 +109,12 @@ struct ClientLoginView: View {
     }
 
     @ViewBuilder
-    private func legal(_ title: String, url: String) -> some View {
-        if let destination = URL(string: url) {
-            Button(title) {
-                legalURL = destination
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(Theme.accent)
+    private func legal(_ title: String, url: URL) -> some View {
+        Button(title) {
+            legalURL = url
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.accent)
     }
 
     /// The approval is happening in the browser sheet.

@@ -7,6 +7,11 @@
 
 import SwiftUI
 
+extension Notification.Name {
+    /// Open the in-app plan sheet. iOS only uses this. Mac keeps the website.
+    static let tokenstatOpenPaywall = Notification.Name("ai.tokenstat.openPaywall")
+}
+
 /// The same Free-year note the public profile puts under the heatmap.
 ///
 /// Not a wall. The year is already on screen. This says why the older
@@ -27,10 +32,19 @@ struct HistoryLockBanner: View {
                     .foregroundStyle(.secondary)
             )
             .fixedSize(horizontal: false, vertical: true)
+            #if os(macOS)
             Link("Upgrade to see the year", destination: Self.pricing)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .underline(false)
+            #else
+            Button("See plans") {
+                NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(Theme.accent)
+            .buttonStyle(.plain)
+            #endif
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

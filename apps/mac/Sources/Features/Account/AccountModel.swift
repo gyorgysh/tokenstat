@@ -283,7 +283,8 @@ final class AccountModel {
                     lastSyncAt: nil,
                     thisMachineID: nil,
                     machines: [],
-                    schemaCurrent: nil
+                    schemaCurrent: nil,
+                    billing: nil
                 )
             } else {
                 // Still mark checked signed-out so we do not re-enter splash.
