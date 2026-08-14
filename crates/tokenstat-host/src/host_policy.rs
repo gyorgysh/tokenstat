@@ -17,7 +17,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
-#[cfg(not(test))]
+#[cfg(all(unix, not(test)))]
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use crate::keep_awake;
 
 /// How long hostd waits after the last app lock disappears before exiting.
-#[cfg(not(test))]
+#[cfg(all(unix, not(test)))]
 const OWNER_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,8 +218,11 @@ pub(crate) fn owner_present_at(_path: &Path) -> bool {
     false
 }
 
+#[cfg(unix)]
 const LOCK_EX: i32 = 2;
+#[cfg(unix)]
 const LOCK_NB: i32 = 4;
+#[cfg(unix)]
 const LOCK_UN: i32 = 8;
 
 #[cfg(unix)]
@@ -228,11 +231,6 @@ unsafe fn libc_flock(fd: i32, op: i32) -> i32 {
         fn flock(fd: i32, operation: i32) -> i32;
     }
     unsafe { flock(fd, op) }
-}
-
-#[cfg(not(unix))]
-fn libc_flock(_fd: i32, _op: i32) -> i32 {
-    0
 }
 
 pub fn lid_closed() -> bool {
@@ -280,7 +278,7 @@ fn apply_now() {
 
 /// True when the installed launch agent would start this process again
 /// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
-#[cfg(not(test))]
+#[cfg(all(unix, not(test)))]
 fn launch_agent_restarts_on_clean_exit() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return true;
@@ -292,6 +290,7 @@ fn launch_agent_restarts_on_clean_exit() -> bool {
     }
 }
 
+#[cfg(any(test, unix))]
 pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
     let Some(rest) = text.split("<key>KeepAlive</key>").nth(1) else {
         return false;
@@ -303,11 +302,12 @@ pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
 ///
 /// The in-process bridge must not: an exit here would take the app with it.
 /// Tests get a no-op: the watch thread exits the process when Always-on is
-/// off and the app lock is gone, which is every unit test.
-#[cfg(test)]
+/// off and the app lock is gone, which is every unit test. Windows has no
+/// unix socket server, so it never starts this runtime.
+#[cfg(all(unix, test))]
 pub fn start_runtime() {}
 
-#[cfg(not(test))]
+#[cfg(all(unix, not(test)))]
 pub fn start_runtime() {
     apply_now();
     let _ = std::thread::Builder::new()
@@ -315,7 +315,7 @@ pub fn start_runtime() {
         .spawn(watch);
 }
 
-#[cfg(not(test))]
+#[cfg(all(unix, not(test)))]
 fn watch() {
     let mut gone_since: Option<Instant> = None;
     loop {
