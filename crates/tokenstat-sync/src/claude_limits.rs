@@ -509,9 +509,7 @@ fn keychain_services_from_dump(dump: &str) -> Vec<String> {
             continue;
         };
         let service = &rest[..end];
-        if (service == KEYCHAIN_SERVICE || service.starts_with(KEYCHAIN_SERVICE_PREFIX))
-            && seen.insert(service.to_string())
-        {
+        if service.starts_with(KEYCHAIN_SERVICE_PREFIX) && seen.insert(service.to_string()) {
             names.push(service.to_string());
         }
     }
