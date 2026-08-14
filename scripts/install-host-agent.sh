@@ -58,7 +58,9 @@ cat > "$PLIST" <<PLIST_END
          types into; ProcessType=Background throttles the process tree and was
          measured at ~5s agent first paint vs ~0.3s for the same binary under a
          normal shell. Automations still run here, but the user's session is
-         the reason this process exists. -->
+         the reason this process exists. This is a scheduler class, not a
+         sleep lock: a closed app still lets the Mac sleep. Sleep is held
+         only while an inbound remote workspace or terminal is live. -->
     <key>ProcessType</key>
     <string>Interactive</string>
     <key>StandardOutPath</key>

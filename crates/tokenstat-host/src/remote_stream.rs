@@ -244,6 +244,10 @@ struct PtyFrame {
 /// ack channel is needed in this version; the read half is kept only so the
 /// connection's close is observed.
 fn pump_pty_subscribe(connection: Connection, session: &str) {
+    // This pump only runs on the machine that owns the pty: a remote peer
+    // attached to a terminal here. That is the keep-awake case. The
+    // assertion drops when the stream ends, even if the app is closed.
+    let _hold = crate::keep_awake::StreamHold::acquire();
     let (reader, writer) = connection.split();
     // The channel is bidirectional: output flows this way (pushed below),
     // keystrokes flow the other way, straight into the pty. A keystroke is a

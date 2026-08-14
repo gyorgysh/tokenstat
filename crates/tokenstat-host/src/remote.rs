@@ -946,10 +946,11 @@ fn report(refused: &Refused) {
 
 /// Answer one peer for as long as it stays connected.
 ///
-/// The body is `server::respond`, unchanged. That is the entire point of the
-/// design: this transport adds a handshake and a frame, and asks the same
-/// dispatch the same way. A method cannot exist here and be missing over the
-/// socket, because neither transport knows what a method is.
+/// The body is `server::respond`, unchanged, plus a keep-awake hook that
+/// looks at the method name. That is the entire point of the design: this
+/// transport adds a handshake and a frame, and asks the same dispatch the
+/// same way. A method cannot exist here and be missing over the socket,
+/// because neither transport knows what a method is.
 fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Session>) {
     let peer = connection.peer_key();
     // A machine cannot serve itself. A self-dial through the tunnel, or a
@@ -992,7 +993,7 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
         return;
     }
     let line = String::from_utf8_lossy(&first).to_string();
-    let response = crate::server::respond(&line, session);
+    let response = respond_remote(&line, session);
     if connection.send(response.as_bytes()).is_err() {
         return;
     }
@@ -1009,11 +1010,21 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
             return;
         }
         let line = String::from_utf8_lossy(&request).to_string();
-        let response = crate::server::respond(&line, session);
+        let response = respond_remote(&line, session);
         if connection.send(response.as_bytes()).is_err() {
             return;
         }
     }
+}
+
+/// Same dispatch as the unix socket, plus the inbound-work sleep assertion.
+///
+/// The method table is still only in `dispatch`. This is the one place a
+/// remote request is known to be inbound, which is the only time the Mac
+/// should stay awake for a closed app.
+fn respond_remote(line: &str, session: &Mutex<Session>) -> String {
+    crate::keep_awake::note_inbound(line);
+    crate::server::respond(line, session)
 }
 
 // MARK: - Reaching another machine

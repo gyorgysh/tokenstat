@@ -54,6 +54,7 @@ pub mod base64;
 pub mod dispatch;
 pub mod dto;
 pub mod error;
+pub(crate) mod keep_awake;
 #[cfg(feature = "local-host")]
 pub(crate) mod launcher;
 #[cfg(feature = "local-host")]
