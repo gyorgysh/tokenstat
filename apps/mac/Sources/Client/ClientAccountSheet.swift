@@ -50,9 +50,9 @@ struct ClientAccountSheet: View {
 /// Phone-sized account settings: identity, plan, devices, sign out, legal.
 private struct ClientAccountContent: View {
     @Environment(AccountModel.self) private var model
-    @Environment(ClientStore.self) private var store
 
     @State private var showLicenses = false
+    @State private var showPaywall = false
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
     @State private var webURL: URL?
@@ -96,6 +96,14 @@ private struct ClientAccountContent: View {
         .background(Theme.background)
         .sheet(isPresented: $showLicenses) {
             ClientLicensesSheet()
+        }
+        // The paywall presents over this sheet, not from the root. The root's
+        // `showPaywall` sheet is another sheet on the same view that presents
+        // the account sheet, and SwiftUI queues two sheets on one view instead
+        // of stacking them: "See plans" only appeared once the account sheet
+        // closed, with a long pause. A sheet on this sheet stacks on top.
+        .sheet(isPresented: $showPaywall) {
+            ClientPaywallView()
         }
         .sheet(isPresented: $showDeletionWeb) {
             ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
@@ -197,7 +205,7 @@ private struct ClientAccountContent: View {
                         .foregroundStyle(Theme.accent)
                 }
                 Button {
-                    store.showPaywall = true
+                    showPaywall = true
                 } label: {
                     Text("See plans")
                         .font(ClientType.label.weight(.semibold))
@@ -218,7 +226,7 @@ private struct ClientAccountContent: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
-                    store.showPaywall = true
+                    showPaywall = true
                 } label: {
                     Text("See plans")
                         .font(ClientType.label.weight(.semibold))
