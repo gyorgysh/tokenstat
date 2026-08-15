@@ -37,7 +37,7 @@ enum ClientRefresh {
     /// Announce a refresh to the rest of the app. Safe to call on its own for
     /// a screen with nothing to rate limit.
     static func began() {
-        NotificationCenter.default.post(name: .clientRefreshing, object: nil)
+        LogoRefresh.began()
     }
 
     /// Run `work` for a pull to refresh, at most once per window per screen.

@@ -303,10 +303,10 @@ struct LogoMark: View {
         .frame(width: size, height: size)
         .accessibilityLabel("tokenstat")
         .onAppear { if animated { raised = true } }
-        #if !os(macOS)
-        // A pull to refresh anywhere in the client dips the bars and lets them
-        // back up, once. The mark is already the only thing in the top bar, so
-        // it is the honest place to acknowledge a refresh nobody else answers.
+        // A refresh somebody asked for dips the bars and lets them back up,
+        // once. The mark sits in the sidebar on the Mac and in the top bar
+        // on the phone, so it is the one place both apps can acknowledge
+        // the same gesture.
         .onReceive(NotificationCenter.default.publisher(for: .clientRefreshing)) { _ in
             guard !animated, !pulse else { return }
             pulse = true
@@ -315,16 +315,22 @@ struct LogoMark: View {
                 pulse = false
             }
         }
-        #endif
     }
 }
 
-#if !os(macOS)
+/// Posts the pulse the wordmark listens for. iOS pull-to-refresh and Mac
+/// toolbar refresh / scan / sync all go through here so the bars move the
+/// same way on both platforms.
+enum LogoRefresh {
+    static func began() {
+        NotificationCenter.default.post(name: .clientRefreshing, object: nil)
+    }
+}
+
 extension Notification.Name {
-    /// A screen in the client started a pull to refresh. See `ClientRefresh`.
+    /// A screen started a refresh the wordmark should acknowledge.
     static let clientRefreshing = Notification.Name("ai.tokenstat.client.refreshing")
 }
-#endif
 
 /// The mark and the name, for the top of the sidebar.
 struct Wordmark: View {

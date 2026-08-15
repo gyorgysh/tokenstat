@@ -50,7 +50,10 @@ struct InsightsView: View {
                         isBusy: model.isScanning,
                         isEnabled: !model.isScanning && model.scanCooldownUntil == nil
                     ) {
-                        Task { await model.scan() }
+                        Task {
+                            LogoRefresh.began()
+                            await model.scan()
+                        }
                     }
                     ToolbarIconButton(
                         systemImage: "arrow.down.circle",
@@ -58,7 +61,10 @@ struct InsightsView: View {
                         isBusy: model.isFetching,
                         isEnabled: !model.isFetching && model.fetchCooldownUntil == nil
                     ) {
-                        Task { await model.fetchRemotes() }
+                        Task {
+                            LogoRefresh.began()
+                            await model.fetchRemotes()
+                        }
                     }
                 }
             )

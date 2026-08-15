@@ -33,7 +33,10 @@ struct AccountView: View {
                         isBusy: model.isSyncing,
                         isEnabled: !model.isSyncing && model.syncCooldownUntil == nil
                     ) {
-                        Task { await model.sync() }
+                        Task {
+                            LogoRefresh.began()
+                            await model.sync()
+                        }
                     }
                 }
             }

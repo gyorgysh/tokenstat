@@ -39,6 +39,7 @@ struct HomeView: View {
                         isEnabled: !model.isLoading && !model.isRefreshing
                     ) {
                         Task {
+                            LogoRefresh.began()
                             await account.load()
                             await model.refresh()
                         }
