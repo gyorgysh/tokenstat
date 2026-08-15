@@ -835,6 +835,8 @@ fn update_jitter() -> u64 {
 pub enum ScheduledUpdate {
     /// `update.auto` is off. Nothing was downloaded and nothing was replaced.
     Disabled,
+    /// macOS is asleep or in DarkWake. The next timer tick can try again.
+    Asleep,
     /// A newer release exists but this install is not ours to replace
     /// (cargo, homebrew, a system path). The package manager owns it.
     NotOurs {
@@ -854,7 +856,14 @@ pub fn scheduled_update() -> Result<ScheduledUpdate, UpdateError> {
     if !auto_apply_enabled() {
         return Ok(ScheduledUpdate::Disabled);
     }
+    if !crate::scheduled_network_allowed() {
+        return Ok(ScheduledUpdate::Asleep);
+    }
     std::thread::sleep(Duration::from_secs(update_jitter()));
+
+    if !crate::scheduled_network_allowed() {
+        return Ok(ScheduledUpdate::Asleep);
+    }
 
     let check = check_latest()?;
     touch_check_stamp()?;

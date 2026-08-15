@@ -461,6 +461,14 @@ pub fn profile_sync_scheduled(
             }
             Ok(())
         }
+        tokenstat_sync::ScheduledOutcome::Asleep => {
+            if json {
+                println!(r#"{{"skipped":"asleep"}}"#);
+            } else {
+                println!("Mac is asleep, will retry on a later run");
+            }
+            Ok(())
+        }
         tokenstat_sync::ScheduledOutcome::Synced(result) => {
             if json {
                 println!(

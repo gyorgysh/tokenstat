@@ -361,13 +361,7 @@ pub fn hex(bytes: &[u8]) -> String {
 /// somebody can run a throwaway instance without disturbing the one their
 /// peers have pinned.
 pub fn identity_dir() -> Result<PathBuf, IdentityError> {
-    let dir = match std::env::var_os("TOKENSTAT_IDENTITY_DIR") {
-        Some(explicit) => PathBuf::from(explicit),
-        None => directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .ok_or(IdentityError::NoDataDir)?
-            .data_dir()
-            .join("identity"),
-    };
+    let dir = identity_dir_path()?;
     std::fs::create_dir_all(&dir).map_err(|e| IdentityError::Io {
         path: dir.display().to_string(),
         source: e,
@@ -378,6 +372,19 @@ pub fn identity_dir() -> Result<PathBuf, IdentityError> {
         let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
     }
     Ok(dir)
+}
+
+/// The identity directory path without creating it.
+pub fn identity_dir_path() -> Result<PathBuf, IdentityError> {
+    match std::env::var_os("TOKENSTAT_IDENTITY_DIR") {
+        Some(explicit) => Ok(PathBuf::from(explicit)),
+        None => Ok(
+            directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+                .ok_or(IdentityError::NoDataDir)?
+                .data_dir()
+                .join("identity"),
+        ),
+    }
 }
 
 fn key_path() -> Result<PathBuf, IdentityError> {

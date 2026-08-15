@@ -1355,6 +1355,8 @@ pub enum ScheduledOutcome {
     Deferred {
         reason: String,
     },
+    /// macOS is asleep or in DarkWake. The next timer tick can try again.
+    Asleep,
     Synced(Box<SyncResult>),
 }
 
@@ -1367,6 +1369,9 @@ pub fn sync_scheduled(
     store: &Store,
     opts: SyncOptions<'_>,
 ) -> Result<ScheduledOutcome, ProfileError> {
+    if !crate::scheduled_network_allowed() {
+        return Ok(ScheduledOutcome::Asleep);
+    }
     let host = resolve_api_host(opts.host_flag)?;
     if keychain::load_token(&host)?.is_none() {
         return Ok(ScheduledOutcome::NotLoggedIn);
@@ -1407,6 +1412,9 @@ pub fn sync_scheduled_now(
     store: &Store,
     opts: SyncOptions<'_>,
 ) -> Result<ScheduledOutcome, ProfileError> {
+    if !crate::scheduled_network_allowed() {
+        return Ok(ScheduledOutcome::Asleep);
+    }
     let host = resolve_api_host(opts.host_flag)?;
     if keychain::load_token(&host)?.is_none() {
         return Ok(ScheduledOutcome::NotLoggedIn);
@@ -1430,6 +1438,9 @@ pub fn sync_scheduled_now(
             reason: "another sync is already running".into(),
         });
     };
+    if !crate::scheduled_network_allowed() {
+        return Ok(ScheduledOutcome::Asleep);
+    }
     match sync_unlocked(store, opts) {
         Ok(result) => Ok(ScheduledOutcome::Synced(Box::new(result))),
         Err(ProfileError::RateLimited {

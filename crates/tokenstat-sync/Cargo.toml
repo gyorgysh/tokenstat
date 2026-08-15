@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dependencies]
 tokenstat-core.workspace = true
+tokenstat-identity.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -15,26 +15,33 @@ enum DesktopSyncScheduler {
         Task.detached {
             while !Task.isCancelled {
                 guard !Bridge.isHosted else { return }
+                let status: SyncScheduleStatus
+                do {
+                    status = try await Bridge.syncScheduleStatus()
+                } catch {
+                    // The next minute retries. Sync errors belong on the next
+                    // explicit Account or Insights surface, not a timer log.
+                    try? await Task.sleep(for: .seconds(60))
+                    continue
+                }
+                guard status.scheduledNetworkAllowed else {
+                    try? await Task.sleep(for: .seconds(60))
+                    continue
+                }
                 // The daemon refreshes pricing on its own schedule; in-process
                 // this loop is the only scheduler there is. Once up front so a
                 // fresh install without the CLI gets real rates, then on the
                 // same minute cadence as sync.
                 try? await Bridge.pricingRefresh()
-                do {
-                    let status = try await Bridge.syncScheduleStatus()
-                    if status.loggedIn && !status.cliScheduleActive && status.due {
-                        // Re-read due immediately before posting. A Sync now
-                        // that landed while this loop was between ticks would
-                        // otherwise send a second usage POST into the same
-                        // gate the account just accepted.
-                        let again = try await Bridge.syncScheduleStatus()
-                        if again.due {
-                            _ = try? await Bridge.sync()
-                        }
+                if status.loggedIn && !status.cliScheduleActive && status.due {
+                    // Re-read due immediately before posting. A Sync now
+                    // that landed while this loop was between ticks would
+                    // otherwise send a second usage POST into the same
+                    // gate the account just accepted.
+                    let again = try? await Bridge.syncScheduleStatus()
+                    if again?.scheduledNetworkAllowed == true && again?.due == true {
+                        _ = try? await Bridge.sync()
                     }
-                } catch {
-                    // The next minute retries. Sync errors belong on the next
-                    // explicit Account or Insights surface, not a timer log.
                 }
                 try? await Task.sleep(for: .seconds(60))
             }

@@ -251,7 +251,10 @@ writes the scheduler entry for your platform. The website installer runs
 
 With an account linked, a sync entry uploads on your plan interval (60 / 30 / 10
 minutes). A daily update check (on by default) runs with jitter and verifies
-the new binary before replacing the running one.
+the new binary before replacing the running one. On macOS, scheduled network
+work on a battery Mac checks the full-wake state first when Always-on host is
+off, and exits without connecting during sleep or DarkWake. Non-battery Macs
+and an explicitly enabled Always-on host keep their existing behavior.
 
 ## Development
 

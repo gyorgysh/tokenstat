@@ -80,6 +80,14 @@ pub fn self_update_scheduled(json: bool) -> Result<()> {
             }
             Ok(())
         }
+        Ok(tokenstat_sync::ScheduledUpdate::Asleep) => {
+            if json {
+                println!(r#"{{"skipped":"asleep"}}"#);
+            } else {
+                println!("Mac is asleep, will retry on a later run");
+            }
+            Ok(())
+        }
         Ok(tokenstat_sync::ScheduledUpdate::UpToDate(v)) => {
             if json {
                 println!(r#"{{"up_to_date":"{v}"}}"#);

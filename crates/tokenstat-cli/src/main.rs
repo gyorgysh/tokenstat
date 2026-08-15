@@ -81,6 +81,9 @@ enum Command {
         /// Discard existing events and rebuild from scratch
         #[arg(long)]
         reset: bool,
+        /// Internal marker for the launchd/systemd scheduled scan.
+        #[arg(long, hide = true)]
+        scheduled: bool,
     },
     /// Usage per day
     Daily(Window),
@@ -393,7 +396,13 @@ fn main() -> Result<()> {
         );
     }
 
-    if let Command::Scan { reset } = command {
+    if let Command::Scan { reset, scheduled } = command {
+        if scheduled && !tokenstat_sync::scheduled_network_allowed() {
+            if cli.json {
+                println!(r#"{{"skipped":"asleep"}}"#);
+            }
+            return Ok(());
+        }
         let mut store = Store::open(&db_path)?;
         if reset {
             store.clear_events()?;
@@ -403,14 +412,18 @@ fn main() -> Result<()> {
         render::scan_report(&report, cli.json)?;
         // Cursor and Antigravity IDE/quota use a 30 minute cache. IDE sync only
         // works while the Antigravity app is open. Soft-fails per vendor.
-        match tokenstat_sync::fetch_remotes(&mut store, &tz, false) {
-            Ok(remote) => render::fetch_reports(&remote, cli.json)?,
-            Err(e) => {
-                eprintln!("  remote fetch: {e}");
+        if !scheduled || tokenstat_sync::scheduled_network_allowed() {
+            match tokenstat_sync::fetch_remotes(&mut store, &tz, false) {
+                Ok(remote) => render::fetch_reports(&remote, cli.json)?,
+                Err(e) => {
+                    eprintln!("  remote fetch: {e}");
+                }
             }
         }
         // Soft update check (24h TTL). Applies when auto-update is on (default).
-        render::maybe_notify_update(cli.json);
+        if !scheduled || tokenstat_sync::scheduled_network_allowed() {
+            render::maybe_notify_update(cli.json);
+        }
         return Ok(());
     }
 

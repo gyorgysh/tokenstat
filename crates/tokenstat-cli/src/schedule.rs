@@ -125,7 +125,9 @@ impl Unit {
     /// Arguments passed to the tokenstat binary.
     pub fn args(self) -> &'static [&'static str] {
         match self {
-            Unit::Scan => &["scan"],
+            // --scheduled skips the local and network follow-on work during
+            // macOS sleep or DarkWake.
+            Unit::Scan => &["scan", "--scheduled"],
             // --scheduled adds the jitter and the self-pacing, and keeps quiet
             // (exit 0) when there is no account or the interval has not elapsed.
             Unit::Sync => &["sync", "--scheduled"],
@@ -731,6 +733,7 @@ mod tests {
         let p = launchd_plist(Unit::Scan, "/usr/local/bin/tokenstat", 3600, "/tmp/t.log");
         assert!(p.contains("<string>/usr/local/bin/tokenstat</string>"));
         assert!(p.contains("<string>scan</string>"));
+        assert!(p.contains("<string>--scheduled</string>"));
         assert!(p.contains("<integer>3600</integer>"));
         assert!(p.contains(LABEL));
         assert!(p.contains("/tmp/t.log"));

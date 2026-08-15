@@ -24,14 +24,18 @@ pub fn start(session: Arc<Mutex<Session>>) {
         // would otherwise read as all-zero values until the first hourly pass.
         // Refresh once up front; a machine offline right now keeps its last
         // known book and retries with the schedule.
-        refresh_pricing(&session);
-        post_limits();
-        loop {
-            if !tokenstat_sync::cli_sync_schedule_active() {
-                run_once(&session);
-            }
+        if tokenstat_sync::scheduled_network_allowed() {
             refresh_pricing(&session);
             post_limits();
+        }
+        loop {
+            if tokenstat_sync::scheduled_network_allowed() {
+                if !tokenstat_sync::cli_sync_schedule_active() {
+                    run_once(&session);
+                }
+                refresh_pricing(&session);
+                post_limits();
+            }
             std::thread::sleep(sync_interval());
         }
     });
@@ -60,6 +64,9 @@ pub fn start(session: Arc<Mutex<Session>>) {
 /// is unlinked or the server asks for it, and a vendor sweep every minute is
 /// how an account gets itself throttled.
 fn post_limits() {
+    if !tokenstat_sync::scheduled_network_allowed() {
+        return;
+    }
     if !tokenstat_sync::config::limits_sync_enabled() {
         return;
     }
@@ -104,6 +111,9 @@ fn limits_pass_is_due() -> bool {
 /// down: the previous book (or the built-in estimate rates) keeps values
 /// readable, and the next pass retries.
 fn refresh_pricing(session: &Mutex<Session>) {
+    if !tokenstat_sync::scheduled_network_allowed() {
+        return;
+    }
     match tokenstat_sync::pricing::refresh(false) {
         Ok(refreshed) => {
             // The fetch wrote a new file; the session still prices from the
@@ -143,6 +153,9 @@ fn sync_interval() -> Duration {
 }
 
 fn run_once(session: &Mutex<Session>) {
+    if !tokenstat_sync::scheduled_network_allowed() {
+        return;
+    }
     // Snapshot path and timezone under the lock, then open a separate Store for
     // the HTTP phase. Holding Session across the upload freezes Home/Insights.
     let snapshot = {
@@ -186,7 +199,8 @@ fn run_once(session: &Mutex<Session>) {
             crate::account_activity::invalidate();
         }
         Ok(tokenstat_sync::ScheduledOutcome::NotLoggedIn)
-        | Ok(tokenstat_sync::ScheduledOutcome::Held { .. }) => {}
+        | Ok(tokenstat_sync::ScheduledOutcome::Held { .. })
+        | Ok(tokenstat_sync::ScheduledOutcome::Asleep) => {}
         Ok(tokenstat_sync::ScheduledOutcome::Deferred { reason }) => {
             eprintln!("sync: deferred: {reason}");
         }

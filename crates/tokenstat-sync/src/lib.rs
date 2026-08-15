@@ -37,6 +37,7 @@ pub mod grok_limits;
 pub mod host;
 pub mod keychain;
 pub mod opencode_limits;
+mod power;
 pub mod pricing;
 pub mod profile;
 pub mod schema;
@@ -122,3 +123,5 @@ pub use update::{
     download_app_image, has_macos_signing_authority, maybe_auto_update, scheduled_update,
     version_cmp,
 };
+
+pub use power::scheduled_network_allowed;

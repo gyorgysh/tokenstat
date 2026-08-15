@@ -2361,6 +2361,7 @@ fn sync_schedule_status() -> Result<Value, String> {
     Ok(json!({
         "loggedIn": info.logged_in,
         "cliScheduleActive": tokenstat_sync::cli_sync_schedule_active(),
+        "scheduledNetworkAllowed": tokenstat_sync::scheduled_network_allowed(),
         "due": due,
     }))
 }

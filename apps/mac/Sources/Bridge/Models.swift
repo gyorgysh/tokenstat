@@ -811,6 +811,7 @@ struct LocalModel: Codable, Sendable, Hashable, Identifiable {
 struct SyncScheduleStatus: Codable, Sendable {
     let loggedIn: Bool
     let cliScheduleActive: Bool
+    let scheduledNetworkAllowed: Bool
     let due: Bool
 }
 
