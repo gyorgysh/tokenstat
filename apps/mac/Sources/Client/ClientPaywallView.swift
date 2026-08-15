@@ -38,7 +38,9 @@ struct ClientPaywallView: View {
 
                     content(for: account.account)
 
-                    restoreRow
+                    if account.account?.isWebManagedPlan != true {
+                        restoreRow
+                    }
                     legalRow
                 }
                 .padding(.horizontal, Theme.Space.m)
@@ -75,18 +77,27 @@ struct ClientPaywallView: View {
 
     @ViewBuilder
     private func content(for signed: Account?) -> some View {
-        if signed?.billing?.isPaddle == true && signed?.billing?.blocksOtherStore == true {
-            paddleCard
+        if signed?.isAppleBilled == true {
+            planCards(signed)
+        } else if signed?.isWebManagedPlan == true {
+            webManagedCard(isPaddle: signed?.isPaddleBilled == true)
         } else {
             planCards(signed)
         }
     }
 
-    private var paddleCard: some View {
+    /// Paddle, founder access, or any paid tier that is not Apple.
+    ///
+    /// No URL and no button. Guideline 3.1.1: this app also sells the same
+    /// plans through StoreKit, so a link to the website would be a second
+    /// purchase path.
+    private func webManagedCard(isPaddle: Bool) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Website subscription")
+            Text(isPaddle ? "Website subscription" : "Plan")
                 .font(ClientType.sectionTitle)
-            Text("You subscribed on the website. Manage that plan there. This app cannot change a web subscription.")
+            Text(isPaddle
+                 ? "You subscribed on the website. Manage that plan there. This app cannot change a web subscription."
+                 : "This plan is not an App Store purchase. Manage it on the web.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

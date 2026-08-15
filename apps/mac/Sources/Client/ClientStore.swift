@@ -285,6 +285,9 @@ final class ClientStore {
     }
 
     func currentProduct(from account: Account) -> ClientStoreProduct? {
+        // A paid tier is not an App Store product. Founder / family access and
+        // a website subscription must not open Apple's manage sheet.
+        guard account.isAppleBilled else { return nil }
         if let id = currentProductID {
             return ClientStoreProduct(rawValue: id)
         }

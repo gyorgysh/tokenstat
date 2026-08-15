@@ -177,9 +177,6 @@ private struct ClientAccountContent: View {
     }
 
     private func planCard(_ account: Account) -> some View {
-        let billing = account.billing
-        let apple = billing?.isApple == true && billing?.blocksOtherStore == true
-        let paddle = billing?.isPaddle == true && billing?.blocksOtherStore == true
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 if let tier = account.tier, !tier.isEmpty {
@@ -194,7 +191,7 @@ private struct ClientAccountContent: View {
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
             }
-            if apple {
+            if account.isAppleBilled {
                 Text("Bought on the App Store. See every plan here, then change or cancel in Apple ID subscriptions.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -215,8 +212,13 @@ private struct ClientAccountContent: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
                 .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            } else if paddle {
+            } else if account.isPaddleBilled {
                 Text("You subscribed on the website. Manage that plan there.")
+                    .font(ClientType.body)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if account.isWebManagedPlan {
+                Text("This plan is not an App Store purchase. Manage it on the web.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

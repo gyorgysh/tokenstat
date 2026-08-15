@@ -663,6 +663,32 @@ struct Account: Codable, Sendable, Hashable {
         if let name, !name.isEmpty { return name }
         return handle
     }
+
+    /// A paid rung, whether Apple, Paddle, or a grant such as founder access.
+    var isPaidTier: Bool {
+        switch tier?.lowercased() {
+        case "supporter", "patron", "legend": return true
+        default: return false
+        }
+    }
+
+    /// Live App Store subscription. StoreKit manage UI is only honest here.
+    var isAppleBilled: Bool {
+        billing?.isApple == true && billing?.blocksOtherStore == true
+    }
+
+    /// Live website subscription.
+    var isPaddleBilled: Bool {
+        billing?.isPaddle == true && billing?.blocksOtherStore == true
+    }
+
+    /// Paid access that did not come from the App Store.
+    ///
+    /// Founder / family access sets a paid tier with no `subscriptions` row.
+    /// The iOS paywall must not treat that as an Apple purchase.
+    var isWebManagedPlan: Bool {
+        isPaidTier && !isAppleBilled
+    }
 }
 
 /// Cross-store billing snapshot from `/api/v1/me`.
