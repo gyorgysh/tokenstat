@@ -87,6 +87,11 @@ final class WorkspacesModel {
     /// a binding straight into `UserDefaults` has no way to tell the view the
     /// value changed. Persistence still happens on every write.
     private(set) var bypassPermissions: [String: Bool] = [:]
+    /// Local model selection per workspace, same reason as bypass: a value
+    /// that lives only in `UserDefaults` or in view `@State` does not survive
+    /// the folder-list refresh, so the picker looked like it did nothing
+    /// until the user left Workspaces and came back.
+    private(set) var localModels: [String: String] = [:]
 
     var folders: [WorkspaceFolder] = []
     var selectedID: String?
@@ -952,6 +957,19 @@ final class WorkspacesModel {
     func setBypassPermissions(_ on: Bool, for workspaceID: String) {
         bypassPermissions[workspaceID] = on
         WorkspacePreference.setBypassPermissions(on, for: workspaceID)
+    }
+
+    func localModel(for workspaceID: String) -> String? {
+        if let stored = localModels[workspaceID] {
+            return stored.isEmpty ? nil : stored
+        }
+        return WorkspacePreference.localModel(for: workspaceID)
+    }
+
+    func setLocalModel(_ key: String?, for workspaceID: String) {
+        let value = key ?? ""
+        localModels[workspaceID] = value
+        WorkspacePreference.setLocalModel(key, for: workspaceID)
     }
 
     /// Ask for a folder and register it.

@@ -38,8 +38,9 @@ enum LocalModelSelection {
     }
 
     /// The selection stored for a workspace, ready to hand to a spawn.
-    static func stored(for workspaceID: String) -> (provider: String, model: String)? {
-        parse(WorkspacePreference.localModel(for: workspaceID))
+    @MainActor
+    static func stored(for workspaceID: String, in workspaces: WorkspacesModel? = nil) -> (provider: String, model: String)? {
+        parse(workspaces?.localModel(for: workspaceID) ?? WorkspacePreference.localModel(for: workspaceID))
     }
 }
 
@@ -53,11 +54,15 @@ struct LocalModelControl: View {
     /// The machine to probe. A remote folder's models come from the machine
     /// that owns it, never from the Mac drawing this row.
     let peer: String?
+    @Bindable var workspaces: WorkspacesModel
 
     @State private var providers: [LocalProvider] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var selectedKey = ""
+
+    private var selectedKey: String {
+        workspaces.localModel(for: folder.id) ?? ""
+    }
 
     private var choices: [(key: String, label: String)] {
         providers.flatMap { provider -> [(key: String, label: String)] in
@@ -76,7 +81,16 @@ struct LocalModelControl: View {
     private var defaultLabel: String { "Each tool's default" }
 
     private var buttonLabel: String {
-        choices.first { $0.key == selectedKey }?.label ?? defaultLabel
+        if let match = choices.first(where: { $0.key == selectedKey }) {
+            return match.label
+        }
+        // The list has not loaded yet, but a choice is already stored.
+        // Show the model id rather than the default, so a folder-list
+        // refresh does not flash "Each tool's default" over a real pick.
+        if let parsed = LocalModelSelection.parse(selectedKey) {
+            return parsed.model
+        }
+        return defaultLabel
     }
 
     var body: some View {
@@ -125,10 +139,13 @@ struct LocalModelControl: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        // Rebuild the menu when the choice changes. macOS caches the label
+        // of a `Menu` and otherwise keeps showing "Each tool's default"
+        // until the view is torn down (Home and back).
+        .id("\(selectedKey)|\(buttonLabel)")
         .help(helpText)
         .task { await load() }
         .onChange(of: folder.id) { _, _ in
-            selectedKey = WorkspacePreference.localModel(for: folder.id) ?? ""
             Task { await load() }
         }
     }
@@ -182,14 +199,12 @@ struct LocalModelControl: View {
     }
 
     private func select(_ key: String) {
-        selectedKey = key
-        WorkspacePreference.setLocalModel(key, for: folder.id)
+        workspaces.setLocalModel(key.isEmpty ? nil : key, for: folder.id)
     }
 
     private func load() async {
         isLoading = true
         defer { isLoading = false }
-        selectedKey = WorkspacePreference.localModel(for: folder.id) ?? ""
         do {
             providers = if let peer {
                 try await Bridge.localModels(onPeer: peer)

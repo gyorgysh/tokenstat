@@ -82,7 +82,10 @@ struct TerminalPane: View {
     /// folder, the owning machine's for a remote one. Installed only; the
     /// launch surface additionally shows what could be installed.
     private var launcherProfiles: [LaunchProfile] {
-        peer == nil ? launcher.available : launcher.remoteAvailable
+        let all = peer == nil ? launcher.available : launcher.remoteAvailable
+        let scope = peer ?? "local"
+        let visibility = LauncherVisibility.shared
+        return all.filter { !visibility.isHidden($0.id, scope: scope) }
     }
 
     /// Every supported harness on the owning machine, installed or not, for
@@ -477,7 +480,7 @@ struct TerminalPane: View {
             // own menu, so they sit beside it rather than on a surface that
             // disappears once anything is running.
             if !modelProfiles.isEmpty {
-                LocalModelControl(folder: folder, peer: peer)
+                LocalModelControl(folder: folder, peer: peer, workspaces: workspaces)
             }
             BypassPermissionsControl(folder: folder, workspaces: workspaces)
         }
@@ -503,7 +506,7 @@ struct TerminalPane: View {
         // ignore it, so the same harness started on a different model
         // depending on which button opened it.
         let selection = LaunchProfile.acceptsLocalModel(profile.id)
-            ? LocalModelSelection.stored(for: folder.id)
+            ? LocalModelSelection.stored(for: folder.id, in: workspaces)
             : nil
         Task {
             await terminals.start(
@@ -809,31 +812,34 @@ private struct LaunchSurface: View {
     /// What an install said when it failed, shown under the grid so the
     /// installer's own message is what the user reads.
     @State private var installError: String?
+    /// The + tile opens the rest of the catalog: not installed, and installed
+    /// tiles the user hid. Closed by default so the grid is what they launch.
+    @State private var showingCatalog = false
+    @State private var pendingInstall: LaunchProfile?
+    @State private var pendingHide: LaunchProfile?
+
+    private var visibility: LauncherVisibility { LauncherVisibility.shared }
+    private var visibilityScope: String { modelPeer ?? "local" }
 
     private var modelProfiles: [LaunchProfile] {
         profiles.filter { LaunchProfile.acceptsLocalModel($0.id) && $0.installed }
     }
 
-    /// Installed harnesses first, then what could be installed, with the
-    /// catalog's own order preserved within each group. The people reading
-    /// this surface have the installed tools in front and the rest quieter,
-    /// the way the heatmap keeps its low rows muted.
-    private var orderedProfiles: [LaunchProfile] {
-        profiles.enumerated()
-            .sorted { lhs, rhs in
-                let li = lhs.element.installed
-                let ri = rhs.element.installed
-                if li != ri { return li && !ri }
-                return lhs.offset < rhs.offset
-            }
-            .map(\.element)
+    /// Installed and still on the grid. Hidden ones live under +.
+    private var visibleProfiles: [LaunchProfile] {
+        profiles.filter { $0.installed && !visibility.isHidden($0.id, scope: visibilityScope) }
+    }
+
+    /// Not installed, or installed and hidden. Same catalog order.
+    private var extraProfiles: [LaunchProfile] {
+        profiles.filter { !$0.installed || visibility.isHidden($0.id, scope: visibilityScope) }
     }
 
     /// The workspace's stored selection. The list itself lives in the chrome
     /// row's control, which owns loading it and is on screen whether or not
     /// this surface is.
     private var selectedModel: (provider: String, model: String)? {
-        LocalModelSelection.stored(for: folder.id)
+        LocalModelSelection.stored(for: folder.id, in: workspaces)
     }
 
     var body: some View {
@@ -871,11 +877,20 @@ private struct LaunchSurface: View {
                     utilityButton("Files", symbol: "folder") {
                         workspaces.showFiles(in: folder.id)
                     }
-                    ForEach(orderedProfiles) { profile in
+                    ForEach(visibleProfiles) { profile in
                         tile(for: profile)
+                    }
+                    if !extraProfiles.isEmpty {
+                        addTile
+                    }
+                    if showingCatalog {
+                        ForEach(extraProfiles) { profile in
+                            tile(for: profile)
+                        }
                     }
                 }
                 .frame(maxWidth: 620)
+                .animation(.easeOut(duration: 0.15), value: showingCatalog)
 
                 if let installError {
                     Text(installError)
@@ -895,6 +910,42 @@ private struct LaunchSurface: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
+        .confirmationDialog(
+            pendingInstall.map { "Install \($0.name) on this machine?" } ?? "Install this tool?",
+            isPresented: Binding(
+                get: { pendingInstall != nil },
+                set: { if !$0 { pendingInstall = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Install") {
+                if let profile = pendingInstall {
+                    runInstall(profile)
+                }
+                pendingInstall = nil
+            }
+            Button("Not now", role: .cancel) { pendingInstall = nil }
+        } message: {
+            Text("This runs its official installer.")
+        }
+        .confirmationDialog(
+            pendingHide.map { "Remove \($0.name) from the launcher?" } ?? "Remove this tool?",
+            isPresented: Binding(
+                get: { pendingHide != nil },
+                set: { if !$0 { pendingHide = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let profile = pendingHide {
+                    visibility.hide(profile.id, scope: visibilityScope)
+                }
+                pendingHide = nil
+            }
+            Button("Keep", role: .cancel) { pendingHide = nil }
+        } message: {
+            Text("The tool stays on this machine. You can add it again from +.")
+        }
     }
 
     /// Where the launch settings went, in one line.
@@ -938,13 +989,47 @@ private struct LaunchSurface: View {
     /// something that has a bundled installer, a muted card for the rest.
     @ViewBuilder
     private func tile(for profile: LaunchProfile) -> some View {
-        if profile.installed {
+        if profile.installed, !visibility.isHidden(profile.id, scope: visibilityScope) {
             launchButton(profile)
+        } else if profile.installed {
+            showAgainButton(profile)
         } else if profile.installCommand != nil {
             installButton(profile)
         } else {
             unavailableTile(profile)
         }
+    }
+
+    /// Same dimmed dashed panel as an uninstalled tile. Opens the rest of
+    /// the catalog, or closes it.
+    private var addTile: some View {
+        Button {
+            showingCatalog.toggle()
+        } label: {
+            VStack(spacing: Theme.Space.s) {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .frame(height: 34)
+                Text(showingCatalog ? "Hide" : "More")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Space.m)
+            .background(Theme.panel.opacity(0.4), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(showingCatalog
+              ? "Hide tools that are not on the launcher."
+              : "Show tools you can install or add back.")
+        .accessibilityLabel(showingCatalog ? "Hide extra tools" : "Show more tools")
     }
 
     /// A muted tile that runs the tool's official installer, then flips to a
@@ -953,16 +1038,28 @@ private struct LaunchSurface: View {
         LaunchInstallTile(
             profile: profile,
             isInstalling: LaunchCatalog.shared.installing.contains(profile.id),
-            onInstall: {
-                installError = nil
-                Task {
-                    let message = await LaunchCatalog.shared.install(profile, peer: modelPeer)
-                    if let message {
-                        installError = "\(profile.name) could not be installed: \(message)"
-                    }
-                }
-            }
+            onInstall: { pendingInstall = profile }
         )
+    }
+
+    /// An installed tool the user hid. Putting it back does not run the installer.
+    private func showAgainButton(_ profile: LaunchProfile) -> some View {
+        LaunchInstallTile(
+            profile: profile,
+            isInstalling: false,
+            onInstall: { visibility.show(profile.id, scope: visibilityScope) }
+        )
+        .help("\(profile.name) is installed. Click to add it back to the launcher.")
+    }
+
+    private func runInstall(_ profile: LaunchProfile) {
+        installError = nil
+        Task {
+            let message = await LaunchCatalog.shared.install(profile, peer: modelPeer)
+            if let message {
+                installError = "\(profile.name) could not be installed: \(message)"
+            }
+        }
     }
 
     /// A profile with no bundled installer yet: shown because it is a
@@ -1000,6 +1097,7 @@ private struct LaunchSurface: View {
             profile: profile,
             isLaunching: launching == profile.id,
             othersBusy: launching != nil && launching != profile.id,
+            onHide: profile.id == "shell" ? nil : { pendingHide = profile },
             onBegin: {
                 guard launching == nil else { return }
                 launching = profile.id
@@ -1073,6 +1171,7 @@ private struct LaunchTile: View {
     let profile: LaunchProfile
     let isLaunching: Bool
     let othersBusy: Bool
+    var onHide: (() -> Void)? = nil
     let onBegin: () -> Void
 
     /// Hover reveals the path bubble; a click pins it open so a long path can
@@ -1127,6 +1226,11 @@ private struct LaunchTile: View {
         }
         // Bubble sits above neighbouring tiles while open.
         .zIndex(showPath ? 20 : 0)
+        .contextMenu {
+            if let onHide {
+                Button("Remove from launcher") { onHide() }
+            }
+        }
     }
 
     private var pathBadge: some View {

@@ -56,7 +56,7 @@ struct LaunchProfile: Identifiable, Sendable {
     /// choice, so a harness missing here costs a menu entry, never a bad
     /// launch. Keep the two in step when a harness gains local support.
     static func acceptsLocalModel(_ profileID: String) -> Bool {
-        ["claude_code", "codex", "opencode", "copilot"].contains(profileID)
+        ["claude_code", "codex", "opencode", "opencode2", "copilot"].contains(profileID)
     }
 
     static let all: [LaunchProfile] = [
@@ -199,8 +199,8 @@ final class LaunchCatalog {
     private(set) var available: [LaunchProfile]
     /// Every supported profile, installed or not, with the host's verdict.
     ///
-    /// What the launch surface draws: installed profiles get a vivid tile that
-    /// starts a session, everything else a muted tile that installs it.
+    /// What the launch surface draws: installed profiles get a vivid tile,
+    /// the rest sit behind the + tile until the user opens them.
     private(set) var catalog: [LaunchProfile]
     /// Profiles on a specific peer (the machine that owns a remote
     /// workspace), fetched from its daemon once per peer. Installed only, for
@@ -297,6 +297,7 @@ final class LaunchCatalog {
             let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             return tail.isEmpty ? "the installer exited with code \(result.exitCode ?? 1)" : tail
         }
+        LauncherVisibility.shared.show(profile.id, scope: peer ?? "local")
         if let peer {
             remoteFetched.remove(peer)
             await resolveRemote(peer: peer)

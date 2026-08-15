@@ -22,6 +22,9 @@ struct ClientWorkspaceDetailView: View {
     @State private var errorMessage: String?
     @State private var isLaunching = false
     @State private var installingID: String?
+    @State private var showingCatalog = false
+    @State private var pendingInstall: RemoteLaunchProfile?
+    @State private var pendingHide: RemoteLaunchProfile?
     @State private var showFiles = false
     @State private var showPort = false
     @State private var portText = "5173"
@@ -35,18 +38,17 @@ struct ClientWorkspaceDetailView: View {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
 
-    /// Installed harnesses first, then what could be installed, so the row
-    /// always puts what this machine can start in front. The catalog's own
-    /// order is preserved within each group.
-    private var orderedCatalog: [RemoteLaunchProfile] {
-        catalog.enumerated()
-            .sorted { lhs, rhs in
-                let li = lhs.element.installed
-                let ri = rhs.element.installed
-                if li != ri { return li && !ri }
-                return lhs.offset < rhs.offset
-            }
-            .map(\.element)
+    private var visibility: LauncherVisibility { LauncherVisibility.shared }
+    private var visibilityScope: String { peer }
+
+    /// Installed and still on the row. Hidden ones live under +.
+    private var visibleCatalog: [RemoteLaunchProfile] {
+        catalog.filter { $0.installed && !visibility.isHidden($0.id, scope: visibilityScope) }
+    }
+
+    /// Not installed, or installed and hidden.
+    private var extraCatalog: [RemoteLaunchProfile] {
+        catalog.filter { !$0.installed || visibility.isHidden($0.id, scope: visibilityScope) }
     }
 
     var body: some View {
@@ -105,6 +107,42 @@ struct ClientWorkspaceDetailView: View {
             Button("Keep it", role: .cancel) { pendingClose = nil }
         } message: {
             Text("Stops the process on \(hostName).")
+        }
+        .confirmationDialog(
+            pendingInstall.map { "Install \($0.name) on \(hostName)?" } ?? "Install this tool?",
+            isPresented: Binding(
+                get: { pendingInstall != nil },
+                set: { if !$0 { pendingInstall = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Install") {
+                if let profile = pendingInstall {
+                    Task { await install(profile) }
+                }
+                pendingInstall = nil
+            }
+            Button("Not now", role: .cancel) { pendingInstall = nil }
+        } message: {
+            Text("This runs its official installer.")
+        }
+        .confirmationDialog(
+            pendingHide.map { "Remove \($0.name) from the launcher?" } ?? "Remove this tool?",
+            isPresented: Binding(
+                get: { pendingHide != nil },
+                set: { if !$0 { pendingHide = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let profile = pendingHide {
+                    visibility.hide(profile.id, scope: visibilityScope)
+                }
+                pendingHide = nil
+            }
+            Button("Keep", role: .cancel) { pendingHide = nil }
+        } message: {
+            Text("The tool stays on \(hostName). You can add it again from +.")
         }
         .sheet(isPresented: $showFiles) {
             NavigationStack {
@@ -173,8 +211,16 @@ struct ClientWorkspaceDetailView: View {
                             installCommand: nil
                         ))
                     } else {
-                        ForEach(orderedCatalog, id: \.id) { profile in
+                        ForEach(visibleCatalog, id: \.id) { profile in
                             launchChip(profile)
+                        }
+                        if !extraCatalog.isEmpty {
+                            addChip
+                        }
+                        if showingCatalog {
+                            ForEach(extraCatalog, id: \.id) { profile in
+                                launchChip(profile)
+                            }
                         }
                     }
                 }
@@ -182,9 +228,24 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
+    private var addChip: some View {
+        Button {
+            showingCatalog.toggle()
+        } label: {
+            Text(showingCatalog ? "Hide" : "+")
+                .font(ClientType.caption.weight(.semibold))
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .background(Color.secondary.opacity(0.12))
+                .foregroundStyle(.secondary)
+                .clipShape(Capsule())
+        }
+        .accessibilityLabel(showingCatalog ? "Hide extra tools" : "Show more tools")
+    }
+
     @ViewBuilder
     private func launchChip(_ profile: RemoteLaunchProfile) -> some View {
-        if profile.installed {
+        if profile.installed, !visibility.isHidden(profile.id, scope: visibilityScope) {
             Button {
                 Task { await launch(profile) }
             } label: {
@@ -197,28 +258,37 @@ struct ClientWorkspaceDetailView: View {
                     .clipShape(Capsule())
             }
             .disabled(isLaunching)
+            .contextMenu {
+                if profile.id != "shell" {
+                    Button("Remove from launcher") { pendingHide = profile }
+                }
+            }
+        } else if profile.installed {
+            Button {
+                visibility.show(profile.id, scope: visibilityScope)
+            } label: {
+                mutedChipLabel(profile.name)
+            }
         } else if profile.installCommand != nil {
             Button {
-                Task { await install(profile) }
+                pendingInstall = profile
             } label: {
-                Text(installingID == profile.id ? "Installing…" : profile.name)
-                    .font(ClientType.caption.weight(.semibold))
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, Theme.Space.s)
-                    .background(Color.secondary.opacity(0.12))
-                    .foregroundStyle(.secondary)
-                    .clipShape(Capsule())
+                mutedChipLabel(installingID == profile.id ? "Installing…" : profile.name)
             }
             .disabled(installingID != nil)
         } else {
-            Text(profile.name)
-                .font(ClientType.caption.weight(.semibold))
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.s)
-                .background(Color.secondary.opacity(0.12))
-                .foregroundStyle(.tertiary)
-                .clipShape(Capsule())
+            mutedChipLabel(profile.name)
         }
+    }
+
+    private func mutedChipLabel(_ title: String) -> some View {
+        Text(title)
+            .font(ClientType.caption.weight(.semibold))
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, Theme.Space.s)
+            .background(Color.secondary.opacity(0.12))
+            .foregroundStyle(.secondary)
+            .clipShape(Capsule())
     }
 
     private func install(_ profile: RemoteLaunchProfile) async {
@@ -234,6 +304,7 @@ struct ClientWorkspaceDetailView: View {
                     : tail
                 return
             }
+            visibility.show(profile.id, scope: visibilityScope)
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
