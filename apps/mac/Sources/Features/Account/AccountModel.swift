@@ -91,6 +91,11 @@ final class AccountModel {
     /// show a retry surface instead of the login door.
     private(set) var authCheckError: String?
 
+    /// Set when a check right after the deletion browser closes confirms the
+    /// account is gone, so the login door can say what happened. Cleared on
+    /// the next sign-in.
+    private(set) var deletionConfirmed = false
+
     var signedIn: Bool { account?.signedIn == true }
 
     /// First check still in flight, or waiting for the host. Splash territory.
@@ -191,6 +196,7 @@ final class AccountModel {
             return
         }
         errorMessage = nil
+        deletionConfirmed = false
         lastSyncSummary = nil
         clearSyncPacing()
 
@@ -289,6 +295,20 @@ final class AccountModel {
         signInNotice = nil
         signInDismisser?()
         Task { await Bridge.cancelLogin() }
+    }
+
+    /// Re-check the account after the deletion browser closes.
+    ///
+    /// The browser cannot report whether deletion finished, so the app asks
+    /// again the moment the sheet is gone. A deleted account answers with
+    /// `signedIn: false`, which drops the session (the root swaps to the
+    /// login door) and lets that door say why. A present account, meaning the
+    /// person closed the browser without deleting, changes nothing.
+    func checkAfterAccountDeletion() async {
+        await load()
+        if account?.signedIn != true {
+            deletionConfirmed = true
+        }
     }
 
     func signOut() async {

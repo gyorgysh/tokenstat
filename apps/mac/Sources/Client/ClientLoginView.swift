@@ -22,7 +22,7 @@ import SwiftUI
 struct ClientLoginView: View {
     @Environment(AccountModel.self) private var account
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
-    @State private var legalURL: URL?
+    @State private var webURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,6 +47,19 @@ struct ClientLoginView: View {
                 if let pending = account.pendingLogin {
                     waiting(pending)
                 } else {
+                    if account.deletionConfirmed {
+                        Label {
+                            Text("Your account was deleted. This phone is signed out, and there is no data left to restore.")
+                        } icon: {
+                            Image(systemName: "trash")
+                        }
+                        .font(ClientType.caption)
+                        .foregroundStyle(Theme.accent)
+                        .frame(maxWidth: 340)
+                        .padding(Theme.Space.m)
+                        .background(Theme.accentSoft, in: .rect(cornerRadius: 12))
+                        .multilineTextAlignment(.center)
+                    }
                     // The frame goes on the label, not on the button. A
                     // prominent button keeps its intrinsic capsule width, so
                     // stretching the button only stretched the space around it.
@@ -99,11 +112,11 @@ struct ClientLoginView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.background)
         .sheet(isPresented: Binding(
-            get: { legalURL != nil },
-            set: { if !$0 { legalURL = nil } }
+            get: { webURL != nil },
+            set: { if !$0 { webURL = nil } }
         )) {
-            if let legalURL {
-                ClientWebBrowser(url: legalURL)
+            if let webURL {
+                ClientWebBrowser(url: webURL)
             }
         }
     }
@@ -111,7 +124,7 @@ struct ClientLoginView: View {
     @ViewBuilder
     private func legal(_ title: String, url: URL) -> some View {
         Button(title) {
-            legalURL = url
+            webURL = url
         }
         .buttonStyle(.plain)
         .foregroundStyle(Theme.accent)

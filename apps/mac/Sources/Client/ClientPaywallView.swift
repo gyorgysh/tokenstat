@@ -21,7 +21,7 @@ struct ClientPaywallView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var legalURL: URL?
+    @State private var webURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -59,11 +59,11 @@ struct ClientPaywallView: View {
                 await store.refreshSubscriptionStatus()
             }
             .sheet(isPresented: Binding(
-                get: { legalURL != nil },
-                set: { if !$0 { legalURL = nil } }
+                get: { webURL != nil },
+                set: { if !$0 { webURL = nil } }
             )) {
-                if let legalURL {
-                    ClientWebBrowser(url: legalURL)
+                if let webURL {
+                    ClientWebBrowser(url: webURL)
                 }
             }
             .manageSubscriptionsSheet(isPresented: Binding(
@@ -470,8 +470,8 @@ struct ClientPaywallView: View {
 
     private var legalRow: some View {
         HStack(spacing: Theme.Space.l) {
-            Button("Privacy") { legalURL = ClientWebPages.privacy() }
-            Button("Terms") { legalURL = ClientWebPages.terms() }
+            Button("Privacy") { webURL = ClientWebPages.privacy() }
+            Button("Terms") { webURL = ClientWebPages.terms() }
         }
         .font(ClientType.caption.weight(.semibold))
         .foregroundStyle(Theme.accent)

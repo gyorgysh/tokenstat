@@ -55,7 +55,7 @@ private struct ClientAccountContent: View {
     @State private var showLicenses = false
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
-    @State private var legalURL: URL?
+    @State private var webURL: URL?
     @State private var confirmSignOut = false
 
     var body: some View {
@@ -100,12 +100,20 @@ private struct ClientAccountContent: View {
         .sheet(isPresented: $showDeletionWeb) {
             ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
         }
+        // Deletion happens on the website, which the browser cannot report on.
+        // When the sheet closes, ask the account again: a gone account answers
+        // signed-out, which drops the session and tells the login door why.
+        .onChange(of: showDeletionWeb) { _, shown in
+            if !shown {
+                Task { await model.checkAfterAccountDeletion() }
+            }
+        }
         .sheet(isPresented: Binding(
-            get: { legalURL != nil },
-            set: { if !$0 { legalURL = nil } }
+            get: { webURL != nil },
+            set: { if !$0 { webURL = nil } }
         )) {
-            if let legalURL {
-                ClientWebBrowser(url: legalURL)
+            if let webURL {
+                ClientWebBrowser(url: webURL)
             }
         }
         .task {
@@ -143,7 +151,7 @@ private struct ClientAccountContent: View {
 
             if let handle = account.handle {
                 Button {
-                    legalURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
+                    webURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
                 } label: {
                     Label("View public profile", systemImage: "arrow.up.right.square")
                         .font(ClientType.label.weight(.semibold))
@@ -399,7 +407,7 @@ private struct ClientAccountContent: View {
     @ViewBuilder
     private func legalLink(_ title: String, url: URL) -> some View {
         Button {
-            legalURL = url
+            webURL = url
         } label: {
             HStack {
                 Text(title)

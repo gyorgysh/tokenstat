@@ -658,11 +658,13 @@ struct AccountView: View {
 
     private func openAccountDeletion() {
         let host = model.account?.host ?? "https://tokenstat.ai"
-        guard let url = URL(string: "\(host)/settings/data#delete") else { return }
         #if os(macOS)
+        guard let url = URL(string: "\(host)/settings/data#delete") else { return }
         openURL(url)
         #else
-        deletionURL = url
+        // Same deep link as the phone account sheet, so both iOS entry points
+        // land on the delete section with the site's focus hint.
+        deletionURL = ClientWebPages.accountDeletion(host: host)
         showDeletionWeb = true
         #endif
     }
