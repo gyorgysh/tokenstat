@@ -181,10 +181,15 @@ private struct ClientInAppWebView: UIViewRepresentable {
         // A target=_blank link opens a new web view; load it here instead so
         // it never escapes this sheet.
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            if navigationAction.targetFrame == nil {
+            if navigationAction.targetFrame == nil, isWebURL(navigationAction.request.url) {
                 webView.load(navigationAction.request)
             }
             return nil
+        }
+
+        private func isWebURL(_ url: URL?) -> Bool {
+            guard let scheme = url?.scheme?.lowercased() else { return false }
+            return scheme == "http" || scheme == "https"
         }
     }
 }
