@@ -1280,11 +1280,32 @@ mod tests {
                 .unwrap_or_else(|e| e.into_inner())
                 .is_none()
         );
+        // The client's FIN can reach the kernel before the connect finishes
+        // queueing for accept, and macOS drops a pending connection whose peer
+        // closed first. Either the accept returns a socket that reads as EOF,
+        // or the queue briefly empties as the dropped connection is discarded;
+        // both mean shutdown closed the half-open connect.
         listener.set_nonblocking(true).expect("nonblocking accept");
-        let (mut peer, _) = listener.accept().expect("accepted");
-        let mut buf = [0u8; 8];
-        let n = peer.read(&mut buf).unwrap_or(0);
-        assert_eq!(n, 0, "shutdown must close the half-open connect");
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match listener.accept() {
+                Ok((mut peer, _)) => {
+                    let mut buf = [0u8; 8];
+                    let n = peer.read(&mut buf).unwrap_or(0);
+                    assert_eq!(n, 0, "shutdown must close the half-open connect");
+                    break;
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    // A dropped pending connection leaves the queue empty,
+                    // which is the same closed state with the FIN first.
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(e) => panic!("accept failed: {e}"),
+            }
+        }
     }
 
     #[test]
