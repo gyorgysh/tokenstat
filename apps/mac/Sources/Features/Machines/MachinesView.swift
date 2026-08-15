@@ -47,18 +47,6 @@ struct MachinesView: View {
                     if let message = model.errorMessage {
                         ErrorBanner(message: message) { Task { await model.load() } }
                     }
-                    #if os(macOS)
-                    if model.showAlwaysOnNotice {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Banner(
-                                text: "tokenstat no longer keeps this Mac reachable after you quit. Turn on Always-on host in Account if other devices should still reach it.",
-                                severity: .info
-                            )
-                            Button("Got it") { model.dismissAlwaysOnNotice() }
-                                .buttonStyle(SecondaryButtonStyle(small: true))
-                        }
-                    }
-                    #endif
                     if !Bridge.isHosted {
                         hostSetup
                     }
@@ -160,6 +148,9 @@ struct MachinesView: View {
             waitingForApproval
         }
         thisMachine
+        #if os(macOS)
+        alwaysOnHost
+        #endif
         if !model.accountMachines.isEmpty {
             accountDevices
         }
@@ -178,6 +169,9 @@ struct MachinesView: View {
     @ViewBuilder
     private var remoteLockedContent: some View {
         remotePlanEmpty
+        #if os(macOS)
+        alwaysOnHost
+        #endif
         if !model.accountMachines.isEmpty {
             lockedMachineList
         }
@@ -526,6 +520,72 @@ struct MachinesView: View {
         }
         .animation(.easeOut(duration: 0.22), value: model.known.isEmpty)
     }
+
+    #if os(macOS)
+    /// Whether this Mac stays a host after the app quits. Mirrors the Account
+    /// screen's card so the setting sits where somebody is deciding whether
+    /// other devices may reach this Mac.
+    private var alwaysOnHost: some View {
+        Card(
+            title: "Always-on host",
+            subtitle: "Whether the host helper stays up after you quit"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let policy = model.hostPolicy {
+                    toggleRow(
+                        "Keep this Mac reachable",
+                        detail: alwaysOnDetail(policy),
+                        isOn: Binding(
+                            get: { policy.alwaysOn },
+                            set: { on in Task { await model.setAlwaysOnHost(on) } }
+                        )
+                    )
+                    .disabled(model.isSavingHostPolicy)
+                    if policy.alwaysOn && policy.hasInternalBattery {
+                        Text("Uses more power.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !policy.alwaysOn {
+                        Text("Automations run only while tokenstat is open.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("The host helper has not answered yet.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func alwaysOnDetail(_ policy: HostPolicy) -> String {
+        if policy.alwaysOn {
+            return "The host helper keeps running after you quit tokenstat, so other devices can reach this Mac. This Mac will not idle-sleep. A laptop still sleeps when you close the lid."
+        }
+        return "The host helper stops when you quit tokenstat, so this Mac can sleep. Other devices cannot open folders or terminals here until you open the app again."
+    }
+
+    private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Toggle("", isOn: isOn)
+                .toggleStyle(.switch)
+                .tint(Theme.accent)
+                .labelsHidden()
+                .accessibilityLabel("Always-on host")
+                .fixedSize()
+        }
+    }
+    #endif
 
     private var accountDevices: some View {
         Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.") {

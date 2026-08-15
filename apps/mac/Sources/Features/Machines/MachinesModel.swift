@@ -33,8 +33,7 @@ final class MachinesModel {
     private(set) var settingUpHelper = false
     #if os(macOS)
     private(set) var hostPolicy: HostPolicy?
-    /// One-time copy on a battery Mac after the default flipped to off.
-    var showAlwaysOnNotice = false
+    var isSavingHostPolicy = false
     #endif
     var errorMessage: String?
     /// Set after an action that worked, so the screen confirms rather than
@@ -204,7 +203,7 @@ final class MachinesModel {
             }
             errorMessage = nil
             #if os(macOS)
-            await refreshAlwaysOnNotice()
+            await loadHostPolicy()
             #endif
             await reconsiderPlanIfNeeded()
         } catch {
@@ -250,19 +249,38 @@ final class MachinesModel {
     }
 
     #if os(macOS)
-    private static let alwaysOnNoticeKey = "host.alwaysOnLaptopNoticeDismissed"
-
-    private func refreshAlwaysOnNotice() async {
-        guard let policy = try? await Bridge.hostPolicy() else { return }
-        hostPolicy = policy
-        showAlwaysOnNotice = policy.hasInternalBattery
-            && !policy.alwaysOn
-            && !UserDefaults.standard.bool(forKey: Self.alwaysOnNoticeKey)
+    private func loadHostPolicy() async {
+        hostPolicy = try? await Bridge.hostPolicy()
     }
 
-    func dismissAlwaysOnNotice() {
-        UserDefaults.standard.set(true, forKey: Self.alwaysOnNoticeKey)
-        showAlwaysOnNotice = false
+    /// Flip whether this Mac's host helper outlives the app.
+    ///
+    /// The same policy the Account screen edits, mirrored here so the setting
+    /// lives where somebody is deciding whether other devices may reach this
+    /// Mac. The install agent applies the launchd side; a failure there rolls
+    /// the stored policy back so the screen never shows a setting the helper
+    /// is not honouring.
+    func setAlwaysOnHost(_ on: Bool) async {
+        isSavingHostPolicy = true
+        defer { isSavingHostPolicy = false }
+        let previous = hostPolicy
+        do {
+            let next = try await Bridge.setHostPolicy(alwaysOn: on)
+            do {
+                try HostAgentInstaller.applyPolicy(alwaysOn: next.alwaysOn)
+                hostPolicy = next
+                errorMessage = nil
+            } catch {
+                if let previous {
+                    _ = try? await Bridge.setHostPolicy(alwaysOn: previous.alwaysOn)
+                    try? HostAgentInstaller.applyPolicy(alwaysOn: previous.alwaysOn)
+                    hostPolicy = previous
+                }
+                errorMessage = error.localizedDescription
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
     #endif
 

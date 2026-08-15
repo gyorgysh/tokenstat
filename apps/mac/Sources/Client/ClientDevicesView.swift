@@ -45,6 +45,7 @@ struct ClientDevicesView: View {
                     }
                 } else {
                     header
+                    alwaysOnHost
                     ForEach(sorted) { machine in
                         NavigationLink {
                             ClientDeviceDetailView(
@@ -184,6 +185,60 @@ struct ClientDevicesView: View {
             return "Remote control is on Patron. Usage from every linked device is already here."
         }
         return nil
+    }
+
+    /// The computers on this account and whether they are reachable right now,
+    /// read-only. A phone cannot change a Mac's host policy, and the account
+    /// does not carry it, so this says where the setting lives instead.
+    @ViewBuilder
+    private var alwaysOnHost: some View {
+        let hosts = machines.filter(\.isHost)
+        if !hosts.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                Text("Always-on host")
+                    .font(ClientType.sectionTitle)
+                ForEach(hosts) { machine in
+                    HStack(spacing: Theme.Space.s) {
+                        AwakeDot(online: machine.online)
+                        Image(systemName: ClientDeviceIcon.symbol(
+                            name: machine.label,
+                            isHost: machine.isHost
+                        ))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(DeviceCopy.name(machine))
+                                .font(ClientType.label.weight(.medium))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Text(alwaysOnLine(machine))
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: Theme.Space.s)
+                    }
+                }
+                Text("A computer with Always-on host on stays reachable even after you quit the app there. Turn it on in Account on that computer.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func alwaysOnLine(_ machine: Machine) -> String {
+        if machine.online == true {
+            return "Reachable now"
+        }
+        if machine.publicIdentity?.isEmpty == false {
+            return "Asleep. Reachable once the app is open there."
+        }
+        return "Not set up for remote reach"
     }
 }
 

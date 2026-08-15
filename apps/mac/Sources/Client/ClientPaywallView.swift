@@ -36,13 +36,7 @@ struct ClientPaywallView: View {
                             .cardSurface()
                     }
 
-                    if let signed = account.account {
-                        content(for: signed)
-                    } else {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding(Theme.Space.xl)
-                    }
+                    content(for: account.account)
 
                     restoreRow
                     legalRow
@@ -80,9 +74,8 @@ struct ClientPaywallView: View {
     }
 
     @ViewBuilder
-    private func content(for signed: Account) -> some View {
-        let billing = signed.billing
-        if billing?.isPaddle == true && billing?.blocksOtherStore == true {
+    private func content(for signed: Account?) -> some View {
+        if signed?.billing?.isPaddle == true && signed?.billing?.blocksOtherStore == true {
             paddleCard
         } else {
             planCards(signed)
@@ -103,10 +96,15 @@ struct ClientPaywallView: View {
         .cardSurface()
     }
 
-    private func planCards(_ signed: Account) -> some View {
-        let current = store.currentProduct(from: signed)
+    private func planCards(_ signed: Account?) -> some View {
+        let current: ClientStoreProduct?
+        if let signed {
+            current = store.currentProduct(from: signed)
+        } else {
+            current = nil
+        }
         let queued = store.queuedProduct()
-            ?? ClientStoreProduct.from(tier: signed.billing?.scheduledTier)
+            ?? ClientStoreProduct.from(tier: signed?.billing?.scheduledTier)
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text("Yearly plans")
                 .font(ClientType.sectionTitle)
@@ -114,12 +112,6 @@ struct ClientPaywallView: View {
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            if store.isLoading && store.products.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(Theme.Space.l)
-            }
 
             ForEach(ClientStoreProduct.allCases) { item in
                 planCard(item, account: signed, current: current, queued: queued)
@@ -132,12 +124,12 @@ struct ClientPaywallView: View {
 
     private func planCard(
         _ item: ClientStoreProduct,
-        account: Account,
+        account: Account?,
         current: ClientStoreProduct?,
         queued: ClientStoreProduct?
     ) -> some View {
         let product = store.product(for: item)
-        let trialUsed = account.billing?.trialUsed == true
+        let trialUsed = account?.billing?.trialUsed == true
         let intro = product?.subscription?.introductoryOffer
         let showTrial = item == .patron && current == nil && !trialUsed && intro != nil
         let busy = store.purchasingProductID == item.rawValue
@@ -165,6 +157,10 @@ struct ClientPaywallView: View {
                     Text(product.displayPrice + " / year")
                         .font(ClientType.label.weight(.semibold))
                         .foregroundStyle(.secondary)
+                } else {
+                    Text(store.products.isEmpty ? "Loading price…" : "Price unavailable")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
             Text(item.summary)
@@ -221,13 +217,13 @@ struct ClientPaywallView: View {
     private func planActions(
         _ item: ClientStoreProduct,
         product: Product?,
-        account: Account,
+        account: Account?,
         current: ClientStoreProduct?,
         queued: ClientStoreProduct?,
         showTrial: Bool,
         busy: Bool
     ) -> some View {
-        let appleLive = account.billing?.isApple == true && account.billing?.blocksOtherStore == true
+        let appleLive = account?.billing?.isApple == true && account?.billing?.blocksOtherStore == true
         if current == item {
             actionButton("Your current plan", accent: false, busy: false, enabled: false) {}
             actionButton("Manage on the App Store", accent: false, busy: false, enabled: true) {
@@ -241,9 +237,9 @@ struct ClientPaywallView: View {
                 showTrial ? "Start 3-day trial" : "Get \(item.title)",
                 accent: true,
                 busy: busy,
-                enabled: product != nil && !store.isBusy
+                enabled: product != nil && account != nil && !store.isBusy
             ) {
-                guard let product else { return }
+                guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
             }
         } else if let current, item.rank > current.rank {
@@ -253,7 +249,7 @@ struct ClientPaywallView: View {
                 busy: busy,
                 enabled: product != nil && !store.isBusy
             ) {
-                guard let product else { return }
+                guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
             }
         } else if queued == item {
@@ -265,6 +261,7 @@ struct ClientPaywallView: View {
                     busy: store.purchasingProductID == keep.id,
                     enabled: !store.isBusy
                 ) {
+                    guard let account else { return }
                     Task { await store.purchase(keep, account: account) }
                 }
             }
@@ -275,7 +272,7 @@ struct ClientPaywallView: View {
                 busy: busy,
                 enabled: product != nil && !store.isBusy
             ) {
-                guard let product else { return }
+                guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
             }
         }
@@ -310,17 +307,41 @@ struct ClientPaywallView: View {
         .opacity(enabled ? 1 : 0.55)
     }
 
+    /// The comparison, Free included. Free is not for sale, but a plan's
+    /// pitch ("four devices, a year of history") only lands when the free
+    /// tier's own limits are beside it.
+    private struct ComparePlan: Identifiable {
+        let tier: String
+        let title: String
+        var id: String { tier }
+    }
+
+    private static let comparePlans: [ComparePlan] = [
+        ComparePlan(tier: "free", title: "Free"),
+        ComparePlan(tier: "supporter", title: "Supporter"),
+        ComparePlan(tier: "patron", title: "Patron"),
+        ComparePlan(tier: "legend", title: "Legend"),
+    ]
+
+    private struct CompareFeature: Identifiable {
+        let label: String
+        let values: [String]
+        var id: String { label }
+    }
+
+    private static let compareFeatures: [CompareFeature] = [
+        CompareFeature(label: "Devices", values: ["2", "4", "6", "10"]),
+        CompareFeature(label: "History", values: ["30 days", "1 yr", "All", "All"]),
+        CompareFeature(label: "Remote", values: ["No", "No", "Yes", "Yes"]),
+        CompareFeature(label: "Sync", values: ["Hourly", "30 min", "10 min", "5 min"]),
+        CompareFeature(label: "Mark", values: ["None", "Star", "Badge", "Crown"]),
+        CompareFeature(label: "Read API", values: ["No", "No", "No", "Yes"]),
+    ]
+
     private var compare: some View {
         DisclosureGroup {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                compareRow("Devices", values: ["4", "6", "10"])
-                compareRow("History", values: ["1 year", "Everything", "Everything"])
-                compareRow("Remote", values: ["No", "Yes", "Yes"])
-                compareRow("Sync", values: ["30 min", "10 min", "5 min"])
-                compareRow("Mark", values: ["Star", "Badge", "Crown"])
-                compareRow("Read API", values: ["No", "No", "Yes"])
-            }
-            .padding(.top, Theme.Space.s)
+            compareGrid
+                .padding(.top, Theme.Space.s)
         } label: {
             Text("Compare plans")
                 .font(ClientType.label.weight(.semibold))
@@ -331,32 +352,95 @@ struct ClientPaywallView: View {
         .tint(Theme.accent)
     }
 
-    private func compareRow(_ label: String, values: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                ForEach(Array(zip(ClientStoreProduct.allCases, values)), id: \.0.id) { item, value in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(ClientType.caption)
-                            .foregroundStyle(.tertiary)
-                        Text(value)
-                            .font(ClientType.label.weight(.medium))
+    /// The tier to draw as the reader's own column, or nil until the account
+    /// has answered.
+    private var currentTier: String? {
+        guard let signed = account.account else { return nil }
+        return store.currentProduct(from: signed)?.tier ?? signed.tier?.lowercased()
+    }
+
+    private var compareGrid: some View {
+        let current = currentTier
+        return Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+            GridRow {
+                Color.clear.frame(width: 1, height: 1)
+                ForEach(Self.comparePlans) { plan in
+                    compareHeader(plan, isCurrent: plan.tier == current)
+                }
+            }
+            ForEach(Self.compareFeatures) { feature in
+                GridRow {
+                    Text(feature.label)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 7)
+                        .padding(.trailing, 8)
+                    ForEach(Array(zip(Self.comparePlans, feature.values)), id: \.0.id) { plan, value in
+                        compareCell(value, isCurrent: plan.tier == current)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
     }
 
-    private func renewalOffCaption(account: Account, item: ClientStoreProduct) -> String {
+    private func compareHeader(_ plan: ComparePlan, isCurrent: Bool) -> some View {
+        VStack(spacing: 2) {
+            Text(plan.title)
+                .font(ClientType.caption.weight(.semibold))
+                .foregroundStyle(isCurrent ? Theme.accent : .primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            if isCurrent {
+                Text("Your plan")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(compareBackground(isCurrent))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func compareCell(_ value: String, isCurrent: Bool) -> some View {
+        Group {
+            if value == "Yes" {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .accessibilityLabel("Yes")
+            } else if value == "No" {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.secondary.opacity(0.4))
+                    .accessibilityLabel("No")
+            } else {
+                Text(value)
+                    .font(ClientType.caption.weight(.medium))
+                    .foregroundStyle(isCurrent ? Theme.accent : .primary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 24)
+        .padding(.vertical, 5)
+        .background(compareBackground(isCurrent))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func compareBackground(_ isCurrent: Bool) -> Color {
+        isCurrent ? Theme.accent.opacity(0.08) : Color.clear
+    }
+
+    private func renewalOffCaption(account: Account?, item: ClientStoreProduct) -> String {
         if let end = store.expirationDate {
             let text = end.formatted(date: .abbreviated, time: .omitted)
             return "Renewal is off. You keep \(item.title) until \(text)."
         }
-        if let raw = account.billing?.periodEnd, let parsed = ISO8601DateFormatter().date(from: raw) {
+        if let raw = account?.billing?.periodEnd, let parsed = ISO8601DateFormatter().date(from: raw) {
             let text = parsed.formatted(date: .abbreviated, time: .omitted)
             return "Renewal is off. You keep \(item.title) until \(text)."
         }
