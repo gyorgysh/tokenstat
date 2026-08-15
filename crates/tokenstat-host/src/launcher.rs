@@ -522,15 +522,50 @@ pub(crate) fn model_environment(
                 .ok_or_else(|| format!("{provider} is not a known local provider"))?;
             Ok(vec![("COPILOT_PROVIDER_BASE_URL".into(), base.into())])
         }
-        // These CLIs receive their local provider through explicit launch
-        // arguments. Their private config/auth handling must not be overridden
-        // by guessed OPENAI_* variables.
-        ("codex" | "opencode", Some("lmstudio" | "ollama")) => Ok(Vec::new()),
+        // Codex names the provider on the command line. Do not guess OPENAI_*.
+        ("codex", Some("lmstudio" | "ollama")) => Ok(Vec::new()),
+        // OpenCode only accepts a `provider/id` that is in its catalog. A
+        // freshly loaded LM Studio model is often missing from that cache.
+        // `OPENCODE_CONFIG_CONTENT` is per-process and registers the one
+        // selected id without writing `~/.config/opencode/`. The same blob
+        // names the default model, which is how OpenCode 2 picks one: its
+        // TUI has no `--model` flag.
+        ("opencode" | "opencode2", Some(provider @ ("lmstudio" | "ollama"))) => {
+            let model = model.ok_or("local model selection needs both a provider and a model")?;
+            Ok(vec![(
+                "OPENCODE_CONFIG_CONTENT".into(),
+                opencode_model_config(provider, model)?,
+            )])
+        }
         (_, Some(provider)) => Err(format!(
             "local model selection is not configured for {executable} with {provider}"
         )),
         (_, None) => unreachable!("provider was checked with the model above"),
     }
+}
+
+/// Per-process OpenCode config that names one local model.
+///
+/// OpenCode splits `provider/model` on the first slash and then looks the
+/// rest up in that provider's catalog. A model id that itself contains a
+/// slash (`meta/muse-glimmer`) is valid once it is in that catalog.
+///
+/// `model` is the default the TUI starts on. OpenCode 1 also accepts
+/// `--model` on the root command. OpenCode 2 does not, so this field is
+/// the only way to point that CLI at the selection.
+fn opencode_model_config(provider: &str, model: &str) -> Result<String, String> {
+    let name = model.rsplit('/').next().unwrap_or(model);
+    serde_json::to_string(&json!({
+        "model": format!("{provider}/{model}"),
+        "provider": {
+            provider: {
+                "models": {
+                    model: { "name": name }
+                }
+            }
+        }
+    }))
+    .map_err(|error| error.to_string())
 }
 
 /// The launch arguments that name a local model to a harness.
@@ -561,8 +596,13 @@ pub(crate) fn model_arguments(
             "--model".into(),
             model.into(),
         ],
-        // OpenCode addresses every model as `provider/model`, local included.
+        // OpenCode 1 takes `--model` on the TUI. OpenCode 2 rejects that flag
+        // on the root command (`Unrecognized flag: --model`). Its default
+        // lives in `OPENCODE_CONFIG_CONTENT` instead, and `--standalone`
+        // keeps that config on this process rather than on a background
+        // service that never saw it.
         "opencode" => vec!["--model".into(), format!("{provider}/{model}")],
+        "opencode2" => vec!["--standalone".into()],
         "claude" | "copilot" => vec!["--model".into(), model.into()],
         _ => Vec::new(),
     }
@@ -952,6 +992,33 @@ mod tests {
             model_arguments("opencode", Some("lmstudio"), Some("qwen/a")),
             vec!["--model", "lmstudio/qwen/a"]
         );
+        assert_eq!(
+            model_arguments(
+                "/Users/me/.opencode/bin/opencode2",
+                Some("lmstudio"),
+                Some("meta/muse-glimmer")
+            ),
+            vec!["--standalone"]
+        );
+        assert!(model_arguments("opencode2", None, None).is_empty());
+    }
+
+    #[test]
+    fn opencode_registers_a_slashed_local_model_for_this_process() {
+        let env = model_environment("opencode2", Some("lmstudio"), Some("meta/muse-glimmer"))
+            .expect("environment");
+        let content = env
+            .iter()
+            .find(|(key, _)| key == "OPENCODE_CONFIG_CONTENT")
+            .map(|(_, value)| value.as_str())
+            .expect("OPENCODE_CONFIG_CONTENT");
+        let parsed: serde_json::Value = serde_json::from_str(content).expect("json");
+        assert_eq!(parsed["model"], "lmstudio/meta/muse-glimmer");
+        assert_eq!(
+            parsed["provider"]["lmstudio"]["models"]["meta/muse-glimmer"]["name"],
+            "muse-glimmer"
+        );
+        assert_eq!(env.len(), 1);
     }
 
     #[test]
