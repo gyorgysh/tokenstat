@@ -697,7 +697,12 @@ struct RootView: View {
     }
 
     private var destinationHasInspector: Bool {
-        destination == .insights || destination == .workspaces
+        switch destination {
+        case .home, .todo, .automations, .machines, .insights, .workspaces:
+            return true
+        case .account:
+            return false
+        }
     }
 
     /// Height of the titlebar band the detail column is lifted into.
@@ -744,13 +749,41 @@ struct RootView: View {
     private var inspectorContent: some View {
         Group {
             switch destination {
+            case .home:
+                HomeInspector(model: home) { closeInspector() }
+            case .todo:
+                TodoInspector(
+                    model: todo,
+                    folders: workspaces.folders,
+                    onViewRun: { runID in
+                        selectDestination(.automations)
+                        pendingRunID = runID
+                    }
+                ) { closeInspector() }
+            case .automations:
+                AutomationsInspector(
+                    model: automations,
+                    folders: workspaces.folders
+                ) { closeInspector() }
+            case .machines:
+                MachinesInspector(model: machines) { closeInspector() }
             case .workspaces:
+                #if os(macOS)
+                WorkspaceInspector(
+                    model: workspaces,
+                    automations: automations,
+                    account: account.account
+                ) { closeInspector() }
+                #else
                 WorkspaceInspector(
                     model: workspaces,
                     account: account.account
                 ) { closeInspector() }
-            default:
+                #endif
+            case .insights:
                 InspectorView(model: model) { closeInspector() }
+            case .account:
+                EmptyView()
             }
         }
     }
@@ -1532,12 +1565,6 @@ struct RootView: View {
             HomeView(
                 model: home,
                 account: account,
-                onSelectDay: { day in
-                    // A click on a day is a question about that day, and
-                    // Insights is where day-sized questions get answered.
-                    model.focusOn(day: day.date)
-                    destination = .insights
-                },
                 onShowAccount: { selectDestination(.account) }
             )
         case .automations:

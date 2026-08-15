@@ -19,8 +19,6 @@ struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.hostReady) private var hostReady
-    /// Clicking a day on the heatmap goes to Insights filtered to it.
-    var onSelectDay: ((HeatCell) -> Void)?
     /// Where the account flow lives, for the sign-in prompt when All machines
     /// cannot be shown without one.
     var onShowAccount: () -> Void
@@ -529,7 +527,8 @@ struct HomeView: View {
                     }
                     HeatmapView(
                         calendar: calendar,
-                        onSelect: onSelectDay,
+                        onSelect: { model.select(day: $0) },
+                        selectedDate: model.selectedDay?.date,
                         onHover: { model.hover(day: $0) }
                     )
                 }

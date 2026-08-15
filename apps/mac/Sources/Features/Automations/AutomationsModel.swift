@@ -105,6 +105,13 @@ struct TranscriptRenderer {
     }
 }
 
+/// Which side of the Automations inspector is showing.
+enum AutomationFocus: Sendable {
+    case none
+    case job
+    case run
+}
+
 /// The agent automations this machine runs, and the runs they have produced.
 ///
 /// Everything lives in the daemon, so a job keeps its schedule with the window
@@ -133,6 +140,11 @@ final class AutomationsModel {
     /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
     private(set) var selectedRunID: String?
+    /// The job the inspector is showing. Separate from the run so picking a
+    /// job does not have to invent a run for it.
+    private(set) var selectedJobID: String?
+    /// Which of the two the inspector should prefer when both are set.
+    private(set) var selectedFocus: AutomationFocus = .none
     /// Transcript text assembled so far for the watched run.
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
@@ -202,8 +214,27 @@ final class AutomationsModel {
     }
 
     var selectedRun: RunRecord? {
-        guard let selectedRunID else { return liveRun }
+        guard let selectedRunID else { return nil }
         return runs.first { $0.id == selectedRunID }
+    }
+
+    var selectedJob: Automation? {
+        guard let selectedJobID else { return nil }
+        return jobs.first { $0.id == selectedJobID }
+    }
+
+    func selectJob(_ id: String) {
+        selectedJobID = id
+        selectedFocus = .job
+        if let job = jobs.first(where: { $0.id == id }), let last = lastRun(for: job) {
+            watch(last)
+        }
+    }
+
+    func selectRun(_ run: RunRecord) {
+        selectedJobID = run.jobId
+        selectedFocus = .run
+        watch(run)
     }
 
     func create(
@@ -260,6 +291,72 @@ final class AutomationsModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Start a one-time Auto commit job in this folder and run it now.
+    ///
+    /// Reuses the existing automation runner: same backends, same pty, same
+    /// budget. The scheduler never calls gitwrite. The agent commits with its
+    /// own tools because the user pressed the button.
+    func startAutoCommit(
+        workspaceID: String,
+        workspaceName: String,
+        backend: String,
+        model: String?
+    ) async {
+        let name = "Auto commit"
+        let prompt = Self.autoCommitPrompt(workspaceName: workspaceName)
+        let schedule = AutomationSchedule(kind: .once)
+        if var existing = jobs.first(where: {
+            $0.name == name && $0.workspaceID == workspaceID
+        }) {
+            existing.backend = backend
+            existing.model = model
+            existing.prompt = prompt
+            existing.enabled = true
+            await update(existing)
+            guard let job = jobs.first(where: { $0.id == existing.id }) else { return }
+            selectJob(job.id)
+            await run(job)
+            return
+        }
+        let draft = Automation(
+            id: "", name: name, backend: backend, model: model, effort: nil,
+            workspaceID: workspaceID, prompt: prompt,
+            schedule: schedule, budgetSeconds: 900, enabled: true,
+            lastRunAtMs: nil, nextRunAtMs: nil, lastRunID: nil
+        )
+        do {
+            let created = try await Bridge.createAutomation(draft)
+            errorMessage = nil
+            await load()
+            selectJob(created.id)
+            await run(created)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    static func autoCommitPrompt(workspaceName: String) -> String {
+        """
+        Commit the pending work in this git repository (\(workspaceName)).
+
+        Inspect the working tree (git status and git diff). Group the changes \
+        into one or more commits by concern. One concern per commit. A single \
+        concern is one commit.
+
+        Write messages that match this repository's existing style:
+        1. Follow the most recent commit subjects.
+        2. If CONTRIBUTING.md, a commitlint config, or .gitmessage exists, \
+        follow those rules.
+        3. Otherwise use Conventional Commits: lowercase type, optional scope, \
+        imperative subject, English.
+
+        Do not push. Do not force. Do not amend. Do not change files except to \
+        commit them. If there is nothing to commit, say so and stop.
+
+        After you finish, list the commits you made.
+        """
     }
 
     func remove(_ job: Automation) async {

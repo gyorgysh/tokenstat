@@ -122,6 +122,8 @@ struct TodoView: View {
                             model: model,
                             card: card,
                             folders: folders,
+                            isSelected: model.selectedCardID == card.id,
+                            onSelect: { model.selectCard(card.id) },
                             onViewRun: onViewRun
                         )
                     }
@@ -230,6 +232,8 @@ private struct CardView: View {
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
+    var isSelected: Bool = false
+    var onSelect: () -> Void = {}
     /// Opens the run's transcript on the Automations screen.
     var onViewRun: ((String) -> Void)?
 
@@ -337,11 +341,20 @@ private struct CardView: View {
             }
         }
         .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(
+            (isSelected ? Theme.rowSelected : Theme.background),
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(card.delegate == nil ? Theme.border : tint.opacity(0.4), lineWidth: 1)
+                .strokeBorder(
+                    isSelected ? Theme.accent.opacity(0.45)
+                        : (card.delegate == nil ? Theme.border : tint.opacity(0.4)),
+                    lineWidth: 1
+                )
         )
+        .contentShape(.rect)
+        .onTapGesture { onSelect() }
         // Escape leaves the editor. macOS only: there is no Escape key to bind
         // on a phone, and dismissing the keyboard already ends the edit there.
         #if os(macOS)

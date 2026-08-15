@@ -346,7 +346,16 @@ struct MachinesView: View {
                 .foregroundStyle(.tertiary)
             }
             .animation(.easeOut(duration: 0.22), value: model.identity != nil)
+            .contentShape(.rect)
+            .onTapGesture { model.selectThisMachine() }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(
+                    model.selectedKind == .thisMachine ? Theme.accent.opacity(0.45) : Color.clear,
+                    lineWidth: 1
+                )
+        )
     }
 
     @ViewBuilder
@@ -476,7 +485,11 @@ struct MachinesView: View {
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.pending) { peer in
-                    PeerRow(peer: peer, resolvedName: model.accountName(for: peer)) {
+                    PeerRow(
+                        peer: peer,
+                        resolvedName: model.accountName(for: peer),
+                        isSelected: model.selectedKind == .peer(peer.key)
+                    ) {
                         HStack(spacing: Theme.Space.s) {
                             Button("Approve") { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
@@ -484,6 +497,7 @@ struct MachinesView: View {
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
+                    .onTapGesture { model.selectPeer(peer) }
                 }
                 Text("Approve only devices you recognize. You can revoke access later.")
                 .font(.caption)
@@ -500,7 +514,8 @@ struct MachinesView: View {
                     PeerRow(
                         peer: peer,
                         resolvedName: model.accountName(for: peer),
-                        symbol: model.peerSymbol(for: peer)
+                        symbol: model.peerSymbol(for: peer),
+                        isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
@@ -514,6 +529,7 @@ struct MachinesView: View {
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
+                    .onTapGesture { model.selectPeer(peer) }
                 }
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -692,6 +708,13 @@ struct MachinesView: View {
                         }
                     }
                     .padding(.vertical, Theme.Space.s)
+                    .background(
+                        model.selectedKind == .account(machine.machineID ?? machine.id)
+                            ? Theme.rowSelected
+                            : Color.clear
+                    )
+                    .contentShape(.rect)
+                    .onTapGesture { model.selectAccount(machine) }
                     if machine.id != model.listedAccountMachines.last?.id { Divider() }
                 }
             }
@@ -968,6 +991,7 @@ private struct PeerRow<Actions: View>: View {
     var resolvedName: String?
     /// SF Symbol: phone for iOS clients, desktop otherwise.
     var symbol: String = "desktopcomputer"
+    var isSelected: Bool = false
     @ViewBuilder var actions: Actions
 
     var body: some View {
@@ -993,10 +1017,16 @@ private struct PeerRow<Actions: View>: View {
             actions
         }
         .padding(Theme.Space.s)
-        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(
+            (isSelected ? Theme.rowSelected : Theme.background),
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
+                .strokeBorder(
+                    isSelected ? Theme.accent.opacity(0.45) : Theme.border,
+                    lineWidth: 1
+                )
         )
     }
 

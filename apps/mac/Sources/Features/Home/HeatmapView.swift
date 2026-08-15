@@ -26,8 +26,10 @@ import SwiftUI
 /// point back to a cell with the same packing math.
 struct HeatmapView: View {
     let calendar: ActivityCalendar
-    /// Clicking a day filters Insights to it.
+    /// Clicking a day pins it in the inspector.
     var onSelect: ((HeatCell) -> Void)?
+    /// The day currently pinned, so the grid can mark it.
+    var selectedDate: String?
     /// The pointer moved over (or left) a day. The parent owns the detail
     /// fetch and the popover, so this only carries which cell it is.
     var onHover: ((HeatCell?) -> Void)?
@@ -191,6 +193,16 @@ struct HeatmapView: View {
 
             // One ring for the hovered day. Drawn as a real view so it stays
             // crisp on top of the canvas without redrawing every cell.
+            if let selected = selectedSlot {
+                RoundedRectangle(cornerRadius: corner)
+                    .strokeBorder(Theme.accent, lineWidth: 1.5)
+                    .frame(width: layout.cell, height: layout.cell)
+                    .offset(
+                        x: layout.cellRect(row: selected.row, column: selected.column).minX,
+                        y: layout.cellRect(row: selected.row, column: selected.column).minY
+                    )
+                    .allowsHitTesting(false)
+            }
             if let hovered {
                 RoundedRectangle(cornerRadius: corner)
                     .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1)
@@ -245,9 +257,21 @@ struct HeatmapView: View {
                 } label: {
                     Text("\(item.day.date): \(formatSpend(item.day.value)) at list rates")
                 }
-                .accessibilityHint("Shows day detail and filters Insights")
+                .accessibilityHint("Pins this day in the inspector")
             }
         }
+    }
+
+    private var selectedSlot: (row: Int, column: Int)? {
+        guard let selectedDate else { return nil }
+        for (row, cells) in calendar.rows.enumerated() {
+            for (column, day) in cells.enumerated() {
+                if day?.date == selectedDate {
+                    return (row, column)
+                }
+            }
+        }
+        return nil
     }
 
     /// Days VoiceOver can land on. Future blank cells are skipped; idle days

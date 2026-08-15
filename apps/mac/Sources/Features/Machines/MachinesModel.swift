@@ -35,6 +35,9 @@ final class MachinesModel {
     private(set) var hostPolicy: HostPolicy?
     var isSavingHostPolicy = false
     #endif
+    /// What the inspector is showing. Keys only, so a refresh cannot pin a
+    /// stale Peer or Machine value.
+    private(set) var selectedKind: DeviceKind?
     var errorMessage: String?
     /// Set after an action that worked, so the screen confirms rather than
     /// leaving somebody wondering whether the button did anything.
@@ -49,6 +52,44 @@ final class MachinesModel {
 
     /// Peers waiting on a decision, which is the thing somebody opened this
     /// screen to do.
+    enum DeviceKind: Equatable {
+        case thisMachine
+        case peer(String)
+        case account(String)
+    }
+
+    enum SelectedDevice {
+        case none
+        case thisMachine
+        case peer(Peer)
+        case account(Machine)
+    }
+
+    var selectedDevice: SelectedDevice {
+        switch selectedKind {
+        case .thisMachine:
+            return .thisMachine
+        case let .peer(key):
+            if let peer = peers.first(where: { $0.key == key }) {
+                return .peer(peer)
+            }
+            return .none
+        case let .account(id):
+            if let machine = accountMachines.first(where: { $0.machineID == id || $0.id == id }) {
+                return .account(machine)
+            }
+            return .none
+        case .none:
+            return .none
+        }
+    }
+
+    func selectThisMachine() { selectedKind = .thisMachine }
+    func selectPeer(_ peer: Peer) { selectedKind = .peer(peer.key) }
+    func selectAccount(_ machine: Machine) {
+        selectedKind = .account(machine.machineID ?? machine.id)
+    }
+
     var pending: [Peer] { peers.filter { $0.trust == .pending && $0.key != identity?.key } }
     var known: [Peer] { peers.filter { $0.trust != .pending && $0.key != identity?.key } }
 

@@ -20,6 +20,8 @@ final class TodoModel {
     /// length of the first read, which is a claim rather than a wait.
     private(set) var hasLoaded = false
     var errorMessage: String?
+    /// The card the inspector is showing.
+    var selectedCardID: String?
     var noticeMessage: String?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
@@ -47,6 +49,15 @@ final class TodoModel {
     /// Cards for a column, in board order.
     func cards(in column: String) -> [TodoCard] {
         cards.filter { $0.column == column }
+    }
+
+    var selectedCard: TodoCard? {
+        guard let selectedCardID else { return nil }
+        return cards.first { $0.id == selectedCardID }
+    }
+
+    func selectCard(_ id: String) {
+        selectedCardID = id
     }
 
     func load() async {

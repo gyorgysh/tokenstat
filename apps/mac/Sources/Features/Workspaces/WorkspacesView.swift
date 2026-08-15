@@ -191,6 +191,9 @@ struct BranchChip: View {
 struct WorkspaceChangesView: View {
     @Bindable var model: WorkspacesModel
     var folder: WorkspaceFolder?
+    #if os(macOS)
+    @Bindable var automations: AutomationsModel
+    #endif
     @State private var expandedDiffs: Set<String> = []
 
     var body: some View {
@@ -205,7 +208,7 @@ struct WorkspaceChangesView: View {
         if let folder, folder.exists, folder.git?.isRepo == true {
             changesBody
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    CommitBox(model: model, folder: folder)
+                    CommitBox(model: model, automations: automations, folder: folder)
                 }
         } else {
             changesBody
@@ -415,6 +418,7 @@ struct WorkspaceChangesView: View {
 /// behind by a click would be a state the user cannot see and did not ask for.
 private struct CommitBox: View {
     @Bindable var model: WorkspacesModel
+    @Bindable var automations: AutomationsModel
     let folder: WorkspaceFolder
 
     private var title: Binding<String> {
@@ -435,6 +439,28 @@ private struct CommitBox: View {
         model.stagedSelection[folder.id]?.count ?? 0
     }
 
+    /// Agent backends only. Shell cannot write commit messages from a diff.
+    private var commitBackends: [AgentBackend] {
+        automations.backends.filter { !$0.models.isEmpty || $0.id != "sh" }
+            .filter { $0.id != "sh" }
+    }
+
+    private var selectedBackend: AgentBackend? {
+        let id = model.autoCommitBackend[folder.id]
+        return commitBackends.first { $0.id == id } ?? commitBackends.first
+    }
+
+    private var selectedModel: String {
+        let stored = model.autoCommitModel[folder.id] ?? ""
+        if let backend = selectedBackend, backend.models.contains(stored) {
+            return stored
+        }
+        if let backend = selectedBackend, backend.models.contains("haiku") {
+            return "haiku"
+        }
+        return selectedBackend?.models.first ?? ""
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Rectangle().fill(Theme.border).frame(height: 1)
@@ -443,6 +469,20 @@ private struct CommitBox: View {
                 Text(outcome.message.isEmpty ? "Done." : outcome.message)
                     .font(.caption)
                     .foregroundStyle(outcome.ok ? .green : .red)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, Theme.Space.m)
+            }
+            if let notice = automations.noticeMessage {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, Theme.Space.m)
+            }
+            if let error = automations.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Theme.danger)
                     .lineLimit(4)
                     .textSelection(.enabled)
                     .padding(.horizontal, Theme.Space.m)
@@ -480,32 +520,91 @@ private struct CommitBox: View {
                 }
                 .padding(.horizontal, Theme.Space.m)
 
+            if !commitBackends.isEmpty {
+                HStack(spacing: Theme.Space.s) {
+                    Picker("Backend", selection: backendBinding) {
+                        ForEach(commitBackends) { backend in
+                            Text(backend.label).tag(backend.id)
+                        }
+                    }
+                    .labelsHidden()
+                    if let backend = selectedBackend, !backend.models.isEmpty {
+                        Picker("Model", selection: modelBinding) {
+                            ForEach(backend.models, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+                }
+                .padding(.horizontal, Theme.Space.m)
+
+                Button {
+                    Task { await runAutoCommit() }
+                } label: {
+                    Text("Auto commit")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(model.isCommitting || selectedBackend == nil)
+                .help("One-time automation: the chosen agent commits in this folder")
+                .padding(.horizontal, Theme.Space.m)
+            }
+
             HStack(spacing: Theme.Space.s) {
                 if let git = folder.git, git.ahead > 0 {
                     Button {
                         Task { await model.push(folder) }
                     } label: {
                         Label("Push \(git.ahead)", systemImage: "arrow.up")
-                            .font(.caption)
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(SecondaryButtonStyle())
                     .disabled(model.isCommitting)
                     .help("Push the current branch")
                 }
-                Spacer()
                 Button {
                     Task { await model.commit(folder) }
                 } label: {
                     Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
-                        .font(.system(size: 13, weight: .medium))
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+                .buttonStyle(AccentButtonStyle())
                 .disabled(model.isCommitting || selectedCount == 0)
             }
             .padding(.horizontal, Theme.Space.m)
         }
         .padding(.bottom, Theme.Space.m)
         .background(Theme.background)
+        .task {
+            if automations.backends.isEmpty {
+                await automations.load()
+            }
+        }
+    }
+
+    private var backendBinding: Binding<String> {
+        Binding(
+            get: { selectedBackend?.id ?? "" },
+            set: { model.autoCommitBackend[folder.id] = $0 }
+        )
+    }
+
+    private var modelBinding: Binding<String> {
+        Binding(
+            get: { selectedModel },
+            set: { model.autoCommitModel[folder.id] = $0 }
+        )
+    }
+
+    private func runAutoCommit() async {
+        guard let backend = selectedBackend else { return }
+        await automations.startAutoCommit(
+            workspaceID: folder.id,
+            workspaceName: folder.name,
+            backend: backend.id,
+            model: selectedModel.isEmpty ? nil : selectedModel
+        )
     }
 }
 #endif

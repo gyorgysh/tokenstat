@@ -113,6 +113,11 @@ final class HomeModel {
     private(set) var hoveredDetail: DayDetail?
     private(set) var isLoadingDayDetail = false
 
+    /// The day pinned in the inspector. Survives leaving Home and coming back.
+    private(set) var selectedDay: HeatCell?
+    private(set) var selectedDetail: DayDetail?
+    private(set) var isLoadingSelectedDetail = false
+
     /// Fetched details, kept per day so revisiting a cell is instant and a
     /// quick sweep across the grid does not re-ask for every cell.
     private var dayDetailCache: [String: DayDetail] = [:]
@@ -299,31 +304,54 @@ final class HomeModel {
 
         isLoadingDayDetail = true
         hoveredDetail = nil
+        fetchDayDetail(day.date, settle: true)
+    }
+
+    /// Pin a day in the inspector. Hover still only glances.
+    func select(day: HeatCell) {
+        selectedDay = day
+        if day.isLocked {
+            selectedDetail = nil
+            isLoadingSelectedDetail = false
+            return
+        }
+        if let cached = dayDetailCache[day.date] {
+            selectedDetail = cached
+            isLoadingSelectedDetail = false
+            return
+        }
+        isLoadingSelectedDetail = true
+        selectedDetail = nil
+        fetchDayDetail(day.date, settle: false)
+    }
+
+    private func fetchDayDetail(_ date: String, settle: Bool) {
         let scope = deliveredScope.wire
         dayDetailTask = Task { [weak self] in
-            // A hover settle: crossing cells fast must not fire a request per
-            // cell. 140ms is short enough to feel instant, long enough to eat
-            // a sweep across the grid.
-            try? await Task.sleep(for: .milliseconds(140))
+            if settle {
+                // A hover settle: crossing cells fast must not fire a request
+                // per cell. 140ms is short enough to feel instant, long enough
+                // to eat a sweep across the grid.
+                try? await Task.sleep(for: .milliseconds(140))
+                guard !Task.isCancelled else { return }
+            }
+            let detail = try? await Bridge.dayDetail(date: date, scope: scope)
             guard !Task.isCancelled else { return }
-            let detail = try? await Bridge.dayDetail(date: day.date, scope: scope)
-            guard !Task.isCancelled else { return }
-            self?.finishDayDetail(day.date, detail)
+            self?.finishDayDetail(date, detail)
         }
     }
 
     private func finishDayDetail(_ date: String, _ detail: DayDetail?) {
         if let detail {
             dayDetailCache[date] = detail
-            if hoveredDay == date {
-                hoveredDetail = detail
-                isLoadingDayDetail = false
-            }
-        } else if hoveredDay == date {
-            // A day the archive knows nothing about: nothing to add. Keep the
-            // totals-only popover rather than a spinner that never lands.
-            hoveredDetail = nil
+        }
+        if hoveredDay == date {
+            hoveredDetail = detail
             isLoadingDayDetail = false
+        }
+        if selectedDay?.date == date {
+            selectedDetail = detail
+            isLoadingSelectedDetail = false
         }
     }
 

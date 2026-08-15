@@ -1,0 +1,146 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
+
+import SwiftUI
+
+/// The selected automation or run. The list stays an overview.
+///
+/// The live transcript used to sit inside the runs card. That buried the list
+/// under a stream. It lives here, next to the job that produced it.
+struct AutomationsInspector: View {
+    @Bindable var model: AutomationsModel
+    var folders: [WorkspaceFolder]
+    var onClose: () -> Void
+
+    @State private var editing = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            InspectorChromeBar(onClose: onClose) {
+                Text(chromeTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.leading, Theme.Space.m)
+                Spacer(minLength: 0)
+            }
+            Group {
+                if let run = model.selectedRun, model.selectedFocus == .run {
+                    runBody(run)
+                } else if let job = model.selectedJob {
+                    jobBody(job)
+                } else {
+                    InspectorEmptyState(
+                        systemImage: "bolt",
+                        title: "Pick a job or a run",
+                        subtitle: "Schedule and transcript open here."
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.background)
+        .sheet(isPresented: $editing) {
+            if let job = model.selectedJob {
+                NewAutomationSheet(model: model, folders: folders, existing: job)
+            }
+        }
+    }
+
+    private var chromeTitle: String {
+        switch model.selectedFocus {
+        case .run: return "Run"
+        case .job: return "Automation"
+        case .none: return "Automations"
+        }
+    }
+
+    private func jobBody(_ job: Automation) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                Text(job.name)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(job.prompt)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                labeled("Backend", model.backends.first { $0.id == job.backend }?.label ?? job.backend)
+                if let modelName = job.model, !modelName.isEmpty {
+                    labeled("Model", modelName)
+                }
+                labeled("Schedule", model.scheduleSummary(job.schedule))
+                if let folder = folders.first(where: { $0.id == job.workspaceID }) {
+                    labeled("Folder", folder.name)
+                }
+                if let next = job.nextRun, job.enabled {
+                    labeled("Next", next.formatted(date: .abbreviated, time: .shortened))
+                }
+                if let last = model.lastRun(for: job) {
+                    labeled("Last", last.startedAt.formatted(date: .abbreviated, time: .shortened))
+                }
+
+                HStack(spacing: Theme.Space.s) {
+                    Button("Run now") { Task { await model.run(job) } }
+                        .buttonStyle(AccentButtonStyle())
+                    Button("Edit") { editing = true }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func runBody(_ run: RunRecord) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack {
+                    Text(run.name)
+                        .font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    StatusPill(status: run.status, text: run.endedLabel)
+                }
+                Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(Theme.Space.m)
+
+            ScrollView {
+                Text(transcriptText(for: run))
+                    .font(Theme.mono(11))
+                    .foregroundStyle(.primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(Theme.Space.m)
+            }
+            .background(Theme.background)
+        }
+        .onAppear { model.watch(run) }
+    }
+
+    private func transcriptText(for run: RunRecord) -> String {
+        if model.transcriptText.isEmpty {
+            return run.isRunning ? "Waiting for output…" : "(No readable output)"
+        }
+        return run.backend == "claude" ? model.readableTranscript : model.transcriptText
+    }
+
+    private func labeled(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(.callout)
+        }
+    }
+}

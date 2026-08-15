@@ -148,6 +148,9 @@ final class WorkspacesModel {
     var stagedSelection: [String: Set<String>] = [:]
     var commitMessage: [String: String] = [:]
     var commitDescription: [String: String] = [:]
+    /// Last Auto commit backend / model picked per folder.
+    var autoCommitBackend: [String: String] = [:]
+    var autoCommitModel: [String: String] = [:]
     /// Result of the last write, for the banner. Cleared on the next attempt.
     var gitOutcome: GitOutcome?
     var isCommitting = false

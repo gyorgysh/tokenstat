@@ -43,6 +43,9 @@ struct InspectorEmptyState: View {
 /// "what is already in". Stacking them would bury whichever one you wanted.
 struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
+    #if os(macOS)
+    @Bindable var automations: AutomationsModel
+    #endif
     /// The signed-in account, for the picture beside your own commits in
     /// History. Nil signs in nobody and draws monograms throughout.
     var account: Account?
@@ -113,7 +116,11 @@ struct WorkspaceInspector: View {
     private var content: some View {
         switch tab.wrappedValue {
         case .changes:
+            #if os(macOS)
+            WorkspaceChangesView(model: model, folder: folder, automations: automations)
+            #else
             WorkspaceChangesView(model: model, folder: folder)
+            #endif
         case .files:
             WorkspaceFilesView(model: model, folder: folder)
         case .history:

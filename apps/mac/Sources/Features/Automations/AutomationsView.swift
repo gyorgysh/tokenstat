@@ -125,8 +125,7 @@ struct AutomationsView: View {
             for _ in 0..<6 {
                 if let run = model.runs.first(where: { $0.id == id }) {
                     pendingRunID = nil
-                    viewingRun = run
-                    model.watch(run)
+                    model.selectRun(run)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(250))
@@ -163,7 +162,10 @@ struct AutomationsView: View {
     /// Three suggested setups, so a blank Automations screen shows what the
     /// screen is for instead of only an empty card.
     private var templatesRow: some View {
-        HStack(alignment: .top, spacing: Theme.Space.s) {
+        LazyVGrid(
+            columns: [GridItem(.flexible(), spacing: Theme.Space.s), GridItem(.flexible(), spacing: Theme.Space.s)],
+            spacing: Theme.Space.s
+        ) {
             ForEach(Self.suggestedTemplates) { suggestion in
                 Button {
                     template = suggestion
@@ -240,6 +242,16 @@ struct AutomationsView: View {
             ),
             budgetSeconds: 600
         ),
+        AutomationTemplate(
+            title: "Commit pending work",
+            subtitle: "Once, when you run it",
+            symbol: "checkmark.circle",
+            name: "Auto commit",
+            prompt: AutomationsModel.autoCommitPrompt(workspaceName: "this folder"),
+            backendID: "claude",
+            schedule: AutomationSchedule(kind: .once),
+            budgetSeconds: 900
+        ),
     ]
 
     private var filteredJobs: [Automation] {
@@ -263,7 +275,9 @@ struct AutomationsView: View {
                 ForEach(jobs) { job in
                     AutomationRow(job: job, model: model,
                                   folder: folders.first { $0.id == job.workspaceID },
-                                  onViewRun: { viewingRun = $0 })
+                                  isSelected: model.selectedJobID == job.id,
+                                  onSelect: { model.selectJob(job.id) },
+                                  onViewRun: { model.selectRun($0) })
                     if job.id != jobs.last?.id { Divider() }
                 }
             }
@@ -344,7 +358,9 @@ struct AutomationsView: View {
                             job: job,
                             model: model,
                             folder: folders.first { $0.id == job.workspaceID },
-                            onViewRun: { viewingRun = $0 }
+                            isSelected: model.selectedJobID == job.id,
+                            onSelect: { model.selectJob(job.id) },
+                            onViewRun: { model.selectRun($0) }
                         )
                     }
                 }
@@ -357,9 +373,7 @@ struct AutomationsView: View {
     private var runsCard: some View {
         Card(
             title: "Runs",
-            subtitle: model.selectedRun?.isRunning == true
-                ? "The latest run, live as its transcript is written."
-                : "Select a run to read its output."
+            subtitle: "Select a run to read its output in the inspector."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if model.runs.isEmpty {
@@ -374,9 +388,6 @@ struct AutomationsView: View {
                 } else {
                     ForEach(Array(model.runs.prefix(6))) { run in
                         runRow(run)
-                    }
-                    if let selected = model.selectedRun {
-                        liveTranscript(selected)
                     }
                 }
             }
@@ -405,52 +416,11 @@ struct AutomationsView: View {
                     in: RoundedRectangle(cornerRadius: Theme.Space.xs))
         .contentShape(.rect)
         .onTapGesture {
-            viewingRun = run
+            model.selectRun(run)
         }
     }
 
-    private func liveTranscript(_ run: RunRecord) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text("Output")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            ScrollView {
-                Text(
-                    model.transcriptText.isEmpty
-                        ? "Waiting for output…"
-                        : (run.backend == "claude"
-                            ? model.readableTranscript
-                            : model.transcriptText)
-                )
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(maxHeight: 220)
-            .padding(Theme.Space.s)
-            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-            HStack(spacing: Theme.Space.s) {
-                Label(run.status == "running" ? "Live output" : run.endedLabel,
-                      systemImage: run.status == "running" ? "waveform" : "doc.text")
-                    .font(.caption)
-                    .foregroundStyle(Self.statusTint(run.status))
-                if let exitCode = run.exitCode {
-                    Text("Exit \(exitCode)")
-                        .font(Theme.numeric(11))
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-                Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
+
 
     static func statusTint(_ status: String) -> Color {
         switch status {
@@ -567,7 +537,9 @@ private struct AutomationRow: View {
     var job: Automation
     @Bindable var model: AutomationsModel
     var folder: WorkspaceFolder?
-    /// Opens the transcript sheet for a run, owned by the screen.
+    var isSelected: Bool = false
+    var onSelect: () -> Void = {}
+    /// Opens the selected run in the inspector.
     var onViewRun: (RunRecord) -> Void
 
     @State private var confirmingDelete = false
@@ -587,6 +559,10 @@ private struct AutomationRow: View {
             facts
         }
         .padding(.vertical, Theme.Space.s)
+        .padding(.horizontal, Theme.Space.xs)
+        .background(isSelected ? Theme.rowSelected : Color.clear, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+        .contentShape(.rect)
+        .onTapGesture { onSelect() }
         .opacity(job.enabled ? 1 : 0.6)
         .confirmationDialog(
             "Delete \(job.name)?",
@@ -688,7 +664,7 @@ private struct AutomationRow: View {
 }
 
 /// The outcome of a run, in the one shape it takes everywhere on this screen.
-private struct StatusPill: View {
+struct StatusPill: View {
     var status: String
     var text: String
 
@@ -757,7 +733,7 @@ private struct AutomationHistorySheet: View {
 // MARK: - Creating one
 
 /// A suggested setup on the Automations screen, pre-filling the sheet.
-private struct AutomationTemplate: Identifiable {
+struct AutomationTemplate: Identifiable {
     var id: String { title }
     var title: String
     var subtitle: String
@@ -775,7 +751,7 @@ private struct AutomationTemplate: Identifiable {
 /// six decisions in it, and standing it permanently under the list meant an
 /// empty screen was mostly an empty form. It also gives Cancel somewhere to be,
 /// which a permanent form never had.
-private struct NewAutomationSheet: View {
+struct NewAutomationSheet: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
     var onNavigate: ((Destination) -> Void)?
