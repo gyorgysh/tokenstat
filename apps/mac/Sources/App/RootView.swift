@@ -720,17 +720,19 @@ struct RootView: View {
 
     /// Puts a pane mounted on the detail column back below the titlebar band.
     ///
-    /// The band itself is left empty on purpose. It belongs to the window, and
-    /// a panel that paints its own chrome into it is drawing controls nobody
-    /// can press.
+    /// The band stays free of controls: AppKit's titlebar owns the mouse there,
+    /// and a tab or close button drawn into it cannot be pressed. It is not
+    /// left unpainted. `Color.clear` showed the window's liquid glass (or the
+    /// unfocused grey titlebar) through the inspector, while the left sidebar
+    /// fills the same strip with `Theme.sidebar`. Paint the same colour here,
+    /// and never take a click.
     private func belowTitlebar<Content: View>(
         @ViewBuilder _ content: () -> Content
     ) -> some View {
         VStack(spacing: 0) {
             if chromeTopInset > 0 {
-                Color.clear
+                Theme.sidebar
                     .frame(height: chromeTopInset)
-                    // Never take a click that belongs to the traffic lights.
                     .allowsHitTesting(false)
             }
             content()
@@ -817,6 +819,11 @@ struct RootView: View {
             .frame(minWidth: Self.detailMinimumWidth)
             .inspector(isPresented: showsInspector) {
                 belowTitlebar { inspectorContent }
+                    // Opaque, like the leading sidebar. `.inspector` on a
+                    // transparent titlebar otherwise composites the column
+                    // against liquid glass, which is what made the Files /
+                    // Changes / History strip look see-through or unfocused.
+                    .background(Theme.sidebar)
                     // Fixed, on purpose. A min/ideal/max triplet left 30 points
                     // of drag travel, and dragging that divider ran the hosted
                     // column's constraint update inside NSSplitView's own
@@ -887,7 +894,7 @@ struct RootView: View {
                 belowTitlebar { inspectorContent }
                     .frame(width: DisplayFit.box(400))
                     .frame(maxHeight: .infinity)
-                    .background(Theme.background)
+                    .background(Theme.sidebar)
                     .overlay(alignment: .leading) {
                         Rectangle()
                             .fill(Theme.border)

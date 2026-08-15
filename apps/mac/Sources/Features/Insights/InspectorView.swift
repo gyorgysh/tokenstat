@@ -19,18 +19,21 @@ struct InspectorView: View {
     var onClose: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                HStack {
-                    Spacer()
-                    InspectorCloseButton(action: onClose)
-                }
-                period
-                selection
-                archive
+        VStack(spacing: 0) {
+            InspectorChromeBar(onClose: onClose) {
+                Spacer(minLength: 0)
             }
-            .padding(Theme.Space.m)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    period
+                    selection
+                    archive
+                }
+                .padding(Theme.Space.m)
+            }
+            .background(Theme.background)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
     }
 

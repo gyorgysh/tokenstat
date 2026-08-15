@@ -64,22 +64,17 @@ struct WorkspaceInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            InspectorChromeBar(onClose: onClose) {
                 TabStrip(
                     // No icons: the inspector is 280pt at its narrowest and three
                     // labels plus three glyphs truncate before they fit.
                     tabs: InspectorTab.allCases.map { ($0, model.inspectorTabTitle($0), "") },
-                    selection: tab
+                    selection: tab,
+                    // The chrome bar owns the fill and the hairline, so the
+                    // strip does not paint a second band that stops short of
+                    // the close button.
+                    showsChrome: false
                 )
-                InspectorCloseButton(action: onClose)
-                    .padding(.trailing, Theme.Space.s)
-            }
-            // The strip's chrome has to cover the whole band, close button
-            // included. TabStrip only paints its own width, so without this the
-            // xmark sat on the grey pane material beside the dark tab band.
-            .background(Theme.tabStrip)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(Theme.border).frame(height: 1)
             }
             // Give every tab the same measured rectangle.  Using an unbounded
             // max-height here lets a tab's internal VStack negotiate a
@@ -95,12 +90,13 @@ struct WorkspaceInspector: View {
         .background(Theme.background)
     }
 
-    // The empty band above this panel is the window's titlebar, not padding
-    // this view controls: `RootView.belowTitlebar` reserves it, because the
+    // The band above this panel is the window's titlebar, not padding this
+    // view controls: `RootView.belowTitlebar` reserves it, because the
     // detail column is lifted into the traffic-light row and everything
-    // mounted on it comes up too. Drawing into that band is not a matter of
-    // taste, it is a dead strip: AppKit's titlebar owns the mouse there, and
-    // the tab that used to sit in it could not be clicked.
+    // mounted on it comes up too. It is painted opaque (`Theme.sidebar`) so
+    // the window's glass does not show through, but it stays free of
+    // controls: AppKit's titlebar owns the mouse there, and a tab that used
+    // to sit in it could not be clicked.
     //
     // Two ways of using the band were tried and both came out worse:
     //

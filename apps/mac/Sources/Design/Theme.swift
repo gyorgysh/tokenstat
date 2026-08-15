@@ -535,7 +535,12 @@ struct TabStrip<Tab: Hashable>: View {
                     // selected tab drawn as a slightly different dark panel is
                     // the same colour as everything around it, and which tab
                     // was selected became a guess.
-                    .foregroundStyle(active ? Theme.accent : Color.secondary)
+                    // Explicit chrome colour, not `.secondary`. Hierarchical
+                    // styles resolve through the window (and through any
+                    // material still sitting behind the strip), so inactive
+                    // tabs went grey-unfocused on the inspector even when the
+                    // window was key.
+                    .foregroundStyle(active ? Theme.accent : Theme.controlGlyph)
                     .padding(.horizontal, Theme.Space.xs)
                     // Every tab takes an equal share of the strip's width.
                     .frame(maxWidth: .infinity)
@@ -571,7 +576,7 @@ struct TabStrip<Tab: Hashable>: View {
         .frame(height: Self.height)
         // Nothing in a tab strip may paint outside it.
         .clipped()
-        .background(showsChrome ? Theme.tabStrip : Color.clear)
+        .background(showsChrome ? Theme.sidebar : Color.clear)
         .overlay(alignment: .bottom) {
             if showsChrome {
                 Rectangle().fill(Theme.border).frame(height: 1)
@@ -879,6 +884,28 @@ struct SidebarToggleButton: View {
             action: action
         )
         .accessibilityAddTraits(isOpen ? .isSelected : [])
+    }
+}
+
+/// Shared top row of every inspector: destination chrome, then the close mark.
+///
+/// One object so Workspaces (tabs) and Insights (empty leading side) paint the
+/// same opaque sidebar colour. A SwiftUI `.inspector` on a transparent titlebar
+/// otherwise lets liquid glass or the unfocused grey show through the strip.
+struct InspectorChromeBar<Content: View>: View {
+    var onClose: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 0) {
+            content()
+            InspectorCloseButton(action: onClose)
+                .padding(.trailing, Theme.Space.s)
+        }
+        .background(Theme.sidebar)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
     }
 }
 

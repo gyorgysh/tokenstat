@@ -93,6 +93,10 @@ struct WindowScreenObserver: NSViewRepresentable {
         /// colour. Used windowed and full screen while `fullSizeContentView`
         /// is on (content draws under the toolbar on both).
         private var sidebarGapPatch: NSView?
+        /// Same paint on the trailing inspector column. `.inspector` sits on
+        /// the lifted detail, so without this the titlebar band over Files /
+        /// Changes / History (and Insights) is liquid glass or unfocused grey.
+        private var inspectorGapPatch: NSView?
         /// Last chrome mode applied. Avoids re-entry when notifications fire
         /// more than once for the same transition.
         private var lastChromeFullScreen: Bool?
@@ -151,6 +155,8 @@ struct WindowScreenObserver: NSViewRepresentable {
             toolbarDisplayModeObservation = nil
             sidebarGapPatch?.removeFromSuperview()
             sidebarGapPatch = nil
+            inspectorGapPatch?.removeFromSuperview()
+            inspectorGapPatch = nil
             lastChromeFullScreen = nil
             window = nil
         }
@@ -191,6 +197,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                 // cheap and can drift after a split resize.
                 revealTrafficLights(on: window)
                 updateSidebarTopGap(in: window)
+                updateInspectorTopGap(in: window)
                 return
             }
             lastChromeFullScreen = fullScreen
@@ -206,6 +213,7 @@ struct WindowScreenObserver: NSViewRepresentable {
             // toolbar. This is not a compact-chrome height trick.
             hideEmptyAppToolbar(on: window)
             updateSidebarTopGap(in: window)
+            updateInspectorTopGap(in: window)
             publishTitlebarInset(from: window)
         }
 
@@ -431,7 +439,10 @@ struct WindowScreenObserver: NSViewRepresentable {
                     object: nil,
                     queue: .main
                 ) { [weak self] _ in
-                    Task { @MainActor in self?.updateSidebarTopGap(in: window) }
+                    Task { @MainActor in
+                        self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
+                    }
                 }
             )
             observers.append(
@@ -448,6 +459,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.revealTrafficLights(on: window)
                         self?.hideEmptyAppToolbar(on: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
                         self?.publishTitlebarInset(from: window)
                     }
                 }
@@ -466,6 +478,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.hideEmptyAppToolbar(on: window)
                         self?.stripSystemSidebarToggle(in: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
                         self?.publishTitlebarInset(from: window)
                         // One follow-up after AppKit finishes full-screen
                         // layout. Inset can change when the toolbar host goes.
@@ -475,6 +488,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.hideEmptyAppToolbar(on: window)
                         self?.revealTrafficLights(on: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
                         self?.flattenFullScreenContent(in: window)
                         self?.publishTitlebarInset(from: window)
                     }
@@ -493,6 +507,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.revealTrafficLights(on: window)
                         self?.hideEmptyAppToolbar(on: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
                         self?.publishTitlebarInset(from: window)
                     }
                 }
@@ -512,6 +527,7 @@ struct WindowScreenObserver: NSViewRepresentable {
                         self?.stripSystemSidebarToggle(in: window)
                         self?.scheduleSidebarToggleStrip(for: window)
                         self?.updateSidebarTopGap(in: window)
+                        self?.updateInspectorTopGap(in: window)
                         self?.publishTitlebarInset(from: window)
                     }
                 }
@@ -521,6 +537,7 @@ struct WindowScreenObserver: NSViewRepresentable {
         private func windowResized(_ window: NSWindow) {
             publish(quantised(window.contentLayoutRect.width, step: 4))
             updateSidebarTopGap(in: window)
+            updateInspectorTopGap(in: window)
             publishTitlebarInset(from: window)
             // Full screen layout can reintroduce corner masks on resize.
             if window.styleMask.contains(.fullScreen) {
@@ -533,6 +550,7 @@ struct WindowScreenObserver: NSViewRepresentable {
             // resize notification was dropped.
             publish(quantised(window.contentLayoutRect.width, step: 4))
             updateSidebarTopGap(in: window)
+            updateInspectorTopGap(in: window)
             publishTitlebarInset(from: window)
         }
 
@@ -566,6 +584,78 @@ struct WindowScreenObserver: NSViewRepresentable {
                 contentView.addSubview(patch, positioned: .below, relativeTo: nil)
             }
             patch.isHidden = false
+        }
+
+        /// Fill the gap above the trailing inspector column the same way.
+        /// Hidden when the inspector is closed or floating (no column).
+        private func updateInspectorTopGap(in window: NSWindow) {
+            guard let contentView = window.contentView,
+                  let frameInContent = Self.inspectorColumnFrame(in: window)
+            else {
+                inspectorGapPatch?.isHidden = true
+                return
+            }
+            let gapAboveColumn = contentView.bounds.height - frameInContent.maxY
+            let layoutInContent = contentView.convert(window.contentLayoutRect, from: nil)
+            let gapAboveLayout = max(0, contentView.bounds.maxY - layoutInContent.maxY)
+            let gap = max(gapAboveColumn, gapAboveLayout)
+            guard gap > 1 else {
+                inspectorGapPatch?.isHidden = true
+                return
+            }
+            let patch = inspectorGapPatch ?? SidebarGapPatchView()
+            inspectorGapPatch = patch
+            patch.frame = NSRect(
+                x: frameInContent.minX - 1,
+                y: contentView.bounds.height - gap,
+                width: frameInContent.width + 1,
+                height: gap
+            )
+            if patch.superview !== contentView {
+                contentView.addSubview(patch, positioned: .below, relativeTo: nil)
+            }
+            patch.isHidden = false
+        }
+
+        /// Frame of the trailing inspector column, in content-view coordinates.
+        /// Nil when the inspector is closed, floating, or not yet in the tree.
+        private static func inspectorColumnFrame(in window: NSWindow) -> NSRect? {
+            guard let wrapper = inspectorColumnWrapper(in: window),
+                  let contentView = window.contentView
+            else {
+                return nil
+            }
+            return wrapper.convert(wrapper.bounds, to: contentView)
+        }
+
+        /// The trailing inspector column's wrapper, found by geometry rather
+        /// than class name. `.inspector` is a split item of about 400 points
+        /// on the trailing edge. A full-width detail pane must not match.
+        private static func inspectorColumnWrapper(in window: NSWindow) -> NSView? {
+            guard let contentView = window.contentView else { return nil }
+            return trailingInspectorColumn(in: contentView)
+        }
+
+        private static func trailingInspectorColumn(in view: NSView) -> NSView? {
+            if let split = view as? NSSplitView {
+                let found = split.subviews
+                    .filter {
+                        $0.frame.maxX > split.bounds.width - 8
+                            && $0.frame.minX > 80
+                            && $0.frame.width > 200
+                            && $0.frame.width < 520
+                            && $0.frame.height > 120
+                    }
+                    .sorted { $0.frame.minX < $1.frame.minX }
+                    .last
+                if let found { return found }
+            }
+            for sub in view.subviews {
+                if let found = trailingInspectorColumn(in: sub) {
+                    return found
+                }
+            }
+            return nil
         }
 
         /// Frame of the leading sidebar column wrapper, in the main window's
