@@ -234,6 +234,9 @@ struct LogoMark: View {
     /// bar chart can move. Anything else on a launch screen is a second logo
     /// nobody chose.
     var animated: Bool = false
+    /// A repeating pulse for a screen that stays while it waits (the launch
+    /// splash), or one rise that lands and holds (an intro page).
+    var loops: Bool = true
 
     @State private var raised = false
     /// One run of the same rise, for a refresh somebody pulled. Not the
@@ -278,9 +281,12 @@ struct LogoMark: View {
                     )
                     .animation(
                         animated
-                            ? .easeInOut(duration: 0.62)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(index) * 0.14)
+                            ? (loops
+                                ? .easeInOut(duration: 0.62)
+                                    .repeatForever(autoreverses: true)
+                                    .delay(Double(index) * 0.14)
+                                : .easeInOut(duration: 1.2)
+                                    .delay(Double(index) * 0.15))
                             : nil,
                         value: raised
                     )

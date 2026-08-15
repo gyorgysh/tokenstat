@@ -62,7 +62,10 @@ private struct IntroArt: View {
 
     var body: some View {
         VStack(spacing: Theme.Space.m) {
-            LogoMark(size: 72, animated: !reduceMotion)
+            // One rise, not the launch splash's pulse: the page is a pitch and
+            // the mark lands and stays, so the bars hold their full height
+            // instead of drumming through the whole paragraph below.
+            LogoMark(size: 72, animated: !reduceMotion, loops: false)
             Wordmark(size: 26, fills: false, showsMark: false)
         }
     }
