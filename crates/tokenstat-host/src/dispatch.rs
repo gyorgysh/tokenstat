@@ -2143,6 +2143,22 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
         // means the machine the session would actually run on.
         "launcher.catalog" => Ok(crate::launcher::catalog()),
 
+        // Run a catalog profile's official installer on this machine. The id
+        // names a command hardcoded in the catalog, never one supplied by the
+        // client, so over a remote connection this stays "the user clicked
+        // Install on a known tile" rather than "a peer runs anything".
+        "launcher.install" => {
+            #[derive(Deserialize)]
+            struct InstallParams {
+                id: String,
+            }
+            let p: InstallParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::launcher::install(&p.id)
+        }
+
         // Remove a machine from the account directory. The server deletes its
         // uploaded rows, so this is an explicit action for a machine id that
         // is stale (a reinstall) or otherwise holding a machine-cap slot.

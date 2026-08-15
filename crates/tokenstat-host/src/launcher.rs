@@ -13,9 +13,18 @@
 //! answers the same question here and the app asks over the remote call when
 //! the folder belongs to a peer.
 
+use std::io::Read;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+
+/// How long a profile installer may run before the host gives up on it.
+///
+/// Downloading a large CLI can take minutes on a slow link, so ten minutes is
+/// generous, but a hang must not hold a connection thread forever and the
+/// client's own patience budget runs out around the same time.
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 struct Profile {
     id: &'static str,
@@ -25,6 +34,11 @@ struct Profile {
     bypass_args: &'static [&'static str],
     harness_id: Option<&'static str>,
     symbol: Option<&'static str>,
+    /// The tool's official one-shot installer, when one exists. `None` for
+    /// the shell, for a CLI that ships inside an editor, and for anything
+    /// with no clean standalone installer. The front end offers the command
+    /// to a user who has not installed the tool; the host runs it.
+    install_command: Option<&'static str>,
     /// Where this tool's own installer puts it, relative to `$HOME`.
     ///
     /// A CLI that ships its own directory is only on the PATH because its
@@ -53,6 +67,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: None,
         symbol: Some("terminal"),
+        install_command: None,
         install_dirs: &[],
         open_url: None,
     },
@@ -64,6 +79,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-skip-permissions"],
         harness_id: Some("claude_code"),
         symbol: None,
+        install_command: Some("curl -fsSL https://claude.ai/install.sh | bash"),
         install_dirs: &[],
         open_url: None,
     },
@@ -75,6 +91,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-bypass-approvals-and-sandbox"],
         harness_id: Some("codex"),
         symbol: None,
+        install_command: Some("curl -fsSL https://chatgpt.com/codex/install.sh | sh"),
         install_dirs: &[],
         open_url: None,
     },
@@ -86,6 +103,21 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--auto"],
         harness_id: Some("opencode"),
         symbol: None,
+        install_command: Some("curl -fsSL https://opencode.ai/install | bash"),
+        install_dirs: &[".opencode/bin"],
+        open_url: None,
+    },
+    Profile {
+        id: "opencode2",
+        name: "OpenCode 2",
+        command: "opencode2",
+        args: &[],
+        bypass_args: &["--auto"],
+        harness_id: Some("opencode"),
+        symbol: None,
+        install_command: Some(
+            "curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/v2/install | bash",
+        ),
         install_dirs: &[".opencode/bin"],
         open_url: None,
     },
@@ -97,6 +129,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--permission-mode", "bypassPermissions"],
         harness_id: Some("grok"),
         symbol: None,
+        install_command: Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
         install_dirs: &[".grok/bin"],
         open_url: None,
     },
@@ -108,6 +141,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--allow-all"],
         harness_id: Some("copilot"),
         symbol: None,
+        install_command: Some("npm install -g @github/copilot"),
         install_dirs: &[],
         open_url: None,
     },
@@ -119,6 +153,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cline"),
         symbol: None,
+        install_command: Some("npm install -g cline"),
         install_dirs: &[],
         open_url: None,
     },
@@ -130,6 +165,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("openclaw"),
         symbol: None,
+        install_command: Some("curl -fsSL https://openclaw.ai/install.sh | bash"),
         install_dirs: &[],
         open_url: None,
     },
@@ -141,6 +177,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("muse"),
         symbol: None,
+        install_command: Some("curl -fsSL https://dev.meta.ai/install.sh | bash"),
         install_dirs: &[],
         open_url: None,
     },
@@ -152,6 +189,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("pi"),
         symbol: None,
+        install_command: Some("npm install -g --ignore-scripts @earendil-works/pi-coding-agent"),
         install_dirs: &[],
         open_url: None,
     },
@@ -163,6 +201,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("dsh"),
         symbol: None,
+        install_command: None,
         install_dirs: &[],
         // `npx @deepseek-ai/dsh web` serves the UI here. The session is the
         // server process. The front end opens this URL once it answers.
@@ -176,6 +215,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("zed"),
         symbol: None,
+        install_command: None,
         install_dirs: &[],
         open_url: None,
     },
@@ -187,6 +227,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &["--dangerously-skip-permissions"],
         harness_id: Some("antigravity"),
         symbol: None,
+        install_command: Some("curl -fsSL https://antigravity.google/cli/install.sh | bash"),
         install_dirs: &[],
         open_url: None,
     },
@@ -198,6 +239,7 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cursor"),
         symbol: None,
+        install_command: Some("curl https://cursor.com/install -fsS | bash"),
         install_dirs: &[],
         open_url: None,
     },
@@ -209,13 +251,21 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("cursor"),
         symbol: None,
+        install_command: None,
         install_dirs: &[],
         open_url: None,
     },
 ];
 
-/// The harnesses whose command is on this machine's PATH. The shell profile is
-/// always available: every Unix box has a shell.
+/// Everything a launcher can run in a workspace, with whether it is on this
+/// machine, as its daemon reports it. The shell profile is always available:
+/// every Unix box has a shell.
+///
+/// The answer is the whole supported catalog, not only what is installed: a
+/// front end shows what is here as something to start, and everything else
+/// as something that can be installed from here. `installed` is the verdict
+/// the UI draws on, and the front end never launches a profile that reports
+/// false.
 pub(crate) fn catalog() -> Value {
     let path = search_path();
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
@@ -227,12 +277,10 @@ pub(crate) fn catalog() -> Value {
     let home = std::env::var("HOME").unwrap_or_default();
     let available: Vec<Value> = PROFILES
         .iter()
-        .filter(|profile| {
-            profile.id == "shell"
-                || profile.command.starts_with('/')
-                || resolve_profile(profile, &path, Path::new(&home)).is_some()
-        })
         .map(|profile| {
+            let installed = profile.id == "shell"
+                || profile.command.starts_with('/')
+                || resolve_profile(profile, &path, Path::new(&home)).is_some();
             let mut value = json!({
                 "id": profile.id,
                 "name": profile.name,
@@ -242,20 +290,112 @@ pub(crate) fn catalog() -> Value {
                 "harnessId": profile.harness_id,
                 "symbol": profile.symbol,
                 "openUrl": profile.open_url,
+                "installed": installed,
+                "installCommand": profile.install_command,
             });
             if profile.id == "shell" {
                 value["command"] = json!(shell);
                 value["args"] = json!(shell_args);
-            } else if let Some(full) = resolve_profile(profile, &path, Path::new(&home)) {
+            } else if installed {
                 // Absolute path so a click does not need the login PATH to
                 // find the binary. Spawn used to block on `$SHELL -ilc env`
                 // just to resolve `claude` → `/Users/…/bin/claude`.
-                value["command"] = json!(full);
+                if let Some(full) = resolve_profile(profile, &path, Path::new(&home)) {
+                    value["command"] = json!(full);
+                }
             }
             value
         })
         .collect();
     Value::Array(available)
+}
+
+/// Run a catalog profile's official installer on this machine.
+///
+/// The command comes from the hardcoded [`PROFILES`] table, never from the
+/// caller: a client may pick a profile by id, and nothing else, so a remote
+/// caller cannot make the host run a command of its own. The installer runs
+/// with the login environment so `npm`, `brew` and friends resolve, and its
+/// output is captured so the calling app can say what happened.
+pub(crate) fn install(id: &str) -> Result<Value, String> {
+    let profile = PROFILES
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| format!("no launcher profile {id}"))?;
+    let command = profile
+        .install_command
+        .ok_or_else(|| format!("{id} has no bundled installer"))?;
+
+    let mut cmd = std::process::Command::new("/bin/sh");
+    cmd.arg("-c").arg(command);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    if let Some(env) = tokenstat_pty::login_env_ready() {
+        cmd.env("PATH", &env.path);
+        for (key, value) in &env.vars {
+            cmd.env(key, value);
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start the installer: {e}"))?;
+    let mut stdout = child.stdout.take().ok_or("installer produced no stdout")?;
+    let mut stderr = child.stderr.take().ok_or("installer produced no stderr")?;
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = out_tx.send(buf);
+    });
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf);
+        let _ = err_tx.send(buf);
+    });
+
+    // The pipes are drained on the reader threads, so waiting on the child
+    // cannot deadlock on a full buffer. The deadline bounds a hung installer
+    // so the connection thread it runs on does not stay busy forever.
+    let deadline = Instant::now() + INSTALL_TIMEOUT;
+    let status = loop {
+        match child
+            .try_wait()
+            .map_err(|e| format!("installer wait failed: {e}"))?
+        {
+            Some(status) => break status,
+            None => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    return Err(format!("the {id} installer timed out"));
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
+    };
+
+    let mut combined = out_rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap_or_default();
+    combined.extend_from_slice(
+        &err_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_default(),
+    );
+    let truncated = combined.len() > 4096;
+    combined.truncate(4096);
+    let mut output = String::from_utf8_lossy(&combined).into_owned();
+    if truncated {
+        output.push_str("\n… (output truncated)");
+    }
+
+    Ok(json!({
+        "ok": status.success(),
+        "exitCode": status.code(),
+        "output": output,
+    }))
 }
 
 /// Build the environment for a local model selection.
@@ -451,7 +591,9 @@ fn search_path() -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROFILES, Profile, catalog, model_arguments, model_environment, resolve_profile};
+    use super::{
+        PROFILES, Profile, catalog, install, model_arguments, model_environment, resolve_profile,
+    };
     use std::path::Path;
     #[cfg(unix)]
     use std::path::PathBuf;
@@ -482,6 +624,7 @@ mod tests {
             bypass_args: &[],
             harness_id: None,
             symbol: None,
+            install_command: None,
             install_dirs,
             open_url: None,
         }
@@ -529,7 +672,11 @@ mod tests {
     /// for. A rename here silently reintroduces the bug.
     #[test]
     fn the_tools_that_ship_a_directory_declare_it() {
-        for (id, dir) in [("opencode", ".opencode/bin"), ("grok", ".grok/bin")] {
+        for (id, dir) in [
+            ("opencode", ".opencode/bin"),
+            ("opencode2", ".opencode/bin"),
+            ("grok", ".grok/bin"),
+        ] {
             let found = PROFILES
                 .iter()
                 .find(|p| p.id == id)
@@ -540,6 +687,70 @@ mod tests {
                 found.install_dirs
             );
         }
+    }
+
+    /// The v2 next build is its own binary in the same install directory as
+    /// v1, so a machine that runs the beta gets its own tile while v1 keeps
+    /// the classic one. It bills as the same product, so the harness id and
+    /// its installer command must not drift from the OpenCode family.
+    #[test]
+    fn the_next_opencode_build_is_its_own_profile() {
+        let next = PROFILES
+            .iter()
+            .find(|p| p.id == "opencode2")
+            .expect("OpenCode 2 must be in the catalog");
+        assert_eq!(next.name, "OpenCode 2");
+        assert_eq!(next.command, "opencode2");
+        assert_eq!(next.harness_id, Some("opencode"));
+        let command = next.install_command.expect("a bundled installer");
+        assert!(
+            command.starts_with("curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/"),
+            "{command}"
+        );
+    }
+
+    /// The catalog answers for the whole supported list, not only what is on
+    /// the machine. Every profile carries the verdict a front end draws on and
+    /// the command that would install it.
+    #[test]
+    fn the_catalog_carries_an_install_verdict_and_command() {
+        let list = catalog();
+        let entries = list.as_array().expect("an array");
+        assert!(
+            entries.len() >= PROFILES.len(),
+            "every profile must be listed, even when not installed"
+        );
+        for entry in entries {
+            assert!(
+                entry.get("installed").and_then(|v| v.as_bool()).is_some(),
+                "{entry} must carry an installed verdict"
+            );
+        }
+        let claude = entries
+            .iter()
+            .find(|v| v.get("id").and_then(|v| v.as_str()) == Some("claude_code"))
+            .expect("claude_code must be listed");
+        assert_eq!(
+            claude.get("installCommand").and_then(|v| v.as_str()),
+            Some("curl -fsSL https://claude.ai/install.sh | bash")
+        );
+    }
+
+    /// The id is the only thing a client may choose. Anything else is refused
+    /// before a command is built, so a remote caller cannot make the host run
+    /// a command of its own.
+    #[test]
+    fn install_refuses_unknown_profiles() {
+        let error = install("definitely-not-a-launcher-profile").expect_err("unknown id");
+        assert!(error.contains("no launcher profile"), "{error}");
+    }
+
+    /// A profile without a bundled installer is refused too, rather than
+    /// launching nothing or running a guessed command.
+    #[test]
+    fn install_refuses_a_profile_without_an_installer() {
+        let error = install("cursor").expect_err("no installer");
+        assert!(error.contains("no bundled installer"), "{error}");
     }
 
     #[test]
