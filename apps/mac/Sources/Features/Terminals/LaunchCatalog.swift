@@ -271,31 +271,40 @@ final class LaunchCatalog {
     ///
     /// Returns a message for the user when the install failed, nil on success.
     /// The install runs on the machine that owns the folder, which is the
-    /// peer's daemon for a remote workspace.
+    /// peer's daemon for a remote workspace. A host that finished but reported
+    /// failure counts as a failure: the installer's own output is the message.
     @discardableResult
     func install(_ profile: LaunchProfile, peer: String?) async -> String? {
         guard !installing.contains(profile.id) else { return nil }
         installing.insert(profile.id)
         defer { installing.remove(profile.id) }
+        let result: LauncherInstallResult
         do {
             if let peer {
-                _ = try await Bridge.onPeer(
+                result = try await Bridge.onPeer(
                     peer,
                     "launcher.install",
                     ["id": profile.id],
                     as: LauncherInstallResult.self
                 )
-                remoteFetched.remove(peer)
-                await resolveRemote(peer: peer)
             } else {
-                _ = try await Bridge.launcherInstall(id: profile.id)
-                resolved = false
-                await resolve()
+                result = try await Bridge.launcherInstall(id: profile.id)
             }
-            return nil
         } catch {
             return error.localizedDescription
         }
+        guard result.ok else {
+            let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return tail.isEmpty ? "the installer exited with code \(result.exitCode ?? 1)" : tail
+        }
+        if let peer {
+            remoteFetched.remove(peer)
+            await resolveRemote(peer: peer)
+        } else {
+            resolved = false
+            await resolve()
+        }
+        return nil
     }
 
     private nonisolated static func profile(from dto: RemoteLaunchProfile) -> LaunchProfile {

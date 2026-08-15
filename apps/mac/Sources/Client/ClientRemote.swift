@@ -165,8 +165,8 @@ enum ClientRemote {
     /// Run a profile's official installer on the machine that owns this
     /// workspace. The peer's daemon runs its own hardcoded command for the
     /// id, never a string from here.
-    static func launcherInstall(peer: String, id: String) async throws {
-        _ = try await Bridge.onPeer(
+    static func launcherInstall(peer: String, id: String) async throws -> LauncherInstallResult {
+        try await Bridge.onPeer(
             peer,
             "launcher.install",
             ["id": id],

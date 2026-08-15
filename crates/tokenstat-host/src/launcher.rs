@@ -17,14 +17,19 @@ use std::io::Read;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use serde_json::{Value, json};
 
 /// How long a profile installer may run before the host gives up on it.
 ///
-/// Downloading a large CLI can take minutes on a slow link, so ten minutes is
-/// generous, but a hang must not hold a connection thread forever and the
-/// client's own patience budget runs out around the same time.
-const INSTALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Downloading a large CLI can take minutes on a slow link, so twenty minutes
+/// is generous. The client's patience is a per-silence budget, so a live
+/// download that keeps writing output is never cut off by the client; this
+/// cap is the hard bound that keeps a silent hang from holding a connection
+/// thread forever.
+const INSTALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 
 struct Profile {
     id: &'static str,
@@ -326,11 +331,27 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         .install_command
         .ok_or_else(|| format!("{id} has no bundled installer"))?;
 
+    // Refuse when the tool is already where the catalog looks for it. The
+    // front end never offers this, so the guard is for a stale tile or a
+    // remote caller asking twice: reinstalling something that is present is
+    // at best pointless and at worst a way to burn a peer's CPU.
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !profile.command.starts_with('/')
+        && resolve_profile(profile, &search_path(), Path::new(&home)).is_some()
+    {
+        return Err(format!("{id} is already installed"));
+    }
+
     let mut cmd = std::process::Command::new("/bin/sh");
     cmd.arg("-c").arg(command);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
+    // Own process group, so a timeout can kill the installer's whole tree
+    // rather than only the shell that launched it: `curl | bash` and npm
+    // postinstall scripts outlive the shell they hang under otherwise.
+    #[cfg(unix)]
+    cmd.process_group(0);
     if let Some(env) = tokenstat_pty::login_env_ready() {
         cmd.env("PATH", &env.path);
         for (key, value) in &env.vars {
@@ -369,6 +390,16 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
             None => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
+                    // Kill the rest of the process group too: the shell's own
+                    // children (curl, npm postinstall, a download) would keep
+                    // running and keep the captured pipes open otherwise.
+                    #[cfg(unix)]
+                    {
+                        let pid = child.id();
+                        let _ = std::process::Command::new("kill")
+                            .args(["-9", &format!("-{pid}")])
+                            .status();
+                    }
                     return Err(format!("the {id} installer timed out"));
                 }
                 std::thread::sleep(Duration::from_millis(200));
@@ -386,7 +417,10 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     );
     let truncated = combined.len() > 4096;
     combined.truncate(4096);
-    let mut output = String::from_utf8_lossy(&combined).into_owned();
+    // Installer output is display text. Some installers paint a TTY when they
+    // can, and their ANSI cursor codes would be noise in the error a failed
+    // install shows, so the escapes are stripped before the text is returned.
+    let mut output = strip_ansi(&String::from_utf8_lossy(&combined));
     if truncated {
         output.push_str("\n… (output truncated)");
     }
@@ -396,6 +430,55 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
         "exitCode": status.code(),
         "output": output,
     }))
+}
+
+/// Remove ANSI escape sequences from installer output.
+///
+/// Handles CSI (`ESC [ … final`) and OSC (`ESC ] … BEL`) and the one-shot
+/// sequences (`ESC X`). Everything else passes through untouched; a trailing
+/// half-eaten sequence from the 4 KiB cap simply has nothing left to strip.
+fn strip_ansi(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                for n in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&n) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                // A BEL ends an OSC; so does the ST escape (`ESC \`), which
+                // this branch swallows whole since the ESC was already taken
+                // by the iteration.
+                loop {
+                    match chars.next() {
+                        None | Some('\u{07}') => break,
+                        Some('\u{1b}') => {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                        Some(_) => continue,
+                    }
+                }
+            }
+            _ => {
+                // `ESC` followed by a single char, e.g. `ESC 7`.
+                chars.next();
+            }
+        }
+    }
+    out
 }
 
 /// Build the environment for a local model selection.
@@ -593,6 +676,7 @@ fn search_path() -> Vec<String> {
 mod tests {
     use super::{
         PROFILES, Profile, catalog, install, model_arguments, model_environment, resolve_profile,
+        strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
@@ -751,6 +835,23 @@ mod tests {
     fn install_refuses_a_profile_without_an_installer() {
         let error = install("cursor").expect_err("no installer");
         assert!(error.contains("no bundled installer"), "{error}");
+    }
+
+    /// Installer output is shown to people as an error message, so the ANSI
+    /// cursor codes an installer aimed at a TTY must not survive into it.
+    #[test]
+    fn installer_output_has_ansi_escapes_stripped() {
+        assert_eq!(
+            strip_ansi("Installing \u{1b}[0;2mopencode\u{1b}[0m ✓\u{1b}[K\n"),
+            "Installing opencode ✓\n"
+        );
+        assert_eq!(
+            strip_ansi("progress \u{1b}[2A\u{1b}[J done"),
+            "progress  done"
+        );
+        assert_eq!(strip_ansi("plain text"), "plain text");
+        assert_eq!(strip_ansi("OSC \u{1b}]0;title\u{07} end"), "OSC  end");
+        assert_eq!(strip_ansi("OSC \u{1b}]0;title\u{1b}\\ end"), "OSC  end");
     }
 
     #[test]

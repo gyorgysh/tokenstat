@@ -35,6 +35,20 @@ struct ClientWorkspaceDetailView: View {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
     }
 
+    /// Installed harnesses first, then what could be installed, so the row
+    /// always puts what this machine can start in front. The catalog's own
+    /// order is preserved within each group.
+    private var orderedCatalog: [RemoteLaunchProfile] {
+        catalog.enumerated()
+            .sorted { lhs, rhs in
+                let li = lhs.element.installed
+                let ri = rhs.element.installed
+                if li != ri { return li && !ri }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -159,7 +173,7 @@ struct ClientWorkspaceDetailView: View {
                             installCommand: nil
                         ))
                     } else {
-                        ForEach(catalog, id: \.id) { profile in
+                        ForEach(orderedCatalog, id: \.id) { profile in
                             launchChip(profile)
                         }
                     }
@@ -212,7 +226,14 @@ struct ClientWorkspaceDetailView: View {
         installingID = profile.id
         defer { installingID = nil }
         do {
-            try await ClientRemote.launcherInstall(peer: peer, id: profile.id)
+            let result = try await ClientRemote.launcherInstall(peer: peer, id: profile.id)
+            guard result.ok else {
+                let tail = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                errorMessage = tail.isEmpty
+                    ? "\(profile.name) could not be installed (exit \(result.exitCode ?? 1))"
+                    : tail
+                return
+            }
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
