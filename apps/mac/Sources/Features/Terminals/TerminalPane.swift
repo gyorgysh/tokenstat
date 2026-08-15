@@ -79,9 +79,16 @@ struct TerminalPane: View {
     }
 
     /// What to offer in the launcher: this machine's harnesses for a local
-    /// folder, the owning machine's for a remote one.
+    /// folder, the owning machine's for a remote one. Installed only; the
+    /// launch surface additionally shows what could be installed.
     private var launcherProfiles: [LaunchProfile] {
         peer == nil ? launcher.available : launcher.remoteAvailable
+    }
+
+    /// Every supported harness on the owning machine, installed or not, for
+    /// the launch surface to draw installed tiles vividly and the rest muted.
+    private var launcherCatalog: [LaunchProfile] {
+        peer == nil ? launcher.catalog : launcher.remoteCatalog
     }
 
     /// The harnesses a local model selection means anything to. With none of
@@ -235,7 +242,7 @@ struct TerminalPane: View {
                         terminals: terminals,
                         workspaces: workspaces,
                         grid: spawnGrid,
-                        profiles: launcherProfiles,
+                        profiles: launcherCatalog,
                         modelPeer: peer
                     )
                         .frame(width: size.width, height: size.height)
@@ -267,7 +274,7 @@ struct TerminalPane: View {
                         terminals: terminals,
                         workspaces: workspaces,
                         grid: spawnGrid,
-                        profiles: launcherProfiles,
+                        profiles: launcherCatalog,
                         modelPeer: peer
                     )
                         .frame(width: size.width, height: size.height)
@@ -700,6 +707,7 @@ private struct SessionStartingView: View {
         case "codex": return "Codex"
         case "grok": return "Grok"
         case "opencode": return "OpenCode"
+        case "opencode2": return "OpenCode 2"
         case "agent": return "Cursor Agent"
         case "agy": return "Antigravity"
         case "zsh", "bash", "fish", "sh": return "Shell"
@@ -784,7 +792,8 @@ private struct LaunchSurface: View {
     /// guessed, so the first session opens at the size it will keep.
     let grid: (rows: Int, cols: Int)
     /// What can be launched: this machine's harnesses for a local folder, the
-    /// owning machine's for a remote one.
+    /// owning machine's for a remote one. The whole supported catalog, so the
+    /// grid can show what is installed to start and what could be installed.
     let profiles: [LaunchProfile]
     /// The machine to probe for local model servers. A remote folder's model
     /// picker must use the remote host, not the Mac displaying this surface.
@@ -797,9 +806,27 @@ private struct LaunchSurface: View {
     /// still empty and this whole surface is still on screen, so without this
     /// the click produced nothing at all and people clicked again.
     @State private var launching: String?
+    /// What an install said when it failed, shown under the grid so the
+    /// installer's own message is what the user reads.
+    @State private var installError: String?
 
     private var modelProfiles: [LaunchProfile] {
-        profiles.filter { LaunchProfile.acceptsLocalModel($0.id) }
+        profiles.filter { LaunchProfile.acceptsLocalModel($0.id) && $0.installed }
+    }
+
+    /// Installed harnesses first, then what could be installed, with the
+    /// catalog's own order preserved within each group. The people reading
+    /// this surface have the installed tools in front and the rest quieter,
+    /// the way the heatmap keeps its low rows muted.
+    private var orderedProfiles: [LaunchProfile] {
+        profiles.enumerated()
+            .sorted { lhs, rhs in
+                let li = lhs.element.installed
+                let ri = rhs.element.installed
+                if li != ri { return li && !ri }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
 
     /// The workspace's stored selection. The list itself lives in the chrome
@@ -844,12 +871,19 @@ private struct LaunchSurface: View {
                     utilityButton("Files", symbol: "folder") {
                         workspaces.showFiles(in: folder.id)
                     }
-                    ForEach(profiles) { profile in
-                        launchButton(profile)
+                    ForEach(orderedProfiles) { profile in
+                        tile(for: profile)
                     }
                 }
                 .frame(maxWidth: 620)
 
+                if let installError {
+                    Text(installError)
+                        .font(.caption)
+                        .foregroundStyle(Theme.danger)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 480)
+                }
                 if let error = terminals.errorMessage {
                     Text(error)
                         .font(.caption)
@@ -898,6 +932,66 @@ private struct LaunchSurface: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
+    }
+
+    /// One grid tile: a launch for something installed, an install for
+    /// something that has a bundled installer, a muted card for the rest.
+    @ViewBuilder
+    private func tile(for profile: LaunchProfile) -> some View {
+        if profile.installed {
+            launchButton(profile)
+        } else if profile.installCommand != nil {
+            installButton(profile)
+        } else {
+            unavailableTile(profile)
+        }
+    }
+
+    /// A muted tile that runs the tool's official installer, then flips to a
+    /// launch tile once the catalog re-resolves.
+    private func installButton(_ profile: LaunchProfile) -> some View {
+        LaunchInstallTile(
+            profile: profile,
+            isInstalling: LaunchCatalog.shared.installing.contains(profile.id),
+            onInstall: {
+                installError = nil
+                Task {
+                    let message = await LaunchCatalog.shared.install(profile, peer: modelPeer)
+                    if let message {
+                        installError = "\(profile.name) could not be installed: \(message)"
+                    }
+                }
+            }
+        )
+    }
+
+    /// A profile with no bundled installer yet: shown because it is a
+    /// supported harness, but with nothing to offer but its name.
+    private func unavailableTile(_ profile: LaunchProfile) -> some View {
+        VStack(spacing: Theme.Space.s) {
+            if let harness = profile.harnessID {
+                HarnessMark(id: harness, size: 34)
+                    .opacity(0.35)
+                    .saturation(0.2)
+            } else {
+                Image(systemName: profile.symbol ?? "terminal")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.tertiary)
+                    .frame(height: 34)
+            }
+            Text(profile.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.m)
+        .background(Theme.panel.opacity(0.4), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        )
+        .help("No bundled installer for \(profile.name) yet.")
     }
 
     private func launchButton(_ profile: LaunchProfile) -> some View {
@@ -1098,6 +1192,61 @@ private struct LaunchTile: View {
             .alignmentGuide(.top) { $0[.bottom] }
             .allowsHitTesting(false)
             .transition(.opacity)
+    }
+}
+
+/// One muted agent tile for a harness that is not installed.
+///
+/// The quiet treatment is the point: installed harnesses are vivid tiles you
+/// start a session from, and these are the same grid a row down, so they use
+/// the heatmap's trick of drawing the less important thing with less colour.
+/// The click runs the tool's official installer through the host, and the
+/// tile becomes a launch tile when the catalog re-resolves.
+private struct LaunchInstallTile: View {
+    let profile: LaunchProfile
+    let isInstalling: Bool
+    let onInstall: () -> Void
+
+    var body: some View {
+        Button(action: onInstall) {
+            VStack(spacing: Theme.Space.s) {
+                if isInstalling {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(height: 34)
+                } else if let harness = profile.harnessID {
+                    HarnessMark(id: harness, size: 34)
+                        .opacity(0.45)
+                        .saturation(0.3)
+                } else {
+                    Image(systemName: "arrow.down.circle")
+                        .font(.system(size: 18))
+                        .foregroundStyle(.tertiary)
+                        .frame(height: 34)
+                }
+                Text(isInstalling ? "Installing…" : profile.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isInstalling ? .primary : .secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Theme.Space.m)
+            .background(
+                isInstalling ? Theme.accent.opacity(0.08) : Theme.panel.opacity(0.4),
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(
+                        isInstalling ? Theme.accent.opacity(0.6) : Theme.border.opacity(0.5),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(isInstalling)
+        .help("\(profile.name) is not installed. Click to run its official installer.")
     }
 }
 

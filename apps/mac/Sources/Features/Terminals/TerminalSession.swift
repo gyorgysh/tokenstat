@@ -117,7 +117,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         switch URL(fileURLWithPath: command).lastPathComponent {
         case "claude": return "claude_code"
         case "codex": return "codex"
-        case "opencode": return "opencode"
+        case "opencode", "opencode2": return "opencode"
         case "grok": return "grok"
         case "copilot": return "copilot"
         case "muse": return "muse"

@@ -40,6 +40,13 @@ struct LaunchProfile: Identifiable, Sendable {
     /// process. After spawn the pane waits for the port and opens this URL
     /// in the in-app browser. Nil for a TTY session.
     var openUrl: String? = nil
+    /// Whether the command is on this machine's PATH (or in its own install
+    /// directory). False when the profile is only offered to be installed,
+    /// drawn muted with an Install action instead of a launch tile.
+    var installed: Bool = true
+    /// The tool's official one-shot installer. The host runs it when the
+    /// user clicks Install; this app only displays it.
+    var installCommand: String? = nil
 
     /// Whether pointing this harness at a local model server means anything.
     ///
@@ -65,45 +72,61 @@ struct LaunchProfile: Identifiable, Sendable {
         LaunchProfile(
             id: "claude_code", name: "Claude Code", command: "claude", args: [],
             bypassArgs: ["--dangerously-skip-permissions"],
-            harnessID: "claude_code", symbol: nil
+            harnessID: "claude_code", symbol: nil,
+            installCommand: "curl -fsSL https://claude.ai/install.sh | bash"
         ),
         LaunchProfile(
             id: "codex", name: "Codex", command: "codex", args: [],
             bypassArgs: ["--dangerously-bypass-approvals-and-sandbox"],
-            harnessID: "codex", symbol: nil
+            harnessID: "codex", symbol: nil,
+            installCommand: "curl -fsSL https://chatgpt.com/codex/install.sh | sh"
         ),
         LaunchProfile(
             id: "opencode", name: "OpenCode", command: "opencode", args: [],
             bypassArgs: ["--auto"],
             harnessID: "opencode", symbol: nil,
-            installDirs: [".opencode/bin"]
+            installDirs: [".opencode/bin"],
+            installCommand: "curl -fsSL https://opencode.ai/install | bash"
+        ),
+        LaunchProfile(
+            id: "opencode2", name: "OpenCode 2", command: "opencode2", args: [],
+            bypassArgs: ["--auto"],
+            harnessID: "opencode", symbol: nil,
+            installDirs: [".opencode/bin"],
+            installCommand: "curl -fsSL https://raw.githubusercontent.com/anomalyco/opencode/v2/install | bash"
         ),
         LaunchProfile(
             id: "grok", name: "Grok Build", command: "grok", args: [],
             bypassArgs: ["--permission-mode", "bypassPermissions"],
             harnessID: "grok", symbol: nil,
-            installDirs: [".grok/bin"]
+            installDirs: [".grok/bin"],
+            installCommand: "curl -fsSL https://x.ai/cli/install.sh | bash"
         ),
         LaunchProfile(
             id: "copilot", name: "Copilot CLI", command: "copilot", args: [],
             bypassArgs: ["--allow-all"],
-            harnessID: "copilot", symbol: nil
+            harnessID: "copilot", symbol: nil,
+            installCommand: "npm install -g @github/copilot"
         ),
         LaunchProfile(
             id: "cline", name: "Cline", command: "cline", args: [],
-            bypassArgs: [], harnessID: "cline", symbol: nil
+            bypassArgs: [], harnessID: "cline", symbol: nil,
+            installCommand: "npm install -g cline"
         ),
         LaunchProfile(
             id: "openclaw", name: "OpenClaw", command: "openclaw", args: [],
-            bypassArgs: [], harnessID: "openclaw", symbol: nil
+            bypassArgs: [], harnessID: "openclaw", symbol: nil,
+            installCommand: "curl -fsSL https://openclaw.ai/install.sh | bash"
         ),
         LaunchProfile(
             id: "muse", name: "Muse", command: "muse", args: [],
-            bypassArgs: [], harnessID: "muse", symbol: nil
+            bypassArgs: [], harnessID: "muse", symbol: nil,
+            installCommand: "curl -fsSL https://dev.meta.ai/install.sh | bash"
         ),
         LaunchProfile(
             id: "pi", name: "Pi", command: "pi", args: [],
-            bypassArgs: [], harnessID: "pi", symbol: nil
+            bypassArgs: [], harnessID: "pi", symbol: nil,
+            installCommand: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
         ),
         LaunchProfile(
             id: "dsh",
@@ -122,11 +145,13 @@ struct LaunchProfile: Identifiable, Sendable {
         LaunchProfile(
             id: "antigravity", name: "Antigravity", command: "agy", args: [],
             bypassArgs: ["--dangerously-skip-permissions"],
-            harnessID: "antigravity", symbol: nil
+            harnessID: "antigravity", symbol: nil,
+            installCommand: "curl -fsSL https://antigravity.google/cli/install.sh | bash"
         ),
         LaunchProfile(
             id: "cursor_agent", name: "Cursor Agent", command: "agent", args: [],
-            bypassArgs: [], harnessID: "cursor", symbol: nil
+            bypassArgs: [], harnessID: "cursor", symbol: nil,
+            installCommand: "curl https://cursor.com/install -fsS | bash"
         ),
         LaunchProfile(
             id: "cursor", name: "Cursor CLI", command: "cursor", args: [],
@@ -172,9 +197,20 @@ final class LaunchCatalog {
     /// `resolve()` has run, and under-reporting for a moment is the right
     /// trade against blocking the first frame.
     private(set) var available: [LaunchProfile]
+    /// Every supported profile, installed or not, with the host's verdict.
+    ///
+    /// What the launch surface draws: installed profiles get a vivid tile that
+    /// starts a session, everything else a muted tile that installs it.
+    private(set) var catalog: [LaunchProfile]
     /// Profiles on a specific peer (the machine that owns a remote
-    /// workspace), fetched from its daemon once per peer.
+    /// workspace), fetched from its daemon once per peer. Installed only, for
+    /// the strip menu and model control.
     private(set) var remoteAvailable: [LaunchProfile] = []
+    /// Every supported profile on a specific peer, installed or not.
+    private(set) var remoteCatalog: [LaunchProfile] = []
+    /// The profile ids whose installer is currently running, so a tile can
+    /// show progress and refuse a second click.
+    private(set) var installing: Set<String> = []
 
     /// Set once the host has answered. The strip calls `resolve()` every time
     /// it appears, and it must run once per launch, not once per workspace
@@ -184,7 +220,13 @@ final class LaunchCatalog {
     private var remoteFetched = Set<String>()
 
     private init() {
-        available = Self.filter(LaunchProfile.all, onPathIn: Self.launchTimeSearchPath())
+        let quick = Self.filter(LaunchProfile.all, onPathIn: Self.launchTimeSearchPath())
+        available = quick
+        catalog = LaunchProfile.all.map { profile in
+            var p = profile
+            p.installed = quick.contains { $0.id == profile.id }
+            return p
+        }
     }
 
     /// Ask the machine that will run the sessions what it can launch.
@@ -197,7 +239,8 @@ final class LaunchCatalog {
         resolving = true
         do {
             let dtos = try await Bridge.launcherCatalog()
-            available = dtos.map(Self.profile(from:))
+            catalog = dtos.map(Self.profile(from:))
+            available = catalog.filter { $0.installed }
             resolved = true
         } catch {
             // The launch-time list stays; the next appearance retries.
@@ -216,9 +259,42 @@ final class LaunchCatalog {
                 "launcher.catalog",
                 as: [RemoteLaunchProfile].self
             )
-            remoteAvailable = dtos.map(Self.profile(from:))
+            remoteCatalog = dtos.map(Self.profile(from:))
+            remoteAvailable = remoteCatalog.filter { $0.installed }
         } catch {
             remoteFetched.remove(peer)
+        }
+    }
+
+    /// Run a profile's official installer, then re-resolve so the muted tile
+    /// flips to a launch once the tool is on disk.
+    ///
+    /// Returns a message for the user when the install failed, nil on success.
+    /// The install runs on the machine that owns the folder, which is the
+    /// peer's daemon for a remote workspace.
+    @discardableResult
+    func install(_ profile: LaunchProfile, peer: String?) async -> String? {
+        guard !installing.contains(profile.id) else { return nil }
+        installing.insert(profile.id)
+        defer { installing.remove(profile.id) }
+        do {
+            if let peer {
+                _ = try await Bridge.onPeer(
+                    peer,
+                    "launcher.install",
+                    ["id": profile.id],
+                    as: LauncherInstallResult.self
+                )
+                remoteFetched.remove(peer)
+                await resolveRemote(peer: peer)
+            } else {
+                _ = try await Bridge.launcherInstall(id: profile.id)
+                resolved = false
+                await resolve()
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 
@@ -231,7 +307,9 @@ final class LaunchCatalog {
             bypassArgs: dto.bypassArgs,
             harnessID: dto.harnessId,
             symbol: dto.symbol,
-            openUrl: dto.openUrl
+            openUrl: dto.openUrl,
+            installed: dto.installed,
+            installCommand: dto.installCommand
         )
     }
 

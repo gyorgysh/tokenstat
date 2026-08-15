@@ -21,6 +21,7 @@ struct ClientWorkspaceDetailView: View {
     @State private var openSession: ClientTerminalSession?
     @State private var errorMessage: String?
     @State private var isLaunching = false
+    @State private var installingID: String?
     @State private var showFiles = false
     @State private var showPort = false
     @State private var portText = "5173"
@@ -153,7 +154,9 @@ struct ClientWorkspaceDetailView: View {
                             bypassArgs: [],
                             harnessId: nil,
                             symbol: "terminal",
-                            openUrl: nil
+                            openUrl: nil,
+                            installed: true,
+                            installCommand: nil
                         ))
                     } else {
                         ForEach(catalog, id: \.id) { profile in
@@ -165,19 +168,55 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
+    @ViewBuilder
     private func launchChip(_ profile: RemoteLaunchProfile) -> some View {
-        Button {
-            Task { await launch(profile) }
-        } label: {
+        if profile.installed {
+            Button {
+                Task { await launch(profile) }
+            } label: {
+                Text(profile.name)
+                    .font(ClientType.caption.weight(.semibold))
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.s)
+                    .background(Theme.accent.opacity(0.15))
+                    .foregroundStyle(Theme.accent)
+                    .clipShape(Capsule())
+            }
+            .disabled(isLaunching)
+        } else if profile.installCommand != nil {
+            Button {
+                Task { await install(profile) }
+            } label: {
+                Text(installingID == profile.id ? "Installing…" : profile.name)
+                    .font(ClientType.caption.weight(.semibold))
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, Theme.Space.s)
+                    .background(Color.secondary.opacity(0.12))
+                    .foregroundStyle(.secondary)
+                    .clipShape(Capsule())
+            }
+            .disabled(installingID != nil)
+        } else {
             Text(profile.name)
                 .font(ClientType.caption.weight(.semibold))
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
-                .background(Theme.accent.opacity(0.15))
-                .foregroundStyle(Theme.accent)
+                .background(Color.secondary.opacity(0.12))
+                .foregroundStyle(.tertiary)
                 .clipShape(Capsule())
         }
-        .disabled(isLaunching)
+    }
+
+    private func install(_ profile: RemoteLaunchProfile) async {
+        guard installingID == nil else { return }
+        installingID = profile.id
+        defer { installingID = nil }
+        do {
+            try await ClientRemote.launcherInstall(peer: peer, id: profile.id)
+            catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
     }
 
     private var sessionsCard: some View {

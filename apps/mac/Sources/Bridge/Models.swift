@@ -765,6 +765,10 @@ struct ProxyListen: Codable, Sendable, Hashable {
 /// What a machine can launch in a workspace, as its daemon reports it. A
 /// remote folder asks the machine that owns it, so the launcher always means
 /// the machine the session would actually run on.
+///
+/// The catalog answers for the whole supported list, not only what is
+/// installed: a profile with `installed == false` is something the machine
+/// does not have yet, and `installCommand` is how it can get it.
 struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var id: String
     var name: String
@@ -775,6 +779,22 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     var symbol: String?
     /// Loopback page the command starts, when the UI is a local web server.
     var openUrl: String?
+    /// Whether the command is on this machine's PATH (or in its own install
+    /// directory). False when the profile is only offered to be installed.
+    var installed: Bool
+    /// The tool's official one-shot installer, shown for a profile that is
+    /// not installed. Data to display, never a command this app runs: the
+    /// host executes it and the app only sends the profile id.
+    var installCommand: String?
+}
+
+/// What running a profile's installer said. `output` is the captured tail of
+/// the installer's stdout and stderr, so an error is something the user can
+/// read rather than a bare "it failed".
+struct LauncherInstallResult: Codable, Sendable {
+    var ok: Bool
+    var exitCode: Int?
+    var output: String
 }
 
 /// A model server discovered on this machine's loopback.

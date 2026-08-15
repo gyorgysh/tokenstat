@@ -1202,6 +1202,19 @@ extension Bridge {
     static func launcherCatalog() async throws -> [RemoteLaunchProfile] {
         try await background("launcher.catalog", as: [RemoteLaunchProfile].self)
     }
+
+    /// Run a profile's official installer on this machine, then the caller
+    /// refreshes the catalog. The id selects a command hardcoded in the host,
+    /// never a string from this app, so this stays "the user clicked Install
+    /// on a known tile". Long by nature: installers download binaries.
+    static func launcherInstall(id: String) async throws -> LauncherInstallResult {
+        try await background(
+            "launcher.install",
+            ["id": id],
+            patience: Patience.long,
+            as: LauncherInstallResult.self
+        )
+    }
 }
 
 // MARK: - Automations
