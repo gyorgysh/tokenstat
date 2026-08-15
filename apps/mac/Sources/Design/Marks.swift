@@ -257,6 +257,14 @@ struct LogoMark: View {
         let unit = size / Self.inkSide
 
         ZStack(alignment: .topLeading) {
+            // Offsets do not participate in layout, so without this the ZStack
+            // sizes to a single bar (12 units wide) and `.frame(width:size)`
+            // centres that box, sliding every bar 15 units to the right of the
+            // frame's centre. A full-size clear child sets the layout box to
+            // the whole frame so the offsets below land on the real origin.
+            Color.clear
+                .frame(width: size, height: size)
+                .allowsHitTesting(false)
             ForEach(Array(Self.bars.enumerated()), id: \.offset) { index, bar in
                 RoundedRectangle(cornerRadius: 3.5 * unit)
                     .fill(bar.color)
