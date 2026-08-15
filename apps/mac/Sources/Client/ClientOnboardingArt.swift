@@ -33,18 +33,20 @@ struct ClientOnboardingArt: View {
     var reduceMotion: Bool
 
     var body: some View {
-        Group {
-            switch kind {
-            case .intro: IntroArt(reduceMotion: reduceMotion)
-            case .heatmap: HeatmapArt(reduceMotion: reduceMotion)
-            case .devices: DevicesArt(reduceMotion: reduceMotion)
-            case .spend: SpendArt(reduceMotion: reduceMotion)
-            case .remaining: RemainingArt(reduceMotion: reduceMotion)
-            case .workspaces: WorkspacesArt(reduceMotion: reduceMotion)
-            case .sessions: SessionsArt(reduceMotion: reduceMotion)
-            case .onTheGo: OnTheGoArt(reduceMotion: reduceMotion)
-            case .privacy: PrivacyArt(reduceMotion: reduceMotion)
-            case .control: ControlArt(reduceMotion: reduceMotion)
+        ZStack {
+            Group {
+                switch kind {
+                case .intro: IntroArt(reduceMotion: reduceMotion)
+                case .heatmap: HeatmapArt(reduceMotion: reduceMotion)
+                case .devices: DevicesArt(reduceMotion: reduceMotion)
+                case .spend: SpendArt(reduceMotion: reduceMotion)
+                case .remaining: RemainingArt(reduceMotion: reduceMotion)
+                case .workspaces: WorkspacesArt(reduceMotion: reduceMotion)
+                case .sessions: SessionsArt(reduceMotion: reduceMotion)
+                case .onTheGo: OnTheGoArt(reduceMotion: reduceMotion)
+                case .privacy: PrivacyArt(reduceMotion: reduceMotion)
+                case .control: ControlArt(reduceMotion: reduceMotion)
+                }
             }
         }
         .frame(maxWidth: .infinity)
