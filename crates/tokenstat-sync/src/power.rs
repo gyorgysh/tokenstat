@@ -10,19 +10,12 @@
 /// macOS can launch `launchd` jobs during DarkWake. `IOPMUserIsActive` is the
 /// system's current full-wake signal. Other platforms do not have this
 /// macOS-specific state and keep their existing behavior.
+#[cfg(target_os = "macos")]
 fn system_is_awake() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        let output = std::process::Command::new("/usr/sbin/ioreg")
-            .args(["-rd1", "-c", "IOPMrootDomain"])
-            .output();
-        output.is_ok_and(|output| output.status.success() && ioreg_user_is_active(&output.stdout))
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
+    let output = std::process::Command::new("/usr/sbin/ioreg")
+        .args(["-rd1", "-c", "IOPMrootDomain"])
+        .output();
+    output.is_ok_and(|output| output.status.success() && ioreg_user_is_active(&output.stdout))
 }
 
 /// Whether scheduled network work may run now.
