@@ -103,7 +103,7 @@ struct ClientLoginView: View {
             set: { if !$0 { legalURL = nil } }
         )) {
             if let legalURL {
-                ClientLegalBrowser(url: legalURL)
+                ClientWebBrowser(url: legalURL)
             }
         }
     }

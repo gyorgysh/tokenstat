@@ -24,9 +24,16 @@ enum ClientWebPages {
         withMobileFlag(URL(string: "\(host)/terms")!)
     }
 
+    static func publicProfile(host: String, handle: String) -> URL {
+        withMobileFlag(URL(string: "\(host)/\(handle)")!)
+    }
+
     static func accountDeletion(host: String = host) -> URL {
         var parts = URLComponents(string: "\(host)/settings/data")!
-        parts.queryItems = [URLQueryItem(name: "mobile", value: "1")]
+        parts.queryItems = [
+            URLQueryItem(name: "mobile", value: "1"),
+            URLQueryItem(name: "focus", value: "delete"),
+        ]
         parts.fragment = "delete"
         return parts.url!
     }

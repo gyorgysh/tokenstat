@@ -98,22 +98,14 @@ private struct ClientAccountContent: View {
             ClientLicensesSheet()
         }
         .sheet(isPresented: $showDeletionWeb) {
-            NavigationStack {
-                AccountDeletionWebView(url: deletionURL ?? Self.defaultDeletionURL)
-                    .ignoresSafeArea(.container, edges: .bottom)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showDeletionWeb = false }
-                        }
-                    }
-            }
+            ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
         }
         .sheet(isPresented: Binding(
             get: { legalURL != nil },
             set: { if !$0 { legalURL = nil } }
         )) {
             if let legalURL {
-                ClientLegalBrowser(url: legalURL)
+                ClientWebBrowser(url: legalURL)
             }
         }
         .task {
@@ -149,8 +141,10 @@ private struct ClientAccountContent: View {
                 Spacer(minLength: 0)
             }
 
-            if let handle = account.handle, let url = URL(string: "\(account.host)/\(handle)") {
-                Link(destination: url) {
+            if let handle = account.handle {
+                Button {
+                    legalURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
+                } label: {
                     Label("View public profile", systemImage: "arrow.up.right.square")
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)

@@ -11,13 +11,13 @@ import SwiftUI
 // The client is iOS and iPadOS only.
 #if !os(macOS)
 
-/// Presents legal documents without sending the person away from the app.
+/// Presents website pages without sending the person away from the app.
 /// Safari still owns the page, cookies, reader controls and dismissal gesture.
 ///
 /// `mobile=1` is what the site uses to drop the header, footer and marketing
 /// links. App Review treats a full website in this sheet as a way to leave
 /// the app. The flag is layout only.
-struct ClientLegalBrowser: UIViewControllerRepresentable {
+struct ClientWebBrowser: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> SFSafariViewController {

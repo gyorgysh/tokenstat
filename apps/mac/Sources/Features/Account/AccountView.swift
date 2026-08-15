@@ -13,7 +13,7 @@ struct AccountView: View {
     /// Whether the third-party notices sheet is open.
     @State private var confirmSignOut = false
     @State private var showLicenses = false
-    /// iOS only: the in-app web view that completes deletion on the website.
+    /// iOS only: the in-app browser that completes deletion on the website.
     @State private var showDeletionWeb = false
     @State private var deletionURL: URL?
     #if os(macOS)
@@ -74,19 +74,11 @@ struct AccountView: View {
         }
         #if os(iOS)
         // App Store Guideline 5.1.1(v) wants deletion available inside the
-        // app. The website's own data settings page in a web view lets the
+        // app. The website's own data settings page in an in-app browser lets the
         // user start and finish it without leaving, and needs no backend
         // endpoint of our own. macOS opens the same page in the browser.
         .sheet(isPresented: $showDeletionWeb) {
-            NavigationStack {
-                AccountDeletionWebView(url: deletionURL ?? Self.defaultDeletionURL)
-                    .ignoresSafeArea(.container, edges: .bottom)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showDeletionWeb = false }
-                        }
-                    }
-            }
+            ClientWebBrowser(url: deletionURL ?? Self.defaultDeletionURL)
         }
         #endif
         .overlay(alignment: .bottomTrailing) {
