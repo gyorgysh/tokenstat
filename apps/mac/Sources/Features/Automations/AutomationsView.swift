@@ -30,6 +30,8 @@ struct AutomationsView: View {
     @State private var viewingRun: RunRecord?
     @State private var search = ""
     @FocusState private var searchFocused: Bool
+    /// Empty means follow the default: open when there are no jobs yet.
+    @AppStorage("automations.examplesExpanded") private var examplesExpandedStored = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,7 +49,6 @@ struct AutomationsView: View {
                         Banner(text: error, severity: .warning)
                     }
                     intro
-                    templatesRow
                     // A search box, not a rounded text field with the icon glued
                     // on top: the overlay sat on the field's leading edge and
                     // overlapped the placeholder and the first typed characters.
@@ -91,6 +92,7 @@ struct AutomationsView: View {
                     if !model.runs.isEmpty {
                         recentRuns
                     }
+                    examples
                 }
                 .padding(Theme.Space.m)
             }
@@ -159,9 +161,62 @@ struct AutomationsView: View {
         }
     }
 
-    /// Three suggested setups, so a blank Automations screen shows what the
-    /// screen is for instead of only an empty card.
-    private var templatesRow: some View {
+    /// Suggested setups sit under the user's own jobs. Open by default only
+    /// when the list is empty, so first visit still teaches the screen.
+    private var examplesExpanded: Bool {
+        switch examplesExpandedStored {
+        case "1": return true
+        case "0": return false
+        default: return model.jobs.isEmpty
+        }
+    }
+
+    /// Ready-made jobs, collapsed the same way Devices hides its keys.
+    private var examples: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    examplesExpandedStored = examplesExpanded ? "0" : "1"
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                    Image(systemName: "square.grid.2x2")
+                        .foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Examples")
+                            .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                        Text(examplesExpanded
+                            ? "Create one, then press Run now"
+                            : "Ready-made jobs you can create and run yourself")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: Theme.Space.s)
+                    Image(systemName: examplesExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint(examplesExpanded
+                ? "Hides the example jobs"
+                : "Shows the example jobs")
+
+            if examplesExpanded {
+                templatesGrid
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+
+    private var templatesGrid: some View {
         LazyVGrid(
             columns: [GridItem(.flexible(), spacing: Theme.Space.s), GridItem(.flexible(), spacing: Theme.Space.s)],
             spacing: Theme.Space.s
@@ -186,7 +241,7 @@ struct AutomationsView: View {
                     }
                     .padding(Theme.Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                    .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                     .overlay(
                         RoundedRectangle(cornerRadius: Theme.cardRadius)
                             .strokeBorder(Theme.border, lineWidth: 1)
@@ -251,6 +306,16 @@ struct AutomationsView: View {
             backendID: "claude",
             schedule: AutomationSchedule(kind: .once),
             budgetSeconds: 900
+        ),
+        AutomationTemplate(
+            title: "Release",
+            subtitle: "Once, when you run it",
+            symbol: "tag",
+            name: "Release",
+            prompt: AutomationsModel.releasePrompt(),
+            backendID: "claude",
+            schedule: AutomationSchedule(kind: .once),
+            budgetSeconds: 1800
         ),
     ]
 

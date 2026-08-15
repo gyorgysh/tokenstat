@@ -352,6 +352,14 @@ struct RootView: View {
             guard launch.hostReady, destinationHasInspector else { return }
             toggleRightSidebar()
         }
+        .onChange(of: todo.selectionGeneration) { _, _ in
+            guard todo.selectedCardID != nil else { return }
+            isInspectorPresented = true
+            if !inspectorFits {
+                isOverlayVisible = true
+                overlayHeldByPress = true
+            }
+        }
         // The network came back: refresh what the offline stretch starved.
         // This is the connectionBack hook. Do it now, not on the next
         // 30-second retry tick.
@@ -750,7 +758,13 @@ struct RootView: View {
         Group {
             switch destination {
             case .home:
-                HomeInspector(model: home) { closeInspector() }
+                HomeInspector(
+                    model: home,
+                    onOpenInsights: { day in
+                        model.focusOn(day: day)
+                        selectDestination(.insights)
+                    }
+                ) { closeInspector() }
             case .todo:
                 TodoInspector(
                     model: todo,

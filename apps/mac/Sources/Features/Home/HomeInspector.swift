@@ -7,13 +7,16 @@
 
 import SwiftUI
 
-/// The day pinned from the Home heatmap: spend, models, and the token split.
+/// The day pinned from the Home heatmap: an Insights-shaped overview.
 ///
 /// Hover still pops a glance card. A click lives here so leaving Home and
 /// coming back keeps the same day, which a view `@State` would not survive.
 struct HomeInspector: View {
     var model: HomeModel
+    var onOpenInsights: ((String) -> Void)? = nil
     var onClose: () -> Void
+
+    private let listLimit = 8
 
     var body: some View {
         VStack(spacing: 0) {
@@ -56,7 +59,7 @@ struct HomeInspector: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if let detail = model.selectedDetail {
-                    detailCard(detail)
+                    overview(detail)
                 } else {
                     Text("Nothing recorded on this day.")
                         .font(.callout)
@@ -68,8 +71,10 @@ struct HomeInspector: View {
         }
     }
 
-    private func detailCard(_ detail: DayDetail) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
+    private func overview(_ detail: DayDetail) -> some View {
+        let extra = model.selectedOverview
+        let sessions = extra?.totals?.sessions
+        return VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(Self.friendlyDate(detail.date))
                 .font(.system(size: 15, weight: .semibold))
 
@@ -81,30 +86,232 @@ struct HomeInspector: View {
                 size: 22
             )
 
-            Text("\(formatTokens(detail.tokens)) tokens · \(detail.events.formatted(.number)) requests")
+            Text(headline(detail, sessions: sessions))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if !detail.rows.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    ForEach(detail.rows) { part in
-                        HStack(spacing: Theme.Space.s) {
-                            Circle()
-                                .fill(Self.dotColor(part))
-                                .frame(width: 6, height: 6)
-                            Text("\(shortModel(part.model)) · \(harnessName(part.src))")
-                                .font(.system(size: 12))
-                                .lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(formatTokens(part.tokens))
-                                .font(Theme.numeric(12, weight: .medium))
-                                .foregroundStyle(.secondary)
-                        }
+            counters(detail)
+
+            split(detail)
+
+            groupCard(
+                title: "Models",
+                subtitle: "List-rate value",
+                rows: modelRows(detail, extra: extra),
+                showsValue: true,
+                isHarness: false
+            )
+
+            groupCard(
+                title: "Harnesses",
+                subtitle: "Which agent produced the tokens",
+                rows: harnessRows(detail, extra: extra),
+                showsValue: false,
+                isHarness: true
+            )
+
+            if let projects = extra?.byProject, !projects.isEmpty {
+                groupCard(
+                    title: "Projects",
+                    subtitle: "Where the work happened",
+                    rows: projects.map { bucketRow($0, display: $0.key, monospaced: true) },
+                    showsValue: false,
+                    isHarness: false
+                )
+            }
+
+            if let sessions = extra?.bySession, !sessions.isEmpty {
+                groupCard(
+                    title: "Sessions",
+                    subtitle: "This device",
+                    rows: sessions.map { bucketRow($0, display: $0.key, monospaced: true) },
+                    showsValue: false,
+                    isHarness: false
+                )
+            }
+
+            if !detail.unpricedModels.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text("Unpriced models")
+                        .font(.caption.weight(.medium))
+                    ForEach(detail.unpricedModels, id: \.self) { name in
+                        Text(name)
+                            .font(Theme.mono(10))
+                            .foregroundStyle(.secondary)
                     }
                 }
-                split(detail)
+            }
+
+            if model.isLoadingSelectedOverview {
+                HStack(spacing: Theme.Space.s) {
+                    ProgressView().controlSize(.mini)
+                    Text("Loading breakdown…")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            if let onOpenInsights {
+                Button("Open in Insights") { onOpenInsights(detail.date) }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
             }
         }
+    }
+
+    private func headline(_ detail: DayDetail, sessions: UInt64?) -> String {
+        var parts = [
+            "\(formatTokens(detail.tokens)) tokens",
+            "\(detail.events.formatted(.number)) requests",
+        ]
+        if let sessions {
+            parts.append("\(sessions.formatted(.number)) sessions")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func counters(_ detail: DayDetail) -> some View {
+        let sums = Self.sumCounters(detail.rows)
+        return VStack(spacing: Theme.Space.xs) {
+            counterRow("Fresh input", sums.fresh)
+            counterRow("Cache read", sums.cacheRead)
+            counterRow("Cache write 5m", sums.cacheWrite5m)
+            counterRow("Cache write 1h", sums.cacheWrite1h)
+            counterRow("Output", sums.output)
+        }
+    }
+
+    private func counterRow(_ label: String, _ value: UInt64?) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value.map { formatTokens($0) } ?? "n/a")
+                .font(Theme.numeric(11))
+                .foregroundStyle(value == nil ? .tertiary : .primary)
+        }
+    }
+
+    private func groupCard(
+        title: String,
+        subtitle: String,
+        rows: [DayGroupRow],
+        showsValue: Bool,
+        isHarness: Bool
+    ) -> some View {
+        Card(title: title, subtitle: subtitle) {
+            if rows.isEmpty {
+                Text("Nothing recorded yet.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(rows.prefix(listLimit)) { row in
+                        HStack(spacing: Theme.Space.s) {
+                            if isHarness {
+                                HarnessMark(id: row.key, size: 15)
+                            }
+                            Text(row.label)
+                                .font(row.monospaced ? Theme.mono(12) : .system(size: 12))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(formatTokens(row.tokens))
+                                .font(Theme.numeric(11))
+                                .foregroundStyle(.secondary)
+                            if showsValue, let value = row.value {
+                                Text(value)
+                                    .font(Theme.numeric(11))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    if rows.count > listLimit {
+                        Text("and \(rows.count - listLimit) more")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    private func modelRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {
+        if let extra, !extra.byModel.isEmpty {
+            return extra.byModel.map {
+                bucketRow($0, display: shortModel($0.key), monospaced: true)
+            }
+        }
+        return fold(detail.rows, key: \.model, display: shortModel, monospaced: true)
+    }
+
+    private func harnessRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {
+        if let extra, !extra.bySource.isEmpty {
+            return extra.bySource.map {
+                bucketRow($0, display: harnessName($0.key), monospaced: false)
+            }
+        }
+        return fold(detail.rows, key: \.src, display: harnessName, monospaced: false)
+    }
+
+    private func bucketRow(_ bucket: Bucket, display: String, monospaced: Bool) -> DayGroupRow {
+        DayGroupRow(
+            key: bucket.key,
+            label: display.isEmpty ? "unknown" : display,
+            tokens: bucket.counters.total,
+            value: bucket.value.formatted,
+            monospaced: monospaced
+        )
+    }
+
+    private func fold(
+        _ parts: [DayPart],
+        key: KeyPath<DayPart, String>,
+        display: (String) -> String,
+        monospaced: Bool
+    ) -> [DayGroupRow] {
+        var totals: [(String, UInt64)] = []
+        var index: [String: Int] = [:]
+        for part in parts {
+            let raw = part[keyPath: key]
+            if let i = index[raw] {
+                totals[i].1 += part.tokens
+            } else {
+                index[raw] = totals.count
+                totals.append((raw, part.tokens))
+            }
+        }
+        totals.sort { $0.1 > $1.1 }
+        return totals.map { raw, tokens in
+            DayGroupRow(
+                key: raw,
+                label: display(raw).isEmpty ? "unknown" : display(raw),
+                tokens: tokens,
+                value: nil,
+                monospaced: monospaced
+            )
+        }
+    }
+
+    private static func sumCounters(_ rows: [DayPart]) -> (
+        fresh: UInt64?, cacheRead: UInt64?, cacheWrite5m: UInt64?,
+        cacheWrite1h: UInt64?, output: UInt64?
+    ) {
+        func fold(_ pick: (DayPart) -> UInt64?) -> UInt64? {
+            let values = rows.compactMap(pick)
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0, +)
+        }
+        return (
+            fold(\.fresh),
+            fold(\.cacheRead),
+            fold(\.cacheWrite5m),
+            fold(\.cacheWrite1h),
+            fold(\.output)
+        )
     }
 
     private func split(_ detail: DayDetail) -> some View {
@@ -161,10 +368,14 @@ struct HomeInspector: View {
         out.dateFormat = "MMM d, yyyy"
         return out.string(from: date)
     }
+}
 
-    private static func dotColor(_ part: DayPart) -> Color {
-        let palette = [Theme.accent, Theme.heat[4], Theme.heat[3], Theme.heat[2], Theme.heat[1]]
-        let seed = abs(part.id.hashValue) % palette.count
-        return palette[seed]
-    }
+private struct DayGroupRow: Identifiable {
+    var key: String
+    var label: String
+    var tokens: UInt64
+    var value: String?
+    var monospaced: Bool
+
+    var id: String { key }
 }

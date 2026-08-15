@@ -522,19 +522,17 @@ private struct CommitBox: View {
 
             if !commitBackends.isEmpty {
                 HStack(spacing: Theme.Space.s) {
-                    Picker("Backend", selection: backendBinding) {
-                        ForEach(commitBackends) { backend in
-                            Text(backend.label).tag(backend.id)
-                        }
-                    }
-                    .labelsHidden()
+                    AppMenuPicker(
+                        title: "Agent",
+                        options: commitBackends.map { (value: $0.id, label: $0.label) },
+                        selection: backendBinding
+                    )
                     if let backend = selectedBackend, !backend.models.isEmpty {
-                        Picker("Model", selection: modelBinding) {
-                            ForEach(backend.models, id: \.self) { name in
-                                Text(name).tag(name)
-                            }
-                        }
-                        .labelsHidden()
+                        AppMenuPicker(
+                            title: "Model",
+                            options: backend.models.map { (value: $0, label: $0) },
+                            selection: modelBinding
+                        )
                     }
                 }
                 .padding(.horizontal, Theme.Space.m)

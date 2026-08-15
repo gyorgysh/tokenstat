@@ -22,6 +22,9 @@ final class TodoModel {
     var errorMessage: String?
     /// The card the inspector is showing.
     var selectedCardID: String?
+    /// Bumps on every select, including a second click on the same card, so
+    /// the inspector can reopen.
+    private(set) var selectionGeneration = 0
     var noticeMessage: String?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
@@ -58,6 +61,7 @@ final class TodoModel {
 
     func selectCard(_ id: String) {
         selectedCardID = id
+        selectionGeneration += 1
     }
 
     func load() async {

@@ -237,11 +237,6 @@ private struct CardView: View {
     /// Opens the run's transcript on the Automations screen.
     var onViewRun: ((String) -> Void)?
 
-    @State private var editingTitle = false
-    @State private var editingNotes = false
-    @State private var titleDraft = ""
-    @State private var notesDraft = ""
-
     private var tint: Color {
         switch card.delegate?.status {
         case "running": return Theme.accent
@@ -258,20 +253,9 @@ private struct CardView: View {
                 FeatureMark(name: card.isNote ? "mark_note" : "mark_todo",
                             tint: card.isNote ? Theme.secondary : Theme.accent,
                             size: 16)
-                if editingTitle {
-                    TextField("Title", text: $titleDraft)
-                        .textFieldStyle(.plain)
-                        .font(.callout.weight(.medium))
-                        .onSubmit { saveTitle() }
-                } else {
-                    Text(card.title)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(2)
-                        .onTapGesture {
-                            titleDraft = card.title
-                            editingTitle = true
-                        }
-                }
+                Text(card.title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(2)
                 Spacer()
                 if card.priority == "high" {
                     Image(systemName: "exclamationmark")
@@ -279,40 +263,12 @@ private struct CardView: View {
                         .foregroundStyle(Theme.warning)
                 }
             }
-            if editingNotes {
-                // A task's notes are the prompt the agent gets; only a plain
-                // note card calls them notes.
-                TextField(
-                    card.isNote ? "Note" : (card.backend == "sh" ? "Command" : "Prompt"),
-                    text: $notesDraft,
-                    axis: .vertical
-                )
-                    .textFieldStyle(.plain)
-                    .font(.caption)
-                    .lineLimit(2...4)
-                    .onSubmit { saveNotes() }
-            } else if !card.notes.isEmpty {
+            if !card.notes.isEmpty {
                 Text(card.notes)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .onTapGesture {
-                        notesDraft = card.notes
-                        editingNotes = true
-                    }
-            } else {
-                Text(
-                    card.isNote
-                        ? "Click to add a note"
-                        : (card.backend == "sh" ? "Click to add a command" : "Click to add a prompt")
-                )
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .onTapGesture {
-                        notesDraft = ""
-                        editingNotes = true
-                    }
             }
             if let delegate = card.delegate {
                 delegateStatus(delegate)
@@ -354,19 +310,7 @@ private struct CardView: View {
                 )
         )
         .contentShape(.rect)
-        .onTapGesture { onSelect() }
-        // Escape leaves the editor. macOS only: there is no Escape key to bind
-        // on a phone, and dismissing the keyboard already ends the edit there.
-        #if os(macOS)
-        .onExitCommand {
-            editingTitle = false
-            editingNotes = false
-        }
-        #endif
-        .onAppear {
-            titleDraft = card.title
-            notesDraft = card.notes
-        }
+        .simultaneousGesture(TapGesture().onEnded { onSelect() })
         .draggable(card.id)
     }
 
@@ -374,16 +318,6 @@ private struct CardView: View {
         seconds % 60 == 0
             ? "\(seconds / 60)m time limit"
             : "\(seconds)s time limit"
-    }
-
-    private func saveTitle() {
-        editingTitle = false
-        Task { await model.updateTitle(card, title: titleDraft) }
-    }
-
-    private func saveNotes() {
-        editingNotes = false
-        Task { await model.updateNotes(card, notes: notesDraft) }
     }
 
     private func delegateStatus(_ delegate: TodoDelegate) -> some View {

@@ -117,11 +117,16 @@ final class HomeModel {
     private(set) var selectedDay: HeatCell?
     private(set) var selectedDetail: DayDetail?
     private(set) var isLoadingSelectedDetail = false
+    /// Insights-style breakdown for the pinned day. Local archive only.
+    private(set) var selectedOverview: DayOverview?
+    private(set) var isLoadingSelectedOverview = false
 
     /// Fetched details, kept per day so revisiting a cell is instant and a
     /// quick sweep across the grid does not re-ask for every cell.
     private var dayDetailCache: [String: DayDetail] = [:]
     private var dayDetailTask: Task<Void, Never>?
+    private var dayOverviewCache: [String: DayOverview] = [:]
+    private var dayOverviewTask: Task<Void, Never>?
 
     /// Value at list rates over the last seven calendar days, the same measure
     /// the heatmap colours by, so the two cannot disagree.
@@ -191,10 +196,13 @@ final class HomeModel {
                 // account grid fell back to local). Stale day details would
                 // describe a different machine's usage, so they have to go.
                 dayDetailCache = [:]
+                dayOverviewCache = [:]
                 hoveredDay = nil
                 hoveredDetail = nil
                 isLoadingDayDetail = false
                 dayDetailTask?.cancel()
+                dayOverviewTask?.cancel()
+                selectedOverview = nil
             }
             deliveredScope = newScope
             scopeNotice = grid?.notice
@@ -312,17 +320,67 @@ final class HomeModel {
         selectedDay = day
         if day.isLocked {
             selectedDetail = nil
+            selectedOverview = nil
             isLoadingSelectedDetail = false
+            isLoadingSelectedOverview = false
             return
         }
         if let cached = dayDetailCache[day.date] {
             selectedDetail = cached
             isLoadingSelectedDetail = false
+        } else {
+            isLoadingSelectedDetail = true
+            selectedDetail = nil
+            fetchDayDetail(day.date, settle: false)
+        }
+        loadOverview(for: day.date)
+    }
+
+    /// Local reports for the pinned day: models, harnesses, projects, sessions.
+    ///
+    /// The account series has no project or session keys, so this stays off
+    /// when the grid is counting every device.
+    private func loadOverview(for date: String) {
+        dayOverviewTask?.cancel()
+        guard deliveredScope == .thisMachine else {
+            selectedOverview = nil
+            isLoadingSelectedOverview = false
             return
         }
-        isLoadingSelectedDetail = true
-        selectedDetail = nil
-        fetchDayDetail(day.date, settle: false)
+        if let cached = dayOverviewCache[date] {
+            selectedOverview = cached
+            isLoadingSelectedOverview = false
+            return
+        }
+        isLoadingSelectedOverview = true
+        selectedOverview = nil
+        dayOverviewTask = Task { [weak self] in
+            let query = Query(since: date, until: date)
+            var sessionQuery = query
+            sessionQuery.limit = 80
+            async let totalsResult = Bridge.totals(query)
+            async let byModelResult = Bridge.report(group: .model, query: query)
+            async let bySourceResult = Bridge.report(group: .source, query: query)
+            async let byProjectResult = Bridge.report(group: .project, query: query)
+            async let bySessionResult = Bridge.report(group: .session, query: sessionQuery)
+            let overview = DayOverview(
+                totals: try? await totalsResult,
+                byModel: (try? await byModelResult) ?? [],
+                bySource: (try? await bySourceResult) ?? [],
+                byProject: (try? await byProjectResult) ?? [],
+                bySession: (try? await bySessionResult) ?? []
+            )
+            guard !Task.isCancelled else { return }
+            self?.finishOverview(date, overview)
+        }
+    }
+
+    private func finishOverview(_ date: String, _ overview: DayOverview) {
+        dayOverviewCache[date] = overview
+        if selectedDay?.date == date {
+            selectedOverview = overview
+            isLoadingSelectedOverview = false
+        }
     }
 
     private func fetchDayDetail(_ date: String, settle: Bool) {
@@ -361,10 +419,13 @@ final class HomeModel {
         // The new grid is a different set of numbers; a cached hover from the
         // old one would describe the wrong scope.
         dayDetailCache = [:]
+        dayOverviewCache = [:]
         hoveredDay = nil
         hoveredDetail = nil
         isLoadingDayDetail = false
         dayDetailTask?.cancel()
+        dayOverviewTask?.cancel()
+        selectedOverview = nil
         scope = new
         await load()
     }
@@ -378,4 +439,13 @@ final class HomeModel {
         defer { isLoadingLimits = false }
         planLimits = (try? await Bridge.usageLimits()) ?? []
     }
+}
+
+/// Insights-shaped breakdown for one local day.
+struct DayOverview: Sendable {
+    var totals: Totals?
+    var byModel: [Bucket]
+    var bySource: [Bucket]
+    var byProject: [Bucket]
+    var bySession: [Bucket]
 }
