@@ -342,6 +342,8 @@ pub fn agent_command(
                 [
                     "--print",
                     p,
+                    "--output-format",
+                    "stream-json",
                     "--print-timeout",
                     "30m",
                     // Headless: agy cannot prompt, so a tool that needs
@@ -1495,6 +1497,10 @@ mod tests {
         assert!(claude.iter().any(|a| a == "--dangerously-skip-permissions"));
         let agy = agent_command("agy", "do it", None, None).unwrap();
         assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(
+            agy.windows(2)
+                .any(|w| w == ["--output-format", "stream-json"])
+        );
         let grok = agent_command("grok", "do it", None, None).unwrap();
         assert!(
             grok.windows(2)

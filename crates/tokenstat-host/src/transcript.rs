@@ -142,9 +142,7 @@ impl Parser {
             "cursor" => render_cursor(&value),
             "codex" => render_codex(&value),
             "opencode" => render_opencode(&value),
-            // Antigravity --print is prose. A JSON line from another tool
-            // in the same stream is dropped rather than dumped.
-            "agy" => None,
+            "agy" => render_agy(&value),
             _ => None,
         }
     }
@@ -176,7 +174,7 @@ pub fn looks_like_ndjson(bytes: &[u8]) -> bool {
         return false;
     }
     let sample = &bytes[i..bytes.len().min(i + 512)];
-    sample.windows(7).any(|w| w == b"\"type\":")
+    sample.windows(7).any(|w| w == b"\"type\":") || sample.windows(8).any(|w| w == b"\"event\":")
 }
 
 /// Build `{run}.readable.txt` from the raw file when it is missing or empty.
@@ -356,6 +354,47 @@ fn render_codex(value: &serde_json::Value) -> Option<Piece> {
     None
 }
 
+/// Antigravity `--output-format stream-json`. Tools are `step_update`
+/// with `step_type: tool`. Text arrives as `text_delta` on
+/// `agent_response`. The final `result` repeats that text, so it is dropped.
+fn render_agy(value: &serde_json::Value) -> Option<Piece> {
+    let event = value.get("event")?.as_str()?;
+    match event {
+        "step_update" => {
+            let step = value.get("step_update")?;
+            let kind = step.get("step_type").and_then(|v| v.as_str()).unwrap_or("");
+            match kind {
+                "tool" => {
+                    // ACTIVE and DONE are the same call. Emit once, when it
+                    // starts, so the inspector does not double every row.
+                    let state = step.get("state").and_then(|v| v.as_str()).unwrap_or("");
+                    if state != "ACTIVE" {
+                        return None;
+                    }
+                    let name = step
+                        .get("tool_name")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| {
+                            step.get("tool_info")
+                                .and_then(|info| info.get("name"))
+                                .and_then(|v| v.as_str())
+                        })
+                        .unwrap_or("tool");
+                    let params = step
+                        .get("tool_info")
+                        .and_then(|info| info.get("parameters"));
+                    Some(Piece::Block(format_tool(&display_verb(name), params)))
+                }
+                "agent_response" => {
+                    text_delta(step.get("text_delta").and_then(|v| v.as_str())).map(Piece::Text)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type")?.as_str()?;
     match kind {
@@ -409,7 +448,7 @@ fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
 
 fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
     let value = input?;
-    const KEYS: [&str; 8] = [
+    const KEYS: [&str; 12] = [
         "path",
         "file_path",
         "file",
@@ -418,14 +457,32 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
         "command",
         "pattern",
         "query",
+        // Antigravity stream-json uses PascalCase.
+        "TargetFile",
+        "AbsolutePath",
+        "CommandLine",
+        "FilePath",
     ];
-    for key in KEYS {
+    lookup_str(value, &KEYS)
+}
+
+fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    for key in keys {
         if let Some(s) = value
-            .get(key)
+            .get(*key)
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
         {
             return Some(s);
+        }
+    }
+    let obj = value.as_object()?;
+    let wanted: Vec<String> = keys.iter().map(|k| k.to_ascii_lowercase()).collect();
+    for (key, val) in obj {
+        if wanted.iter().any(|want| want == &key.to_ascii_lowercase()) {
+            if let Some(s) = val.as_str().filter(|s| !s.is_empty()) {
+                return Some(s);
+            }
         }
     }
     None
@@ -433,14 +490,8 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
 
 fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
     let value = input?;
-    let old = value
-        .get("old_string")
-        .or_else(|| value.get("old_str"))
-        .and_then(|v| v.as_str())?;
-    let new = value
-        .get("new_string")
-        .or_else(|| value.get("new_str"))
-        .and_then(|v| v.as_str())?;
+    let old = lookup_str(value, &["old_string", "old_str", "OldString", "OldStr"])?;
+    let new = lookup_str(value, &["new_string", "new_str", "NewString", "NewStr"])?;
     if old.is_empty() && new.is_empty() {
         return None;
     }
@@ -854,6 +905,29 @@ mod tests {
     }
 
     #[test]
+    fn agy_stream_json_tools_become_verbs() {
+        let raw = "\
+{\"event\":\"init\",\"init\":{\"tools\":[]}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"ACTIVE\",\"tool_name\":\"view_file\",\"tool_info\":{\"name\":\"view_file\",\"parameters\":{\"AbsolutePath\":\"/tmp/a.txt\"}}}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"DONE\",\"tool_name\":\"view_file\",\"tool_info\":{\"name\":\"view_file\",\"parameters\":{\"AbsolutePath\":\"/tmp/a.txt\"}}}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"ACTIVE\",\"tool_name\":\"write_to_file\",\"tool_info\":{\"parameters\":{\"TargetFile\":\"/tmp/a.txt\"}}}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"ACTIVE\",\"tool_name\":\"replace_file_content\",\"tool_info\":{\"parameters\":{\"TargetFile\":\"/tmp/a.txt\"}}}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"ACTIVE\",\"tool_name\":\"run_command\",\"tool_info\":{\"parameters\":{\"CommandLine\":\"echo ok\"}}}}\n\
+{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"agent_response\",\"text_delta\":\"done\"}}\n\
+{\"event\":\"result\",\"result\":{\"response\":\"done\"}}\n";
+        let out = feed("agy", raw);
+        assert!(out.contains("Read /tmp/a.txt"), "{out}");
+        assert!(out.contains("Write /tmp/a.txt"), "{out}");
+        assert!(out.contains("Edit /tmp/a.txt"), "{out}");
+        assert!(out.contains("Shell echo ok"), "{out}");
+        assert!(out.contains("done"), "{out}");
+        assert_eq!(out.matches("Read /tmp/a.txt").count(), 1, "{out}");
+        assert!(!out.contains("write_to_file"), "{out}");
+        assert!(!out.contains("view_file"), "{out}");
+        assert!(!out.contains("CommandLine"), "{out}");
+    }
+
+    #[test]
     fn materialize_writes_readable_from_raw() {
         let dir =
             std::env::temp_dir().join(format!("tokenstat-transcript-mat-{}", std::process::id()));
@@ -874,6 +948,9 @@ mod tests {
     #[test]
     fn looks_like_ndjson_detects_grok_streams() {
         assert!(looks_like_ndjson(b"{\"type\":\"text\",\"data\":\"hi\"}\n"));
+        assert!(looks_like_ndjson(
+            b"{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\"}}\n"
+        ));
         assert!(!looks_like_ndjson(b"I'll start by reading Cargo.toml"));
         assert!(!looks_like_ndjson(b""));
     }

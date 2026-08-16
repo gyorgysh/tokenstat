@@ -647,14 +647,14 @@ private struct AutomationRow: View {
                 StatusPill(status: last.status, text: last.endedLabel)
             }
             Spacer()
-            Toggle("Enabled", isOn: Binding(
-                get: { job.enabled },
-                set: { _ in Task { await model.toggle(job) } }
-            ))
-            .toggleStyle(.switch)
-            .labelsHidden()
+            BrandToggleChip(
+                title: job.enabled ? "On" : "Off",
+                isOn: Binding(
+                    get: { job.enabled },
+                    set: { _ in Task { await model.toggle(job) } }
+                )
+            )
             .accessibilityLabel("Enabled")
-            .accessibilityValue(job.enabled ? "On" : "Off")
             .help(job.enabled ? "Running on its schedule" : "Paused. It will not fire.")
         }
     }
