@@ -868,9 +868,6 @@ impl Store {
             }
             let piece = parser.push(bytes);
             if !piece.is_empty() {
-                if !readable_body.is_empty() {
-                    readable_body.push_str("\n\n");
-                }
                 readable_body.push_str(&piece);
                 transcript::cap_readable(readable_body);
                 let _ = std::fs::write(&readable_path, readable_body.as_bytes());
@@ -912,9 +909,6 @@ impl Store {
 
         let tail = parser.finish();
         if !tail.is_empty() {
-            if !readable_body.is_empty() {
-                readable_body.push_str("\n\n");
-            }
             readable_body.push_str(&tail);
             transcript::cap_readable(&mut readable_body);
             let _ = std::fs::write(&readable_path, readable_body.as_bytes());

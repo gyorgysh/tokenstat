@@ -331,8 +331,10 @@ final class AutomationsModel {
             startPolling(live.id)
         } else {
             stopPolling()
-            // The run ended; show whatever the transcript has, once.
-            Task { await self.fetchTranscript(id: live.id, resetIfNeeded: false) }
+            // Each reply is 64 KiB. A finished run is not growing, so pull
+            // until we have the display window or the host has no more.
+            let id = live.id
+            Task { await self.fetchTranscriptUntilCaughtUp(id: id) }
         }
     }
 
@@ -350,6 +352,18 @@ final class AutomationsModel {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+    }
+
+    private func fetchTranscriptUntilCaughtUp(id: String) async {
+        var slices = 0
+        while slices < 8 {
+            slices += 1
+            let before = transcriptOffset
+            await fetchTranscript(id: id, resetIfNeeded: false)
+            if watchingRunID != id { return }
+            if transcriptOffset <= before { return }
+            if transcriptText.utf8.count >= transcriptDisplayCap { return }
+        }
     }
 
     private func fetchTranscript(id: String, resetIfNeeded: Bool) async {

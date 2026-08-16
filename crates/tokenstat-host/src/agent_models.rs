@@ -142,11 +142,16 @@ fn run_list(bin: &str, args: &[&str]) -> Option<String> {
                             .args(["-9", &format!("-{pid}")])
                             .status();
                     }
+                    let _ = child.wait();
                     return None;
                 }
                 std::thread::sleep(Duration::from_millis(50));
             }
-            Err(_) => return None,
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
         }
     };
     if !status.success() {
@@ -360,6 +365,16 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         }
         let list = parse(&String::from_utf8_lossy(&out.stdout));
         if list.is_empty() { None } else { Some(list) }
+    }
+
+    #[test]
+    fn a_hanging_list_command_is_reaped() {
+        let start = Instant::now();
+        assert!(run_list("/bin/sleep", &["30"]).is_none());
+        assert!(
+            start.elapsed() < Duration::from_secs(12),
+            "list timeout should fire well before the sleep ends"
+        );
     }
 
     #[test]

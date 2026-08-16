@@ -78,6 +78,8 @@ impl Parser {
         out
     }
 
+    /// Prefix a paragraph break when the new piece is not a text continuation,
+    /// including across drain chunks where `out` starts empty.
     fn emit(&mut self, out: &mut String, piece: Piece) {
         match piece {
             Piece::Text(text) => {
@@ -90,7 +92,7 @@ impl Parser {
                     out.push_str(&text);
                     self.last_block.push_str(&text);
                 } else {
-                    append_block(out, &text);
+                    append_piece(out, &text, !self.last_block.is_empty());
                     self.last_block = text;
                     self.last_was_text = true;
                 }
@@ -99,7 +101,7 @@ impl Parser {
                 if text == self.last_block {
                     return;
                 }
-                append_block(out, &text);
+                append_piece(out, &text, !self.last_block.is_empty());
                 self.last_block = text;
                 self.last_was_text = false;
             }
@@ -152,7 +154,10 @@ pub fn cap_readable(text: &mut String) {
     if text.len() <= READABLE_CAP {
         return;
     }
-    let start = text.len() - READABLE_CAP;
+    let mut start = text.len() - READABLE_CAP;
+    while start < text.len() && !text.is_char_boundary(start) {
+        start += 1;
+    }
     let cut = text[start..]
         .find('\n')
         .map(|i| start + i + 1)
@@ -175,11 +180,13 @@ fn is_char_boundary(bytes: &[u8], index: usize) -> bool {
     index == bytes.len() || (bytes[index] as i8) >= -0x40
 }
 
-fn append_block(out: &mut String, piece: &str) {
+/// Join a new paragraph. `had_prior` is true when a previous `push` already
+/// emitted something, so a drain chunk that starts a block still gets a break.
+fn append_piece(out: &mut String, piece: &str, had_prior: bool) {
     if piece.is_empty() {
         return;
     }
-    if !out.is_empty() {
+    if !out.is_empty() || had_prior {
         out.push_str("\n\n");
     }
     out.push_str(piece);
@@ -458,6 +465,37 @@ mod tests {
     }
 
     #[test]
+    fn grok_text_deltas_join_across_drain_chunks() {
+        let mut p = Parser::new("grok");
+        let a = p.push(b"{\"type\":\"text\",\"data\":\"Hel\"}\n");
+        let b = p.push(b"{\"type\":\"text\",\"data\":\"lo\"}\n");
+        assert_eq!(format!("{a}{b}"), "Hello");
+    }
+
+    #[test]
+    fn a_tool_after_text_stays_its_own_paragraph() {
+        let mut p = Parser::new("grok");
+        let a = p.push(b"{\"type\":\"text\",\"data\":\"Hi\"}\n");
+        let b = p.push(
+            b"{\"type\":\"tool_call\",\"title\":\"Read\",\"rawInput\":{\"path\":\"a.rs\"}}\n",
+        );
+        assert_eq!(format!("{a}{b}"), "Hi\n\nRead a.rs");
+    }
+
+    #[test]
+    fn codex_keeps_agent_text_and_shell() {
+        let raw = concat!(
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"Done.\"}}\n",
+            "{\"type\":\"item.completed\",\"item\":{\"type\":\"command_execution\",\"command\":\"ls -la\"}}\n",
+            "{\"type\":\"item.started\",\"item\":{\"type\":\"agent_message\"}}\n",
+        );
+        let out = feed("codex", raw);
+        assert!(out.contains("Done."));
+        assert!(out.contains("Shell ls -la"));
+        assert!(!out.contains("item.started"));
+    }
+
+    #[test]
     fn cursor_tool_call_and_repeat_are_readable() {
         let raw = concat!(
             "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"H\"}]}}\n",
@@ -505,5 +543,19 @@ mod tests {
         assert!(text.len() <= READABLE_CAP);
         assert!(text.ends_with("tail"));
         assert!(!text.starts_with("head"));
+    }
+
+    #[test]
+    fn readable_cap_does_not_split_a_multibyte_character() {
+        // `é` is two bytes. Place it so `len - READABLE_CAP` lands on its
+        // second byte, which is not a char boundary.
+        let mut text = String::from("head\n");
+        text.push('é');
+        text.push_str(&"z".repeat(READABLE_CAP - 1));
+        cap_readable(&mut text);
+        assert!(text.len() <= READABLE_CAP);
+        assert!(text.is_char_boundary(0));
+        assert!(text.ends_with('z'));
+        assert!(!text.contains('é') || text.starts_with('é'));
     }
 }
