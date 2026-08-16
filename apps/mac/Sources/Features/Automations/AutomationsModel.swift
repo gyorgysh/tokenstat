@@ -40,6 +40,17 @@ final class AutomationsModel {
     var queueBudgetMinutes = "180"
     var queueNoLimit = false
     var queueMaxConcurrent = "2"
+    /// Last values the daemon accepted. The Save button is only live when
+    /// the fields differ, so a tap that did nothing cannot look like a save.
+    private(set) var savedQueueBudgetMinutes = "180"
+    private(set) var savedQueueNoLimit = false
+    private(set) var savedQueueMaxConcurrent = "2"
+
+    var queueDirty: Bool {
+        queueBudgetMinutes != savedQueueBudgetMinutes
+            || queueNoLimit != savedQueueNoLimit
+            || queueMaxConcurrent != savedQueueMaxConcurrent
+    }
 
     /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
@@ -192,6 +203,9 @@ final class AutomationsModel {
             queueBudgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
         }
         queueMaxConcurrent = String(queue.maxConcurrent)
+        savedQueueBudgetMinutes = queueBudgetMinutes
+        savedQueueNoLimit = queueNoLimit
+        savedQueueMaxConcurrent = queueMaxConcurrent
     }
 
     func toggle(_ job: Automation) async {
@@ -203,9 +217,12 @@ final class AutomationsModel {
         }
     }
 
-    func update(_ job: Automation) async {
+    func update(_ job: Automation, announce: Bool = true) async {
         do {
             _ = try await Bridge.updateAutomation(job)
+            if announce {
+                showNotice("Saved \(job.name).")
+            }
             errorMessage = nil
             await load()
         } catch {
@@ -260,7 +277,7 @@ final class AutomationsModel {
             existing.model = model
             existing.prompt = prompt
             existing.enabled = true
-            await update(existing)
+            await update(existing, announce: false)
             guard let job = jobs.first(where: { $0.id == existing.id }) else { return }
             selectJob(job.id)
             await run(job)

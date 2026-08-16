@@ -11,17 +11,27 @@ import SwiftUI
 
 /// Centred icon + title + subtitle used by all three inspector tabs.
 struct InspectorEmptyState: View {
-    let systemImage: String
+    var systemImage: String = "circle"
+    /// Product mark. Preferred over `systemImage` so the pane matches cards.
+    var mark: String? = nil
     let title: String
     let subtitle: String
     var tint: Color = .secondary
 
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(tint.opacity(0.7))
-                .symbolRenderingMode(.hierarchical)
+            if let mark {
+                FeatureMark(
+                    name: mark,
+                    tint: tint == .secondary ? Theme.accent : tint,
+                    size: 28
+                )
+            } else {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(tint.opacity(0.7))
+                    .symbolRenderingMode(.hierarchical)
+            }
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.75))

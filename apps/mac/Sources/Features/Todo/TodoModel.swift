@@ -160,24 +160,34 @@ final class TodoModel {
         }
     }
 
-    func updateTitle(_ card: TodoCard, title: String) async {
+    @discardableResult
+    func updateTitle(_ card: TodoCard, title: String) async -> Bool {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value != card.title else { return }
+        guard !value.isEmpty else { return false }
+        if value == card.title { return true }
         do {
             _ = try await Bridge.todoUpdate(id: card.id, title: value)
+            showNotice("Saved \"\(value)\".")
+            errorMessage = nil
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
-    func updateNotes(_ card: TodoCard, notes: String) async {
-        guard notes != card.notes else { return }
+    @discardableResult
+    func updateNotes(_ card: TodoCard, notes: String) async -> Bool {
+        if notes == card.notes { return true }
         do {
             _ = try await Bridge.todoUpdate(id: card.id, notes: notes)
+            errorMessage = nil
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

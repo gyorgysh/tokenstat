@@ -21,9 +21,10 @@ struct AutomationsInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
+                FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
+                    .padding(.leading, Theme.Space.m)
                 Text(chromeTitle)
                     .font(.system(size: 13, weight: .semibold))
-                    .padding(.leading, Theme.Space.m)
                 Spacer(minLength: 0)
             }
             Group {
@@ -33,7 +34,7 @@ struct AutomationsInspector: View {
                     jobBody(job)
                 } else {
                     InspectorEmptyState(
-                        systemImage: "bolt",
+                        mark: "mark_automation",
                         title: "Pick a job or a run",
                         subtitle: "Schedule and transcript open here."
                     )
@@ -113,6 +114,10 @@ struct AutomationsInspector: View {
                         Button("Stop") { Task { await model.stop(run) } }
                             .buttonStyle(SecondaryButtonStyle())
                             .help("Kill this run now")
+                    }
+                    if model.selectedJob != nil {
+                        Button("Edit job") { editing = true }
+                            .buttonStyle(SecondaryButtonStyle())
                     }
                     StatusPill(status: run.status, text: run.endedLabel)
                 }

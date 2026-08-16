@@ -21,6 +21,10 @@ struct InspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
+                FeatureMark(name: "mark_insights", tint: Theme.accent, size: 16)
+                    .padding(.leading, Theme.Space.m)
+                Text("Insights")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             ScrollView {
@@ -44,7 +48,7 @@ struct InspectorView: View {
     /// it. Home is cards, Insights is cards, and the inspector is now the same
     /// object at sidebar width.
     private var period: some View {
-        Card(title: "This period", subtitle: nil) {
+        Card(title: "This period", subtitle: nil, mark: "mark_insights") {
             if isEmptyArchive {
                 nothingScanned
             } else {
@@ -132,7 +136,7 @@ struct InspectorView: View {
     /// here were a feature you had to discover by accident.
     @ViewBuilder
     private var selection: some View {
-        Card(title: "Selected", subtitle: nil) {
+        Card(title: "Selected", subtitle: nil, mark: "mark_activity") {
             if let row = model.selected {
                 selection(row)
             } else {
@@ -251,7 +255,7 @@ struct InspectorView: View {
     }
 
     private var archive: some View {
-        Card(title: "Archive", subtitle: nil) {
+        Card(title: "Archive", subtitle: nil, mark: "mark_archive") {
             archiveRows
         }
     }

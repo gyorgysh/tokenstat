@@ -152,7 +152,7 @@ struct InsightsView: View {
         // Sharp wireframe of the overview. Real content replaces it with
         // `.smoothIn` when the first report lands; no blur veil.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
+            Card(title: "Daily volume", subtitle: "Tokens per day, cache included", mark: "mark_insights") {
                 Skeleton.Bar(width: nil, height: 160)
             }
             WidthReader { width in
@@ -167,7 +167,7 @@ struct InsightsView: View {
         // moved to Home: "what is left of the allowance" is asked before the
         // work, not while reading a report about it.
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Card(title: "Daily volume", subtitle: "Tokens per day, cache included") {
+            Card(title: "Daily volume", subtitle: "Tokens per day, cache included", mark: "mark_insights") {
                 DailyChart(rows: model.daily)
             }
 
@@ -219,13 +219,13 @@ struct InsightsView: View {
     }
 
     private var topModelsCard: some View {
-        Card(title: "Top models", subtitle: "List-rate value", fillsHeight: true) {
+        Card(title: "Top models", subtitle: "List-rate value", mark: "mark_insights", fillsHeight: true) {
             MiniList(rows: model.byModel, showsValue: true, monospaced: true)
         }
     }
 
     private var byHarnessCard: some View {
-        Card(title: "By harness", subtitle: "Which agent produced the tokens", fillsHeight: true) {
+        Card(title: "By harness", subtitle: "Which agent produced the tokens", mark: "mark_automation", fillsHeight: true) {
             MiniList(
                 rows: model.bySource,
                 showsValue: false,
@@ -239,7 +239,7 @@ struct InsightsView: View {
     @ViewBuilder
     private var byProjectCard: some View {
         if !model.byProject.isEmpty {
-            Card(title: "By project", subtitle: "Where the work happened", fillsHeight: true) {
+            Card(title: "By project", subtitle: "Where the work happened", mark: "mark_archive", fillsHeight: true) {
                 MiniList(rows: model.byProject, showsValue: false, monospaced: true)
             }
         }

@@ -16,6 +16,9 @@ struct TodoInspector: View {
 
     @State private var titleDraft = ""
     @State private var notesDraft = ""
+    @State private var baselineTitle = ""
+    @State private var baselineNotes = ""
+    @State private var saveState: FieldSaveState = .idle
     @FocusState private var focused: Field?
     @State private var loadedID: String?
     @State private var showDelegate = false
@@ -25,9 +28,14 @@ struct TodoInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
+                FeatureMark(
+                    name: model.selectedCard?.isNote == true ? "mark_note" : "mark_todo",
+                    tint: model.selectedCard?.isNote == true ? Theme.secondary : Theme.accent,
+                    size: 16
+                )
+                .padding(.leading, Theme.Space.m)
                 Text("Task")
                     .font(.system(size: 13, weight: .semibold))
-                    .padding(.leading, Theme.Space.m)
                 Spacer(minLength: 0)
             }
             Group {
@@ -35,7 +43,7 @@ struct TodoInspector: View {
                     cardBody(card)
                 } else {
                     InspectorEmptyState(
-                        systemImage: "checklist",
+                        mark: "mark_todo",
                         title: "Pick a card",
                         subtitle: "Notes and delegate live here."
                     )
@@ -47,13 +55,17 @@ struct TodoInspector: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
         .onChange(of: model.selectedCardID) { old, _ in
-            saveDrafts(for: old)
+            let title = titleDraft
+            let notes = notesDraft
+            Task { await persistDrafts(for: old, title: title, notes: notes) }
             syncDrafts()
         }
         .onChange(of: focused) { _, new in
-            if new == nil { saveDrafts() }
+            if new == nil { Task { await persistDrafts() } }
         }
-        .onDisappear { saveDrafts() }
+        .onChange(of: titleDraft) { _, _ in markDirtyIfNeeded() }
+        .onChange(of: notesDraft) { _, _ in markDirtyIfNeeded() }
+        .onDisappear { Task { await persistDrafts() } }
         .sheet(isPresented: $showDelegate) {
             if let card = model.selectedCard {
                 DelegateSheet(model: model, card: card, folders: folders)
@@ -68,10 +80,21 @@ struct TodoInspector: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 15, weight: .semibold))
                     .focused($focused, equals: .title)
-                    .onSubmit { saveDrafts() }
+                    .onSubmit { Task { await persistDrafts() } }
                     .onAppear { syncDrafts() }
 
                 notesEditor(card)
+
+                FieldSaveBar(
+                    state: saveState,
+                    canSave: !titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
+                    Task { await persistDrafts() }
+                } onCancel: {
+                    titleDraft = baselineTitle
+                    notesDraft = baselineNotes
+                    saveState = .idle
+                }
 
                 labeled("Column", card.columnLabel)
                 if !card.isNote {
@@ -171,15 +194,34 @@ struct TodoInspector: View {
     private func syncDrafts() {
         guard let card = model.selectedCard else {
             loadedID = nil
+            saveState = .idle
             return
         }
         if loadedID == card.id { return }
         loadedID = card.id
         titleDraft = card.title
         notesDraft = card.notes
+        baselineTitle = card.title
+        baselineNotes = card.notes
+        saveState = .idle
     }
 
-    private func saveDrafts(for id: String? = nil) {
+    private func markDirtyIfNeeded() {
+        guard loadedID != nil else { return }
+        let dirty = titleDraft != baselineTitle || notesDraft != baselineNotes
+        if dirty {
+            if saveState != .saving { saveState = .dirty }
+        } else if saveState == .dirty || saveState == .failed {
+            saveState = .idle
+        }
+    }
+
+    private func persistDrafts(
+        for id: String? = nil,
+        title: String? = nil,
+        notes: String? = nil
+    ) async {
+        if saveState == .saving { return }
         let card: TodoCard?
         if let id {
             card = model.cards.first { $0.id == id }
@@ -187,15 +229,39 @@ struct TodoInspector: View {
             card = model.selectedCard
         }
         guard let card else { return }
-        let title = titleDraft
-        let notes = notesDraft
-        Task {
-            if title != card.title {
-                await model.updateTitle(card, title: title)
+        let title = (title ?? titleDraft).trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = notes ?? notesDraft
+        if title.isEmpty {
+            titleDraft = baselineTitle
+            if notes == baselineNotes {
+                saveState = .idle
+                return
             }
-            if notes != card.notes {
-                await model.updateNotes(card, notes: notes)
+        }
+        let titleChanged = !title.isEmpty && title != card.title
+        let notesChanged = notes != card.notes
+        guard titleChanged || notesChanged else {
+            if saveState == .dirty { saveState = .idle }
+            return
+        }
+        saveState = .saving
+        var ok = true
+        if titleChanged {
+            ok = await model.updateTitle(card, title: title) && ok
+        }
+        if notesChanged {
+            ok = await model.updateNotes(card, notes: notes) && ok
+        }
+        if ok {
+            baselineTitle = title.isEmpty ? baselineTitle : title
+            baselineNotes = notes
+            saveState = .saved
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                if saveState == .saved { saveState = .idle }
             }
+        } else {
+            saveState = .failed
         }
     }
 }

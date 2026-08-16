@@ -287,6 +287,7 @@ private struct CardView: View {
     @State private var confirmingDelete = false
     @State private var editingTitle = false
     @State private var titleDraft = ""
+    @State private var titleSaveState: FieldSaveState = .idle
     @State private var delegating = false
     /// A drop onto this card also looks like a tap. Ignore that one so the
     /// inspector stays on the card that moved, not the one it landed on.
@@ -324,9 +325,42 @@ private struct CardView: View {
                         .font(.callout.weight(.medium))
                         .focused($titleFocused)
                         .onSubmit { saveTitle() }
+                        .onChange(of: titleDraft) { _, value in
+                            if value != card.title {
+                                titleSaveState = .dirty
+                            }
+                        }
                         .onChange(of: titleFocused) { _, on in
                             if !on { saveTitle() }
                         }
+                    if titleSaveState == .dirty || titleSaveState == .failed {
+                        Button {
+                            cancelTitle()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Discard title")
+                        Button {
+                            saveTitle()
+                        } label: {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.accent)
+                        .help("Save title")
+                    } else if titleSaveState == .saving {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else if titleSaveState == .saved {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Theme.success)
+                            .help("Saved")
+                    }
                 } else {
                     Text(card.title)
                         .font(.callout.weight(.medium))
@@ -334,6 +368,7 @@ private struct CardView: View {
                         .onTapGesture {
                             onSelect()
                             titleDraft = card.title
+                            titleSaveState = .idle
                             editingTitle = true
                             titleFocused = true
                         }
@@ -417,9 +452,41 @@ private struct CardView: View {
         }
     }
 
-    private func saveTitle() {
+    private func cancelTitle() {
+        titleDraft = card.title
+        titleSaveState = .idle
         editingTitle = false
-        Task { await model.updateTitle(card, title: titleDraft) }
+        titleFocused = false
+    }
+
+    private func saveTitle() {
+        if titleSaveState == .saving { return }
+        let value = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            titleDraft = card.title
+            titleSaveState = .idle
+            editingTitle = false
+            return
+        }
+        if value == card.title {
+            titleSaveState = .idle
+            editingTitle = false
+            return
+        }
+        titleSaveState = .saving
+        Task {
+            let ok = await model.updateTitle(card, title: value)
+            if ok {
+                titleSaveState = .saved
+                editingTitle = false
+                try? await Task.sleep(for: .seconds(2))
+                if titleSaveState == .saved { titleSaveState = .idle }
+            } else {
+                titleSaveState = .failed
+                editingTitle = true
+                titleFocused = true
+            }
+        }
     }
 
     private static func budgetLabel(_ seconds: UInt64) -> String {

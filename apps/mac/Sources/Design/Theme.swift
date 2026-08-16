@@ -300,6 +300,29 @@ struct Card<Content: View>: View {
         self.content = content()
     }
 
+    /// Same card, with a product FeatureMark in the header leading slot.
+    ///
+    /// The website puts a mint chip next to every titled block. Cards that
+    /// omit it look like a different product, so this is the usual call.
+    init(
+        title: String,
+        subtitle: String? = nil,
+        mark: String,
+        markTint: Color = Theme.accent,
+        accessory: AnyView? = nil,
+        fillsHeight: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            leading: AnyView(FeatureMark(name: mark, tint: markTint, size: 22)),
+            accessory: accessory,
+            fillsHeight: fillsHeight,
+            content: content
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: leading == nil ? .firstTextBaseline : .center) {
@@ -709,6 +732,69 @@ struct EmptyState<Action: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Space.xl)
+    }
+}
+
+/// Whether an editable field has something waiting to be written.
+enum FieldSaveState: Equatable {
+    case idle
+    case dirty
+    case saving
+    case saved
+    case failed
+}
+
+/// Unsaved / Saving / Saved next to Save and Cancel.
+///
+/// Implicit blur-save hid failures. A card that looks finished after a
+/// keystroke, then reverts later, is worse than a button that says it wrote.
+struct FieldSaveBar: View {
+    var state: FieldSaveState
+    var saveTitle: String = "Save"
+    var canSave: Bool = true
+    var onSave: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            status
+            Spacer(minLength: 0)
+            if state == .dirty || state == .failed {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(SecondaryButtonStyle())
+                Button(saveTitle, action: onSave)
+                    .buttonStyle(AccentButtonStyle())
+                    .disabled(!canSave || state == .saving)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .dirty:
+            Text("Unsaved")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.warning)
+        case .saving:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Saving")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .saved:
+            Label("Saved", systemImage: "checkmark")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.success)
+        case .failed:
+            Text("Not saved")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Theme.danger)
+        }
     }
 }
 

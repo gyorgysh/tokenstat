@@ -22,9 +22,10 @@ struct HomeInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
+                FeatureMark(name: "mark_activity", tint: Theme.accent, size: 16)
+                    .padding(.leading, Theme.Space.m)
                 Text("Day")
                     .font(.system(size: 13, weight: .semibold))
-                    .padding(.leading, Theme.Space.m)
                 Spacer(minLength: 0)
             }
             Group {
@@ -32,7 +33,7 @@ struct HomeInspector: View {
                     dayBody(day)
                 } else {
                     InspectorEmptyState(
-                        systemImage: "square.grid.3x3",
+                        mark: "mark_activity",
                         title: "Today opens here",
                         subtitle: "The heatmap is still loading. Hover a day for a glance, or click another day to pin it."
                     )
@@ -214,7 +215,7 @@ struct HomeInspector: View {
         showsValue: Bool,
         isHarness: Bool
     ) -> some View {
-        Card(title: title, subtitle: subtitle) {
+        Card(title: title, subtitle: subtitle, mark: isHarness ? "mark_automation" : "mark_insights") {
             if rows.isEmpty {
                 Text("Nothing recorded yet.")
                     .font(.caption)

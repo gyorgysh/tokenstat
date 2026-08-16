@@ -21,6 +21,7 @@ struct PlanUsageCard: View {
         Card(
             title: "Plan usage",
             subtitle: "Subscription-covered usage recorded in the archive",
+            mark: "mark_plan",
             fillsHeight: fillsHeight
         ) {
             if rows.isEmpty {

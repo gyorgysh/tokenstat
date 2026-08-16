@@ -30,6 +30,8 @@ struct AutomationsView: View {
     @FocusState private var searchFocused: Bool
     /// Empty means follow the default: open when there are no jobs yet.
     @AppStorage("automations.examplesExpanded") private var examplesExpandedStored = ""
+    @State private var schedulerJustSaved = false
+    @State private var schedulerSaving = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -158,7 +160,11 @@ struct AutomationsView: View {
     }
 
     private var schedulerCard: some View {
-        Card(title: "Scheduler", subtitle: "How queued jobs run on this Mac") {
+        Card(
+            title: "Scheduler",
+            subtitle: "How queued jobs run on this Mac",
+            mark: "mark_scheduler"
+        ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
                     Text("Time limit")
@@ -169,10 +175,16 @@ struct AutomationsView: View {
                         .frame(width: 56)
                         .multilineTextAlignment(.trailing)
                         .disabled(model.queueNoLimit)
+                        .onChange(of: model.queueBudgetMinutes) { _, _ in
+                            schedulerJustSaved = false
+                        }
                     Text("minutes")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     BrandToggleChip(title: "No limit", isOn: $model.queueNoLimit)
+                        .onChange(of: model.queueNoLimit) { _, _ in
+                            schedulerJustSaved = false
+                        }
                 }
                 HStack {
                     Text("Max concurrent jobs")
@@ -182,14 +194,41 @@ struct AutomationsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 56)
                         .multilineTextAlignment(.trailing)
+                        .onChange(of: model.queueMaxConcurrent) { _, _ in
+                            schedulerJustSaved = false
+                        }
                 }
                 Text("New jobs inherit the time limit. 0 concurrent means no cap. Extra jobs wait in the queue.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Button("Save scheduler") {
-                    Task { await model.saveQueue() }
+                HStack(spacing: Theme.Space.s) {
+                    if model.queueDirty {
+                        Text("Unsaved")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.warning)
+                    } else if schedulerJustSaved {
+                        Label("Saved", systemImage: "checkmark")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Theme.success)
+                    }
+                    Spacer()
+                    if model.queueDirty {
+                        Button(schedulerSaving ? "Saving" : "Save scheduler") {
+                            schedulerSaving = true
+                            Task {
+                                await model.saveQueue()
+                                schedulerSaving = false
+                                schedulerJustSaved = model.errorMessage == nil && !model.queueDirty
+                            }
+                        }
+                        .buttonStyle(AccentButtonStyle())
+                        .disabled(schedulerSaving)
+                    } else {
+                        Button("Save scheduler") {}
+                            .buttonStyle(SecondaryButtonStyle())
+                            .disabled(true)
+                    }
                 }
-                .buttonStyle(SecondaryButtonStyle())
             }
         }
     }
@@ -212,9 +251,8 @@ struct AutomationsView: View {
                     examplesExpandedStored = examplesExpanded ? "0" : "1"
                 }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
-                    Image(systemName: "square.grid.2x2")
-                        .foregroundStyle(Theme.accent)
+                HStack(alignment: .center, spacing: Theme.Space.s) {
+                    FeatureMark(name: "mark_examples", tint: Theme.accent, size: 22)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Examples")
                             .font(.system(size: DisplayFit.dp(13), weight: .semibold))
@@ -372,6 +410,7 @@ struct AutomationsView: View {
             VStack(spacing: 0) {
                 ForEach(jobs) { job in
                     AutomationRow(job: job, model: model,
+                                  folders: folders,
                                   folder: folders.first { $0.id == job.workspaceID },
                                   isSelected: model.selectedJobID == job.id,
                                   onSelect: { model.selectJob(job.id) },
@@ -386,7 +425,11 @@ struct AutomationsView: View {
     }
 
     private var recentRuns: some View {
-        Card(title: "Recent runs", subtitle: "The latest result from each scheduled job.") {
+        Card(
+            title: "Recent runs",
+            subtitle: "The latest result from each scheduled job.",
+            mark: "mark_automation"
+        ) {
             VStack(spacing: 0) {
                 ForEach(Array(model.runs.prefix(5))) { run in
                     runRow(run)
@@ -402,7 +445,7 @@ struct AutomationsView: View {
     /// screen is for. An automation is not a familiar object, so the empty
     /// state describes the thing rather than announcing its absence.
     private var nothingYet: some View {
-        Card(title: "Automations", subtitle: nil) {
+        Card(title: "Automations", subtitle: nil, mark: "mark_automation") {
             EmptyState(
                 symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
                 title: "Nothing scheduled yet",
@@ -434,6 +477,7 @@ struct AutomationsView: View {
         Card(
             title: "Automations",
             subtitle: "Owned by the host helper. They run after you quit only if Always-on host is on.",
+            mark: "mark_automation",
             accessory: AnyView(
                 Button { creating = true } label: {
                     Label("New", systemImage: "plus")
@@ -455,6 +499,7 @@ struct AutomationsView: View {
                         AutomationRow(
                             job: job,
                             model: model,
+                            folders: folders,
                             folder: folders.first { $0.id == job.workspaceID },
                             isSelected: model.selectedJobID == job.id,
                             onSelect: { model.selectJob(job.id) },
@@ -471,7 +516,8 @@ struct AutomationsView: View {
     private var runsCard: some View {
         Card(
             title: "Runs",
-            subtitle: "Select a run to read its output in the inspector."
+            subtitle: "Select a run to read its output in the inspector.",
+            mark: "mark_automation"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 if model.runs.isEmpty {
@@ -543,6 +589,7 @@ struct AutomationsView: View {
 private struct AutomationRow: View {
     var job: Automation
     @Bindable var model: AutomationsModel
+    var folders: [WorkspaceFolder]
     var folder: WorkspaceFolder?
     var isSelected: Bool = false
     var onSelect: () -> Void = {}
@@ -671,7 +718,7 @@ private struct AutomationRow: View {
             AutomationHistorySheet(job: job, model: model, onView: onViewRun)
         }
         .sheet(isPresented: $editing) {
-            NewAutomationSheet(model: model, folders: folder.map { [$0] } ?? [], existing: job)
+            NewAutomationSheet(model: model, folders: folders, existing: job)
         }
     }
 }
@@ -829,6 +876,10 @@ struct NewAutomationSheet: View {
                 )
             }
 
+            if let error = model.errorMessage {
+                Banner(text: error, severity: .warning)
+            }
+
             stepHeader
             fields
 
@@ -897,9 +948,11 @@ struct NewAutomationSheet: View {
                 )
             }
         }
-        .onChange(of: backendID) { _, _ in
-            // A model that meant something to one backend means nothing to
-            // the next; go back to defaults when the agent changes.
+        .onChange(of: backendID) { old, new in
+            // Opening the editor sets backendID from the existing job.
+            // That is not a change of agent, and must not wipe the model
+            // the job already had. Only a later pick resets the pair.
+            guard !old.isEmpty, old != new else { return }
             modelChoice = ""
             effortChoice = ""
         }

@@ -490,6 +490,7 @@ struct HomeView: View {
         Card(
             title: "Activity",
             subtitle: activitySubtitle,
+            mark: "mark_activity",
             accessory: AnyView(scopePicker)
         ) {
             if let calendar = model.calendar {
