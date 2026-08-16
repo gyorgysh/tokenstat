@@ -1098,15 +1098,19 @@ private struct SegmentButton: View {
 /// Replaces the system grey pop-up menus so every selector in a form reads as
 /// the same control family.
 struct AppMenuPicker<Option: Hashable>: View {
-    var title: String
+    /// Caption above the control. Empty hides it, for a row that already
+    /// names the pickers (Auto commit next to Agent / Model).
+    var title: String = ""
     var options: [(value: Option, label: String)]
     @Binding var selection: Option
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: title.isEmpty ? 0 : 3) {
+            if !title.isEmpty {
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Menu {
                 ForEach(options, id: \.value) { option in
                     Button(option.label) {

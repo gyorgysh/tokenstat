@@ -335,6 +335,10 @@ struct TerminalPane: View {
 
     private var strip: some View {
         HStack(spacing: Theme.Space.s) {
+            LaunchChip(isSelected: isLaunchSelected) {
+                workspaces.showLauncher(in: folder.id)
+            }
+
             ForEach(sessions) { session in
                 SessionChip(
                     session: session,
@@ -494,6 +498,13 @@ struct TerminalPane: View {
         }
     }
 
+    /// The Launch tab is the workspace home: selected while the grid is up,
+    /// including the empty-folder case where the grid shows without the flag.
+    private var isLaunchSelected: Bool {
+        workspaces.showingLauncher.contains(folder.id)
+            || (sessions.isEmpty && workspaces.isShowingTerminal(in: folder.id))
+    }
+
     private func start(_ profile: LaunchProfile) {
         // A new session is what the user now wants to look at, so get any open
         // file out of the way.
@@ -571,6 +582,42 @@ private struct TabCloseButton: View {
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+/// Always-on tab that brings the launch grid back. Not closeable: it is the
+/// workspace home, not a session you can throw away.
+private struct LaunchChip: View {
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: Theme.Space.xs) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 16, height: 16)
+                Text("Launch")
+                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, 3)
+            .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Back to the launcher. Pick a tool to start in this folder.")
+        .accessibilityLabel("Launch")
+        .opacity(isHovering && !isSelected ? 0.85 : 1)
     }
 }
 

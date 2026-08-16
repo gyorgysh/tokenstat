@@ -69,6 +69,27 @@ struct HomeInspector: View {
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let onOpenInsights {
+                VStack(spacing: 0) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                    Button {
+                        onOpenInsights(day.date)
+                    } label: {
+                        HStack(spacing: Theme.Space.xs) {
+                            Text("Open in Insights")
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .help("Open the full report for this day")
+                    .padding(Theme.Space.m)
+                }
+                .background(Theme.background)
+            }
+        }
     }
 
     private func overview(_ detail: DayDetail) -> some View {
@@ -149,13 +170,6 @@ struct HomeInspector: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-            }
-
-            if let onOpenInsights {
-                Button("Open in Insights") { onOpenInsights(detail.date) }
-                    .buttonStyle(.plain)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
             }
         }
     }

@@ -461,6 +461,15 @@ final class WorkspacesModel {
         showingLauncher.remove(workspaceID)
     }
 
+    /// Put the launch grid in front. Sessions stay mounted underneath.
+    ///
+    /// The Launch tab calls this. It does not toggle: clicking Launch while
+    /// already there is a no-op, the same way clicking the selected session
+    /// does not hide it.
+    func showLauncher(in workspaceID: String) {
+        showingLauncher.insert(workspaceID)
+    }
+
     /// Second click on a folder: swap between the running surface and the
     /// launcher, so a new agent can be started without hiding the sessions
     /// that are already there.

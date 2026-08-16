@@ -461,23 +461,41 @@ private struct CommitBox: View {
         return selectedBackend?.models.first ?? ""
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Rectangle().fill(Theme.border).frame(height: 1)
+    private var hasChanges: Bool {
+        guard let git = folder.git, git.isRepo else { return false }
+        return !git.files.isEmpty
+    }
 
+    private var isAhead: Bool {
+        (folder.git?.ahead ?? 0) > 0
+    }
+
+    var body: some View {
+        Group {
+            if hasChanges || isAhead || model.gitOutcome != nil {
+                box
+            }
+        }
+        .task {
+            if automations.backends.isEmpty {
+                await automations.load()
+            }
+        }
+    }
+
+    private var box: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let outcome = model.gitOutcome {
                 Text(outcome.message.isEmpty ? "Done." : outcome.message)
                     .font(.caption)
-                    .foregroundStyle(outcome.ok ? .green : .red)
+                    .foregroundStyle(outcome.ok ? Theme.success : Theme.danger)
                     .lineLimit(4)
                     .textSelection(.enabled)
-                    .padding(.horizontal, Theme.Space.m)
             }
             if let notice = automations.noticeMessage {
                 Text(notice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, Theme.Space.m)
             }
             if let error = automations.errorMessage {
                 Text(error)
@@ -485,29 +503,62 @@ private struct CommitBox: View {
                     .foregroundStyle(Theme.danger)
                     .lineLimit(4)
                     .textSelection(.enabled)
-                    .padding(.horizontal, Theme.Space.m)
             }
 
+            if hasChanges {
+                VStack(spacing: 0) {
+                    messageFields
+                    hairline
+                    actions
+                    if !commitBackends.isEmpty {
+                        hairline
+                        autoCommitRow
+                    }
+                }
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            } else if isAhead {
+                VStack(spacing: 0) {
+                    pushOnly
+                }
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Theme.border, lineWidth: 1)
+                )
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.top, Theme.Space.s)
+        .padding(.bottom, Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.background)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle().fill(Theme.border).frame(height: 1)
+    }
+
+    private var messageFields: some View {
+        VStack(spacing: 0) {
             TextField("Commit title", text: title)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .lineLimit(1)
                 .padding(Theme.Space.s)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
-                )
-                .padding(.horizontal, Theme.Space.m)
-
+            hairline
             TextEditor(text: description)
                 .font(.system(size: 12))
                 .scrollContentBackground(.hidden)
-                .frame(minHeight: 44, maxHeight: 82)
-                .padding(Theme.Space.xs)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 5))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.border, lineWidth: 1)
-                )
+                .frame(minHeight: 48, maxHeight: 48)
+                .padding(.horizontal, Theme.Space.xs)
+                .padding(.vertical, 2)
                 .overlay(alignment: .topLeading) {
                     if description.wrappedValue.isEmpty {
                         Text("Description (optional)")
@@ -518,67 +569,71 @@ private struct CommitBox: View {
                             .allowsHitTesting(false)
                     }
                 }
-                .padding(.horizontal, Theme.Space.m)
+        }
+    }
 
-            if !commitBackends.isEmpty {
-                HStack(spacing: Theme.Space.s) {
-                    AppMenuPicker(
-                        title: "Agent",
-                        options: commitBackends.map { (value: $0.id, label: $0.label) },
-                        selection: backendBinding
-                    )
-                    if let backend = selectedBackend, !backend.models.isEmpty {
-                        AppMenuPicker(
-                            title: "Model",
-                            options: backend.models.map { (value: $0, label: $0) },
-                            selection: modelBinding
-                        )
-                    }
-                }
-                .padding(.horizontal, Theme.Space.m)
-
+    private var actions: some View {
+        HStack(spacing: Theme.Space.s) {
+            if isAhead {
                 Button {
-                    Task { await runAutoCommit() }
+                    Task { await model.push(folder) }
                 } label: {
-                    Text("Auto commit")
+                    Label("Push \(folder.git?.ahead ?? 0)", systemImage: "arrow.up")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(model.isCommitting || selectedBackend == nil)
-                .help("One-time automation: the chosen agent commits in this folder")
-                .padding(.horizontal, Theme.Space.m)
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(model.isCommitting)
+                .help("Push the current branch")
             }
+            Button {
+                Task { await model.commit(folder) }
+            } label: {
+                Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(AccentButtonStyle())
+            .disabled(model.isCommitting || selectedCount == 0)
+        }
+        .padding(Theme.Space.s)
+    }
 
-            HStack(spacing: Theme.Space.s) {
-                if let git = folder.git, git.ahead > 0 {
-                    Button {
-                        Task { await model.push(folder) }
-                    } label: {
-                        Label("Push \(git.ahead)", systemImage: "arrow.up")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(model.isCommitting)
-                    .help("Push the current branch")
-                }
-                Button {
-                    Task { await model.commit(folder) }
-                } label: {
-                    Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(model.isCommitting || selectedCount == 0)
-            }
-            .padding(.horizontal, Theme.Space.m)
+    private var pushOnly: some View {
+        Button {
+            Task { await model.push(folder) }
+        } label: {
+            Label("Push \(folder.git?.ahead ?? 0)", systemImage: "arrow.up")
+                .frame(maxWidth: .infinity)
         }
-        .padding(.bottom, Theme.Space.m)
-        .background(Theme.background)
-        .task {
-            if automations.backends.isEmpty {
-                await automations.load()
+        .buttonStyle(SecondaryButtonStyle())
+        .disabled(model.isCommitting)
+        .help("Push the current branch")
+        .padding(Theme.Space.s)
+    }
+
+    private var autoCommitRow: some View {
+        HStack(spacing: Theme.Space.s) {
+            Button {
+                Task { await runAutoCommit() }
+            } label: {
+                Text("Auto commit")
+            }
+            .buttonStyle(SecondaryButtonStyle())
+            .disabled(model.isCommitting || selectedBackend == nil)
+            .help("One-time automation: the chosen agent commits in this folder")
+            .fixedSize()
+
+            AppMenuPicker(
+                options: commitBackends.map { (value: $0.id, label: $0.label) },
+                selection: backendBinding
+            )
+            if let backend = selectedBackend, !backend.models.isEmpty {
+                AppMenuPicker(
+                    options: backend.models.map { (value: $0, label: $0) },
+                    selection: modelBinding
+                )
             }
         }
+        .padding(Theme.Space.s)
     }
 
     private var backendBinding: Binding<String> {
