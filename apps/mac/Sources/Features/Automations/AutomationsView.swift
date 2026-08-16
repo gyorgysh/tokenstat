@@ -921,7 +921,7 @@ struct NewAutomationSheet: View {
                 backendID = existing.backend
                 workspaceID = existing.workspaceID
                 prompt = existing.prompt
-                modelChoice = existing.model ?? ""
+                modelChoice = TodoCard.cleanModelID(existing.model ?? "")
                 effortChoice = existing.effort ?? ""
                 applySchedule(existing.schedule)
                 applyBudget(existing.budgetSeconds)
@@ -1005,12 +1005,12 @@ struct NewAutomationSheet: View {
                 )
                 if let backend = model.backends.first(where: { $0.id == backendID }),
                    !backend.models.isEmpty || !backend.efforts.isEmpty {
-                    HStack(spacing: Theme.Space.s) {
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
                         if !backend.models.isEmpty {
-                            AppMenuPicker(
-                                title: "Model",
-                                options: [(value: "", label: "Default")]
-                                    + backend.models.map { (value: $0, label: $0) },
+                            FavoriteModelPicker(
+                                backendID: backend.id,
+                                models: backend.models,
+                                extra: modelChoice,
                                 selection: $modelChoice
                             )
                         }
@@ -1360,7 +1360,10 @@ struct NewAutomationSheet: View {
                 id: existing.id,
                 name: name.trimmingCharacters(in: .whitespaces),
                 backend: backendID,
-                model: modelChoice.isEmpty ? nil : modelChoice,
+                model: {
+                    let cleaned = TodoCard.cleanModelID(modelChoice)
+                    return cleaned.isEmpty ? nil : cleaned
+                }(),
                 effort: effortChoice.isEmpty ? nil : effortChoice,
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -1376,7 +1379,10 @@ struct NewAutomationSheet: View {
             await model.create(
                 name: name.trimmingCharacters(in: .whitespaces),
                 backend: backendID,
-                model: modelChoice.isEmpty ? nil : modelChoice,
+                model: {
+                    let cleaned = TodoCard.cleanModelID(modelChoice)
+                    return cleaned.isEmpty ? nil : cleaned
+                }(),
                 effort: effortChoice.isEmpty ? nil : effortChoice,
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),

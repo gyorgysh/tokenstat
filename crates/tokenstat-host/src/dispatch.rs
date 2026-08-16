@@ -330,6 +330,11 @@ struct AutomationParams {
     offset: Option<u64>,
     default_budget_seconds: Option<u64>,
     max_concurrent: Option<u32>,
+    /// `automation.interactiveCommand` only.
+    backend: Option<String>,
+    prompt: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1373,6 +1378,24 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
         }
         "automation.runs" => serde_json::to_value(crate::automations::shared().runs()).envelope(),
         "automation.backends" => Ok(serde_json::Value::Array(crate::automations::backends())),
+        "automation.interactiveCommand" => {
+            let p: AutomationParams = parse(params)?;
+            let backend = p
+                .backend
+                .as_deref()
+                .ok_or("automation.interactiveCommand needs backend")?;
+            let prompt = p
+                .prompt
+                .as_deref()
+                .ok_or("automation.interactiveCommand needs prompt")?;
+            let argv = crate::automations::interactive_agent_command(
+                backend,
+                prompt,
+                p.model.as_deref(),
+                p.effort.as_deref(),
+            )?;
+            Ok(json!({"argv": argv}))
+        }
         "automation.transcript" => {
             let p: AutomationParams = parse(params)?;
             let id = p.id.ok_or("automation.transcript needs a run id")?;

@@ -1264,6 +1264,27 @@ extension Bridge {
         try await background("automation.backends", as: [AgentBackend].self)
     }
 
+    /// Argv for an interactive TTY. Not an automation run.
+    static func automationInteractiveCommand(
+        backend: String,
+        prompt: String,
+        model: String? = nil,
+        effort: String? = nil
+    ) async throws -> [String] {
+        var params: [String: Any] = [
+            "backend": backend,
+            "prompt": prompt,
+        ]
+        if let model, !model.isEmpty { params["model"] = model }
+        if let effort, !effort.isEmpty { params["effort"] = effort }
+        let result = try await background(
+            "automation.interactiveCommand",
+            params,
+            as: InteractiveCommandArgv.self
+        )
+        return result.argv
+    }
+
     /// Output a run produced after `offset`. Poll while the run is running.
     static func automationTranscript(id: String, offset: UInt64) async throws -> TranscriptChunk {
         try await background("automation.transcript", ["id": id, "offset": offset], as: TranscriptChunk.self)

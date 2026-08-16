@@ -141,7 +141,7 @@ impl Parser {
             "claude" => render_claude_family(&value),
             "cursor" => render_cursor(&value),
             "codex" => render_codex(&value),
-            "opencode" => render_opencode(&value),
+            "opencode" | "opencode2" => render_opencode(&value),
             "agy" => render_agy(&value),
             _ => None,
         }
@@ -150,7 +150,7 @@ impl Parser {
     fn is_json_backend(&self) -> bool {
         matches!(
             self.backend.as_str(),
-            "grok" | "claude" | "cursor" | "codex" | "opencode" | "agy"
+            "grok" | "claude" | "cursor" | "codex" | "opencode" | "opencode2" | "agy"
         )
     }
 }
@@ -355,7 +355,8 @@ fn render_codex(value: &serde_json::Value) -> Option<Piece> {
 
 /// Antigravity `--output-format stream-json`. Tools are `step_update`
 /// with `step_type: tool`. Text arrives as `text_delta` on
-/// `agent_response`. The final `result` repeats that text, so it is dropped.
+/// `agent_response`. A successful `result` repeats that text, so it is
+/// dropped. An ERROR result is the only place a failed launch is explained.
 fn render_agy(value: &serde_json::Value) -> Option<Piece> {
     let event = value.get("event")?.as_str()?;
     match event {
@@ -382,13 +383,34 @@ fn render_agy(value: &serde_json::Value) -> Option<Piece> {
                     let params = step
                         .get("tool_info")
                         .and_then(|info| info.get("parameters"));
-                    Some(Piece::Block(format_tool(&display_verb(name), params)))
+                    Some(Piece::Block(stamp(
+                        event_timestamp(value).or_else(|| event_timestamp(step)),
+                        format_tool(&display_verb(name), params),
+                    )))
                 }
                 "agent_response" => {
                     text_delta(step.get("text_delta").and_then(|v| v.as_str())).map(Piece::Text)
                 }
                 _ => None,
             }
+        }
+        "result" => {
+            let result = value.get("result")?;
+            let status = result.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if !status.eq_ignore_ascii_case("ERROR") && !status.eq_ignore_ascii_case("error") {
+                return None;
+            }
+            let err = result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .or_else(|| result.get("response").and_then(|v| v.as_str()))
+                .unwrap_or("the run failed");
+            nonempty(Some(err)).map(|text| {
+                Piece::Block(stamp(
+                    event_timestamp(value).or_else(|| event_timestamp(result)),
+                    text,
+                ))
+            })
         }
         _ => None,
     }
@@ -411,8 +433,30 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
             let input = part
                 .get("input")
                 .or_else(|| part.get("args"))
+                .or_else(|| part.pointer("/state/input"))
                 .or_else(|| part.get("state"));
-            Some(Piece::Block(format_tool(&display_verb(tool), input)))
+            let mut body = format_tool(&display_verb(tool), input);
+            if body
+                .split_once(' ')
+                .map(|(_, a)| a.trim().is_empty())
+                .unwrap_or(true)
+            {
+                if let Some(title) = part
+                    .pointer("/state/title")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    body = format!("{} {title}", display_verb(tool));
+                }
+            }
+            if let Some(out) = part.pointer("/state/output").and_then(|v| v.as_str()) {
+                let snippet = output_snippet(out);
+                if !snippet.is_empty() {
+                    body.push('\n');
+                    body.push_str(&snippet);
+                }
+            }
+            Some(Piece::Block(stamp(event_timestamp(value), body)))
         }
         "error" => {
             let msg = match value.get("error") {
@@ -447,9 +491,10 @@ fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
 
 fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
     let value = input?;
-    const KEYS: [&str; 12] = [
+    const KEYS: [&str; 14] = [
         "path",
         "file_path",
+        "filePath",
         "file",
         "target_file",
         "target_directory",
@@ -461,6 +506,7 @@ fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
         "AbsolutePath",
         "CommandLine",
         "FilePath",
+        "Command",
     ];
     lookup_str(value, &KEYS)
 }
@@ -476,15 +522,83 @@ fn lookup_str<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str
         }
     }
     let obj = value.as_object()?;
-    let wanted: Vec<String> = keys.iter().map(|k| k.to_ascii_lowercase()).collect();
+    let wanted: Vec<String> = keys.iter().map(|k| fold_key(k)).collect();
     for (key, val) in obj {
-        if wanted.iter().any(|want| want == &key.to_ascii_lowercase()) {
+        if wanted.iter().any(|want| want == &fold_key(key)) {
             if let Some(s) = val.as_str().filter(|s| !s.is_empty()) {
                 return Some(s);
             }
         }
     }
     None
+}
+
+/// `filePath`, `file_path`, and `FilePath` are the same key.
+fn fold_key(key: &str) -> String {
+    key.chars()
+        .filter(|c| *c != '_')
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+fn event_timestamp(value: &serde_json::Value) -> Option<i64> {
+    value
+        .get("timestamp")
+        .and_then(json_i64)
+        .or_else(|| value.get("time").and_then(json_i64))
+}
+
+fn json_i64(value: &serde_json::Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_u64().map(|n| n as i64))
+        .or_else(|| value.as_f64().map(|n| n as i64))
+}
+
+/// Prefix a tool/error line with `HH:MM:SS` when the event carried a time.
+fn stamp(ts_ms: Option<i64>, body: String) -> String {
+    match ts_ms.and_then(format_clock) {
+        Some(clock) => format!("{clock} {body}"),
+        None => body,
+    }
+}
+
+fn format_clock(ms: i64) -> Option<String> {
+    let ts = jiff::Timestamp::from_millisecond(ms).ok()?;
+    let zoned = ts.to_zoned(jiff::tz::TimeZone::system());
+    Some(format!(
+        "{:02}:{:02}:{:02}",
+        zoned.hour(),
+        zoned.minute(),
+        zoned.second()
+    ))
+}
+
+/// First lines of a tool's stdout, marked so the inspector can fold them.
+fn output_snippet(out: &str) -> String {
+    const MAX_LINES: usize = 8;
+    const MAX_CHARS: usize = 2000;
+    let lines: Vec<&str> = out.lines().collect();
+    if lines.is_empty() || out.trim().is_empty() {
+        return String::new();
+    }
+    let mut out_lines: Vec<String> = lines
+        .iter()
+        .take(MAX_LINES)
+        .map(|line| format!("| {line}"))
+        .collect();
+    if lines.len() > MAX_LINES {
+        out_lines.push("| …".into());
+    }
+    let mut text = out_lines.join("\n");
+    if text.len() > MAX_CHARS {
+        let mut end = MAX_CHARS;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
 }
 
 fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
@@ -536,12 +650,13 @@ fn display_verb(name: &str) -> String {
         .unwrap_or(name)
         .trim_end_matches("ToolCall");
     match leaf {
-        "read_file" | "Read" | "view_file" | "view_file_outline" | "view_code_item" => {
+        "read_file" | "Read" | "read" | "view_file" | "view_file_outline" | "view_code_item" => {
             "Read".into()
         }
         "write" | "Write" | "write_file" | "write_to_file" | "create_file" => "Write".into(),
         "search_replace"
         | "Edit"
+        | "edit"
         | "str_replace"
         | "edit_file"
         | "replace_file_content"
@@ -779,6 +894,26 @@ mod tests {
         let out = feed("opencode", raw);
         assert!(out.contains("Done."));
         assert!(out.contains("Bash"));
+    }
+
+    #[test]
+    fn opencode_reads_state_input_and_stamps_time() {
+        let raw = concat!(
+            "{\"type\":\"tool_use\",\"timestamp\":1786894155793,\"part\":{\"tool\":\"bash\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"ls -ld /tmp\"},\"output\":\"ok\\n\"}}}\n",
+            "{\"type\":\"tool_use\",\"timestamp\":1786894158457,\"part\":{\"tool\":\"read\",\"state\":{\"status\":\"completed\",\"input\":{\"filePath\":\"/tmp/a.txt\"}}}}\n",
+        );
+        let out = feed("opencode", raw);
+        assert!(out.contains("Bash ls -ld /tmp"), "{out}");
+        assert!(out.contains("Read /tmp/a.txt"), "{out}");
+        assert!(out.contains("| ok"), "{out}");
+        assert!(out.contains(':'), "{out}");
+    }
+
+    #[test]
+    fn agy_error_result_becomes_readable() {
+        let raw = "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"error\":\"invalid model selection\"}}\n";
+        let out = feed("agy", raw);
+        assert!(out.contains("invalid model selection"), "{out}");
     }
 
     #[test]

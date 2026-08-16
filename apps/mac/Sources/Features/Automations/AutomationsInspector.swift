@@ -17,6 +17,8 @@ struct AutomationsInspector: View {
     var onClose: () -> Void
 
     @State private var editing = false
+    /// Live tail. On by default so a started run stays on the newest line.
+    @AppStorage("automations.followLive") private var followLive = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -127,19 +129,40 @@ struct AutomationsInspector: View {
                 Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                BrandToggleChip(title: "Follow", isOn: $followLive)
+                    .help("Keep the transcript pinned to the newest line")
             }
             .padding(Theme.Space.m)
 
-            ScrollView {
-                TranscriptView(
-                    text: model.transcriptText,
-                    empty: run.isRunning ? "Waiting for output…" : "(No readable output)"
-                )
-                .padding(Theme.Space.m)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    TranscriptView(
+                        text: model.transcriptText,
+                        empty: run.isRunning ? "Waiting for output…" : "(No readable output)"
+                    )
+                    .padding(Theme.Space.m)
+                    Color.clear
+                        .frame(height: 1)
+                        .id("transcript-tail")
+                }
+                .background(Theme.background)
+                .onChange(of: model.transcriptText) { _, _ in
+                    guard followLive else { return }
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        proxy.scrollTo("transcript-tail", anchor: .bottom)
+                    }
+                }
+                .onAppear {
+                    if followLive {
+                        proxy.scrollTo("transcript-tail", anchor: .bottom)
+                    }
+                }
             }
-            .background(Theme.background)
         }
         .onAppear { model.watch(run) }
+        .onChange(of: run.id) { _, _ in
+            model.watch(run)
+        }
     }
 
     private func labeled(_ title: String, _ value: String) -> some View {

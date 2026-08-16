@@ -146,11 +146,11 @@ struct TokenstatApp: App {
         WindowGroup {
             #if os(macOS)
             RootView()
-                // The minimum is what the window needs *without* the
-                // inspector, not with it. Asking for more than the user can
-                // give does not enlarge the window, it overflows it, and the
-                // pane that runs past the right edge is the one that gets cut.
-                // The inspector closes itself below its own threshold instead.
+                // The minimum is the detail column alone. The sidebar overlays
+                // on a tiled half-screen, and a content minimum larger than
+                // the tile overflows: the layout is built at the minimum and
+                // the trailing edge is cut. The inspector closes itself below
+                // its own threshold instead.
                 .frame(
                     minWidth: RootView.minimumContentWidth,
                     minHeight: RootView.minimumContentHeight

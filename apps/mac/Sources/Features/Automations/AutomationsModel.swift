@@ -64,6 +64,9 @@ final class AutomationsModel {
     private(set) var transcriptText: String = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    /// The run id the poll task is actually tailing. Distinct from
+    /// `watchingRunID` so switching runs restarts the loop.
+    private var pollingID: String?
     private var noticeGeneration = 0
 
     /// True while the screen is on show.
@@ -245,10 +248,15 @@ final class AutomationsModel {
 
     func run(_ job: Automation) async {
         do {
-            _ = try await Bridge.runAutomation(job.id)
+            let updated = try await Bridge.runAutomation(job.id)
             showNotice("Started \(job.name).")
             errorMessage = nil
             await load()
+            if let id = updated.lastRunID, let run = runs.first(where: { $0.id == id }) {
+                selectRun(run)
+            } else if let last = lastRun(for: updated) ?? lastRun(for: job) {
+                selectRun(last)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -402,11 +410,22 @@ final class AutomationsModel {
     }
 
     private func startPolling(_ id: String) {
-        guard isVisible, pollTask == nil else { return }
+        guard isVisible else { return }
+        if pollTask != nil, pollingID == id { return }
+        stopPolling()
+        pollingID = id
         pollTask = Task { [weak self] in
+            var ticks = 0
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.fetchTranscript(id: id, resetIfNeeded: true)
+                ticks += 1
+                // Status lives on the run list, not in the transcript. Refresh
+                // it often enough that a finished job flips off Running
+                // without switching screens.
+                if ticks % 3 == 0 {
+                    await self.refreshRuns()
+                }
                 try? await Task.sleep(for: .milliseconds(400))
             }
         }
@@ -415,6 +434,23 @@ final class AutomationsModel {
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
+        pollingID = nil
+    }
+
+    /// Reload run rows so a live inspector sees ok / error / stopped.
+    private func refreshRuns() async {
+        do {
+            let latest = try await Bridge.automationRuns()
+            let before = runs.first { $0.id == watchingRunID }
+            runs = latest
+            let after = runs.first { $0.id == watchingRunID }
+            if let before, let after, before.status != after.status, !after.isRunning {
+                stopPolling()
+                await fetchTranscriptUntilCaughtUp(id: after.id)
+            }
+        } catch {
+            // The next tick tries again.
+        }
     }
 
     private func fetchTranscriptUntilCaughtUp(id: String) async {

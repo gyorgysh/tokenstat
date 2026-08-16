@@ -543,26 +543,22 @@ struct RootView: View {
     /// still being somewhere nobody rests by accident.
     static let edgeStrip: CGFloat = 32
 
-    /// The narrowest the detail column may be. `minimumContentWidth` is this
-    /// plus the sidebar, and the two must be defined from one number so they
-    /// cannot drift.
-    static var detailMinimumWidth: CGFloat { DisplayFit.box(560) }
+    /// The narrowest the detail column may be. The window minimum is this
+    /// alone: below `widthForSidebar` the sidebar overlays, so requiring
+    /// both columns overflows a tiled half-screen.
+    static var detailMinimumWidth: CGFloat { DisplayFit.box(480) }
 
     /// The narrowest the sidebar column may be, matching
     /// `navigationSplitViewColumnWidth(min:)` on the sidebar.
     static var sidebarMinimumWidth: CGFloat { DisplayFit.box(200) }
 
-    /// The narrowest the window may get: the sidebar and detail minimums
-    /// together.
+    /// The narrowest the window may get.
     ///
-    /// This is the window's minimum size, set from here so it cannot drift from
-    /// the numbers above. It must stay **smaller** than a window a user can
-    /// actually make. A content minimum larger than the window does not shrink
+    /// Detail only. A content minimum larger than the window does not shrink
     /// the window, it overflows it: the layout is built at the minimum and the
-    /// right hand side is simply cut off by the window edge. That was the
-    /// clipped inspector, and it also blinded the measurement below, which sits
-    /// inside the clamp and so could only ever read the clamped width back.
-    static var minimumContentWidth: CGFloat { sidebarMinimumWidth + detailMinimumWidth }
+    /// trailing edge is cut off. Half-screen tile on a 1440-wide display is
+    /// about 720, which is less than sidebar + detail (760 at factor 1).
+    static var minimumContentWidth: CGFloat { detailMinimumWidth }
 
     /// The narrowest the window may get vertically.
     static var minimumContentHeight: CGFloat { DisplayFit.box(620) }
@@ -772,6 +768,10 @@ struct RootView: View {
                     onViewRun: { runID in
                         selectDestination(.automations)
                         pendingRunID = runID
+                        isInspectorPresented = true
+                    },
+                    onRunInFront: { launch in
+                        launchTaskInFront(launch)
                     }
                 ) { closeInspector() }
             case .automations:
@@ -1589,10 +1589,18 @@ struct RootView: View {
                 pendingRunID: $pendingRunID
             )
         case .todo:
-            TodoView(model: todo, folders: workspaces.folders) { runID in
-                selectDestination(.automations)
-                pendingRunID = runID
-            }
+            TodoView(
+                model: todo,
+                folders: workspaces.folders,
+                onViewRun: { runID in
+                    selectDestination(.automations)
+                    pendingRunID = runID
+                    isInspectorPresented = true
+                },
+                onRunInFront: { launch in
+                    launchTaskInFront(launch)
+                }
+            )
         case .machines:
             MachinesView(model: machines)
         case .account:
@@ -1634,6 +1642,43 @@ struct RootView: View {
         #if os(macOS)
         // Agent tiles: absolute paths from the host's login PATH.
         await LaunchCatalog.shared.resolve()
+        #endif
+    }
+
+    /// Interactive TTY for a task. Not an automation run: no transcript, no
+    /// delegate badge. Opens the workspace terminal so the person can watch.
+    private func launchTaskInFront(_ launch: InteractiveTaskLaunch) {
+        #if os(macOS)
+        guard let folder = workspaces.folders.first(where: { $0.id == launch.workspaceID }) else {
+            todo.errorMessage = "Choose a workspace first."
+            return
+        }
+        Task {
+            do {
+                let argv = try await Bridge.automationInteractiveCommand(
+                    backend: launch.backend,
+                    prompt: launch.prompt,
+                    model: launch.model,
+                    effort: launch.effort
+                )
+                guard let command = argv.first else {
+                    todo.errorMessage = "The agent command was empty."
+                    return
+                }
+                selectDestination(.workspaces) {
+                    workspaces.selectedID = folder.id
+                    workspaces.showTerminal(in: folder.id)
+                    isInspectorPresented = true
+                }
+                _ = await terminals.start(
+                    workspace: folder,
+                    command: command,
+                    args: Array(argv.dropFirst())
+                )
+            } catch {
+                todo.errorMessage = error.localizedDescription
+            }
+        }
         #endif
     }
 

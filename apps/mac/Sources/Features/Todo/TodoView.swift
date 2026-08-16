@@ -12,6 +12,8 @@ struct TodoView: View {
     var folders: [WorkspaceFolder]
     /// Open a delegated run's transcript on the Automations screen.
     var onViewRun: ((String) -> Void)? = nil
+    /// Spawn an interactive terminal for this card. Not an automation.
+    var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
 
     private static let columns: [(String, String)] = [
         ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
@@ -22,6 +24,8 @@ struct TodoView: View {
     @State private var dropBeforeID: String?
     /// The tallest stack of cards on the board, measured.
     @State private var tallestColumn: CGFloat = 0
+    /// Scroll-view height per column, so empty space under the cards is a drop target.
+    @State private var columnBodyHeights: [String: CGFloat] = [:]
 
     /// Which column's new-card form is open. Held here, not in the form, so a
     /// column's trigger and its form drive the same flag.
@@ -62,25 +66,25 @@ struct TodoView: View {
             }
             GeometryReader { proxy in
                 let available = proxy.size.height - Theme.Space.m * 2
-                // Three columns side by side where the window allows it,
-                // shrinking together on a narrow window instead of one fixed
-                // 300pt column overflowing the pane.
-                let columnWidth = max(
-                    DisplayFit.box(240),
-                    min(
-                        DisplayFit.box(300),
-                        (proxy.size.width - Theme.Space.m * 4) / 3
-                    )
-                )
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: Theme.Space.m) {
-                        ForEach(Self.columns, id: \.0) { id, label in
-                            // Every column takes the height of the fullest one,
-                            // so the board is three columns rather than three
-                            // unrelated boxes, and drop targets stay the same
-                            // size whichever column a card is dragged from.
-                            column(id, label, width: columnWidth)
-                                .frame(height: boardHeight(available: available))
+                let gap = Theme.Space.m
+                let usable = proxy.size.width - Theme.Space.m * 4
+                // Three columns only when they stay readable. A 240 floor
+                // overflowed a tiled half-screen. Below that, stack them.
+                let minCol: CGFloat = 160
+                let sideBySide = usable >= minCol * 3 + gap * 2
+                let columnWidth = sideBySide
+                    ? min(DisplayFit.box(300), (usable - gap * 2) / 3)
+                    : max(minCol, usable)
+                ScrollView(sideBySide ? .horizontal : .vertical) {
+                    let columns = ForEach(Self.columns, id: \.0) { id, label in
+                        column(id, label, width: columnWidth)
+                            .frame(height: sideBySide ? boardHeight(available: available) : nil)
+                    }
+                    Group {
+                        if sideBySide {
+                            HStack(alignment: .top, spacing: gap) { columns }
+                        } else {
+                            VStack(alignment: .leading, spacing: gap) { columns }
                         }
                     }
                     .padding(Theme.Space.m)
@@ -148,6 +152,7 @@ struct TodoView: View {
                             isSelected: model.selectedCardID == card.id,
                             onSelect: { model.selectCard(card.id) },
                             onViewRun: onViewRun,
+                            onRunInFront: onRunInFront,
                             onDropBefore: { dragged in
                                 guard dragged.id != card.id else { return }
                                 let list = model.cards(in: id).filter { $0.id != dragged.id }
@@ -184,7 +189,24 @@ struct TodoView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Theme.Space.xl)
                     }
+                    // Empty space under the last card is a drop target. The
+                    // outer column destination only wins on the header.
+                    Color.clear
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .frame(maxHeight: .infinity)
+                        .contentShape(.rect)
+                        .dropDestination(for: String.self) { ids, _ in
+                            dropOnColumn(ids, column: id)
+                        } isTargeted: { targeted in
+                            if targeted {
+                                dropTarget = id
+                                dropBeforeID = "__end__"
+                            } else if dropTarget == id && dropBeforeID == "__end__" {
+                                clearDropChrome()
+                            }
+                        }
                 }
+                .frame(minHeight: columnBodyHeights[id] ?? 0, alignment: .top)
                 // Measured inside the scroll view, so this is the height the
                 // cards want rather than the height the column was given.
                 // Measuring the column itself would report what was just set
@@ -195,6 +217,17 @@ struct TodoView: View {
                             .preference(key: ColumnHeightKey.self, value: proxy.size.height)
                     }
                 )
+            }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: ColumnBodyHeightKey.self,
+                        value: [id: proxy.size.height]
+                    )
+                }
+            )
+            .onPreferenceChange(ColumnBodyHeightKey.self) { next in
+                columnBodyHeights.merge(next, uniquingKeysWith: { _, n in n })
             }
             .frame(maxWidth: .infinity)
 
@@ -221,12 +254,7 @@ struct TodoView: View {
                 .strokeBorder(dropTarget == id ? Theme.accent : Theme.border, lineWidth: 1)
         )
         .dropDestination(for: String.self) { ids, _ in
-            guard let cardID = ids.first,
-                  let card = model.cards.first(where: { $0.id == cardID }) else { return false }
-            let others = model.cards(in: id).filter { $0.id != card.id }.count
-            Task { await model.reorder(card, to: id, order: Int64(others)) }
-            clearDropChrome()
-            return true
+            dropOnColumn(ids, column: id)
         } isTargeted: { targeted in
             if targeted {
                 dropTarget = id
@@ -249,6 +277,17 @@ struct TodoView: View {
     private func clearDropChrome() {
         dropTarget = nil
         dropBeforeID = nil
+    }
+
+    /// Append a dragged card to this column. Shared by header chrome and the
+    /// empty space under the last card.
+    private func dropOnColumn(_ ids: [String], column: String) -> Bool {
+        guard let cardID = ids.first,
+              let card = model.cards.first(where: { $0.id == cardID }) else { return false }
+        let others = model.cards(in: column).filter { $0.id != card.id }.count
+        Task { await model.reorder(card, to: column, order: Int64(others)) }
+        clearDropChrome()
+        return true
     }
 
     /// The height every column takes: what the fullest one needs, never less
@@ -300,6 +339,7 @@ private struct CardView: View {
     var onSelect: () -> Void = {}
     /// Opens the run's transcript on the Automations screen.
     var onViewRun: ((String) -> Void)?
+    var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
     var onDropBefore: ((TodoCard) -> Void)?
     var onTargeted: ((Bool) -> Void)?
 
@@ -448,7 +488,13 @@ private struct CardView: View {
             onTargeted?(on)
         }
         .sheet(isPresented: $delegating) {
-            DelegateSheet(model: model, card: card, folders: folders)
+            DelegateSheet(
+                model: model,
+                card: card,
+                folders: folders,
+                onViewRun: onViewRun,
+                onRunInFront: onRunInFront
+            )
         }
     }
 
@@ -541,7 +587,7 @@ private struct CardView: View {
             }
             Divider()
             if !card.isNote {
-                Button("Delegate to agent", systemImage: "paperplane") {
+                Button("Run…", systemImage: "paperplane") {
                     delegating = true
                 }
             }
@@ -675,12 +721,12 @@ private struct NewCardForm: View {
                     // Shell. Both start on the backend's default.
                     if let backend = selectedBackend,
                        !backend.models.isEmpty || !backend.efforts.isEmpty {
-                        HStack(spacing: Theme.Space.s) {
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
                             if !backend.models.isEmpty {
-                                AppMenuPicker(
-                                    title: "Model",
-                                    options: [(value: "", label: "Default")]
-                                        + backend.models.map { (value: $0, label: $0) },
+                                FavoriteModelPicker(
+                                    backendID: backend.id,
+                                    models: backend.models,
+                                    extra: modelChoice,
                                     selection: $modelChoice
                                 )
                             }
@@ -723,8 +769,8 @@ private struct NewCardForm: View {
             }
         }
         .onAppear {
-            budgetMinutes = model.defaultBudgetMinutes
-            noTimeLimit = model.defaultNoLimit
+            budgetMinutes = "180"
+            noTimeLimit = false
         }
         .onChange(of: backendID) { _, _ in
             // A model that meant something to one backend means nothing to
@@ -757,7 +803,10 @@ private struct NewCardForm: View {
             workspaceID: kind == .note ? "" : workspaceID,
             budgetSeconds: budget,
             column: kind == .note ? "backlog" : column,
-            model: modelChoice.isEmpty ? nil : modelChoice,
+            model: {
+                let cleaned = TodoCard.cleanModelID(modelChoice)
+                return cleaned.isEmpty ? nil : cleaned
+            }(),
             effort: effortChoice.isEmpty ? nil : effortChoice
         )
         if model.errorMessage == nil { cancel() }
@@ -767,8 +816,8 @@ private struct NewCardForm: View {
         title = ""
         notes = ""
         workspaceID = ""
-        budgetMinutes = model.defaultBudgetMinutes
-        noTimeLimit = model.defaultNoLimit
+        budgetMinutes = "180"
+        noTimeLimit = false
         backendID = ""
         expanded = false
         kind = .task
@@ -780,6 +829,8 @@ struct DelegateSheet: View {
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
+    var onViewRun: ((String) -> Void)? = nil
+    var onRunInFront: ((InteractiveTaskLaunch) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
 
     @State private var backendID = ""
@@ -792,7 +843,7 @@ struct DelegateSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Delegate to agent")
+            Text("Run this task")
                 .font(.system(size: 17, weight: .semibold))
             Text(card.title)
                 .font(.callout)
@@ -810,12 +861,12 @@ struct DelegateSheet: View {
             )
             if let backend = model.backends.first(where: { $0.id == backendID }),
                !backend.models.isEmpty || !backend.efforts.isEmpty {
-                HStack(spacing: Theme.Space.s) {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
                     if !backend.models.isEmpty {
-                        AppMenuPicker(
-                            title: "Model",
-                            options: [(value: "", label: "Default")]
-                                + backend.models.map { (value: $0, label: $0) },
+                        FavoriteModelPicker(
+                            backendID: backend.id,
+                            models: backend.models,
+                            extra: modelChoice,
                             selection: $modelChoice
                         )
                     }
@@ -842,24 +893,27 @@ struct DelegateSheet: View {
                     .foregroundStyle(.secondary)
                 BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
             }
-            HStack {
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                Spacer()
-                Button("Run") {
+            RunModeButtons(
+                canRun: canRun,
+                running: working,
+                onBackground: {
                     working = true
-                    Task { await run() }
+                    Task { await run(inFront: false) }
+                },
+                onFront: {
+                    working = true
+                    Task { await run(inFront: true) }
                 }
-                .buttonStyle(AccentButtonStyle())
-                .disabled(!canRun || working)
-            }
+            )
+            Button("Cancel") { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
         }
         .padding(Theme.Space.l)
         .frame(width: 420)
         .onAppear {
             backendID = card.backend
             workspaceID = card.workspaceID
-            modelChoice = card.model ?? ""
+            modelChoice = card.cleanedModel
             effortChoice = card.effort ?? ""
             noTimeLimit = card.budgetSeconds == 0
             if card.budgetSeconds > 0 {
@@ -875,21 +929,44 @@ struct DelegateSheet: View {
         !backendID.isEmpty && !workspaceID.isEmpty
     }
 
-    private func run() async {
+    private func run(inFront: Bool) async {
         let minutes = UInt64(budgetMinutes) ?? 180
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
         let saved = await model.updateCard(
             card,
             backend: backendID,
-            model: modelChoice.isEmpty ? nil : modelChoice,
+            model: {
+                let cleaned = TodoCard.cleanModelID(modelChoice)
+                return cleaned.isEmpty ? nil : cleaned
+            }(),
             effort: effortChoice.isEmpty ? nil : effortChoice,
             workspaceID: workspaceID,
             budgetSeconds: budget
         )
-        guard saved, let latest = model.cards.first(where: { $0.id == card.id }) else { return }
-        await model.delegate(latest)
+        guard saved, let latest = model.cards.first(where: { $0.id == card.id }) else {
+            working = false
+            return
+        }
+        if inFront {
+            onRunInFront?(InteractiveTaskLaunch(
+                workspaceID: latest.workspaceID,
+                backend: latest.backend,
+                model: latest.cleanedModel.isEmpty ? nil : latest.cleanedModel,
+                effort: latest.effort,
+                prompt: latest.promptForRun,
+                title: latest.title
+            ))
+            model.noticeOpenedInFront(latest.title)
+            working = false
+            if model.errorMessage == nil { dismiss() }
+            return
+        }
+        let runID = await model.delegate(latest)
         working = false
-        if model.errorMessage == nil { dismiss() }
+        if model.errorMessage == nil {
+            dismiss()
+            if let runID { onViewRun?(runID) }
+        }
     }
 }
 
@@ -901,5 +978,12 @@ private struct ColumnHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct ColumnBodyHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
     }
 }

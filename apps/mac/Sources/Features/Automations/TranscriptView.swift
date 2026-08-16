@@ -26,8 +26,8 @@ struct TranscriptView: View {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                case .tool(let verb, let arg, let snippet):
-                    ToolRow(verb: verb, arg: arg, snippet: snippet)
+                case .tool(let verb, let arg, let snippet, let time):
+                    ToolRow(verb: verb, arg: arg, snippet: snippet, time: time)
                 }
             }
         }
@@ -36,7 +36,7 @@ struct TranscriptView: View {
 
     enum Block {
         case text(String)
-        case tool(verb: String, arg: String, snippet: [String])
+        case tool(verb: String, arg: String, snippet: [String], time: String?)
     }
 
     /// Verbs the host writes as the first token of a tool paragraph.
@@ -68,7 +68,7 @@ struct TranscriptView: View {
                     rest.append(line)
                 }
             }
-            out.append(.tool(verb: tool.verb, arg: tool.arg, snippet: snippet))
+            out.append(.tool(verb: tool.verb, arg: tool.arg, snippet: snippet, time: tool.time))
             if !rest.isEmpty {
                 out.append(.text(rest.joined(separator: "\n")))
             }
@@ -76,20 +76,42 @@ struct TranscriptView: View {
         return out
     }
 
-    private static func toolLine(_ line: String) -> (verb: String, arg: String)? {
-        let parts = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+    private static func toolLine(_ line: String) -> (time: String?, verb: String, arg: String)? {
+        var rest = line
+        var time: String?
+        if let split = clockPrefix(rest) {
+            time = split.time
+            rest = split.rest
+        }
+        let parts = rest.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
         guard let first = parts.first else { return nil }
         let verb = String(first)
         guard verbs.contains(verb) else { return nil }
         let arg = parts.count > 1 ? String(parts[1]) : ""
         // A sentence that happens to start with "Read" stays prose.
         if arg.contains(". ") || arg.contains("? ") { return nil }
-        return (verb, arg)
+        return (time, verb, arg)
+    }
+
+    /// `17:29:15 Bash ls` from the host. Optional. Prose never starts this way.
+    private static func clockPrefix(_ line: String) -> (time: String, rest: String)? {
+        let chars = Array(line)
+        guard chars.count >= 8 else { return nil }
+        let digits: (Character) -> Bool = { $0.isNumber }
+        guard digits(chars[0]), digits(chars[1]), chars[2] == ":",
+              digits(chars[3]), digits(chars[4]), chars[5] == ":",
+              digits(chars[6]), digits(chars[7])
+        else { return nil }
+        let time = String(chars[0...7])
+        var idx = 8
+        if idx < chars.count && chars[idx] == " " { idx += 1 }
+        return (time, String(chars[idx...]))
     }
 
     private static func isSnippetLine(_ line: String) -> Bool {
         line.hasPrefix("+ ") || line.hasPrefix("- ")
             || line.hasPrefix("+ …") || line.hasPrefix("- …")
+            || line.hasPrefix("| ") || line.hasPrefix("| …")
     }
 }
 
@@ -97,7 +119,12 @@ private struct ToolRow: View {
     var verb: String
     var arg: String
     var snippet: [String]
+    var time: String?
     @State private var showSnippet = false
+
+    private var snippetIsOutput: Bool {
+        snippet.contains { $0.hasPrefix("|") }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -113,12 +140,17 @@ private struct ToolRow: View {
                     Text(arg)
                         .font(Theme.mono(11))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                         .truncationMode(.middle)
                 }
                 Spacer(minLength: 0)
+                if let time, !time.isEmpty {
+                    Text(time)
+                        .font(Theme.mono(10))
+                        .foregroundStyle(.tertiary)
+                }
                 if !snippet.isEmpty {
-                    Button(showSnippet ? "Hide edit" : "Show edit") {
+                    Button(showSnippet ? hideLabel : showLabel) {
                         showSnippet.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))
@@ -127,7 +159,7 @@ private struct ToolRow: View {
             if showSnippet && !snippet.isEmpty {
                 VStack(alignment: .leading, spacing: 1) {
                     ForEach(Array(snippet.enumerated()), id: \.offset) { _, line in
-                        Text(line)
+                        Text(displaySnippet(line))
                             .font(Theme.mono(11))
                             .foregroundStyle(snippetColor(line))
                     }
@@ -167,6 +199,15 @@ private struct ToolRow: View {
         case "Shell", "Bash": return Theme.warning
         default: return Theme.accent
         }
+    }
+
+    private var showLabel: String { snippetIsOutput ? "Show output" : "Show edit" }
+    private var hideLabel: String { snippetIsOutput ? "Hide output" : "Hide edit" }
+
+    private func displaySnippet(_ line: String) -> String {
+        if line.hasPrefix("| ") { return String(line.dropFirst(2)) }
+        if line == "| …" { return "…" }
+        return line
     }
 
     private func snippetColor(_ line: String) -> Color {

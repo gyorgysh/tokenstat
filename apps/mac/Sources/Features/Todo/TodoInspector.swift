@@ -12,6 +12,7 @@ struct TodoInspector: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
     var onViewRun: ((String) -> Void)?
+    var onRunInFront: ((InteractiveTaskLaunch) -> Void)?
     var onClose: () -> Void
 
     @State private var titleDraft = ""
@@ -22,6 +23,14 @@ struct TodoInspector: View {
     @FocusState private var focused: Field?
     @State private var loadedID: String?
     @State private var showDelegate = false
+    @State private var backendID = ""
+    @State private var modelChoice = ""
+    @State private var effortChoice = ""
+    @State private var workspaceID = ""
+    @State private var budgetMinutes = "180"
+    @State private var noTimeLimit = false
+    @State private var applyingAgent = false
+    @State private var starting = false
 
     private enum Field: Hashable { case title, notes }
 
@@ -68,7 +77,13 @@ struct TodoInspector: View {
         .onDisappear { Task { await persistDrafts() } }
         .sheet(isPresented: $showDelegate) {
             if let card = model.selectedCard {
-                DelegateSheet(model: model, card: card, folders: folders)
+                DelegateSheet(
+                    model: model,
+                    card: card,
+                    folders: folders,
+                    onViewRun: onViewRun,
+                    onRunInFront: onRunInFront
+                )
             }
         }
     }
@@ -98,16 +113,7 @@ struct TodoInspector: View {
 
                 labeled("Column", card.columnLabel)
                 if !card.isNote {
-                    labeled(
-                        "Backend",
-                        model.backends.first { $0.id == card.backend }?.label ?? card.backend
-                    )
-                    if let modelName = card.model, !modelName.isEmpty {
-                        labeled("Model", modelName)
-                    }
-                    if let folder = folders.first(where: { $0.id == card.workspaceID }) {
-                        labeled("Folder", folder.name)
-                    }
+                    agentFields(card)
                 }
 
                 if let delegate = card.delegate {
@@ -125,8 +131,17 @@ struct TodoInspector: View {
                     Button("Open run") { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
                 } else if !card.isNote {
-                    Button("Delegate to agent") { showDelegate = true }
-                        .buttonStyle(AccentButtonStyle())
+                    if canRun {
+                        RunModeButtons(
+                            canRun: canRun,
+                            running: starting,
+                            onBackground: { Task { await startRun(card, inFront: false) } },
+                            onFront: { Task { await startRun(card, inFront: true) } }
+                        )
+                    } else {
+                        Button("Run…") { showDelegate = true }
+                            .buttonStyle(AccentButtonStyle())
+                    }
                 }
 
                 moveButtons(card)
@@ -161,6 +176,86 @@ struct TodoInspector: View {
                 }
             }
             .focused($focused, equals: .notes)
+    }
+
+    @ViewBuilder
+    private func agentFields(_ card: TodoCard) -> some View {
+        AppMenuPicker(
+            title: "Agent",
+            options: [(value: "", label: "Choose later")]
+                + model.backends.map { (value: $0.id, label: $0.label) },
+            selection: $backendID
+        )
+        .onChange(of: backendID) { old, new in
+            guard !applyingAgent, old != new, loadedID == card.id else { return }
+            if !old.isEmpty {
+                modelChoice = ""
+                effortChoice = ""
+            }
+            Task { await persistAgent(card) }
+        }
+        AppMenuPicker(
+            title: "Workspace",
+            options: [(value: "", label: "Choose later")]
+                + folders.map { (value: $0.id, label: $0.name) },
+            selection: $workspaceID
+        )
+        .onChange(of: workspaceID) { _, _ in
+            guard !applyingAgent, loadedID == card.id else { return }
+            Task { await persistAgent(card) }
+        }
+        if let backend = model.backends.first(where: { $0.id == backendID }),
+           !backend.models.isEmpty || !backend.efforts.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                if !backend.models.isEmpty {
+                    FavoriteModelPicker(
+                        backendID: backend.id,
+                        models: backend.models,
+                        extra: modelChoice,
+                        selection: $modelChoice
+                    )
+                    .onChange(of: modelChoice) { _, _ in
+                        guard !applyingAgent, loadedID == card.id else { return }
+                        Task { await persistAgent(card) }
+                    }
+                }
+                if !backend.efforts.isEmpty {
+                    AppMenuPicker(
+                        title: "Effort",
+                        options: [(value: "", label: "Default")]
+                            + backend.efforts.map { (value: $0, label: $0) },
+                        selection: $effortChoice
+                    )
+                    .onChange(of: effortChoice) { _, _ in
+                        guard !applyingAgent, loadedID == card.id else { return }
+                        Task { await persistAgent(card) }
+                    }
+                }
+            }
+        }
+        HStack(spacing: Theme.Space.xs) {
+            Text("Time limit")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("180", text: $budgetMinutes)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 56)
+                .multilineTextAlignment(.trailing)
+                .disabled(noTimeLimit)
+                .onSubmit { Task { await persistAgent(card) } }
+            Text("minutes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
+                .onChange(of: noTimeLimit) { _, _ in
+                    guard !applyingAgent, loadedID == card.id else { return }
+                    Task { await persistAgent(card) }
+                }
+        }
+    }
+
+    private var canRun: Bool {
+        !backendID.isEmpty && !workspaceID.isEmpty
     }
 
     @ViewBuilder
@@ -203,7 +298,64 @@ struct TodoInspector: View {
         notesDraft = card.notes
         baselineTitle = card.title
         baselineNotes = card.notes
+        applyingAgent = true
+        backendID = card.backend
+        modelChoice = card.cleanedModel
+        effortChoice = card.effort ?? ""
+        workspaceID = card.workspaceID
+        noTimeLimit = card.budgetSeconds == 0
+        if card.budgetSeconds > 0 {
+            budgetMinutes = String(max(1, card.budgetSeconds / 60))
+        } else {
+            budgetMinutes = "180"
+        }
         saveState = .idle
+        applyingAgent = false
+        if (card.model ?? "") != card.cleanedModel {
+            Task { await persistAgent(card) }
+        }
+    }
+
+    private func persistAgent(_ card: TodoCard) async {
+        let minutes = UInt64(budgetMinutes) ?? 180
+        let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
+        let modelValue = TodoCard.cleanModelID(modelChoice)
+        _ = await model.updateCard(
+            card,
+            backend: backendID,
+            model: modelValue.isEmpty ? nil : modelValue,
+            effort: effortChoice.isEmpty ? nil : effortChoice,
+            workspaceID: workspaceID,
+            budgetSeconds: budget
+        )
+    }
+
+    private func startRun(_ card: TodoCard, inFront: Bool) async {
+        if starting { return }
+        starting = true
+        await persistDrafts()
+        await persistAgent(card)
+        guard let latest = model.cards.first(where: { $0.id == card.id }) ?? model.selectedCard else {
+            starting = false
+            return
+        }
+        if inFront {
+            onRunInFront?(InteractiveTaskLaunch(
+                workspaceID: latest.workspaceID,
+                backend: latest.backend,
+                model: latest.cleanedModel.isEmpty ? nil : latest.cleanedModel,
+                effort: latest.effort,
+                prompt: latest.promptForRun,
+                title: latest.title
+            ))
+            model.noticeOpenedInFront(latest.title)
+            starting = false
+            return
+        }
+        if let runID = await model.delegate(latest) {
+            onViewRun?(runID)
+        }
+        starting = false
     }
 
     private func markDirtyIfNeeded() {

@@ -96,6 +96,33 @@ pub struct Board {
     cards: Mutex<Vec<Card>>,
 }
 
+fn run_error_note(run: &crate::automations::RunRecord) -> String {
+    let raw = std::path::PathBuf::from(&run.transcript_path);
+    let readable = crate::transcript::readable_path(&raw);
+    let text = std::fs::read_to_string(&readable)
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| crate::transcript::rematerialize(&raw, &run.backend, true))
+        .unwrap_or_default();
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
+    if line.is_empty() {
+        return "the run failed".into();
+    }
+    let mut note = line.to_string();
+    if note.len() > 240 {
+        let mut end = 240;
+        while end > 0 && !note.is_char_boundary(end) {
+            end -= 1;
+        }
+        note.truncate(end);
+    }
+    note
+}
+
 pub fn shared() -> std::sync::Arc<Board> {
     static BOARD: std::sync::OnceLock<std::sync::Arc<Board>> = std::sync::OnceLock::new();
     std::sync::Arc::clone(BOARD.get_or_init(|| std::sync::Arc::new(Board::load())))
@@ -161,7 +188,7 @@ impl Board {
                             delegate.status = run.status.clone();
                             delegate.ended_at_ms = run.ended_at_ms;
                             if run.status == "error" {
-                                delegate.error = Some("the run failed".into());
+                                delegate.error = Some(run_error_note(run));
                             }
                             card.updated_at_ms = Self::now_ms();
                             changed = true;

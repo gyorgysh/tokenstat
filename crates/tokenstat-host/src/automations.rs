@@ -240,6 +240,8 @@ pub fn agent_command(
         return Err("an automation needs a prompt".into());
     }
 
+    let model = crate::agent_models::sanitize_cli_model(backend, model);
+    let model = model.as_deref();
     let mut args: Vec<String> = Vec::new();
     match backend {
         "sh" => {
@@ -335,10 +337,8 @@ pub fn agent_command(
                 args.push("--model".into());
                 args.push(m.into());
             }
-            if let Some(e) = effort {
-                args.push("--effort".into());
-                args.push(e.into());
-            }
+            // Effort lives in the model id (`gemini-3.6-flash-high`). Passing
+            // `--effort` on top is rejected as unsupported for those models.
             // Host drain is the real stop. Give print enough room that a
             // 180-minute job is not killed by this first.
             let timeout = agy_print_timeout(budget_seconds);
@@ -368,6 +368,119 @@ pub fn agent_command(
                 args.push(e.into());
             }
             args.extend(["run", "--auto", "--format", "json", "--", p].map(str::to_string));
+        }
+        "opencode2" => {
+            // OpenCode 2 rejects `--model` on the root command. Flags belong
+            // on `run`.
+            args.push("opencode2".into());
+            args.extend(["run", "--auto", "--format", "json"].map(str::to_string));
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--variant".into());
+                args.push(e.into());
+            }
+            args.extend(["--", p].map(str::to_string));
+        }
+        other => return Err(format!("unknown backend {other}")),
+    }
+    Ok(args)
+}
+
+/// Argv for an interactive TTY. Same backends as [`agent_command`], without
+/// print / stream-json flags. The front end `pty.spawn`s this so the person
+/// can watch the agent. Not an automation run: no transcript, no budget.
+pub fn interactive_agent_command(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let p = prompt.trim();
+    if p.is_empty() {
+        return Err("an interactive run needs a prompt".into());
+    }
+
+    let model = crate::agent_models::sanitize_cli_model(backend, model);
+    let model = model.as_deref();
+    let mut args: Vec<String> = Vec::new();
+    match backend {
+        "sh" => {
+            args = shell_argv(p).into_iter().map(str::to_string).collect();
+        }
+        "claude" => {
+            args.push("claude".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--effort".into());
+                args.push(e.into());
+            }
+            args.extend(["--dangerously-skip-permissions", p].map(str::to_string));
+        }
+        "codex" => {
+            args.push("codex".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            args.extend(
+                [
+                    "--dangerously-bypass-approvals-and-sandbox",
+                    "--skip-git-repo-check",
+                    p,
+                ]
+                .map(str::to_string),
+            );
+        }
+        "grok" => {
+            args.push("grok".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--reasoning-effort".into());
+                args.push(e.into());
+            }
+            args.extend(["--permission-mode", "bypassPermissions", p].map(str::to_string));
+        }
+        "cursor" => {
+            args.push("cursor-agent".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            args.extend(["--trust", p].map(str::to_string));
+        }
+        "agy" => {
+            args.push("agy".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            args.extend(["--dangerously-skip-permissions", p].map(str::to_string));
+        }
+        "opencode" => {
+            args.push("opencode".into());
+            if let Some(m) = model {
+                args.push("--model".into());
+                args.push(m.into());
+            }
+            if let Some(e) = effort {
+                args.push("--variant".into());
+                args.push(e.into());
+            }
+            args.extend(["--auto", p].map(str::to_string));
+        }
+        "opencode2" => {
+            // Root command rejects `--model`. The TUI is the place to pick one.
+            args.push("opencode2".into());
+            args.extend(["--auto", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
     }
@@ -452,12 +565,20 @@ pub fn backends() -> Vec<serde_json::Value> {
                 "claude-sonnet-4-6",
                 "gpt-oss-120b-medium",
             ],
-            serde_json::json!(["low", "medium", "high"]),
+            // High / medium / low are separate model ids, not a second flag.
+            serde_json::json!([]),
         ),
         (
             "opencode",
             "OpenCode",
             "opencode run \"…\"",
+            &[],
+            serde_json::json!(["minimal", "medium", "high", "max"]),
+        ),
+        (
+            "opencode2",
+            "OpenCode 2",
+            "opencode2 run \"…\"",
             &[],
             serde_json::json!(["minimal", "medium", "high", "max"]),
         ),
@@ -1547,7 +1668,15 @@ mod tests {
 
     #[test]
     fn every_backend_builds_a_command() {
-        for backend in ["claude", "codex", "grok", "cursor", "agy", "opencode"] {
+        for backend in [
+            "claude",
+            "codex",
+            "grok",
+            "cursor",
+            "agy",
+            "opencode",
+            "opencode2",
+        ] {
             let argv = agent_command(backend, "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
             assert!(!argv.is_empty(), "{backend} produced no command");
             assert!(argv.iter().any(|a| a == "do it"));
@@ -1563,6 +1692,24 @@ mod tests {
                 .any(|w| w == ["--output-format", "stream-json"])
         );
         assert!(agy.windows(2).any(|w| w == ["--print-timeout", "180m"]));
+        let mashed = agent_command(
+            "agy",
+            "do it",
+            Some("gemini-3.6-flash-high\tGemini 3.6 Flash (High)"),
+            Some("high"),
+            DEFAULT_BUDGET_SECONDS,
+        )
+        .unwrap();
+        assert!(
+            mashed
+                .windows(2)
+                .any(|w| w == ["--model", "gemini-3.6-flash-high"]),
+            "{mashed:?}"
+        );
+        assert!(
+            !mashed.iter().any(|a| a == "--effort"),
+            "agy models already encode effort: {mashed:?}"
+        );
         let unlimited = agent_command("agy", "do it", None, None, 0).unwrap();
         assert!(
             unlimited
@@ -1578,6 +1725,10 @@ mod tests {
             agent_command("opencode", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(opencode.windows(2).any(|w| w == ["--format", "json"]));
         assert!(opencode.iter().any(|a| a == "--auto"));
+        let next = agent_command("opencode2", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
+        assert_eq!(next.first().map(String::as_str), Some("opencode2"));
+        assert!(next.windows(2).any(|w| w == ["--format", "json"]));
+        assert!(next.iter().any(|a| a == "run"));
         let codex = agent_command("codex", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(
             codex
@@ -1630,6 +1781,39 @@ mod tests {
         )
         .unwrap();
         assert!(!shell.iter().any(|a| a == "--model" || a == "--effort"));
+    }
+
+    #[test]
+    fn interactive_command_is_a_tty_not_a_print_session() {
+        let claude =
+            interactive_agent_command("claude", "do it", Some("sonnet"), Some("high")).unwrap();
+        assert_eq!(claude.first().map(String::as_str), Some("claude"));
+        assert!(claude.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(!claude.iter().any(|a| a == "-p" || a == "--print"));
+        assert!(!claude.iter().any(|a| a == "stream-json"));
+        assert!(claude.iter().any(|a| a == "do it"));
+
+        let agy =
+            interactive_agent_command("agy", "do it", Some("gemini-3.6-flash-high"), None).unwrap();
+        assert!(!agy.iter().any(|a| a == "--print"));
+        assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));
+
+        let next =
+            interactive_agent_command("opencode2", "do it", Some("opencode/foo"), None).unwrap();
+        assert_eq!(next, vec!["opencode2", "--auto", "do it"]);
+
+        assert!(interactive_agent_command("nope", "do it", None, None).is_err());
+        assert!(interactive_agent_command("claude", "   ", None, None).is_err());
+    }
+
+    #[test]
+    fn backends_include_opencode2() {
+        let ids: Vec<String> = backends()
+            .into_iter()
+            .filter_map(|v| v.get("id")?.as_str().map(str::to_string))
+            .collect();
+        assert!(ids.contains(&"opencode".into()));
+        assert!(ids.contains(&"opencode2".into()));
     }
 
     /// Register `dir` in the shared registry and return its id.

@@ -191,15 +191,22 @@ final class TodoModel {
         }
     }
 
-    func delegate(_ card: TodoCard) async {
+    @discardableResult
+    func delegate(_ card: TodoCard) async -> String? {
         do {
-            _ = try await Bridge.todoDelegate(id: card.id)
+            let updated = try await Bridge.todoDelegate(id: card.id)
             showNotice("Handed \"\(card.title)\" to an agent.")
             errorMessage = nil
             await load()
+            return updated.delegate?.runId ?? cards.first { $0.id == card.id }?.delegate?.runId
         } catch {
             errorMessage = error.localizedDescription
+            return nil
         }
+    }
+
+    func noticeOpenedInFront(_ title: String) {
+        showNotice("Opened \"\(title)\" in a terminal.")
     }
 
     private func showNotice(_ message: String) {
@@ -238,9 +245,9 @@ final class TodoModel {
         if running && pollTask == nil {
             pollTask = Task { [weak self] in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(2))
                     guard let self else { return }
                     await self.load()
+                    try? await Task.sleep(for: .seconds(1))
                 }
             }
         } else if !running {

@@ -60,6 +60,11 @@ pub fn refresh() {
                 list("opencode", &["models"], parse_opencode_models)
             })
         });
+        scope.spawn(|| {
+            fill("opencode2", || {
+                list("opencode2", &["models"], parse_opencode_models)
+            })
+        });
     });
 }
 
@@ -214,7 +219,8 @@ pub(crate) fn parse_cursor_models(out: &str) -> Vec<String> {
 }
 
 /// Current `agy models` mashes the id into the label (`gemini-3.6-flash-highGemini 3.6 Flash (High)`).
-/// Older builds printed the label alone, and that label is what `--model` accepted.
+/// Some builds print `id<TAB>label`. Older builds printed the label alone,
+/// and that label is what `--model` accepted.
 pub(crate) fn parse_agy_models(out: &str) -> Vec<String> {
     let mut models = Vec::new();
     for line in out.lines() {
@@ -222,24 +228,54 @@ pub(crate) fn parse_agy_models(out: &str) -> Vec<String> {
         if line.is_empty() || line.to_ascii_lowercase().starts_with("fetching") {
             continue;
         }
-        if let Some(id) = split_agy_id(line) {
+        if let Some(id) = sanitize_agy_model(line) {
             if !models.iter().any(|m| m == &id) {
                 models.push(id);
             }
-            continue;
-        }
-        if is_model_id(line) {
-            if !models.iter().any(|m| m == line) {
-                models.push(line.to_string());
-            }
-            continue;
-        }
-        // Legacy: the whole line is the `--model` value.
-        if line.chars().any(|c| c.is_whitespace()) {
-            models.push(line.to_string());
         }
     }
     models
+}
+
+/// The token `agy --model` will accept. Strips a tab-separated label, or the
+/// mashed `idLabel` form, so a picker value cannot poison the launch argv.
+pub(crate) fn sanitize_agy_model(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let first = trimmed.split(['\t', '\n']).next().unwrap_or(trimmed).trim();
+    if let Some(id) = split_agy_id(first) {
+        return Some(id);
+    }
+    if let Some(id) = split_agy_id(trimmed) {
+        return Some(id);
+    }
+    if is_model_id(first) {
+        return Some(first.to_string());
+    }
+    // Legacy: the whole line is the `--model` value, e.g. "Gemini 3.1 Pro (High)".
+    if first.chars().any(|c| c.is_whitespace()) {
+        return Some(first.to_string());
+    }
+    None
+}
+
+/// Drop a tab/label suffix on any backend so a stored picker value stays an id.
+pub(crate) fn sanitize_cli_model(backend: &str, model: Option<&str>) -> Option<String> {
+    let raw = model?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if backend == "agy" {
+        return sanitize_agy_model(raw);
+    }
+    let first = raw.split(['\t', '\n']).next().unwrap_or(raw).trim();
+    if first.is_empty() {
+        None
+    } else {
+        Some(first.to_string())
+    }
 }
 
 /// `opencode models` prints `provider/model` lines.
@@ -348,6 +384,19 @@ gpt-oss-120b-mediumGPT-OSS 120B (Medium)
         assert_eq!(
             parse_agy_models("Gemini 3.1 Pro (High)\n"),
             vec!["Gemini 3.1 Pro (High)".to_string()]
+        );
+    }
+
+    #[test]
+    fn agy_list_splits_a_tab_separated_id() {
+        let out = "gemini-3.6-flash-high\tGemini 3.6 Flash (High)\n";
+        assert_eq!(
+            parse_agy_models(out),
+            vec!["gemini-3.6-flash-high".to_string()]
+        );
+        assert_eq!(
+            sanitize_agy_model("gemini-3.6-flash-high\tGemini 3.6 Flash (High)").as_deref(),
+            Some("gemini-3.6-flash-high")
         );
     }
 

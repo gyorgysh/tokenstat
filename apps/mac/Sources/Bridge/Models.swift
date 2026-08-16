@@ -1326,7 +1326,7 @@ struct Automation: Codable, Sendable, Hashable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name, backend, model, effort, workspaceID = "workspaceId", prompt, schedule
-        case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID
+        case budgetSeconds, enabled, lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId"
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
@@ -1447,6 +1447,11 @@ struct TranscriptChunk: Codable, Sendable {
     var nextOffset: UInt64
 }
 
+/// Argv from `automation.interactiveCommand`.
+struct InteractiveCommandArgv: Codable, Sendable {
+    var argv: [String]
+}
+
 /// One agent CLI a job can run on, as the daemon advertises it.
 struct AgentBackend: Codable, Sendable, Identifiable {
     var id: String
@@ -1537,6 +1542,42 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     }
 
     var isNote: Bool { kind == .note }
+
+    /// The token a CLI `--model` flag accepts. Drops a tab-separated label
+    /// or a mashed `idLabel` leftover from an older picker.
+    var cleanedModel: String {
+        Self.cleanModelID(model ?? "")
+    }
+
+    /// What an agent should do. Notes first, title if the notes are empty.
+    var promptForRun: String {
+        let body = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !body.isEmpty { return body }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func cleanModelID(_ raw: String) -> String {
+        let first = raw.split(whereSeparator: { $0 == "\t" || $0 == "\n" }).first
+            .map(String.init) ?? raw
+        let trimmed = first.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let idx = trimmed.firstIndex(where: \.isUppercase) {
+            let prefix = String(trimmed[..<idx])
+            if prefix.contains(where: { $0 == "-" || $0 == "." }) {
+                return prefix
+            }
+        }
+        return trimmed
+    }
+}
+
+/// Start this card as an interactive terminal, not as an automation.
+struct InteractiveTaskLaunch: Sendable {
+    var workspaceID: String
+    var backend: String
+    var model: String?
+    var effort: String?
+    var prompt: String
+    var title: String
 }
 
 /// The live state of a card handed to an agent.
