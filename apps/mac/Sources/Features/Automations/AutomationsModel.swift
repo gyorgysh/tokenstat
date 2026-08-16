@@ -308,7 +308,9 @@ final class AutomationsModel {
         let prompt = Self.autoCommitPrompt(workspaceName: workspaceName)
         let schedule = AutomationSchedule(kind: .once)
         if var existing = jobs.first(where: {
-            $0.name == name && $0.workspaceID == workspaceID
+            $0.name == name
+                && $0.workspaceID == workspaceID
+                && $0.schedule.kind == .once
         }) {
             existing.backend = backend
             existing.model = model

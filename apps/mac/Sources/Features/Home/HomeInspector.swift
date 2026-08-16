@@ -409,11 +409,13 @@ struct HomeInspector: View {
     private static func friendlyDate(_ iso: String) -> String {
         let parse = DateFormatter()
         parse.locale = Locale(identifier: "en_US_POSIX")
-        parse.timeZone = TimeZone(identifier: "UTC")
+        let utc = TimeZone(secondsFromGMT: 0)
+        parse.timeZone = utc
         parse.dateFormat = "yyyy-MM-dd"
         guard let date = parse.date(from: iso) else { return iso }
         let out = DateFormatter()
         out.locale = Locale.current
+        out.timeZone = utc
         out.dateFormat = "MMM d, yyyy"
         return out.string(from: date)
     }

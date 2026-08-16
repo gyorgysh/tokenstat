@@ -93,24 +93,8 @@ struct WorkspaceInspector: View {
         .background(Theme.background)
     }
 
-    // The band above this panel is the window's titlebar, not padding this
-    // view controls: `RootView.belowTitlebar` reserves it, because the
-    // detail column is lifted into the traffic-light row and everything
-    // mounted on it comes up too. It is painted opaque (`Theme.sidebar`) so
-    // the window's glass does not show through, but it stays free of
-    // controls: AppKit's titlebar owns the mouse there, and a tab that used
-    // to sit in it could not be clicked.
-    //
-    // Two ways of using the band were tried and both came out worse:
-    //
-    // - `.ignoresSafeArea(.container, edges: .top)` does not move a view *into*
-    //   the titlebar, it slides it *behind* it, and the tabs vanish entirely.
-    // - A `ToolbarItem` does land in the band, but toolbar items fill from the
-    //   leading edge, so the tabs sat beside the sidebar toggle instead of over
-    //   the column they switch. `ToolbarSpacer` fixes that and is macOS 26,
-    //   above this app's deployment target.
-    //
-    // Leave the band alone. The tabs belong to the panel they switch.
+    // The band above this panel is the window titlebar. AppKit owns the
+    // mouse there, so the tabs stay in the panel they switch.
 
     @ViewBuilder
     private var content: some View {

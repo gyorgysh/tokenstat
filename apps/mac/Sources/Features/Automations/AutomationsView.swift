@@ -26,8 +26,6 @@ struct AutomationsView: View {
 
     @State private var creating = false
     @State private var template: AutomationTemplate?
-    /// The run whose transcript sheet is open.
-    @State private var viewingRun: RunRecord?
     @State private var search = ""
     @FocusState private var searchFocused: Bool
     /// Empty means follow the default: open when there are no jobs yet.
@@ -109,9 +107,6 @@ struct AutomationsView: View {
                 onNavigate: onNavigate,
                 template: suggestion
             )
-        }
-        .sheet(item: $viewingRun) { run in
-            TranscriptSheet(model: model, run: run)
         }
         .overlay(alignment: .bottomTrailing) {
             TransientToast(message: $model.noticeMessage, severity: .success)
@@ -497,97 +492,6 @@ struct AutomationsView: View {
         default: return .secondary
         }
     }
-}
-
-/// The full transcript of one run, rendered as something a person reads.
-///
-/// The raw transcript is the CLI's own stream — for Claude that is a JSON
-/// line stream whose system hooks drown out the actual answer. This sheet
-/// extracts the assistant messages and the final result, and passes plain
-/// text through untouched for shell runs. Readable parsing exists for
-/// Claude's stream-json today; every other backend stays raw until its
-/// output shape is handled the same way.
-private struct TranscriptSheet: View {
-    @Bindable var model: AutomationsModel
-    var run: RunRecord
-
-    @Environment(\.dismiss) private var dismiss
-    /// Raw shows the CLI's exact stream; off (the default) shows the parsed,
-    /// human-readable version.
-    @State private var showRaw = false
-
-    /// Only Claude's stream-json has a readable form yet.
-    private var canSummarize: Bool { run.backend == "claude" }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(run.name)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(headerLine)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if canSummarize {
-                    Button {
-                        showRaw.toggle()
-                    } label: {
-                        Label(showRaw ? "Readable" : "Raw", systemImage: showRaw ? "text.alignleft" : "terminal")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.borderless)
-                    .help(showRaw ? "Show the readable summary" : "Show the raw device output")
-                }
-                StatusPill(status: run.status, text: run.endedLabel)
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.controlGlyph)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(Theme.controlSeat))
-                        .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .help("Close")
-            }
-
-            ScrollView {
-                Text(
-                    showRaw || !canSummarize
-                        ? model.transcriptText
-                        : model.readableTranscript
-                )
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(Theme.Space.s)
-            .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.cardRadius)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-        }
-        .padding(Theme.Space.l)
-        .frame(width: 680)
-        .frame(minHeight: 420, maxHeight: 560)
-        .background(Theme.panel)
-        .task { model.watch(run) }
-    }
-
-    private var headerLine: String {
-        var line = run.startedAt.formatted(date: .abbreviated, time: .shortened)
-        if let code = run.exitCode {
-            line += " · exit \(code)"
-        }
-        return line
-    }
-
 }
 
 // MARK: - One automation

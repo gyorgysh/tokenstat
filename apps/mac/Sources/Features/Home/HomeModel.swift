@@ -124,7 +124,10 @@ final class HomeModel {
     /// Fetched details, kept per day so revisiting a cell is instant and a
     /// quick sweep across the grid does not re-ask for every cell.
     private var dayDetailCache: [String: DayDetail] = [:]
-    private var dayDetailTask: Task<Void, Never>?
+    /// Hover and the pinned inspector must not share a task. Leaving the
+    /// grid used to cancel today's fetch and leave the pane on "Loading day…".
+    private var hoverDetailTask: Task<Void, Never>?
+    private var selectedDetailTask: Task<Void, Never>?
     private var dayOverviewCache: [String: DayOverview] = [:]
     private var dayOverviewTask: Task<Void, Never>?
 
@@ -191,7 +194,8 @@ final class HomeModel {
             isArchiveReady = true
             // What came back, not what was asked for.
             let newScope: ActivityScope = grid?.scope == "account" ? .allMachines : .thisMachine
-            if newScope != deliveredScope {
+            let scopeChanged = newScope != deliveredScope
+            if scopeChanged {
                 // The grid underneath the popover changed identity (e.g. an
                 // account grid fell back to local). Stale day details would
                 // describe a different machine's usage, so they have to go.
@@ -200,8 +204,10 @@ final class HomeModel {
                 hoveredDay = nil
                 hoveredDetail = nil
                 isLoadingDayDetail = false
-                dayDetailTask?.cancel()
+                hoverDetailTask?.cancel()
+                selectedDetailTask?.cancel()
                 dayOverviewTask?.cancel()
+                selectedDetail = nil
                 selectedOverview = nil
             }
             deliveredScope = newScope
@@ -211,9 +217,17 @@ final class HomeModel {
             // The inspector is empty until a day is pinned. Open today on
             // first load so Home is not "pick a day" when the grid is already
             // about this year. A later click is left alone, including across
-            // a quiet refresh.
+            // a quiet refresh. A scope change has to re-select: the cell is
+            // the same date, the numbers are not.
             if selectedDay == nil {
                 pinToday()
+            } else if scopeChanged {
+                if let date = selectedDay?.date, let cell = cell(on: date) {
+                    select(day: cell)
+                } else {
+                    selectedDay = nil
+                    pinToday()
+                }
             }
 
             self.planBySource = try await plan
@@ -303,7 +317,7 @@ final class HomeModel {
     /// cell asks for nothing: the grid only lights priced days, and a day with
     /// no value has nothing to show.
     func hover(day: HeatCell?) {
-        dayDetailTask?.cancel()
+        hoverDetailTask?.cancel()
         guard let day, day.value > 0, !day.isLocked else {
             hoveredDay = nil
             hoveredDetail = nil
@@ -320,13 +334,17 @@ final class HomeModel {
 
         isLoadingDayDetail = true
         hoveredDetail = nil
-        fetchDayDetail(day.date, settle: true)
+        hoverDetailTask = fetchDayDetail(day.date, settle: true)
     }
 
     /// Today's cell on the delivered grid, if the host drew one.
     private var todayCell: HeatCell? {
         guard let last = calendar?.last else { return nil }
-        return calendarDays.last { $0.date == last }
+        return cell(on: last)
+    }
+
+    private func cell(on date: String) -> HeatCell? {
+        calendarDays.last { $0.date == date }
     }
 
     /// Pin today if the grid has that cell. Used once, when nothing is pinned.
@@ -338,6 +356,7 @@ final class HomeModel {
     /// Pin a day in the inspector. Hover still only glances.
     func select(day: HeatCell) {
         selectedDay = day
+        selectedDetailTask?.cancel()
         if day.isLocked {
             selectedDetail = nil
             selectedOverview = nil
@@ -351,7 +370,7 @@ final class HomeModel {
         } else {
             isLoadingSelectedDetail = true
             selectedDetail = nil
-            fetchDayDetail(day.date, settle: false)
+            selectedDetailTask = fetchDayDetail(day.date, settle: false)
         }
         loadOverview(for: day.date)
     }
@@ -403,9 +422,9 @@ final class HomeModel {
         }
     }
 
-    private func fetchDayDetail(_ date: String, settle: Bool) {
+    private func fetchDayDetail(_ date: String, settle: Bool) -> Task<Void, Never> {
         let scope = deliveredScope.wire
-        dayDetailTask = Task { [weak self] in
+        return Task { [weak self] in
             if settle {
                 // A hover settle: crossing cells fast must not fire a request
                 // per cell. 140ms is short enough to feel instant, long enough
@@ -443,9 +462,13 @@ final class HomeModel {
         hoveredDay = nil
         hoveredDetail = nil
         isLoadingDayDetail = false
-        dayDetailTask?.cancel()
+        hoverDetailTask?.cancel()
+        selectedDetailTask?.cancel()
         dayOverviewTask?.cancel()
+        selectedDetail = nil
         selectedOverview = nil
+        isLoadingSelectedDetail = false
+        isLoadingSelectedOverview = false
         scope = new
         await load()
     }

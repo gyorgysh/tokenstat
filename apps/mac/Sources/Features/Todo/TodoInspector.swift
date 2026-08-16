@@ -45,12 +45,14 @@ struct TodoInspector: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
-        .onChange(of: model.selectedCardID) { _, _ in
+        .onChange(of: model.selectedCardID) { old, _ in
+            saveDrafts(for: old)
             syncDrafts()
         }
         .onChange(of: focused) { _, new in
             if new == nil { saveDrafts() }
         }
+        .onDisappear { saveDrafts() }
     }
 
     private func cardBody(_ card: TodoCard) -> some View {
@@ -171,14 +173,22 @@ struct TodoInspector: View {
         notesDraft = card.notes
     }
 
-    private func saveDrafts() {
-        guard let card = model.selectedCard else { return }
+    private func saveDrafts(for id: String? = nil) {
+        let card: TodoCard?
+        if let id {
+            card = model.cards.first { $0.id == id }
+        } else {
+            card = model.selectedCard
+        }
+        guard let card else { return }
+        let title = titleDraft
+        let notes = notesDraft
         Task {
-            if titleDraft != card.title {
-                await model.updateTitle(card, title: titleDraft)
+            if title != card.title {
+                await model.updateTitle(card, title: title)
             }
-            if notesDraft != card.notes {
-                await model.updateNotes(card, notes: notesDraft)
+            if notes != card.notes {
+                await model.updateNotes(card, notes: notes)
             }
         }
     }
