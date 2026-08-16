@@ -82,7 +82,10 @@ enum AppInstaller {
         let current = Bundle.main.bundleURL
         let runningID = Bundle.main.bundleIdentifier
         let diskID = bundleIdentifier(at: current)
-        refreshLaunchServices(bundle: current, unregisterFirst: runningID != diskID)
+        // A failed plist read must not take the `-u` path: that is the
+        // same-id case we cannot prove, and unregistering forgets the pin.
+        let idChanged = runningID != nil && diskID != nil && runningID != diskID
+        refreshLaunchServices(bundle: current, unregisterFirst: idChanged)
         DispatchQueue.main.async {
             updateDockIcon(to: current)
         }
@@ -286,10 +289,13 @@ enum AppInstaller {
         let bundle = Bundle.main.bundleURL.path
         let pid = ProcessInfo.processInfo.processIdentifier
         let quoted = shellQuote(bundle)
+        // nohup plus ignore HUP so quitting this app does not kill the
+        // waiter before it can `open` the replaced bundle.
         let script = """
-        ( while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
-          /usr/bin/open \(quoted)
-        ) >/dev/null 2>&1 &
+        /usr/bin/nohup /bin/sh -c 'trap "" HUP
+        while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
+        /usr/bin/open \(quoted)
+        ' >/dev/null 2>&1 &
         """
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")

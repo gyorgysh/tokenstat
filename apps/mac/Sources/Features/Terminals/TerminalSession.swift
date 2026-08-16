@@ -1315,6 +1315,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         continuation.resume()
     }
 
+    /// OpenCode 2 fills the prompt from `--prompt` and waits. Type Enter
+    /// after the TUI is up, not as a paste (a newline inside a paste
+    /// does not submit).
+    func sendEnter() {
+        wake()
+        eventStream.continuation.yield(.write([0x0d]))
+    }
+
     /// Insert text at the cursor as a paste, not as typing.
     ///
     /// The distinction matters to a full screen program: with bracketed paste
@@ -1324,13 +1332,6 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     ///
     /// Queued like a keystroke, so a drop cannot overtake what the user typed a
     /// moment earlier.
-    /// Type a raw Enter. OpenCode 2 fills the prompt from `--prompt` and
-    /// waits; this submits it after the TUI is up.
-    func sendEnter() {
-        wake()
-        eventStream.continuation.yield(.write([0x0d]))
-    }
-
     func paste(text: String) {
         guard !text.isEmpty else { return }
         wake()

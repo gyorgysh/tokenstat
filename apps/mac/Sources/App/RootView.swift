@@ -1724,10 +1724,14 @@ struct RootView: View {
                     return
                 }
                 // OpenCode 2 seeds the prompt box but does not submit it.
-                // `run -i` covers OpenCode 1. Wait for the TUI, then Enter.
-                if launch.backend == "opencode2" {
-                    try? await Task.sleep(for: .milliseconds(1200))
-                    session?.sendEnter()
+                // Wait for first output (the TUI), then a short settle.
+                if launch.backend == "opencode2", let session {
+                    let deadline = Date().addingTimeInterval(5)
+                    while session.showsStartingState, Date() < deadline {
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
+                    try? await Task.sleep(for: .milliseconds(400))
+                    session.sendEnter()
                 }
                 todo.noticeOpenedInFront(launch.title)
             } catch {
