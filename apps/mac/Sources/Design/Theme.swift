@@ -1050,6 +1050,30 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// A two-state chip in the same capsule family as the action buttons.
+///
+/// A system switch next to `AccentButtonStyle` is a different language on the
+/// same row. This is the on/off control for a single flag, so the row stays
+/// in Theme.
+struct BrandToggleChip: View {
+    var title: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Group {
+            if isOn {
+                Button(title) { isOn.toggle() }
+                    .buttonStyle(AccentButtonStyle(small: true))
+            } else {
+                Button(title) { isOn.toggle() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+        }
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+}
+
 /// One segment of `SegmentedCapsulePicker`.
 private struct SegmentButton: View {
     var label: String

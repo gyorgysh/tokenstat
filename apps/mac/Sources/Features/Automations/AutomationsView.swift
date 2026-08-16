@@ -168,16 +168,11 @@ struct AutomationsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 56)
                         .multilineTextAlignment(.trailing)
+                        .disabled(model.queueNoLimit)
                     Text("minutes")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Toggle("No limit", isOn: $model.queueNoLimit)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .labelsHidden()
-                    Text("No limit")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    BrandToggleChip(title: "No limit", isOn: $model.queueNoLimit)
                 }
                 HStack {
                     Text("Max concurrent jobs")
@@ -990,9 +985,7 @@ struct NewAutomationSheet: View {
                     Text("minutes")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
-                    Toggle("No limit", isOn: $noTimeLimit)
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
+                    BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                 }
             }
         }

@@ -126,23 +126,15 @@ struct AutomationsInspector: View {
             .padding(Theme.Space.m)
 
             ScrollView {
-                Text(transcriptText(for: run))
-                    .font(Theme.mono(11))
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(Theme.Space.m)
+                TranscriptView(
+                    text: model.transcriptText,
+                    empty: run.isRunning ? "Waiting for output…" : "(No readable output)"
+                )
+                .padding(Theme.Space.m)
             }
             .background(Theme.background)
         }
         .onAppear { model.watch(run) }
-    }
-
-    private func transcriptText(for run: RunRecord) -> String {
-        if model.transcriptText.isEmpty {
-            return run.isRunning ? "Waiting for output…" : "(No readable output)"
-        }
-        return model.transcriptText
     }
 
     private func labeled(_ title: String, _ value: String) -> some View {

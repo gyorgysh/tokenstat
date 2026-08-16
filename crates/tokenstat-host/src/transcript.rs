@@ -260,18 +260,7 @@ fn render_grok(value: &serde_json::Value) -> Option<Piece> {
                 .filter(|s| !s.is_empty())
                 .or_else(|| value.get("toolName").and_then(|v| v.as_str()))
                 .unwrap_or("tool");
-            let path = value
-                .get("rawInput")
-                .and_then(|v| {
-                    v.get("path")
-                        .or_else(|| v.get("file"))
-                        .or_else(|| v.get("target_file"))
-                })
-                .and_then(|v| v.as_str());
-            Some(Piece::Block(match path {
-                Some(p) => format!("{title} {p}"),
-                None => title.to_string(),
-            }))
+            Some(Piece::Block(format_tool(title, value.get("rawInput"))))
         }
         _ => None,
     }
@@ -282,13 +271,16 @@ fn render_claude_family(value: &serde_json::Value) -> Option<Piece> {
     match kind {
         "assistant" => {
             let (tools, texts) = assistant_split(value);
-            if !texts.is_empty() {
-                return Some(Piece::Text(texts.join("\n")));
+            match (tools.is_empty(), texts.is_empty()) {
+                (true, true) => None,
+                (false, true) => Some(Piece::Block(tools.join("\n\n"))),
+                (true, false) => Some(Piece::Text(texts.join("\n"))),
+                (false, false) => Some(Piece::Block(format!(
+                    "{}\n\n{}",
+                    tools.join("\n\n"),
+                    texts.join("\n")
+                ))),
             }
-            if !tools.is_empty() {
-                return Some(Piece::Block(tools.join("\n")));
-            }
-            None
         }
         "result" => nonempty(value.get("result").and_then(|v| v.as_str())).map(Piece::Text),
         _ => None,
@@ -310,18 +302,7 @@ fn render_cursor(value: &serde_json::Value) -> Option<Piece> {
             let map = value.get("tool_call")?.as_object()?;
             let (key, call) = map.iter().next()?;
             let title = tool_label(key);
-            let args = call.get("args");
-            let path = args
-                .and_then(|v| {
-                    v.get("path")
-                        .or_else(|| v.get("file"))
-                        .or_else(|| v.get("target_file"))
-                })
-                .and_then(|v| v.as_str());
-            Some(Piece::Block(match path {
-                Some(p) => format!("{title} {p}"),
-                None => title,
-            }))
+            Some(Piece::Block(format_tool(&title, call.get("args"))))
         }
         _ => None,
     }
@@ -376,7 +357,11 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
         "tool_use" => {
             let part = value.get("part").unwrap_or(value);
             let tool = part.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
-            Some(Piece::Block(tool_label(tool)))
+            let input = part
+                .get("input")
+                .or_else(|| part.get("args"))
+                .or_else(|| part.get("state"));
+            Some(Piece::Block(format_tool(&tool_label(tool), input)))
         }
         "error" => {
             let msg = match value.get("error") {
@@ -392,6 +377,89 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
         }
         _ => None,
     }
+}
+
+/// One display paragraph for a tool: `Verb path`, plus an optional short
+/// `+/-` snippet when the call carried old and new text.
+fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
+    let arg = tool_arg(input);
+    let mut out = match arg {
+        Some(a) => format!("{verb} {a}"),
+        None => verb.to_string(),
+    };
+    if let Some(snip) = edit_snippet(input) {
+        out.push('\n');
+        out.push_str(&snip);
+    }
+    out
+}
+
+fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
+    let value = input?;
+    const KEYS: [&str; 6] = [
+        "path",
+        "file_path",
+        "file",
+        "target_file",
+        "command",
+        "pattern",
+    ];
+    for key in KEYS {
+        if let Some(s) = value
+            .get(key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            return Some(s);
+        }
+    }
+    None
+}
+
+fn edit_snippet(input: Option<&serde_json::Value>) -> Option<String> {
+    let value = input?;
+    let old = value
+        .get("old_string")
+        .or_else(|| value.get("old_str"))
+        .and_then(|v| v.as_str())?;
+    let new = value
+        .get("new_string")
+        .or_else(|| value.get("new_str"))
+        .and_then(|v| v.as_str())?;
+    if old.is_empty() && new.is_empty() {
+        return None;
+    }
+    Some(render_edit_snippet(old, new))
+}
+
+/// Cap a preview so the inspector stays a timeline, not a dump of the file.
+fn render_edit_snippet(old: &str, new: &str) -> String {
+    const MAX_EACH: usize = 6;
+    const MAX_CHARS: usize = 2000;
+    let mut lines: Vec<String> = Vec::new();
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    for line in old_lines.iter().take(MAX_EACH) {
+        lines.push(format!("- {line}"));
+    }
+    if old_lines.len() > MAX_EACH {
+        lines.push("- …".into());
+    }
+    for line in new_lines.iter().take(MAX_EACH) {
+        lines.push(format!("+ {line}"));
+    }
+    if new_lines.len() > MAX_EACH {
+        lines.push("+ …".into());
+    }
+    let mut out = lines.join("\n");
+    if out.len() > MAX_CHARS {
+        let mut end = MAX_CHARS;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+    }
+    out
 }
 
 fn tool_label(name: &str) -> String {
@@ -430,7 +498,7 @@ fn assistant_split(value: &serde_json::Value) -> (Vec<String>, Vec<String>) {
                 let kind = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if kind == "tool_use" {
                     if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
-                        tools.push(tool_label(name));
+                        tools.push(format_tool(&tool_label(name), block.get("input")));
                     }
                     continue;
                 }
@@ -649,6 +717,21 @@ mod tests {
         assert_eq!(out, "I'll start by reading\n\nRead Cargo.toml");
         assert!(!out.contains("available_commands"));
         assert!(!out.contains("planning"));
+    }
+
+    #[test]
+    fn claude_keeps_tool_path() {
+        let raw = "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{\"file_path\":\"src/lib.rs\"}}]}}\n";
+        assert_eq!(feed("claude", raw), "Read src/lib.rs");
+    }
+
+    #[test]
+    fn grok_edit_carries_a_short_snippet() {
+        let raw = "{\"type\":\"tool_call\",\"title\":\"Edit\",\"rawInput\":{\"path\":\"a.rs\",\"old_string\":\"foo\",\"new_string\":\"bar\"}}\n";
+        let out = feed("grok", raw);
+        assert!(out.starts_with("Edit a.rs\n"), "{out}");
+        assert!(out.contains("- foo"), "{out}");
+        assert!(out.contains("+ bar"), "{out}");
     }
 
     #[test]

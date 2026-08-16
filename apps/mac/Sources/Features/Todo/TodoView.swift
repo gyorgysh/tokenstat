@@ -44,11 +44,13 @@ struct TodoView: View {
                 ) {
                     addingIn = "backlog"
                 }
-                Picker("Order", selection: $newestFirst) {
-                    Text("Newest").tag(true)
-                    Text("Your order").tag(false)
-                }
-                .pickerStyle(.segmented)
+                SegmentedCapsulePicker(
+                    options: [
+                        (true, "Newest", ""),
+                        (false, "Your order", ""),
+                    ],
+                    selection: $newestFirst
+                )
                 .frame(maxWidth: 220)
                 .onChange(of: newestFirst) { _, on in
                     model.sortNewestFirst = on
@@ -150,12 +152,15 @@ struct TodoView: View {
                                 guard dragged.id != card.id else { return }
                                 let list = model.cards(in: id).filter { $0.id != dragged.id }
                                 let order = Int64(list.firstIndex(where: { $0.id == card.id }) ?? list.count)
+                                clearDropChrome()
                                 Task { await model.reorder(dragged, to: id, order: order) }
                             },
                             onTargeted: { on in
                                 if on {
                                     dropTarget = id
                                     dropBeforeID = card.id
+                                } else if dropTarget == id && dropBeforeID == card.id {
+                                    clearDropChrome()
                                 }
                             }
                         )
@@ -220,14 +225,14 @@ struct TodoView: View {
                   let card = model.cards.first(where: { $0.id == cardID }) else { return false }
             let others = model.cards(in: id).filter { $0.id != card.id }.count
             Task { await model.reorder(card, to: id, order: Int64(others)) }
+            clearDropChrome()
             return true
         } isTargeted: { targeted in
             if targeted {
                 dropTarget = id
                 dropBeforeID = "__end__"
             } else if dropTarget == id {
-                dropTarget = nil
-                dropBeforeID = nil
+                clearDropChrome()
             }
         }
     }
@@ -236,6 +241,14 @@ struct TodoView: View {
         RoundedRectangle(cornerRadius: 1)
             .fill(Theme.accent)
             .frame(height: 2)
+    }
+
+    /// Drop highlight is local to the pointer. A same-column drop never
+    /// leaves the column, so `isTargeted(false)` on the column does not fire
+    /// and the insertion line would stay without this.
+    private func clearDropChrome() {
+        dropTarget = nil
+        dropBeforeID = nil
     }
 
     /// The height every column takes: what the fullest one needs, never less
@@ -275,6 +288,9 @@ private struct CardView: View {
     @State private var editingTitle = false
     @State private var titleDraft = ""
     @State private var delegating = false
+    /// A drop onto this card also looks like a tap. Ignore that one so the
+    /// inspector stays on the card that moved, not the one it landed on.
+    @State private var ignoreNextTap = false
     @FocusState private var titleFocused: Bool
     @Bindable var model: TodoModel
     var card: TodoCard
@@ -379,11 +395,18 @@ private struct CardView: View {
                 )
         )
         .contentShape(.rect)
-        .simultaneousGesture(TapGesture().onEnded { onSelect() })
+        .highPriorityGesture(TapGesture().onEnded {
+            guard !ignoreNextTap else {
+                ignoreNextTap = false
+                return
+            }
+            onSelect()
+        })
         .draggable(card.id)
         .dropDestination(for: String.self) { ids, _ in
             guard let cardID = ids.first,
                   let dragged = model.cards.first(where: { $0.id == cardID }) else { return false }
+            ignoreNextTap = true
             onDropBefore?(dragged)
             return true
         } isTargeted: { on in
@@ -616,21 +639,18 @@ private struct NewCardForm: View {
                         Text("minutes")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Toggle("No limit", isOn: $noTimeLimit)
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
+                        BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                         Spacer()
                     }
                 }
                 HStack {
                     Button("Cancel") { cancel() }
-                        .buttonStyle(.borderless)
+                        .buttonStyle(SecondaryButtonStyle())
                     Spacer()
                     Button("Save") {
                         Task { await save() }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .buttonStyle(AccentButtonStyle())
                     .disabled(!canSave)
                 }
             }
@@ -753,9 +773,7 @@ struct DelegateSheet: View {
                 Text("minutes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Toggle("No limit", isOn: $noTimeLimit)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
+                BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
             }
             HStack {
                 Button("Cancel") { dismiss() }

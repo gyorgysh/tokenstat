@@ -832,6 +832,10 @@ impl Store {
         // stomp it by re-parsing the raw stream while it is still growing.
         if missing || (empty && !running) {
             transcript::materialize(&raw, &backend);
+        } else if !running && offset == 0 && raw.is_file() {
+            // Finished runs reparse from raw on first read so a better
+            // parser (paths, edit snippets) applies to old transcripts.
+            transcript::rematerialize(&raw, &backend, true);
         }
         if !readable.is_file() {
             return Ok(("(No readable output)".into(), 0));
