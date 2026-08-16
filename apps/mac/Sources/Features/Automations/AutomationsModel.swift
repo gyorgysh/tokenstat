@@ -182,9 +182,22 @@ final class AutomationsModel {
     }
 
     func saveQueue() async {
-        let minutes = UInt64(queueBudgetMinutes) ?? 180
-        let budget: UInt64 = queueNoLimit ? 0 : minutes * 60
-        let max = UInt32(queueMaxConcurrent) ?? 2
+        let budget: UInt64
+        if queueNoLimit {
+            budget = 0
+        } else {
+            let trimmed = queueBudgetMinutes.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let minutes = UInt64(trimmed), minutes > 0 else {
+                errorMessage = "Time limit must be a whole number of minutes."
+                return
+            }
+            budget = minutes * 60
+        }
+        let maxTrimmed = queueMaxConcurrent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let max = UInt32(maxTrimmed) else {
+            errorMessage = "Max concurrent jobs must be a whole number."
+            return
+        }
         do {
             applyQueue(try await Bridge.setAutomationQueue(
                 defaultBudgetSeconds: budget,

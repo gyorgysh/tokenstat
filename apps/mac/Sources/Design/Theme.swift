@@ -323,6 +323,28 @@ struct Card<Content: View>: View {
         )
     }
 
+    /// Header only. A content `EmptyView` still occupies a VStack slot and
+    /// leaves a gap under the title, so header-only cards use this instead.
+    init(
+        title: String,
+        subtitle: String? = nil,
+        mark: String,
+        markTint: Color = Theme.accent,
+        accessory: AnyView? = nil,
+        fillsHeight: Bool = false
+    ) where Content == EmptyView {
+        self.init(
+            title: title,
+            subtitle: subtitle,
+            mark: mark,
+            markTint: markTint,
+            accessory: accessory,
+            fillsHeight: fillsHeight
+        ) {
+            EmptyView()
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(alignment: leading == nil ? .firstTextBaseline : .center) {
@@ -343,7 +365,9 @@ struct Card<Content: View>: View {
                     accessory
                 }
             }
-            content
+            if Content.self != EmptyView.self {
+                content
+            }
             // Content sits at the top of a filled card, rather than being
             // spread down it. A quota bar belongs under its heading whatever
             // the neighbour's card happens to be doing.

@@ -177,35 +177,34 @@ pub fn looks_like_ndjson(bytes: &[u8]) -> bool {
     sample.windows(7).any(|w| w == b"\"type\":") || sample.windows(8).any(|w| w == b"\"event\":")
 }
 
-/// Build `{run}.readable.txt` from the raw file when it is missing or empty.
+/// Rebuild `{run}.readable.txt` from the raw file.
 ///
 /// Old runs predate drain-time parsing. Serving that raw file to a text view
 /// freezes the app. Never call this on a live drain that is still writing
-/// incrementally unless the readable sibling is absent.
-pub fn materialize(raw: &Path, backend: &str) -> PathBuf {
-    rematerialize(raw, backend, false)
-}
-
-/// Rebuild the readable sibling. `force` overwrites a file that already
-/// exists, used when that file is the raw NDJSON stream under the wrong name.
-pub fn rematerialize(raw: &Path, backend: &str, force: bool) -> PathBuf {
+/// incrementally unless the readable sibling is absent. `force` overwrites
+/// a file that already exists, used when that file is the raw NDJSON stream
+/// under the wrong name.
+///
+/// Returns the rendered prose when the raw file was read, even if writing
+/// the sibling failed. `None` when there was nothing to rebuild.
+pub fn rematerialize(raw: &Path, backend: &str, force: bool) -> Option<String> {
     let readable = readable_path(raw);
     if !raw.is_file() {
-        return readable;
+        return None;
     }
     let stale = !readable.is_file()
         || std::fs::metadata(&readable)
             .map(|m| m.len() == 0)
             .unwrap_or(true);
     if !force && !stale {
-        return readable;
+        return None;
     }
     let Ok(bytes) = std::fs::read(raw) else {
-        return readable;
+        return None;
     };
     let text = render_raw(backend, &bytes);
     let _ = std::fs::write(&readable, text.as_bytes());
-    readable
+    Some(text)
 }
 
 /// Sibling of the raw transcript that the inspector tails.
@@ -928,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn materialize_writes_readable_from_raw() {
+    fn rematerialize_writes_readable_from_raw() {
         let dir =
             std::env::temp_dir().join(format!("tokenstat-transcript-mat-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -938,9 +937,10 @@ mod tests {
             "{\"type\":\"thought\",\"data\":\"x\"}\n{\"type\":\"text\",\"data\":\"hello\"}\n",
         )
         .unwrap();
-        let readable = materialize(&raw, "grok");
-        let text = std::fs::read_to_string(&readable).unwrap();
+        let text = rematerialize(&raw, "grok", false).expect("raw still renders");
         assert_eq!(text, "hello");
+        let on_disk = std::fs::read_to_string(readable_path(&raw)).unwrap();
+        assert_eq!(on_disk, "hello");
         assert!(!looks_like_ndjson(text.as_bytes()));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -970,6 +970,23 @@ mod tests {
         let text = std::fs::read_to_string(&readable).unwrap();
         assert_eq!(text, "hello");
         assert!(!looks_like_ndjson(text.as_bytes()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rematerialize_returns_text_when_the_sibling_cannot_be_written() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-transcript-nowrite-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let raw = dir.join("run.txt");
+        std::fs::write(&raw, "{\"type\":\"text\",\"data\":\"hello\"}\n").unwrap();
+        let readable = readable_path(&raw);
+        std::fs::create_dir_all(&readable).unwrap();
+        let text = rematerialize(&raw, "grok", true).expect("raw still renders");
+        assert_eq!(text, "hello");
+        assert!(readable.is_dir());
         let _ = std::fs::remove_dir_all(dir);
     }
 

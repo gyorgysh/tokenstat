@@ -233,6 +233,7 @@ pub fn agent_command(
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    budget_seconds: u64,
 ) -> Result<Vec<String>, String> {
     let p = prompt.trim();
     if p.is_empty() {
@@ -338,6 +339,9 @@ pub fn agent_command(
                 args.push("--effort".into());
                 args.push(e.into());
             }
+            // Host drain is the real stop. Give print enough room that a
+            // 180-minute job is not killed by this first.
+            let timeout = agy_print_timeout(budget_seconds);
             args.extend(
                 [
                     "--print",
@@ -345,7 +349,7 @@ pub fn agent_command(
                     "--output-format",
                     "stream-json",
                     "--print-timeout",
-                    "30m",
+                    timeout.as_str(),
                     // Headless: agy cannot prompt, so a tool that needs
                     // "command" is denied unless this is on.
                     "--dangerously-skip-permissions",
@@ -368,6 +372,15 @@ pub fn agent_command(
         other => return Err(format!("unknown backend {other}")),
     }
     Ok(args)
+}
+
+/// Agy's print-session ceiling. `0` means no host budget, so use a day.
+fn agy_print_timeout(budget_seconds: u64) -> String {
+    if budget_seconds == 0 {
+        "24h".into()
+    } else {
+        format!("{}m", budget_seconds.div_ceil(60).max(1))
+    }
 }
 
 #[cfg(unix)]
@@ -842,12 +855,18 @@ impl Store {
         };
         // A live drain creates an empty readable file on purpose. Do not
         // stomp it by re-parsing the raw stream while it is still growing.
+        // Serve the in-memory prose when rematerialize ran, so a sibling
+        // write that failed still never returns NDJSON.
         if missing || (empty && !running) {
-            transcript::materialize(&raw, &backend);
+            if let Some(text) = transcript::rematerialize(&raw, &backend, false) {
+                return Ok(transcript::slice_reply(text.as_bytes(), offset));
+            }
         } else if !running && offset == 0 && raw.is_file() {
             // Finished runs reparse from raw on first read so a better
             // parser (paths, edit snippets) applies to old transcripts.
-            transcript::rematerialize(&raw, &backend, true);
+            if let Some(text) = transcript::rematerialize(&raw, &backend, true) {
+                return Ok(transcript::slice_reply(text.as_bytes(), offset));
+            }
         }
         if !readable.is_file() {
             return Ok(("(No readable output)".into(), 0));
@@ -865,12 +884,10 @@ impl Store {
         }
         if transcript::looks_like_ndjson(&bytes) {
             // A stale readable that is actually the raw file. Rebuild it.
-            transcript::rematerialize(&raw, &backend, true);
-            let again = std::fs::read(&readable).unwrap_or_default();
-            if again.is_empty() || transcript::looks_like_ndjson(&again) {
-                return Ok(("(No readable output)".into(), 0));
+            if let Some(text) = transcript::rematerialize(&raw, &backend, true) {
+                return Ok(transcript::slice_reply(text.as_bytes(), offset));
             }
-            return Ok(transcript::slice_reply(&again, offset));
+            return Ok(("(No readable output)".into(), 0));
         }
         Ok(transcript::slice_reply(&bytes, offset))
     }
@@ -888,6 +905,7 @@ impl Store {
             &job.prompt,
             job.model.as_deref(),
             job.effort.as_deref(),
+            job.budget_seconds,
         )?;
 
         let run_id = format!("run-{}", now_ms());
@@ -900,10 +918,7 @@ impl Store {
 
         if self.try_take_slot() {
             match self.spawn_pending(pending, workspace.id.clone()) {
-                Ok(run) => {
-                    self.push_run(run.clone())?;
-                    Ok(run)
-                }
+                Ok((run, budget)) => self.persist_and_drain(run, budget, |r| self.push_run(r)),
                 Err(e) => {
                     self.release_slot();
                     Err(e)
@@ -958,7 +973,7 @@ impl Store {
         self: &Arc<Store>,
         pending: Pending,
         workspace_id: String,
-    ) -> Result<RunRecord, String> {
+    ) -> Result<(RunRecord, u64), String> {
         if self.is_killed(&pending.run_id) {
             return Err("stopped".into());
         }
@@ -968,6 +983,7 @@ impl Store {
             &pending.job.prompt,
             pending.job.model.as_deref(),
             pending.job.effort.as_deref(),
+            pending.job.budget_seconds,
         )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
@@ -998,21 +1014,46 @@ impl Store {
             pty_id: Some(info.id.clone()),
         };
 
-        let pty_id = info.id.clone();
-        let budget = pending.job.budget_seconds;
-        let run_id = pending.run_id;
-        let transcript_path = pending.transcript_path;
-        if self.is_killed(&run_id) {
-            let _ = tokenstat_pty::manager().kill(&pty_id);
-            let _ = tokenstat_pty::manager().close(&pty_id);
+        if self.is_killed(&pending.run_id) {
+            let _ = tokenstat_pty::manager().kill(&info.id);
+            let _ = tokenstat_pty::manager().close(&info.id);
             return Err("stopped".into());
         }
+        Ok((run, pending.job.budget_seconds))
+    }
+
+    /// Write the row, then start drain. A drain that starts before the row
+    /// exists can finish into a missing record, then the write leaves a
+    /// forever-running job with no pty.
+    fn persist_and_drain(
+        self: &Arc<Store>,
+        run: RunRecord,
+        budget: u64,
+        persist: impl FnOnce(RunRecord) -> Result<(), String>,
+    ) -> Result<RunRecord, String> {
+        if let Err(e) = persist(run.clone()) {
+            if let Some(pty_id) = &run.pty_id {
+                let _ = tokenstat_pty::manager().kill(pty_id);
+                let _ = tokenstat_pty::manager().close(pty_id);
+            }
+            return Err(e);
+        }
+        self.start_drain(&run, budget);
+        Ok(run)
+    }
+
+    fn start_drain(self: &Arc<Store>, run: &RunRecord, budget: u64) {
+        let Some(pty_id) = run.pty_id.clone() else {
+            return;
+        };
+        let transcript_path = PathBuf::from(&run.transcript_path);
+        let run_id = run.id.clone();
+        let backend = run.backend.clone();
         let me = Arc::clone(self);
         std::thread::spawn(move || {
-            me.drain(&pty_id, &transcript_path, budget, &run_id);
+            me.drain(&pty_id, &transcript_path, budget, &run_id, &backend);
             me.pump();
         });
-        Ok(run)
     }
 
     fn pump(self: &Arc<Store>) {
@@ -1038,8 +1079,14 @@ impl Store {
                 continue;
             }
             match self.spawn_pending(pending, workspace_id) {
-                Ok(run) => {
-                    let _ = self.update_run(run);
+                Ok((run, budget)) => {
+                    if self
+                        .persist_and_drain(run, budget, |r| self.update_run(r))
+                        .is_err()
+                    {
+                        self.release_slot();
+                        self.finish_run(&run_id, None, "error");
+                    }
                 }
                 Err(err) => {
                     self.release_slot();
@@ -1061,6 +1108,12 @@ impl Store {
     fn update_run(&self, run: RunRecord) -> Result<(), String> {
         let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
+            // Drain may have already recorded a terminal status. Do not put
+            // the row back to running.
+            if matches!(existing.status.as_str(), "ok" | "error" | "stopped") {
+                drop(runs);
+                return Ok(());
+            }
             *existing = run;
         } else {
             runs.insert(0, run);
@@ -1118,25 +1171,37 @@ impl Store {
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
-        if run.status == "queued" {
+        let pty_id = run.pty_id.clone();
+        let status = run.status.clone();
+        drop(runs);
+        if let Some(pty_id) = pty_id {
+            match tokenstat_pty::manager().kill(&pty_id) {
+                Ok(()) | Err(tokenstat_pty::PtyError::NoSession(_)) => {}
+                Err(e) => return Err(e.to_string()),
+            }
+            return Ok(());
+        }
+        if status == "queued" {
             // pump owns it now. spawn_pending / pump will see the kill mark.
             return Ok(());
         }
-        if run.status != "running" {
+        if status != "running" {
             return Err("that run is not running".into());
         }
-        let pty_id = run.pty_id.clone().ok_or("that run has no live pty")?;
-        drop(runs);
-        match tokenstat_pty::manager().kill(&pty_id) {
-            Ok(()) => Ok(()),
-            Err(tokenstat_pty::PtyError::NoSession(_)) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        // Marked killed, no pty yet. Drain will see the mark if it starts.
+        Ok(())
     }
 
     /// Drain a run's pty into its transcript file, kill on budget, then record
     /// the outcome and close the pty. Runs on its own thread.
-    pub fn drain(&self, pty_id: &str, path: &Path, budget_seconds: u64, run_id: &str) {
+    pub fn drain(
+        &self,
+        pty_id: &str,
+        path: &Path,
+        budget_seconds: u64,
+        run_id: &str,
+        backend: &str,
+    ) {
         let manager = tokenstat_pty::manager();
         let deadline = if budget_seconds == 0 {
             None
@@ -1149,14 +1214,7 @@ impl Store {
         // through to the raw JSON while the first event is still arriving.
         let _ = std::fs::write(&readable_path, b"");
         let mut readable_body = String::new();
-        let backend = {
-            let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
-            runs.iter()
-                .find(|run| run.id == run_id)
-                .map(|run| run.backend.clone())
-                .unwrap_or_default()
-        };
-        let mut parser = Parser::new(&backend);
+        let mut parser = Parser::new(backend);
         let mut offset = 0u64;
         let reader_id = format!("automation:{run_id}");
         let mut stopped_by_budget = false;
@@ -1205,6 +1263,9 @@ impl Store {
             if deadline.is_some_and(|d| Instant::now() >= d) {
                 let _ = manager.kill(pty_id);
                 stopped_by_budget = true;
+            }
+            if self.is_killed(run_id) {
+                let _ = manager.kill(pty_id);
             }
             std::thread::sleep(DRAIN_POLL);
         }
@@ -1487,36 +1548,44 @@ mod tests {
     #[test]
     fn every_backend_builds_a_command() {
         for backend in ["claude", "codex", "grok", "cursor", "agy", "opencode"] {
-            let argv = agent_command(backend, "do it", None, None).unwrap();
+            let argv = agent_command(backend, "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
             assert!(!argv.is_empty(), "{backend} produced no command");
             assert!(argv.iter().any(|a| a == "do it"));
         }
         // Regression: claude rejects stream-json print output without this.
-        let claude = agent_command("claude", "do it", None, None).unwrap();
+        let claude = agent_command("claude", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(claude.iter().any(|a| a == "--verbose"));
         assert!(claude.iter().any(|a| a == "--dangerously-skip-permissions"));
-        let agy = agent_command("agy", "do it", None, None).unwrap();
+        let agy = agent_command("agy", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));
         assert!(
             agy.windows(2)
                 .any(|w| w == ["--output-format", "stream-json"])
         );
-        let grok = agent_command("grok", "do it", None, None).unwrap();
+        assert!(agy.windows(2).any(|w| w == ["--print-timeout", "180m"]));
+        let unlimited = agent_command("agy", "do it", None, None, 0).unwrap();
+        assert!(
+            unlimited
+                .windows(2)
+                .any(|w| w == ["--print-timeout", "24h"])
+        );
+        let grok = agent_command("grok", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(
             grok.windows(2)
                 .any(|w| w == ["--permission-mode", "bypassPermissions"])
         );
-        let opencode = agent_command("opencode", "do it", None, None).unwrap();
+        let opencode =
+            agent_command("opencode", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(opencode.windows(2).any(|w| w == ["--format", "json"]));
         assert!(opencode.iter().any(|a| a == "--auto"));
-        let codex = agent_command("codex", "do it", None, None).unwrap();
+        let codex = agent_command("codex", "do it", None, None, DEFAULT_BUDGET_SECONDS).unwrap();
         assert!(
             codex
                 .iter()
                 .any(|a| a == "--dangerously-bypass-approvals-and-sandbox")
         );
-        assert!(agent_command("nope", "do it", None, None).is_err());
-        assert!(agent_command("claude", "   ", None, None).is_err());
+        assert!(agent_command("nope", "do it", None, None, DEFAULT_BUDGET_SECONDS).is_err());
+        assert!(agent_command("claude", "   ", None, None, DEFAULT_BUDGET_SECONDS).is_err());
     }
 
     #[test]
@@ -1537,7 +1606,14 @@ mod tests {
 
     #[test]
     fn model_and_effort_flags_land_for_backends_that_advertise_them() {
-        let claude = agent_command("claude", "do it", Some("sonnet"), Some("high")).unwrap();
+        let claude = agent_command(
+            "claude",
+            "do it",
+            Some("sonnet"),
+            Some("high"),
+            DEFAULT_BUDGET_SECONDS,
+        )
+        .unwrap();
         let at_model = claude.iter().position(|a| a == "--model").unwrap();
         assert_eq!(claude[at_model + 1], "sonnet");
         let at_effort = claude.iter().position(|a| a == "--effort").unwrap();
@@ -1545,7 +1621,14 @@ mod tests {
 
         // A backend without the flags must not silently swallow them; the
         // shell ignores both because the client never offers a picker for it.
-        let shell = agent_command("sh", "ls", Some("sonnet"), Some("high")).unwrap();
+        let shell = agent_command(
+            "sh",
+            "ls",
+            Some("sonnet"),
+            Some("high"),
+            DEFAULT_BUDGET_SECONDS,
+        )
+        .unwrap();
         assert!(!shell.iter().any(|a| a == "--model" || a == "--effort"));
     }
 
@@ -1616,7 +1699,7 @@ mod tests {
         // A budget long enough for a shell to start and print, short enough
         // that a run which never ends fails the test quickly instead of
         // holding the suite for the whole allowance.
-        store.drain(&pty_id, &transcript_path, 10, run_id);
+        store.drain(&pty_id, &transcript_path, 10, run_id, "sh");
 
         let record = store
             .runs()
@@ -1704,7 +1787,7 @@ mod tests {
             })
             .unwrap();
         let pty_id = info.id.clone();
-        store.drain(&pty_id, &transcript_path, 1, run_id);
+        store.drain(&pty_id, &transcript_path, 1, run_id, "sh");
 
         let record = store
             .runs()
@@ -1971,6 +2054,90 @@ mod tests {
         assert_eq!(second_now.status, "stopped");
         assert_eq!(second_now.pty_id, None);
         let _ = store.kill_run(&first.id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_run_does_not_revive_a_finished_row() {
+        let dir = temp_dir("no-revive");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        store
+            .push_run(RunRecord {
+                id: "run-done".into(),
+                job_id: "j".into(),
+                name: "done".into(),
+                backend: "sh".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: Some(now_ms()),
+                exit_code: Some(0),
+                status: "ok".into(),
+                transcript_path: dir.join("run.txt").display().to_string(),
+                pty_id: None,
+            })
+            .unwrap();
+        store
+            .update_run(RunRecord {
+                id: "run-done".into(),
+                job_id: "j".into(),
+                name: "done".into(),
+                backend: "sh".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                exit_code: None,
+                status: "running".into(),
+                transcript_path: dir.join("run.txt").display().to_string(),
+                pty_id: Some("pty-late".into()),
+            })
+            .unwrap();
+        let row = store
+            .runs()
+            .into_iter()
+            .find(|r| r.id == "run-done")
+            .unwrap();
+        assert_eq!(row.status, "ok");
+        assert_eq!(row.pty_id, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_fast_exit_is_not_left_running() {
+        let dir = temp_dir("fast-exit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let workspace_id = sh_workspace(&dir);
+        let job = Automation {
+            id: "fast".into(),
+            name: "fast".into(),
+            backend: "sh".into(),
+            model: None,
+            effort: None,
+            workspace_id,
+            prompt: if cfg!(windows) {
+                "exit 0".into()
+            } else {
+                "true".into()
+            },
+            schedule: ScheduleSpec::default(),
+            budget_seconds: 15,
+            enabled: false,
+            last_run_at_ms: None,
+            next_run_at_ms: None,
+            last_run_id: None,
+        };
+        let run = store.run_adhoc(job).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let row = store.runs().into_iter().find(|r| r.id == run.id).unwrap();
+            if row.status != "running" && row.status != "queued" {
+                assert_eq!(row.status, "ok", "fast exit left as {}", row.status);
+                break;
+            }
+            assert!(Instant::now() < deadline, "fast exit still {}", row.status);
+            std::thread::sleep(Duration::from_millis(40));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

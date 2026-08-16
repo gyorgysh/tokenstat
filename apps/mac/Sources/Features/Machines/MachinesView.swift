@@ -255,9 +255,7 @@ struct MachinesView: View {
                 Button("Add device") { addingDevice = true }
                     .buttonStyle(AccentButtonStyle(small: true))
             )
-        ) {
-            EmptyView()
-        }
+        )
     }
 
     private var hostSetup: some View {
