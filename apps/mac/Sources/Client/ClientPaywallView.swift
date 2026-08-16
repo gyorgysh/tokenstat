@@ -117,8 +117,7 @@ struct ClientPaywallView: View {
         let queued = store.queuedProduct()
             ?? ClientStoreProduct.from(tier: signed?.billing?.scheduledTier)
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Yearly plans")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Yearly plans", mark: "mark_plan")
             Text("The app stays free. A plan unlocks more devices, longer history, and remote management.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)

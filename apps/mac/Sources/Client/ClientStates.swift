@@ -34,6 +34,14 @@ enum ClientEmptyKind {
         case .needsAccount: return "person.crop.circle.badge.plus"
         }
     }
+
+    var mark: String {
+        switch self {
+        case .nothingYet: return "mark_activity"
+        case .unreachable: return "mark_sync"
+        case .needsAccount: return "mark_account"
+        }
+    }
 }
 
 /// One card for all three cases above. One component so they cannot drift into
@@ -47,12 +55,17 @@ struct ClientEmptyState: View {
     /// Shown only when there is something the person can actually do.
     var actionTitle: String?
     var action: (() -> Void)?
+    /// Override the kind's default mark when the empty state is about a
+    /// specific surface (devices, workspaces) rather than activity.
+    var mark: String?
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
-            Image(systemName: kind.symbol)
-                .font(.system(size: 30, weight: .light))
-                .foregroundStyle(kind == .unreachable ? Color.secondary : Theme.accent)
+            FeatureMark(
+                name: mark ?? kind.mark,
+                tint: kind == .unreachable ? Color.secondary : Theme.accent,
+                size: 30
+            )
             Text(title)
                 .font(ClientType.screenTitle)
                 .multilineTextAlignment(.center)
@@ -64,7 +77,7 @@ struct ClientEmptyState: View {
             }
             if let actionTitle, let action {
                 Button(actionTitle, action: action)
-                    .buttonStyle(.glassProminent)
+                    .clientProminentStyle()
                     .tint(Theme.accent)
                     .padding(.top, 4)
             }

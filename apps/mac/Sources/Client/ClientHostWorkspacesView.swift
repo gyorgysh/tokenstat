@@ -48,8 +48,7 @@ struct ClientHostWorkspacesView: View {
                 }
 
                 if !model.folders.isEmpty {
-                    Text("Folders")
-                        .font(ClientType.sectionTitle)
+                    ClientSectionTitle(title: "Folders", mark: "mark_archive")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 2)
                     ForEach(model.folders) { folder in
@@ -67,8 +66,7 @@ struct ClientHostWorkspacesView: View {
                 }
 
                 if !model.sessions.isEmpty {
-                    Text("Sessions")
-                        .font(ClientType.sectionTitle)
+                    ClientSectionTitle(title: "Sessions", mark: "mark_terminal")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 2)
                         .padding(.top, Theme.Space.s)

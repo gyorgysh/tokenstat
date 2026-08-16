@@ -69,11 +69,11 @@ struct ClientWorkspacesView: View {
                             title: "No host devices yet",
                             message: "Install tokenstat on a computer, turn on Reach devices "
                                 + "from anywhere, and sign in. Hosts appear here so this phone "
-                                + "can open their folders and sessions."
+                                + "can open their folders and sessions.",
+                            mark: "mark_host"
                         )
                     } else {
-                        Text("Hosts on your account")
-                            .font(ClientType.sectionTitle)
+                        ClientSectionTitle(title: "Hosts on your account", mark: "mark_host")
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 2)
 
@@ -92,8 +92,7 @@ struct ClientWorkspacesView: View {
 
                     if model.connectedKey != nil {
                         if !model.folders.isEmpty {
-                            Text("Folders")
-                                .font(ClientType.sectionTitle)
+                            ClientSectionTitle(title: "Folders", mark: "mark_archive")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 2)
                                 .padding(.top, Theme.Space.s)
@@ -215,8 +214,7 @@ struct ClientWorkspacesView: View {
                 Circle()
                     .fill(Theme.accent)
                     .frame(width: 9, height: 9)
-                Image(systemName: "iphone")
-                    .foregroundStyle(.secondary)
+                FeatureMark(name: "mark_device", tint: Theme.accent, size: 22)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(name)
                         .font(ClientType.label.weight(.medium))

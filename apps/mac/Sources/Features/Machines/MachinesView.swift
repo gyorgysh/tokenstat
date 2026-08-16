@@ -199,7 +199,8 @@ struct MachinesView: View {
     private var lockedMachineList: some View {
         Card(
             title: "Devices on this account",
-            subtitle: "Usage from every linked device is already here."
+            subtitle: "Usage from every linked device is already here.",
+            mark: "mark_device"
         ) {
             VStack(spacing: 0) {
                 ForEach(model.listedAccountMachines) { machine in
@@ -246,25 +247,21 @@ struct MachinesView: View {
     }
 
     private var addDeviceAction: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Add a device")
-                    .font(.callout.weight(.medium))
-                Text("Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Add device") { addingDevice = true }
-                .buttonStyle(AccentButtonStyle())
+        Card(
+            title: "Add a device",
+            subtitle: "Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.",
+            mark: "mark_device",
+            accessory: AnyView(
+                Button("Add device") { addingDevice = true }
+                    .buttonStyle(AccentButtonStyle(small: true))
+            )
+        ) {
+            EmptyView()
         }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     private var hostSetup: some View {
-        Card(title: "This Mac is not ready for background connections", subtitle: "The app can still show local data. A small background helper is needed for machines and automations to keep working when this window is closed.") {
+        Card(title: "This Mac is not ready for background connections", subtitle: "The app can still show local data. A small background helper is needed for machines and automations to keep working when this window is closed.", mark: "mark_host") {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Theme.success)
@@ -291,7 +288,8 @@ struct MachinesView: View {
     private var thisMachine: some View {
         Card(
             title: "This device",
-            subtitle: "One simple identity for every connection."
+            subtitle: "One simple identity for every connection.",
+            mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let identity = model.identity {
@@ -481,7 +479,8 @@ struct MachinesView: View {
     private var waitingForApproval: some View {
         Card(
             title: "Needs your approval",
-            subtitle: "Nothing can run here until you approve it."
+            subtitle: "Nothing can run here until you approve it.",
+            mark: "mark_device"
         ) {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.pending) { peer in
@@ -508,7 +507,7 @@ struct MachinesView: View {
     }
 
     private var knownMachines: some View {
-        Card(title: "Your devices", subtitle: "Manage connections you have already approved.") {
+        Card(title: "Your devices", subtitle: "Manage connections you have already approved.", mark: "mark_device") {
             VStack(spacing: Theme.Space.s) {
                 ForEach(model.known) { peer in
                     PeerRow(
@@ -544,7 +543,8 @@ struct MachinesView: View {
     private var alwaysOnHost: some View {
         Card(
             title: "Always-on host",
-            subtitle: "Whether the host helper stays up after you quit"
+            subtitle: "Whether the host helper stays up after you quit",
+            mark: "mark_host"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let policy = model.hostPolicy {
@@ -604,7 +604,7 @@ struct MachinesView: View {
     #endif
 
     private var accountDevices: some View {
-        Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.") {
+        Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.", mark: "mark_device") {
             VStack(spacing: 0) {
                 ForEach(model.listedAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
@@ -1086,7 +1086,8 @@ private struct PairingForm: View {
     var body: some View {
         Card(
             title: "Connect another device",
-            subtitle: "Paste an invite from the other device. Nearby devices do not need this step."
+            subtitle: "Paste an invite from the other device. Nearby devices do not need this step.",
+            mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField(

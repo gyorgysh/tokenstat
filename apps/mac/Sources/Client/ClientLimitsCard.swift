@@ -27,8 +27,7 @@ struct ClientLimitsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Plan limits")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Plan limits", mark: "mark_plan")
 
             if isLoading {
                 ClientWireframe.Rows(count: 2)

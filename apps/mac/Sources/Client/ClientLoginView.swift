@@ -68,7 +68,7 @@ struct ClientLoginView: View {
                     } label: {
                         Text("Sign in").frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glassProminent)
+                    .clientProminentStyle()
                     .controlSize(.large)
                     Text("No password to make. Signing in with GitHub, Google, X or Apple "
                         + "creates your account the first time.")
@@ -157,9 +157,9 @@ struct ClientLoginView: View {
                 .accessibilityLabel("Code \(pending.userCode.map(String.init).joined(separator: " "))")
             HStack(spacing: Theme.Space.s) {
                 Button("Open the page") { account.presentSignInPage() }
-                    .buttonStyle(.glass)
+                    .clientGlassStyle()
                 Button("Cancel") { account.cancelSignIn() }
-                    .buttonStyle(.glass)
+                    .clientGlassStyle()
             }
             .padding(.top, 2)
         }

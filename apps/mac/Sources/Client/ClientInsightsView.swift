@@ -79,7 +79,8 @@ struct ClientInsightsView: View {
                 ClientEmptyState(
                     kind: .nothingYet,
                     title: "Nothing recorded yet",
-                    message: "Sync a device and its usage shows up here."
+                    message: "Sync a device and its usage shows up here.",
+                    mark: "mark_insights"
                 )
             } else {
                 summary(rows)
@@ -117,6 +118,8 @@ struct ClientInsightsView: View {
 
     private func summary(_ rows: [Bucket]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            ClientSectionTitle(title: "This period", mark: "mark_insights")
+                .padding(.bottom, 4)
             Text(rows.totalValue.formatted)
                 .font(ClientType.figure)
                 .foregroundStyle(Theme.accent)

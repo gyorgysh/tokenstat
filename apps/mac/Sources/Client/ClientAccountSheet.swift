@@ -181,6 +181,8 @@ private struct ClientAccountContent: View {
             HStack(spacing: Theme.Space.s) {
                 if let tier = account.tier, !tier.isEmpty {
                     TierMark(tier: tier, size: 22)
+                } else {
+                    FeatureMark(name: "mark_plan", tint: Theme.accent, size: 22)
                 }
                 Text("Plan")
                     .font(ClientType.sectionTitle)
@@ -247,8 +249,7 @@ private struct ClientAccountContent: View {
 
     private func lastSync(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Last sync")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Last sync", mark: "mark_sync")
             Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
                 .font(ClientType.figureSmall)
                 .foregroundStyle(Theme.accent)
@@ -264,8 +265,7 @@ private struct ClientAccountContent: View {
 
     private func devices(_ account: Account) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Devices")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Devices", mark: "mark_device")
             Text(
                 account.machines.isEmpty
                     ? "None linked yet. Install tokenstat on a computer and sign in there."
@@ -373,8 +373,7 @@ private struct ClientAccountContent: View {
 
     private var signedOut: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Not signed in")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Not signed in", mark: "mark_account")
             Text("Signing in lets this phone read usage from every device on your account. Only aggregate counters leave a computer.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
@@ -385,7 +384,7 @@ private struct ClientAccountContent: View {
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .clientProminentStyle()
             .controlSize(.large)
             .tint(Theme.accent)
         }
@@ -403,8 +402,7 @@ private struct ClientAccountContent: View {
     /// serves, and a copy in the bundle is a copy that goes stale.
     private var legalCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Terms and privacy")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Terms and privacy", mark: "mark_license")
             legalLink("Privacy policy", url: ClientWebPages.privacy())
             Divider()
             legalLink("Terms of service", url: ClientWebPages.terms())
@@ -436,8 +434,7 @@ private struct ClientAccountContent: View {
 
     private var licensesCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Open source licenses")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Open source licenses", mark: "mark_license")
             Text("Third-party notices for the libraries bundled in this build.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
@@ -460,8 +457,7 @@ private struct ClientAccountContent: View {
 
     private var deleteAccountCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Delete this account")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "Delete this account", mark: "mark_delete", tint: Theme.danger)
             Text(
                 model.account?.billing?.isApple == true
                     && model.account?.billing?.blocksOtherStore == true
@@ -497,8 +493,7 @@ private struct ClientAccountContent: View {
 
     private var privacyNote: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Label("What syncing sends", systemImage: "lock.shield")
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: "What syncing sends", mark: "mark_sync")
             Text("""
             Aggregate counts per day, tool and model, and project names replaced \
             by salted hashes. Prompts, replies, file contents, file paths and \

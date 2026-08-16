@@ -21,6 +21,10 @@ import SwiftUI
 /// So there is deliberately almost no custom glass here. Two glass surfaces
 /// overlapping is a bug, and the fastest way to get one is to add glass the
 /// system was already going to provide.
+///
+/// Glass button styles and the floating tab bar exist from iOS 26. Below
+/// that, chrome falls back to the same Theme capsules the Mac already
+/// uses: content stays opaque, accent stays one colour.
 extension View {
     /// A content card: opaque panel, hairline, card radius.
     func cardSurface() -> some View {
@@ -29,6 +33,82 @@ extension View {
                 RoundedRectangle(cornerRadius: Theme.cardRadius)
                     .strokeBorder(Theme.border, lineWidth: 1)
             }
+    }
+
+    /// Primary action. Liquid glass on iOS 26, brand capsule below.
+    @ViewBuilder
+    func clientProminentStyle() -> some View {
+        if #available(iOS 26, *) {
+            buttonStyle(.glassProminent)
+        } else {
+            buttonStyle(ClientProminentButtonStyle())
+        }
+    }
+
+    /// Secondary chrome action. Liquid glass on iOS 26, quiet capsule below.
+    @ViewBuilder
+    func clientGlassStyle() -> some View {
+        if #available(iOS 26, *) {
+            buttonStyle(.glass)
+        } else {
+            buttonStyle(ClientQuietButtonStyle())
+        }
+    }
+
+    /// Hide the iOS 26 scroll-edge fade. Older systems never drew it.
+    @ViewBuilder
+    func clientHideScrollEdgeEffect() -> some View {
+        if #available(iOS 26, *) {
+            scrollEdgeEffectHidden(true, for: .all)
+        } else {
+            self
+        }
+    }
+}
+
+/// Section title with the same FeatureMark cards use on the Mac.
+struct ClientSectionTitle: View {
+    let title: String
+    let mark: String
+    var tint: Color = Theme.accent
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            FeatureMark(name: mark, tint: tint, size: 22)
+            Text(title)
+                .font(ClientType.sectionTitle)
+        }
+    }
+}
+
+/// Full-width primary button for phones that do not have glass chrome.
+private struct ClientProminentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(ClientType.label.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                Theme.accent.opacity(configuration.isPressed ? 0.78 : 1),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            )
+            .opacity(configuration.isPressed ? 0.92 : 1)
+    }
+}
+
+/// Quiet capsule for secondary actions on older iOS.
+private struct ClientQuietButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(ClientType.label.weight(.semibold))
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Theme.accentSoft.opacity(configuration.isPressed ? 0.7 : 1),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
     }
 }
 

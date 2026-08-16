@@ -144,7 +144,7 @@ struct PhoneHeatmap: View {
             // dissolves under glass chrome, and there is no chrome here: this
             // lives inside an opaque card, where the fade only washed out the
             // leading third of the grid.
-            .scrollEdgeEffectHidden(true, for: .all)
+            .clientHideScrollEdgeEffect()
         }
         .frame(height: monthRow + 6 + gridHeight + 6)
     }

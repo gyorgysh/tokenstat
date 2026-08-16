@@ -143,6 +143,7 @@ struct AutomationsView: View {
 
     private var intro: some View {
         HStack(alignment: .top) {
+            FeatureMark(name: "mark_automation", tint: Theme.accent, size: 28)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Automations")
                     .font(.system(size: 24, weight: .semibold))

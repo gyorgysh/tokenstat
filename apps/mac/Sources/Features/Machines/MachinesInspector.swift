@@ -37,7 +37,7 @@ struct MachinesInspector: View {
                     accountBody(machine)
                 case .none:
                     InspectorEmptyState(
-                        systemImage: "laptopcomputer",
+                        mark: "mark_device",
                         title: "Pick a device",
                         subtitle: "Reachability and pairing actions open here."
                     )

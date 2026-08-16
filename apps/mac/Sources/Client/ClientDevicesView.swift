@@ -40,7 +40,8 @@ struct ClientDevicesView: View {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "No devices yet",
-                            message: "Install tokenstat on a computer and sign in there. Free includes two devices. This phone uses one of them."
+                            message: "Install tokenstat on a computer and sign in there. Free includes two devices. This phone uses one of them.",
+                            mark: "mark_device"
                         )
                     }
                 } else {
@@ -154,8 +155,7 @@ struct ClientDevicesView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(deviceCount)
-                .font(ClientType.sectionTitle)
+            ClientSectionTitle(title: deviceCount, mark: "mark_device")
             Text(planLine ?? model.windowDescription)
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
@@ -195,8 +195,7 @@ struct ClientDevicesView: View {
         let hosts = machines.filter(\.isHost)
         if !hosts.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Always-on host")
-                    .font(ClientType.sectionTitle)
+                ClientSectionTitle(title: "Always-on host", mark: "mark_host")
                 ForEach(hosts) { machine in
                     HStack(spacing: Theme.Space.s) {
                         AwakeDot(online: machine.online)

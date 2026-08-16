@@ -97,7 +97,8 @@ struct AccountView: View {
     private var signedOut: some View {
         Card(
             title: "Not signed in",
-            subtitle: "Everything works without an account. Signing in only adds the option to publish."
+            subtitle: "Everything works without an account. Signing in only adds the option to publish.",
+            mark: "mark_account"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text("""
@@ -187,7 +188,8 @@ struct AccountView: View {
         // Sync now there is a button whose honest outcome is a refusal.
         Card(
             title: "Sync",
-            subtitle: "Only aggregate counters are eligible"
+            subtitle: "Only aggregate counters are eligible",
+            mark: "mark_sync"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack(alignment: .center, spacing: Theme.Space.l) {
@@ -287,7 +289,7 @@ struct AccountView: View {
             }
             return "\(account.machines.count) linked"
         }()
-        return Card(title: "Devices", subtitle: subtitle) {
+        return Card(title: "Devices", subtitle: subtitle, mark: "mark_device") {
             if account.machines.isEmpty {
                 #if os(macOS)
                 EmptyState(
@@ -379,9 +381,7 @@ struct AccountView: View {
     /// The claim, stated where someone is deciding whether to connect an
     /// account. This is the moment it matters, not the marketing page.
     private var privacyNote: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Label("What syncing sends", systemImage: "lock.shield")
-                .font(.callout.weight(.medium))
+        Card(title: "What syncing sends", subtitle: nil, mark: "mark_sync") {
             Text("""
             Aggregate counts per day, tool and model, and project names replaced \
             by salted hashes. Prompts, replies, file contents, file paths and \
@@ -390,9 +390,6 @@ struct AccountView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
     }
 
     #if os(macOS)
@@ -404,7 +401,8 @@ struct AccountView: View {
     private var planLimitsCard: some View {
         Card(
             title: "Plan limits",
-            subtitle: "Track vendor quota windows. Off means this Mac does not read that vendor and does not show it on Home."
+            subtitle: "Track vendor quota windows. Off means this Mac does not read that vendor and does not show it on Home.",
+            mark: "mark_plan"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 toggleRow(
@@ -486,7 +484,8 @@ struct AccountView: View {
     private var hostCard: some View {
         Card(
             title: "This Mac",
-            subtitle: "Whether the host helper stays up after you quit"
+            subtitle: "Whether the host helper stays up after you quit",
+            mark: "mark_host"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let policy = model.hostPolicy {
@@ -529,7 +528,8 @@ struct AccountView: View {
     private var terminalCard: some View {
         Card(
             title: "Terminal",
-            subtitle: "How terminal sessions behave"
+            subtitle: "How terminal sessions behave",
+            mark: "mark_terminal"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 // These describe terminals, and a client has none.
@@ -560,7 +560,8 @@ struct AccountView: View {
     private var localModelsCard: some View {
         Card(
             title: "Local models",
-            subtitle: "LM Studio on port 1234, Ollama on port 11434"
+            subtitle: "LM Studio on port 1234, Ollama on port 11434",
+            mark: "mark_local"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack {
@@ -677,7 +678,8 @@ struct AccountView: View {
     private var licensesCard: some View {
         Card(
             title: "Open source licenses",
-            subtitle: "Third-party notices for the bundled dependencies."
+            subtitle: "Third-party notices for the bundled dependencies.",
+            mark: "mark_license"
         ) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "doc.text.magnifyingglass")
@@ -702,7 +704,9 @@ struct AccountView: View {
     private var deleteAccountCard: some View {
         Card(
             title: "Delete this account",
-            subtitle: "Permanent. Confirmed on the website's data settings."
+            subtitle: "Permanent. Confirmed on the website's data settings.",
+            mark: "mark_delete",
+            markTint: Theme.danger
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text("""
@@ -928,7 +932,8 @@ private struct SignInCode: View {
     var body: some View {
         Card(
             title: "Confirm in your browser",
-            subtitle: "A page should have opened at \(device.verificationURI)"
+            subtitle: "A page should have opened at \(device.verificationURI)",
+            mark: "mark_account"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(device.userCode)

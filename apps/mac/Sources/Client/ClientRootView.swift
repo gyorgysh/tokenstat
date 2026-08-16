@@ -26,8 +26,9 @@ import UIKit
 /// The chrome is the system's own. A `TabView` on iOS 26 draws the floating
 /// glass bar, a `.toolbar` draws the glass top bar, and both keep their
 /// behaviour under Reduce Transparency and Reduce Motion without this file
-/// knowing about either. Custom glass is for the places no system control
-/// exists, and there are deliberately very few.
+/// knowing about either. On iOS 17 and 18 the same tabs sit on the system
+/// bar of that year: no glass, no minimise-on-scroll. Custom glass is for
+/// the places no system control exists, and there are deliberately very few.
 struct ClientRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var launch = LaunchState()
@@ -142,21 +143,34 @@ struct ClientRootView: View {
         }
     }
 
+    @ViewBuilder
     private var tabs: some View {
-        TabView(selection: $selection) {
-            ForEach(ClientTab.allCases) { tab in
-                Tab(tab.label, systemImage: tab.symbol, value: tab) {
+        if #available(iOS 18, *) {
+            TabView(selection: $selection) {
+                ForEach(ClientTab.allCases) { tab in
+                    Tab(tab.label, systemImage: tab.symbol, value: tab) {
+                        NavigationStack {
+                            tab.content
+                                .clientChrome(showAccount: $showAccount)
+                        }
+                    }
+                }
+            }
+            // The bar shrinks out of the way while reading and returns on
+            // scroll up. iOS 26 only. It never hides completely.
+            .modifier(TabBarMinimizeIfAvailable())
+        } else {
+            TabView(selection: $selection) {
+                ForEach(ClientTab.allCases) { tab in
                     NavigationStack {
                         tab.content
                             .clientChrome(showAccount: $showAccount)
                     }
+                    .tabItem { Label(tab.label, systemImage: tab.symbol) }
+                    .tag(tab)
                 }
             }
         }
-        // The bar shrinks out of the way while reading and returns on scroll
-        // up. It never hides completely: a control that disappears is one
-        // people stop trusting.
-        .tabBarMinimizeBehavior(.onScrollDown)
     }
 }
 
@@ -178,7 +192,7 @@ struct ClientRootView: View {
 /// it hoping to find, so it gets a place rather than being buried under
 /// Machines. Machines stays: a device is not a folder, and the account's tier,
 /// its reach and its last-seen times belong to devices.
-enum ClientTab: String, CaseIterable, Identifiable {
+enum ClientTab: String, CaseIterable, Identifiable, Hashable {
     case home
     case workspaces
     case insights
@@ -250,7 +264,7 @@ private struct ClientAuthRetryView: View {
                         Text("Try again").frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.glassProminent)
+                .clientProminentStyle()
                 .controlSize(.large)
                 .disabled(isLoading)
             }
@@ -289,6 +303,17 @@ private extension View {
                         .accessibilityAddTraits(.isHeader)
                 }
             }
+    }
+}
+
+/// iOS 26 shrinks the tab bar on scroll. Earlier systems keep the full bar.
+private struct TabBarMinimizeIfAvailable: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
+        }
     }
 }
 

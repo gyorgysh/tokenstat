@@ -12,14 +12,12 @@ options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "14.0"
-    # iOS 26 rather than 17, and the reason is the design rather than an API
-    # count. The client is built around the system's floating tab bar and its
-    # glass chrome, which do not exist below 26, so supporting 17 would mean
-    # shipping two visual designs instead of one design that degrades. The app
-    # has never shipped on iOS, so there is nobody on an older phone to strand.
-    # Lowering this later is additive: a handful of `if #available(iOS 26, *)`
-    # fallbacks, written when a real user asks. See `docs/ios-client-ui.md`.
-    iOS: "26.0"
+    # iOS 17 is the floor. The FFI already builds for 17, and the client
+    # only needed 26 for liquid glass chrome. Glass buttons, the floating
+    # tab bar and scroll-edge fades wrap in `#available(iOS 26, *)` and
+    # fall back to the same Theme capsules the Mac uses. The Tab API is
+    # 18+, so 17 uses `.tabItem`. See `docs/ios-client-ui.md`.
+    iOS: "17.0"
   groupSortPosition: top
 
 packages:

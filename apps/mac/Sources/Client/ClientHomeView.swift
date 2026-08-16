@@ -68,7 +68,8 @@ struct ClientHomeView: View {
                     ClientEmptyState(
                         kind: .nothingYet,
                         title: "Nothing recorded yet",
-                        message: "Sync a device and its usage shows up here."
+                        message: "Sync a device and its usage shows up here.",
+                        mark: "mark_activity"
                     )
                 }
             }
@@ -148,9 +149,8 @@ struct ClientHomeView: View {
 
     private func heatmapCard(_ calendar: ActivityCalendar) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Activity")
-                    .font(ClientType.sectionTitle)
+            HStack(alignment: .center) {
+                ClientSectionTitle(title: "Activity", mark: "mark_activity")
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
                     Text("\(calendar.activeDays) active days")
@@ -245,7 +245,7 @@ private struct NoticeCard: View {
                 .foregroundStyle(.secondary)
             if showSignIn {
                 Button("Sign in") { account.signIn() }
-                    .buttonStyle(.glass)
+                    .clientGlassStyle()
                     .tint(Theme.accent)
             }
         }

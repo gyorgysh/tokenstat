@@ -158,13 +158,13 @@ struct ClientOnboarding: View {
                 Button("Continue") {
                     withAnimation(.easeInOut(duration: 0.25)) { page += 1 }
                 }
-                .buttonStyle(.glassProminent)
+                .clientProminentStyle()
             } else {
                 // Get started only marks the intro done. Sign-in is a separate
                 // choice on the next screen: opening the browser from here made
                 // finishing the welcome feel like an auto-login.
                 Button("Get started") { finish() }
-                    .buttonStyle(.glassProminent)
+                    .clientProminentStyle()
             }
         }
         .tint(Theme.accent)
