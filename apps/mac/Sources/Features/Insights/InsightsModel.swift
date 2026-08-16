@@ -161,14 +161,6 @@ final class InsightsModel {
     }()
 
     func load() async {
-        do {
-            info = try await Bridge.info()
-        } catch {
-            if info == nil {
-                errorMessage = error.localizedDescription
-                return
-            }
-        }
         await refresh()
     }
 

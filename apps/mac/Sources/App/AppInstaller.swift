@@ -288,14 +288,14 @@ enum AppInstaller {
         // persistent tile.
         let bundle = Bundle.main.bundleURL.path
         let pid = ProcessInfo.processInfo.processIdentifier
-        let quoted = shellQuote(bundle)
-        // nohup plus ignore HUP so quitting this app does not kill the
-        // waiter before it can `open` the replaced bundle.
+        // Path as $1 so a space in the bundle is not eaten by the inner
+        // single-quoted -c. nohup plus ignore HUP so quitting this app
+        // does not kill the waiter before it can `open` the replaced bundle.
         let script = """
         /usr/bin/nohup /bin/sh -c 'trap "" HUP
         while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
-        /usr/bin/open \(quoted)
-        ' >/dev/null 2>&1 &
+        /usr/bin/open "$1"
+        ' _ \(shellQuote(bundle)) >/dev/null 2>&1 &
         """
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/sh")
