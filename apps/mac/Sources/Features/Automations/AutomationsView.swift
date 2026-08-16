@@ -134,6 +134,12 @@ struct AutomationsView: View {
         }
         // The model outlives this view, and the transcript tail must not.
         .onDisappear { model.disappeared() }
+        .onChange(of: model.hasLoaded) { _, loaded in
+            // Write the first-visit default so a later appear does not
+            // recompute it from an empty in-flight list.
+            guard loaded, examplesExpandedStored.isEmpty else { return }
+            examplesExpandedStored = model.jobs.isEmpty ? "1" : "0"
+        }
     }
 
     /// Waiting on the first read of the daemon's job list.
@@ -236,11 +242,15 @@ struct AutomationsView: View {
 
     /// Suggested setups sit under the user's own jobs. Open by default only
     /// when the list is empty, so first visit still teaches the screen.
+    ///
+    /// The stored value is the last tap. Until that exists, wait for the
+    /// jobs list to load: treating an unloaded list as empty flashed the
+    /// section open and forgot a collapse on the next appear.
     private var examplesExpanded: Bool {
         switch examplesExpandedStored {
         case "1": return true
         case "0": return false
-        default: return model.jobs.isEmpty
+        default: return model.hasLoaded && model.jobs.isEmpty
         }
     }
 
