@@ -10,10 +10,13 @@
 //! by the host and killed when the budget expires, so an automation can never
 //! run away.
 
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use crate::transcript::{self, Parser};
 
 use serde::{Deserialize, Serialize};
 
@@ -497,6 +500,9 @@ pub struct Store {
     runs_dir: PathBuf,
     jobs: Mutex<Vec<Automation>>,
     runs: Mutex<Vec<RunRecord>>,
+    /// Run ids the user asked to stop. Drain records those as stopped
+    /// rather than as an error from the signal.
+    killed: Mutex<HashSet<String>>,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -514,6 +520,7 @@ impl Store {
             runs_dir,
             jobs: Mutex::new(Vec::new()),
             runs: Mutex::new(Vec::new()),
+            killed: Mutex::new(HashSet::new()),
         }
     }
 
@@ -551,6 +558,7 @@ impl Store {
             runs_dir,
             jobs: Mutex::new(jobs),
             runs: Mutex::new(runs),
+            killed: Mutex::new(HashSet::new()),
         };
         if recovered {
             let _ = store.save_runs();
@@ -704,22 +712,27 @@ impl Store {
 
     /// Bytes of a run's transcript after `offset`.
     ///
-    /// The offset is against the file, not the pty, so a transcript outlives
-    /// the pty the run was watched through.
+    /// Prefers the readable file the drain wrote. Raw JSON stays on disk for
+    /// debugging and is not what a front end should display. The offset is
+    /// against that file, so a transcript outlives the pty.
     pub fn transcript(&self, run_id: &str, offset: u64) -> Result<(String, u64), String> {
         let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         let run = runs
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
-        let path = Path::new(&run.transcript_path);
-        if !path.is_absolute() {
+        let raw = Path::new(&run.transcript_path);
+        if !raw.is_absolute() {
             return Err("a run transcript is not absolute".into());
         }
+        let readable = transcript::readable_path(raw);
+        let path = if readable.is_file() {
+            readable.as_path()
+        } else {
+            raw
+        };
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        let start = (offset as usize).min(bytes.len());
-        let text = String::from_utf8_lossy(&bytes[start..]).to_string();
-        Ok((text, bytes.len() as u64))
+        Ok(transcript::slice_reply(&bytes, offset))
     }
 
     // MARK: running
@@ -740,6 +753,7 @@ impl Store {
                 args: argv[1..].to_vec(),
                 cwd: workspace.path.clone(),
                 workspace_id: Some(workspace.id.clone()),
+                hidden: true,
                 rows: 24,
                 cols: 120,
                 no_color: false,
@@ -805,11 +819,20 @@ impl Store {
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
+        if run.status != "running" {
+            return Err("that run is not running".into());
+        }
         let pty_id = run.pty_id.clone().ok_or("that run has no live pty")?;
         drop(runs);
-        tokenstat_pty::manager()
-            .kill(&pty_id)
-            .map_err(|e| e.to_string())
+        self.killed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run_id.to_string());
+        match tokenstat_pty::manager().kill(&pty_id) {
+            Ok(()) => Ok(()),
+            Err(tokenstat_pty::PtyError::NoSession(_)) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     /// Drain a run's pty into its transcript file, kill on budget, then record
@@ -818,9 +841,40 @@ impl Store {
         let manager = tokenstat_pty::manager();
         let deadline = Instant::now() + Duration::from_secs(budget_seconds);
         let mut file = std::fs::File::create(path).ok();
+        let readable_path = transcript::readable_path(path);
+        // Create the readable file immediately so a live tail never falls
+        // through to the raw JSON while the first event is still arriving.
+        let _ = std::fs::write(&readable_path, b"");
+        let mut readable_body = String::new();
+        let backend = {
+            let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+            runs.iter()
+                .find(|run| run.id == run_id)
+                .map(|run| run.backend.clone())
+                .unwrap_or_default()
+        };
+        let mut parser = Parser::new(&backend);
         let mut offset = 0u64;
         let reader_id = format!("automation:{run_id}");
         let mut stopped_by_budget = false;
+
+        let take = |bytes: &[u8],
+                        file: &mut Option<std::fs::File>,
+                        readable_body: &mut String,
+                        parser: &mut Parser| {
+            if let Some(f) = file {
+                let _ = f.write_all(bytes);
+            }
+            let piece = parser.push(bytes);
+            if !piece.is_empty() {
+                if !readable_body.is_empty() {
+                    readable_body.push_str("\n\n");
+                }
+                readable_body.push_str(&piece);
+                transcript::cap_readable(readable_body);
+                let _ = std::fs::write(&readable_path, readable_body.as_bytes());
+            }
+        };
 
         loop {
             let alive = manager.info(pty_id).map(|i| i.alive).unwrap_or(false);
@@ -836,9 +890,7 @@ impl Store {
                         && !chunk.bytes.is_empty()
                     {
                         offset = chunk.next_offset;
-                        if let Some(f) = &mut file {
-                            let _ = f.write_all(&chunk.bytes);
-                        }
+                        take(&chunk.bytes, &mut file, &mut readable_body, &mut parser);
                     }
                     std::thread::sleep(DRAIN_POLL);
                 }
@@ -846,8 +898,8 @@ impl Store {
             }
             if let Ok(chunk) = manager.read_for_stream(pty_id, &reader_id, offset) {
                 offset = chunk.next_offset;
-                if let Some(f) = &mut file {
-                    let _ = f.write_all(&chunk.bytes);
+                if !chunk.bytes.is_empty() {
+                    take(&chunk.bytes, &mut file, &mut readable_body, &mut parser);
                 }
             }
             if Instant::now() >= deadline {
@@ -857,9 +909,24 @@ impl Store {
             std::thread::sleep(DRAIN_POLL);
         }
 
+        let tail = parser.finish();
+        if !tail.is_empty() {
+            if !readable_body.is_empty() {
+                readable_body.push_str("\n\n");
+            }
+            readable_body.push_str(&tail);
+            transcript::cap_readable(&mut readable_body);
+            let _ = std::fs::write(&readable_path, readable_body.as_bytes());
+        }
+
         manager.forget_reader(pty_id, &reader_id);
         let exit_code = Self::settle_exit_code(pty_id);
-        let status = if stopped_by_budget {
+        let user_stopped = self
+            .killed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(run_id);
+        let status = if stopped_by_budget || user_stopped {
             "stopped"
         } else if exit_code == Some(0) {
             "ok"
@@ -1204,6 +1271,7 @@ mod tests {
                 args,
                 cwd: dir.clone(),
                 workspace_id: None,
+                hidden: false,
                 rows: 24,
                 cols: 80,
                 no_color: false,
@@ -1294,6 +1362,7 @@ mod tests {
                 args,
                 cwd: dir.clone(),
                 workspace_id: None,
+                hidden: false,
                 rows: 24,
                 cols: 80,
                 no_color: false,
@@ -1351,6 +1420,46 @@ mod tests {
         assert!(due.last_run_at_ms.is_some(), "the due job ran");
         let never = jobs.iter().find(|j| j.id == "never").unwrap();
         assert!(never.last_run_at_ms.is_none(), "the future job did not run");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_grok_shaped_transcript_is_readable_and_capped() {
+        let dir = temp_dir("readable");
+        std::fs::create_dir_all(dir.join("runs")).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let raw_path = dir.join("runs").join("run-grok.txt");
+        let raw = concat!(
+            "{\"type\":\"thought\",\"data\":\"nope\"}\n",
+            "{\"type\":\"text\",\"data\":\"hello from grok\"}\n",
+            "{\"type\":\"end\",\"stopReason\":\"end_turn\"}\n",
+        );
+        std::fs::write(&raw_path, raw).unwrap();
+        let mut parser = crate::transcript::Parser::new("grok");
+        let mut readable = parser.push(raw.as_bytes());
+        readable.push_str(&parser.finish());
+        std::fs::write(crate::transcript::readable_path(&raw_path), &readable).unwrap();
+        store
+            .push_run(RunRecord {
+                id: "run-grok".into(),
+                job_id: "j".into(),
+                name: "g".into(),
+                backend: "grok".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                exit_code: Some(0),
+                status: "ok".into(),
+                transcript_path: raw_path.display().to_string(),
+                pty_id: None,
+            })
+            .unwrap();
+        let (text, next) = store.transcript("run-grok", 0).unwrap();
+        assert!(text.contains("hello from grok"));
+        assert!(!text.contains("thought"));
+        assert!(!text.contains("end_turn"));
+        assert!(next as usize <= crate::transcript::REPLY_CAP);
+        assert!(next as usize >= text.len());
         let _ = std::fs::remove_dir_all(dir);
     }
 }

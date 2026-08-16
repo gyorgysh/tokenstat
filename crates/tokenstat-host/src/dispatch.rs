@@ -1754,6 +1754,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     args,
                     cwd: ws.path.clone(),
                     workspace_id: Some(ws.id.clone()),
+                    hidden: false,
                     rows: p.rows,
                     cols: p.cols,
                     no_color: p.no_color,

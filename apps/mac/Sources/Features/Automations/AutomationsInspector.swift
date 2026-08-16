@@ -85,8 +85,14 @@ struct AutomationsInspector: View {
                 }
 
                 HStack(spacing: Theme.Space.s) {
-                    Button("Run now") { Task { await model.run(job) } }
-                        .buttonStyle(AccentButtonStyle())
+                    if let last = model.lastRun(for: job), last.isRunning {
+                        Button("Stop") { Task { await model.stop(last) } }
+                            .buttonStyle(AccentButtonStyle())
+                            .help("Kill this run now")
+                    } else {
+                        Button("Run now") { Task { await model.run(job) } }
+                            .buttonStyle(AccentButtonStyle())
+                    }
                     Button("Edit") { editing = true }
                         .buttonStyle(SecondaryButtonStyle())
                 }
@@ -103,6 +109,11 @@ struct AutomationsInspector: View {
                     Text(run.name)
                         .font(.system(size: 15, weight: .semibold))
                     Spacer()
+                    if run.isRunning {
+                        Button("Stop") { Task { await model.stop(run) } }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .help("Kill this run now")
+                    }
                     StatusPill(status: run.status, text: run.endedLabel)
                 }
                 Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
@@ -131,7 +142,7 @@ struct AutomationsInspector: View {
         if model.transcriptText.isEmpty {
             return run.isRunning ? "Waiting for output…" : "(No readable output)"
         }
-        return run.backend == "claude" ? model.readableTranscript : model.transcriptText
+        return model.transcriptText
     }
 
     private func labeled(_ title: String, _ value: String) -> some View {

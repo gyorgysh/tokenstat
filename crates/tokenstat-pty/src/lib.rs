@@ -66,6 +66,10 @@ pub struct SessionInfo {
     pub cwd: String,
     /// Workspace this belongs to, so sessions can be grouped by folder.
     pub workspace_id: Option<String>,
+    /// True for daemon-owned jobs that must not appear as a workspace tab.
+    /// The process still runs in the folder. The front end must not adopt it.
+    #[serde(default)]
+    pub hidden: bool,
     pub rows: u16,
     pub cols: u16,
     pub alive: bool,
@@ -246,6 +250,9 @@ pub struct Spawn {
     pub args: Vec<String>,
     pub cwd: PathBuf,
     pub workspace_id: Option<String>,
+    /// When true, `list` omits the session. Automations use this so a headless
+    /// JSON stream is not adopted as a visible terminal.
+    pub hidden: bool,
     pub rows: u16,
     pub cols: u16,
     /// The user asked for no colour: NO_COLOR=1 and nothing that overrides it.
@@ -452,6 +459,7 @@ impl Manager {
             command: req.command.clone(),
             cwd: req.cwd.display().to_string(),
             workspace_id: req.workspace_id.clone(),
+            hidden: req.hidden,
             rows: size.rows,
             cols: size.cols,
             alive: true,
@@ -564,6 +572,7 @@ impl Manager {
                 info.command = req.command.clone();
                 info.cwd = req.cwd.display().to_string();
                 info.workspace_id = req.workspace_id.clone();
+                info.hidden = req.hidden;
                 info.rows = size.rows;
                 info.cols = size.cols;
                 // The handoff itself counts as activity: the shell has just
@@ -615,6 +624,7 @@ impl Manager {
             args,
             cwd: PathBuf::from(cwd),
             workspace_id: None,
+            hidden: false,
             rows: 24,
             cols: 80,
             no_color: false,
@@ -915,7 +925,11 @@ impl Manager {
             .values()
             .cloned()
             .collect();
-        let mut out: Vec<_> = sessions.iter().map(|s| self.snapshot(s)).collect();
+        let mut out: Vec<_> = sessions
+            .iter()
+            .map(|s| self.snapshot(s))
+            .filter(|info| !info.hidden)
+            .collect();
         out.sort_by(|a, b| a.id.cmp(&b.id));
         out
     }
@@ -1763,6 +1777,7 @@ mod tests {
             args,
             cwd,
             workspace_id: Some("ws-1".into()),
+            hidden: false,
             rows: 30,
             cols: 100,
             no_color: false,
@@ -2007,6 +2022,7 @@ mod tests {
             args,
             cwd: std::env::temp_dir(),
             workspace_id: None,
+            hidden: false,
             rows: 24,
             cols: 80,
             no_color: false,
@@ -2161,6 +2177,52 @@ mod tests {
         let info = m.info(&s.id).expect("info");
         assert_eq!((info.rows, info.cols), (45, 120));
         let _ = m.kill(&s.id);
+    }
+
+    #[test]
+    fn list_omits_a_hidden_session() {
+        let m = Manager::new();
+        let visible = stay_busy(&m);
+        #[cfg(unix)]
+        let (command, args) = (
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), "sleep 60".into()],
+        );
+        #[cfg(windows)]
+        let (command, args) = (
+            "cmd.exe".to_string(),
+            vec![
+                "/V:ON".to_string(),
+                "/C".to_string(),
+                "ping -n 61 127.0.0.1 > nul".into(),
+            ],
+        );
+        let hidden = m
+            .spawn(&Spawn {
+                command,
+                args,
+                cwd: std::env::temp_dir(),
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 80,
+                no_color: false,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .expect("hidden spawn");
+        let ids: Vec<String> = m.list().into_iter().map(|s| s.id).collect();
+        assert!(ids.contains(&visible.id), "visible session stays in list");
+        assert!(
+            !ids.contains(&hidden.id),
+            "a hidden automation session must not appear in list"
+        );
+        assert!(
+            m.info(&hidden.id).is_ok(),
+            "info still finds a hidden session"
+        );
+        let _ = m.kill(&visible.id);
+        let _ = m.kill(&hidden.id);
     }
 
     #[test]

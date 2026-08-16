@@ -5,105 +5,10 @@
 import Foundation
 import Observation
 
-/// Renders a run transcript readably, caching the parsed result so a live
-/// tail that polls every 400ms does not re-parse the whole stream on every
-/// tick.
-///
-/// Claude's `--output-format stream-json` writes one JSON object per line:
-/// system hooks, tool uses, assistant messages, and a final result. The
-/// readable form keeps the assistant text and the result, and drops the
-/// machinery. Non-JSON output (shell runs) passes through whole.
-struct TranscriptRenderer {
-    private var rawKey = ""
-    private var cached = ""
-
-    /// The readable form of `raw`, re-parsed only when the text changed.
-    mutating func render(_ raw: String) -> String {
-        if rawKey != raw {
-            rawKey = raw
-            cached = Self.readableTranscript(raw)
-        }
-        return cached
-    }
-
-    mutating func reset() {
-        rawKey = ""
-        cached = ""
-    }
-
-    static func readableTranscript(_ raw: String) -> String {
-        guard !raw.isEmpty else { return "Waiting for output…" }
-        var out: [String] = []
-        // Split on the *string* separator, not the Character one: the pty
-        // writes CRLF, and Swift treats CRLF as one grapheme cluster, so
-        // splitting on Character("\n") finds nothing and the whole file is one
-        // "line" that then fails to parse and passes through raw.
-        for line in raw.components(separatedBy: "\n") {
-            // `\r` ends pty lines and `.whitespaces` alone does not strip it;
-            // ANSI show/hide-cursor escapes can also prefix a line.
-            let cleaned = stripANSI(line)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard cleaned.hasPrefix("{"),
-                  let data = cleaned.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                // An occasional truncated or escape-polluted JSON line should
-                // not dump raw machine JSON into the readable view.
-                if !cleaned.contains("\"type\":") {
-                    out.append(cleaned)
-                }
-                continue
-            }
-
-            let type = object["type"] as? String
-            switch type {
-            case "assistant":
-                // `message.content` on newer SDKs, top-level `content` on
-                // older ones. Text blocks are the words; tool blocks are not.
-                let content = (object["message"] as? [String: Any])?["content"]
-                    ?? object["content"]
-                let texts = (content as? [[String: Any]])?
-                    .compactMap { $0["text"] as? String } ?? []
-                if !texts.isEmpty {
-                    let block = texts.joined(separator: "\n")
-                    // Claude re-emits the same final message across turns; the
-                    // user and tool lines between the copies are filtered out,
-                    // so without this the conclusion prints once per turn.
-                    if out.last != block {
-                        out.append(block)
-                    }
-                }
-            case "result":
-                if let result = object["result"] as? String, !result.isEmpty {
-                    // Claude's final result repeats the last assistant
-                    // message; do not print the conclusion twice.
-                    if out.last != result {
-                        out.append(result)
-                    }
-                }
-            default:
-                // System hooks, tool uses, and the prompt echo are the
-                // machinery around the answer, not the answer.
-                break
-            }
-        }
-        let joined = out.joined(separator: "\n\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return joined.isEmpty ? "(No readable output)" : joined
-    }
-
-    /// Removes ANSI escape sequences (e.g. `\u{1B}[?25h`) that the pty can
-    /// interleave with the JSON stream.
-    static func stripANSI(_ text: String) -> String {
-        // Not a raw string: `\u{1B}` must become the ESC character in the
-        // pattern, and `\\[` the regex's literal-bracket.
-        text.replacingOccurrences(
-            of: "\u{1B}\\[[0-9;?]*[A-Za-z]",
-            with: "",
-            options: .regularExpression
-        )
-    }
-}
+/// How much readable transcript the inspector keeps. The host already caps
+/// each reply and the on-disk readable file. This is the last line of defence
+/// so a live tail cannot grow a SwiftUI `Text` without bound.
+private let transcriptDisplayCap = 256 * 1024
 
 /// Which side of the Automations inspector is showing.
 enum AutomationFocus: Sendable {
@@ -131,12 +36,6 @@ final class AutomationsModel {
     var errorMessage: String?
     var noticeMessage: String?
 
-    /// The readable form of the watched transcript, parsed once per change
-    /// rather than on every poll.
-    var readableTranscript: String {
-        transcriptRenderer.render(transcriptText)
-    }
-
     /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
     private(set) var selectedRunID: String?
@@ -150,7 +49,6 @@ final class AutomationsModel {
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
-    private var transcriptRenderer = TranscriptRenderer()
 
     /// True while the screen is on show.
     ///
@@ -293,6 +191,19 @@ final class AutomationsModel {
         }
     }
 
+    /// Kill a live run now. Same host path as a budget stop: the pty dies
+    /// and the drain records the run as stopped.
+    func stop(_ run: RunRecord) async {
+        do {
+            try await Bridge.automationKill(runID: run.id)
+            showNotice("Stopped \(run.name).")
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Start a one-time Auto commit job in this folder and run it now.
     ///
     /// Reuses the existing automation runner: same backends, same pty, same
@@ -402,7 +313,6 @@ final class AutomationsModel {
         watchingRunID = run.id
         transcriptText = ""
         transcriptOffset = 0
-        transcriptRenderer.reset()
         syncWatching()
     }
 
@@ -450,8 +360,18 @@ final class AutomationsModel {
         }
         do {
             let chunk = try await Bridge.automationTranscript(id: id, offset: transcriptOffset)
+            if chunk.nextOffset < transcriptOffset {
+                // The host compacted the readable file. Start again from the
+                // window it kept rather than appending onto dropped bytes.
+                transcriptText = ""
+                transcriptOffset = 0
+                let again = try await Bridge.automationTranscript(id: id, offset: 0)
+                transcriptText = Self.capped(again.text)
+                transcriptOffset = again.nextOffset
+                return
+            }
             if !chunk.text.isEmpty {
-                transcriptText += chunk.text
+                transcriptText = Self.capped(transcriptText + chunk.text)
             }
             transcriptOffset = chunk.nextOffset
         } catch {
@@ -497,6 +417,19 @@ final class AutomationsModel {
             if days.isEmpty { return "custom at \(time)" }
             return "\(days) at \(time)"
         }
+    }
+
+    private static func capped(_ text: String) -> String {
+        let bytes = Array(text.utf8)
+        guard bytes.count > transcriptDisplayCap else { return text }
+        var start = bytes.count - transcriptDisplayCap
+        while start < bytes.count && bytes[start] & 0b1100_0000 == 0b1000_0000 {
+            start += 1
+        }
+        if let newline = bytes[start...].firstIndex(of: UInt8(ascii: "\n")) {
+            start = newline + 1
+        }
+        return String(decoding: bytes[start...], as: UTF8.self)
     }
 
     private static func dayList(_ mask: Int) -> String {

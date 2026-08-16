@@ -110,7 +110,7 @@ final class TerminalsModel {
             // spawn over creating a second session: spawn completion and this
             // list can race, and creating both was the "session appears,
             // vanishes, comes back" glitch.
-            for info in list where !knownHostIDs.contains(info.id) {
+            for info in list where !knownHostIDs.contains(info.id) && info.hidden != true {
                 if let pending = pendingMatch(for: info) {
                     pending.attach(info: info)
                     // Drop any accidental second copy with the same host id.

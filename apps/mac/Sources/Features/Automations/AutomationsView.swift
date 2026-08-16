@@ -608,8 +608,14 @@ private struct AutomationRow: View {
                     .lineLimit(1)
             }
             Spacer()
-            Button("Run now") { Task { await model.run(job) } }
-                .buttonStyle(AccentButtonStyle(small: true))
+            if let last = model.lastRun(for: job), last.isRunning {
+                Button("Stop") { Task { await model.stop(last) } }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .help("Kill this run now")
+            } else {
+                Button("Run now") { Task { await model.run(job) } }
+                    .buttonStyle(AccentButtonStyle(small: true))
+            }
             Button("History") { showingHistory = true }
                 .buttonStyle(.borderless)
                 .controlSize(.small)

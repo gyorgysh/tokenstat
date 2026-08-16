@@ -79,6 +79,8 @@ mod sync_scheduler;
 #[cfg(feature = "local-host")]
 mod todo;
 #[cfg(feature = "local-host")]
+pub(crate) mod transcript;
+#[cfg(feature = "local-host")]
 pub mod workspaces;
 
 pub use dispatch::call;

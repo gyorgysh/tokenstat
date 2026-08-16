@@ -1402,7 +1402,7 @@ struct RunRecord: Codable, Sendable, Identifiable {
         switch status {
         case "running": return "Running"
         case "ok": return "Done"
-        case "stopped": return "Stopped at budget"
+        case "stopped": return "Stopped"
         case "error": return "Failed"
         case "interrupted": return "Interrupted by restart"
         default: return status
@@ -1546,6 +1546,9 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var cwd: String
     /// Workspace this belongs to, so sessions can be grouped by folder.
     var workspaceID: String?
+    /// Daemon-owned jobs (automations) set this so the workspace must not
+    /// adopt the session as a tab.
+    var hidden: Bool?
     var rows: Int
     var cols: Int
     var alive: Bool
@@ -1574,6 +1577,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         // The host spells it `workspaceId`, serde's camelCase for
         // `workspace_id`. Swift's own camelCase writes `workspaceID`.
         case workspaceID = "workspaceId"
+        case hidden
         case rows
         case cols
         case alive
