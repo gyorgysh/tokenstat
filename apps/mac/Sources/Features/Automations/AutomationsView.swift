@@ -380,16 +380,6 @@ struct AutomationsView: View {
             budgetSeconds: 600
         ),
         AutomationTemplate(
-            title: "Commit pending work",
-            subtitle: "Once, when you run it",
-            symbol: "checkmark.circle",
-            name: "Auto commit",
-            prompt: AutomationsModel.autoCommitPrompt(workspaceName: "this folder"),
-            backendID: "claude",
-            schedule: AutomationSchedule(kind: .once),
-            budgetSeconds: 900
-        ),
-        AutomationTemplate(
             title: "Release",
             subtitle: "Once, when you run it",
             symbol: "tag",

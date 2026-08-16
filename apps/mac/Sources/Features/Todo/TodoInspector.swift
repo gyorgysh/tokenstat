@@ -128,17 +128,17 @@ struct TodoInspector: View {
                         Button("Stop") { Task { await model.stop(card) } }
                             .buttonStyle(SecondaryButtonStyle())
                     }
-                    Button("Open run") { onViewRun?(delegate.runId) }
+                    Button("View run transcript") { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
                 }
                 if !card.isNote, card.delegate?.isRunning != true {
                     if canRun {
-                        RunModeButtons(
+                        TaskRunBar(
                             canRun: canRun,
-                            running: starting,
-                            onBackground: { Task { await startRun(card, inFront: false) } },
-                            onFront: { Task { await startRun(card, inFront: true) } }
-                        )
+                            running: starting
+                        ) { placement in
+                            Task { await startRun(card, inFront: placement == .front) }
+                        }
                     } else {
                         Button("Run…") { showDelegate = true }
                             .buttonStyle(AccentButtonStyle())
@@ -189,10 +189,8 @@ struct TodoInspector: View {
         )
         .onChange(of: backendID) { old, new in
             guard !applyingAgent, old != new, loadedID == card.id else { return }
-            if !old.isEmpty {
-                modelChoice = ""
-                effortChoice = ""
-            }
+            modelChoice = ""
+            effortChoice = ""
             Task { await persistAgent(card) }
         }
         AppMenuPicker(

@@ -1272,12 +1272,19 @@ struct AppMenuPicker<Option: Hashable>: View {
                 )
                 .contentShape(.rect)
             }
+            // AppKit menus keep their first item list. A new agent must
+            // remount this control or the previous models stay on screen.
+            .id(optionsIdentity)
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
             .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var optionsIdentity: String {
+        options.map { "\($0.value)\u{1e}\($0.label)" }.joined(separator: "\u{1f}")
     }
 
     private var selectedLabel: String {

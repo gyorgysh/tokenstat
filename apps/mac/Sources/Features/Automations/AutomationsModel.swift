@@ -116,6 +116,54 @@ final class AutomationsModel {
         runs.first(where: \.isRunning) ?? runs.first
     }
 
+    /// Display name of the once-job the Changes pane starts.
+    static let autoCommitName = "Auto commit"
+
+    /// The reusable Auto commit job for a folder, if one exists.
+    ///
+    /// Name plus workspace, not schedule: one folder gets one Auto commit
+    /// job. A later start with a different agent edits that job.
+    func autoCommitJob(in workspaceID: String) -> Automation? {
+        let matches = jobs.filter {
+            $0.workspaceID == workspaceID && Self.isAutoCommitName($0.name)
+        }
+        return matches.first { lastRun(for: $0) != nil } ?? matches.first
+    }
+
+    static func isAutoCommitName(_ name: String) -> Bool {
+        name.compare(autoCommitName, options: [.caseInsensitive, .diacriticInsensitive])
+            == .orderedSame
+    }
+
+    /// True while this folder's Auto commit run is queued or live.
+    func isAutoCommitRunning(in workspaceID: String) -> Bool {
+        guard let job = autoCommitJob(in: workspaceID) else { return false }
+        return lastRun(for: job)?.isRunning == true
+    }
+
+    /// Jobs in this folder whose last run is still going. The workspace
+    /// sidebar lists these so a hidden automation pty is still visible.
+    func liveJobs(in workspaceID: String) -> [Automation] {
+        jobs.filter { job in
+            job.workspaceID == workspaceID && lastRun(for: job)?.isRunning == true
+        }
+    }
+
+    /// Reload jobs and runs without touching the transcript tail.
+    ///
+    /// The Automations screen is not the only reader: the workspace sidebar
+    /// and the Auto commit button need a live status while that screen is off.
+    func refreshList() async {
+        do {
+            async let j = Bridge.automations()
+            async let r = Bridge.automationRuns()
+            jobs = try await j
+            runs = try await r
+        } catch {
+            // The next tick tries again.
+        }
+    }
+
     /// How a job last got on. The row carries this rather than the run list,
     /// because "did my nightly check pass" is a question about the automation
     /// and answering it should not mean reading a run history to find out which
@@ -168,15 +216,31 @@ final class AutomationsModel {
         schedule: AutomationSchedule,
         budget: UInt64
     ) async {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        // One Auto commit per folder. The Changes button and this form
+        // share that job, so a second create is an edit.
+        if Self.isAutoCommitName(trimmed), var existing = autoCommitJob(in: workspaceID) {
+            existing.backend = backend
+            existing.model = model
+            existing.effort = effort
+            existing.prompt = prompt
+            existing.schedule = schedule
+            existing.budgetSeconds = budget
+            existing.enabled = true
+            await update(existing, announce: false)
+            showNotice("Updated Auto commit in this folder.")
+            selectJob(existing.id)
+            return
+        }
         let job = Automation(
-            id: "", name: name, backend: backend, model: model, effort: effort,
+            id: "", name: trimmed, backend: backend, model: model, effort: effort,
             workspaceID: workspaceID, prompt: prompt,
             schedule: schedule, budgetSeconds: budget, enabled: true,
             lastRunAtMs: nil, nextRunAtMs: nil, lastRunID: nil
         )
         do {
             _ = try await Bridge.createAutomation(job)
-            showNotice("\(name) will run \(scheduleSummary(schedule)).")
+            showNotice("\(trimmed) will run \(scheduleSummary(schedule)).")
             errorMessage = nil
             await load()
         } catch {
@@ -286,14 +350,17 @@ final class AutomationsModel {
         backend: String,
         model: String?
     ) async {
-        let name = "Auto commit"
+        let name = Self.autoCommitName
         let prompt = Self.autoCommitPrompt(workspaceName: workspaceName)
         let schedule = AutomationSchedule(kind: .once)
-        if var existing = jobs.first(where: {
-            $0.name == name
-                && $0.workspaceID == workspaceID
-                && $0.schedule.kind == .once
-        }) {
+        if var existing = autoCommitJob(in: workspaceID) {
+            if lastRun(for: existing)?.isRunning == true {
+                selectJob(existing.id)
+                if let last = lastRun(for: existing) {
+                    selectRun(last)
+                }
+                return
+            }
             existing.backend = backend
             existing.model = model
             existing.prompt = prompt

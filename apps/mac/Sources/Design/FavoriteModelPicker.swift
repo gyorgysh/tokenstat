@@ -81,14 +81,20 @@ struct FavoriteModelPicker: View {
                 options: options,
                 selection: $selection
             )
+            .id(backendID)
             starButton
         }
+        .onAppear { clampSelection() }
+        .onChange(of: backendID) { _, _ in clampSelection() }
+        .onChange(of: models) { _, _ in clampSelection() }
     }
 
     private var options: [(value: String, label: String)] {
         var ids = models
         let extraID = TodoCard.cleanModelID(extra)
-        if !extraID.isEmpty, !ids.contains(extraID) {
+        // Keep a stored alias this backend no longer lists. Do not carry a
+        // leftover from the previous agent into the new list.
+        if !extraID.isEmpty, !ids.contains(extraID), extraID == selection {
             ids.insert(extraID, at: 0)
         }
         let favs = favorites.ids(for: backendID).filter { ids.contains($0) }
@@ -96,6 +102,14 @@ struct FavoriteModelPicker: View {
         return [(value: "", label: "Default")]
             + favs.map { (value: $0, label: $0) }
             + rest.map { (value: $0, label: $0) }
+    }
+
+    private func clampSelection() {
+        let extraID = TodoCard.cleanModelID(extra)
+        if selection.isEmpty { return }
+        if models.contains(selection) { return }
+        if selection == extraID { return }
+        selection = ""
     }
 
     private var isFavorite: Bool {
@@ -130,29 +144,54 @@ struct FavoriteModelPicker: View {
     }
 }
 
-/// Background automation vs interactive terminal. Two brand capsules.
-struct RunModeButtons: View {
+/// Where a task run goes: hidden automation, or an interactive terminal.
+enum TaskRunPlacement: String, Hashable {
+    case background
+    case front
+}
+
+/// Run type, then a single Run button. Same control in the inspector and
+/// the run sheet, so the two surfaces cannot drift apart.
+struct TaskRunBar: View {
     var canRun: Bool
     var running: Bool
-    var onBackground: () -> Void
-    var onFront: () -> Void
+    var action: (TaskRunPlacement) -> Void
+
+    @AppStorage("tasks.runPlacement") private var placementRaw = TaskRunPlacement.background.rawValue
+
+    private var placement: Binding<TaskRunPlacement> {
+        Binding(
+            get: { TaskRunPlacement(rawValue: placementRaw) ?? .background },
+            set: { placementRaw = $0.rawValue }
+        )
+    }
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: Theme.Space.s) { buttons }
-            VStack(alignment: .leading, spacing: Theme.Space.s) { buttons }
+            HStack(alignment: .center, spacing: Theme.Space.s) { content }
+            VStack(alignment: .leading, spacing: Theme.Space.s) { content }
         }
     }
 
     @ViewBuilder
-    private var buttons: some View {
-        Button("Run in background") { onBackground() }
-            .buttonStyle(AccentButtonStyle())
-            .disabled(!canRun || running)
-            .help("Start as an automation. The transcript shows on Automations.")
-        Button("Run in front") { onFront() }
-            .buttonStyle(SecondaryButtonStyle())
-            .disabled(!canRun || running)
-            .help("Open an interactive terminal. Not tracked as an automation.")
+    private var content: some View {
+        SegmentedCapsulePicker(
+            options: [
+                (TaskRunPlacement.background, "Background", "bolt.fill"),
+                (TaskRunPlacement.front, "In front", "terminal"),
+            ],
+            selection: placement
+        )
+        Button(running ? "Starting…" : "Run") {
+            action(placement.wrappedValue)
+        }
+        .buttonStyle(AccentButtonStyle())
+        .disabled(!canRun || running)
+        .help(
+            placement.wrappedValue == .front
+                ? "Open an interactive terminal. Not tracked as an automation."
+                : "Start as an automation. The transcript shows on Automations."
+        )
+        .accessibilityLabel("Run")
     }
 }

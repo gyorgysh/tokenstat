@@ -193,6 +193,8 @@ struct WorkspaceChangesView: View {
     var folder: WorkspaceFolder?
     #if os(macOS)
     @Bindable var automations: AutomationsModel
+    /// Opens the Auto commit job on Automations after it starts.
+    var onOpenAutomation: ((String, String?) -> Void)? = nil
     #endif
     @State private var expandedDiffs: Set<String> = []
 
@@ -208,7 +210,12 @@ struct WorkspaceChangesView: View {
         if let folder, folder.exists, folder.git?.isRepo == true {
             changesBody
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    CommitBox(model: model, automations: automations, folder: folder)
+                    CommitBox(
+                        model: model,
+                        automations: automations,
+                        folder: folder,
+                        onOpenAutomation: onOpenAutomation
+                    )
                 }
         } else {
             changesBody
@@ -420,6 +427,7 @@ private struct CommitBox: View {
     @Bindable var model: WorkspacesModel
     @Bindable var automations: AutomationsModel
     let folder: WorkspaceFolder
+    var onOpenAutomation: ((String, String?) -> Void)? = nil
 
     private var title: Binding<String> {
         Binding(
@@ -610,16 +618,24 @@ private struct CommitBox: View {
         .padding(Theme.Space.s)
     }
 
+    private var autoCommitRunning: Bool {
+        automations.isAutoCommitRunning(in: folder.id)
+    }
+
     private var autoCommitRow: some View {
         HStack(spacing: Theme.Space.s) {
             Button {
                 Task { await runAutoCommit() }
             } label: {
-                Text("Auto commit")
+                Text(autoCommitRunning ? "Running…" : "Auto commit")
             }
             .buttonStyle(SecondaryButtonStyle())
-            .disabled(model.isCommitting || selectedBackend == nil)
-            .help("One-time automation: the chosen agent commits in this folder")
+            .disabled(model.isCommitting || selectedBackend == nil || autoCommitRunning)
+            .help(
+                autoCommitRunning
+                    ? "Auto commit is already running in this folder"
+                    : "One-time automation: the chosen agent commits in this folder"
+            )
             .fixedSize()
 
             AppMenuPicker(
@@ -652,12 +668,22 @@ private struct CommitBox: View {
 
     private func runAutoCommit() async {
         guard let backend = selectedBackend else { return }
+        if automations.isAutoCommitRunning(in: folder.id),
+           let job = automations.autoCommitJob(in: folder.id)
+        {
+            onOpenAutomation?(job.id, automations.lastRun(for: job)?.id)
+            return
+        }
         await automations.startAutoCommit(
             workspaceID: folder.id,
             workspaceName: folder.name,
             backend: backend.id,
             model: selectedModel.isEmpty ? nil : selectedModel
         )
+        guard automations.errorMessage == nil,
+              let job = automations.autoCommitJob(in: folder.id)
+        else { return }
+        onOpenAutomation?(job.id, automations.lastRun(for: job)?.id)
     }
 }
 #endif

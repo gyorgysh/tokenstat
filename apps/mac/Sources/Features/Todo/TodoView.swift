@@ -893,18 +893,10 @@ struct DelegateSheet: View {
                     .foregroundStyle(.secondary)
                 BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
             }
-            RunModeButtons(
-                canRun: canRun,
-                running: working,
-                onBackground: {
-                    working = true
-                    Task { await run(inFront: false) }
-                },
-                onFront: {
-                    working = true
-                    Task { await run(inFront: true) }
-                }
-            )
+            TaskRunBar(canRun: canRun, running: working) { placement in
+                working = true
+                Task { await run(inFront: placement == .front) }
+            }
             Button("Cancel") { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
         }
@@ -922,6 +914,11 @@ struct DelegateSheet: View {
             if backendID.isEmpty, let first = model.backends.first {
                 backendID = first.id
             }
+        }
+        .onChange(of: backendID) { old, new in
+            guard !old.isEmpty, old != new else { return }
+            modelChoice = ""
+            effortChoice = ""
         }
     }
 

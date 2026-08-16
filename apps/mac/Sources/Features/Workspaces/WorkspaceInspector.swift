@@ -62,6 +62,10 @@ struct WorkspaceInspector: View {
     /// Dismisses the pane. Owned by the root view, which is the only place the
     /// inspector's presence is decided.
     var onClose: () -> Void
+    #if os(macOS)
+    /// After Auto commit starts, open that job on the Automations screen.
+    var onOpenAutomation: ((String, String?) -> Void)? = nil
+    #endif
 
     /// The chosen tab lives in the model, not in `@State` here.
     ///
@@ -111,7 +115,12 @@ struct WorkspaceInspector: View {
         switch tab.wrappedValue {
         case .changes:
             #if os(macOS)
-            WorkspaceChangesView(model: model, folder: folder, automations: automations)
+            WorkspaceChangesView(
+                model: model,
+                folder: folder,
+                automations: automations,
+                onOpenAutomation: onOpenAutomation
+            )
             #else
             WorkspaceChangesView(model: model, folder: folder)
             #endif

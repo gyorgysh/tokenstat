@@ -620,6 +620,12 @@ pub struct Automation {
     pub last_run_id: Option<String>,
 }
 
+const AUTO_COMMIT_NAME: &str = "Auto commit";
+
+fn is_auto_commit_name(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case(AUTO_COMMIT_NAME)
+}
+
 /// One completed or still-running agent run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -841,8 +847,34 @@ impl Store {
         validate(&job)?;
         job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
-        if jobs.iter().any(|existing| existing.id == job.id) {
+        if jobs
+            .iter()
+            .any(|existing| existing.id == job.id && !job.id.is_empty())
+        {
             return Err(format!("an automation with id {} already exists", job.id));
+        }
+        // One Auto commit per folder. A later create with a different
+        // agent edits that job rather than adding another row.
+        if is_auto_commit_name(&job.name) {
+            if let Some(idx) = jobs.iter().position(|existing| {
+                existing.workspace_id == job.workspace_id && is_auto_commit_name(&existing.name)
+            }) {
+                let id = jobs[idx].id.clone();
+                let last_run_at_ms = jobs[idx].last_run_at_ms;
+                let last_run_id = jobs[idx].last_run_id.clone();
+                job.id = id;
+                job.last_run_at_ms = last_run_at_ms;
+                job.last_run_id = last_run_id;
+                if job.enabled {
+                    job.next_run_at_ms = job.schedule.next_run_ms(now_ms());
+                } else {
+                    job.next_run_at_ms = None;
+                }
+                jobs[idx] = job.clone();
+                drop(jobs);
+                self.save()?;
+                return Ok(job);
+            }
         }
         if job.id.is_empty() {
             job.id = format!("automation-{}", now_ms());
@@ -1667,6 +1699,36 @@ mod tests {
         job.next_run_at_ms = first_next;
         let updated = store.update(job).unwrap();
         assert_eq!(updated.next_run_at_ms, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_auto_commit_job_per_workspace() {
+        let dir = temp_dir("auto-commit-once");
+        let store = Store::at(dir.join("automations.json"));
+        let mut first = job("auto-1", ScheduleSpec::default(), 900);
+        first.name = "Auto commit".into();
+        first.backend = "claude".into();
+        first.model = Some("sonnet".into());
+        let first = store.create(first).unwrap();
+
+        let mut second = job("", ScheduleSpec::default(), 900);
+        second.name = "auto commit".into();
+        second.backend = "grok".into();
+        second.model = Some("grok-4".into());
+        let second = store.create(second).unwrap();
+
+        assert_eq!(second.id, first.id);
+        assert_eq!(second.backend, "grok");
+        assert_eq!(second.model.as_deref(), Some("grok-4"));
+        assert_eq!(store.list().len(), 1);
+
+        let mut other = job("", ScheduleSpec::default(), 900);
+        other.name = "Auto commit".into();
+        other.workspace_id = "other".into();
+        let other = store.create(other).unwrap();
+        assert_ne!(other.id, first.id);
+        assert_eq!(store.list().len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -274,6 +274,19 @@ struct RootView: View {
             guard home.isArchiveReady else { return }
             await warmSecondarySurfaces()
         }
+        // Live automations belong on the workspace sidebar, so the run list
+        // has to stay current even when the Automations screen is not open.
+        .task {
+            await automations.load()
+            while !Task.isCancelled {
+                let interval: Duration = automations.runs.contains(where: \.isRunning)
+                    ? .seconds(2)
+                    : .seconds(12)
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                await automations.refreshList()
+            }
+        }
         // Sidebar footer needs the handle, but not on the first frame. A short
         // yield lets Home's archive calls claim the host first.
         .task {
@@ -786,8 +799,12 @@ struct RootView: View {
                 WorkspaceInspector(
                     model: workspaces,
                     automations: automations,
-                    account: account.account
-                ) { closeInspector() }
+                    account: account.account,
+                    onClose: { closeInspector() },
+                    onOpenAutomation: { jobID, runID in
+                        openAutomation(jobID: jobID, runID: runID)
+                    }
+                )
                 #else
                 WorkspaceInspector(
                     model: workspaces,
@@ -1241,6 +1258,18 @@ struct RootView: View {
 
                         #if os(macOS)
                         if !collapsedWorkspaces.contains(folder.id) {
+                            ForEach(automations.liveJobs(in: folder.id)) { job in
+                                let run = automations.lastRun(for: job)
+                                ActiveAutomationRow(
+                                    job: job,
+                                    backendLabel: automations.backends.first { $0.id == job.backend }?.label
+                                        ?? job.backend,
+                                    isSelected: destination == .automations
+                                        && automations.selectedJobID == job.id
+                                ) {
+                                    openAutomation(jobID: job.id, runID: run?.id)
+                                }
+                            }
                             ForEach(activeSessions) { session in
                                 ActiveSessionRow(
                                     session: session,
@@ -1643,6 +1672,20 @@ struct RootView: View {
         // Agent tiles: absolute paths from the host's login PATH.
         await LaunchCatalog.shared.resolve()
         #endif
+
+        await automations.load()
+    }
+
+    /// Open a job on Automations, with its run in the inspector when we have one.
+    private func openAutomation(jobID: String, runID: String?) {
+        selectDestination(.automations) {
+            automations.selectJob(jobID)
+            if let runID, let run = automations.runs.first(where: { $0.id == runID }) {
+                automations.selectRun(run)
+            }
+            pendingRunID = runID
+            isInspectorPresented = true
+        }
     }
 
     /// Interactive TTY for a task. Not an automation run: no transcript, no
@@ -2196,6 +2239,74 @@ private struct WorkspaceRow: View {
         // A hairline between adjacent rows. Without it two selected cards, or
         // a card and the session under it, share an edge and read as one tall
         // shape rather than as two things.
+        .padding(.vertical, 1)
+    }
+}
+
+/// A live automation, drawn under the workspace it is running in.
+///
+/// Automation ptys are hidden from the terminal list on purpose. This row is
+/// how a job that is already going (Auto commit especially) stays visible
+/// without opening the Automations screen first.
+private struct ActiveAutomationRow: View {
+    let job: Automation
+    let backendLabel: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                FeatureMark(name: "mark_automation", tint: Theme.accent, size: DisplayFit.dp(RowMetrics.mark))
+                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
+                    Text(job.name)
+                        .font(.system(
+                            size: DisplayFit.dp(RowMetrics.title),
+                            weight: isSelected ? .semibold : .regular
+                        ))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(backendLabel)
+                        .font(Theme.numeric(RowMetrics.meta))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    StateBadge(state: .working)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, Theme.Space.m)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, RowMetrics.rowPadding)
+            .background(background)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Open this running job")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(job.name). \(backendLabel). Working")
+    }
+
+    private var background: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelected
+                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+                )
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .padding(.leading, Theme.Space.l)
+        .padding(.trailing, Theme.Space.xs)
         .padding(.vertical, 1)
     }
 }
