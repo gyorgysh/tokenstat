@@ -9,8 +9,9 @@ import SwiftUI
 
 /// The day pinned from the Home heatmap: an Insights-shaped overview.
 ///
-/// Hover still pops a glance card. A click lives here so leaving Home and
-/// coming back keeps the same day, which a view `@State` would not survive.
+/// Today is pinned when Home first loads. Hover still pops a glance card.
+/// A later click lives here so leaving Home and coming back keeps that day,
+/// which a view `@State` would not survive.
 struct HomeInspector: View {
     var model: HomeModel
     var onOpenInsights: ((String) -> Void)? = nil
@@ -32,8 +33,8 @@ struct HomeInspector: View {
                 } else {
                     InspectorEmptyState(
                         systemImage: "square.grid.3x3",
-                        title: "Pick a day on the grid",
-                        subtitle: "Hover for a glance. Click to pin the day here."
+                        title: "Today opens here",
+                        subtitle: "The heatmap is still loading. Hover a day for a glance, or click another day to pin it."
                     )
                 }
             }
@@ -118,7 +119,7 @@ struct HomeInspector: View {
             groupCard(
                 title: "Models",
                 subtitle: "List-rate value",
-                rows: modelRows(detail, extra: extra),
+                rows: pricedModelRows(detail, extra: extra),
                 showsValue: true,
                 isHarness: false
             )
@@ -152,15 +153,13 @@ struct HomeInspector: View {
             }
 
             if !detail.unpricedModels.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("Unpriced models")
-                        .font(.caption.weight(.medium))
-                    ForEach(detail.unpricedModels, id: \.self) { name in
-                        Text(name)
-                            .font(Theme.mono(10))
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                groupCard(
+                    title: "Unpriced / local models",
+                    subtitle: "No list rate. Tokens still counted.",
+                    rows: unpricedModelRows(detail, extra: extra),
+                    showsValue: false,
+                    isHarness: false
+                )
             }
 
             if model.isLoadingSelectedOverview {
@@ -260,6 +259,42 @@ struct HomeInspector: View {
             }
         }
         return fold(detail.rows, key: \.model, display: shortModel, monospaced: true)
+    }
+
+    /// Models that have a list rate. Unpriced and local ones belong in
+    /// their own card, not mixed into a column that shows money.
+    private func pricedModelRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {
+        modelRows(detail, extra: extra).filter { !isUnpriced($0, in: detail) }
+    }
+
+    private func unpricedModelRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {
+        let priced = modelRows(detail, extra: extra)
+        return detail.unpricedModels.map { name in
+            if let row = priced.first(where: { matchesUnpriced($0, name: name) }) {
+                return DayGroupRow(
+                    key: name,
+                    label: row.label,
+                    tokens: row.tokens,
+                    value: nil,
+                    monospaced: true
+                )
+            }
+            return DayGroupRow(
+                key: name,
+                label: shortModel(name).isEmpty ? name : shortModel(name),
+                tokens: detail.rows.filter { $0.model == name }.reduce(0) { $0 + $1.tokens },
+                value: nil,
+                monospaced: true
+            )
+        }
+    }
+
+    private func isUnpriced(_ row: DayGroupRow, in detail: DayDetail) -> Bool {
+        detail.unpricedModels.contains { matchesUnpriced(row, name: $0) }
+    }
+
+    private func matchesUnpriced(_ row: DayGroupRow, name: String) -> Bool {
+        row.key == name || row.label == name || row.label == shortModel(name)
     }
 
     private func harnessRows(_ detail: DayDetail, extra: DayOverview?) -> [DayGroupRow] {

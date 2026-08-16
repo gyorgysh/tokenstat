@@ -208,6 +208,14 @@ final class HomeModel {
             scopeNotice = grid?.notice
             needsAccountSignIn = grid?.noticeCode == "auth"
 
+            // The inspector is empty until a day is pinned. Open today on
+            // first load so Home is not "pick a day" when the grid is already
+            // about this year. A later click is left alone, including across
+            // a quiet refresh.
+            if selectedDay == nil {
+                pinToday()
+            }
+
             self.planBySource = try await plan
             errorMessage = nil
             lastLoadedAt = Date()
@@ -313,6 +321,18 @@ final class HomeModel {
         isLoadingDayDetail = true
         hoveredDetail = nil
         fetchDayDetail(day.date, settle: true)
+    }
+
+    /// Today's cell on the delivered grid, if the host drew one.
+    private var todayCell: HeatCell? {
+        guard let last = calendar?.last else { return nil }
+        return calendarDays.last { $0.date == last }
+    }
+
+    /// Pin today if the grid has that cell. Used once, when nothing is pinned.
+    private func pinToday() {
+        guard let today = todayCell else { return }
+        select(day: today)
     }
 
     /// Pin a day in the inspector. Hover still only glances.
