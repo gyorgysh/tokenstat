@@ -16,6 +16,7 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufRead, Write};
+#[cfg(unix)]
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -420,6 +421,7 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
     }))
 }
 
+#[cfg(unix)]
 fn host_socket(engine: &Engine) -> PathBuf {
     engine
         .db_path()
