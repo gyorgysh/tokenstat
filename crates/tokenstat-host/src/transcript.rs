@@ -132,6 +132,9 @@ impl Parser {
             "cursor" => render_cursor(&value),
             "codex" => render_codex(&value),
             "opencode" => render_opencode(&value),
+            // Antigravity --print is prose. A JSON line from another tool
+            // in the same stream is dropped rather than dumped.
+            "agy" => None,
             _ => None,
         }
     }
@@ -139,9 +142,62 @@ impl Parser {
     fn is_json_backend(&self) -> bool {
         matches!(
             self.backend.as_str(),
-            "grok" | "claude" | "cursor" | "codex" | "opencode"
+            "grok" | "claude" | "cursor" | "codex" | "opencode" | "agy"
         )
     }
+}
+
+/// Walk a whole raw transcript into readable text, then cap it.
+pub fn render_raw(backend: &str, raw: &[u8]) -> String {
+    let mut parser = Parser::new(backend);
+    let mut out = parser.push(raw);
+    out.push_str(&parser.finish());
+    cap_readable(&mut out);
+    out
+}
+
+/// True when `bytes` look like an agent NDJSON stream, not prose.
+pub fn looks_like_ndjson(bytes: &[u8]) -> bool {
+    let start = bytes.iter().position(|b| !b.is_ascii_whitespace());
+    let Some(i) = start else {
+        return false;
+    };
+    if bytes[i] != b'{' {
+        return false;
+    }
+    let sample = &bytes[i..bytes.len().min(i + 512)];
+    sample.windows(7).any(|w| w == b"\"type\":")
+}
+
+/// Build `{run}.readable.txt` from the raw file when it is missing or empty.
+///
+/// Old runs predate drain-time parsing. Serving that raw file to a text view
+/// freezes the app. Never call this on a live drain that is still writing
+/// incrementally unless the readable sibling is absent.
+pub fn materialize(raw: &Path, backend: &str) -> PathBuf {
+    rematerialize(raw, backend, false)
+}
+
+/// Rebuild the readable sibling. `force` overwrites a file that already
+/// exists, used when that file is the raw NDJSON stream under the wrong name.
+pub fn rematerialize(raw: &Path, backend: &str, force: bool) -> PathBuf {
+    let readable = readable_path(raw);
+    if !raw.is_file() {
+        return readable;
+    }
+    let stale = !readable.is_file()
+        || std::fs::metadata(&readable)
+            .map(|m| m.len() == 0)
+            .unwrap_or(true);
+    if !force && !stale {
+        return readable;
+    }
+    let Ok(bytes) = std::fs::read(raw) else {
+        return readable;
+    };
+    let text = render_raw(backend, &bytes);
+    let _ = std::fs::write(&readable, text.as_bytes());
+    readable
 }
 
 /// Sibling of the raw transcript that the inspector tails.
@@ -206,7 +262,11 @@ fn render_grok(value: &serde_json::Value) -> Option<Piece> {
                 .unwrap_or("tool");
             let path = value
                 .get("rawInput")
-                .and_then(|v| v.get("path").or_else(|| v.get("file")))
+                .and_then(|v| {
+                    v.get("path")
+                        .or_else(|| v.get("file"))
+                        .or_else(|| v.get("target_file"))
+                })
                 .and_then(|v| v.as_str());
             Some(Piece::Block(match path {
                 Some(p) => format!("{title} {p}"),
@@ -220,7 +280,16 @@ fn render_grok(value: &serde_json::Value) -> Option<Piece> {
 fn render_claude_family(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type")?.as_str()?;
     match kind {
-        "assistant" => assistant_texts(value).map(Piece::Text),
+        "assistant" => {
+            let (tools, texts) = assistant_split(value);
+            if !texts.is_empty() {
+                return Some(Piece::Text(texts.join("\n")));
+            }
+            if !tools.is_empty() {
+                return Some(Piece::Block(tools.join("\n")));
+            }
+            None
+        }
         "result" => nonempty(value.get("result").and_then(|v| v.as_str())).map(Piece::Text),
         _ => None,
     }
@@ -338,31 +407,9 @@ fn tool_label(name: &str) -> String {
 }
 
 fn assistant_texts(value: &serde_json::Value) -> Option<String> {
-    let content = value
-        .get("message")
-        .and_then(|m| m.get("content"))
-        .or_else(|| value.get("content"));
-    let mut parts: Vec<String> = Vec::new();
-    match content {
-        Some(serde_json::Value::Array(blocks)) => {
-            for block in blocks {
-                let kind = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if kind == "tool_use" {
-                    if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
-                        parts.push(tool_label(name));
-                    }
-                    continue;
-                }
-                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
-                    if !text.is_empty() {
-                        parts.push(text.to_string());
-                    }
-                }
-            }
-        }
-        Some(serde_json::Value::String(s)) if !s.is_empty() => parts.push(s.clone()),
-        _ => {}
-    }
+    let (tools, texts) = assistant_split(value);
+    let mut parts = tools;
+    parts.extend(texts);
     if parts.is_empty() {
         None
     } else {
@@ -370,10 +417,40 @@ fn assistant_texts(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+fn assistant_split(value: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+    let content = value
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .or_else(|| value.get("content"));
+    let mut tools: Vec<String> = Vec::new();
+    let mut texts: Vec<String> = Vec::new();
+    match content {
+        Some(serde_json::Value::Array(blocks)) => {
+            for block in blocks {
+                let kind = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if kind == "tool_use" {
+                    if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
+                        tools.push(tool_label(name));
+                    }
+                    continue;
+                }
+                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                    if !text.is_empty() {
+                        texts.push(text.to_string());
+                    }
+                }
+            }
+        }
+        Some(serde_json::Value::String(s)) if !s.is_empty() => texts.push(s.clone()),
+        _ => {}
+    }
+    (tools, texts)
+}
+
 fn nonempty(s: Option<&str>) -> Option<String> {
-    s.map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
+    // Keep leading and trailing spaces. Grok (and others) send text as
+    // word-sized deltas ("I'll", " start") and trim would glue them.
+    s.filter(|s| !s.trim().is_empty()).map(str::to_string)
 }
 
 /// Strip CSI and similar cursor sequences the pty can interleave.
@@ -557,5 +634,128 @@ mod tests {
         assert!(text.is_char_boundary(0));
         assert!(text.ends_with('z'));
         assert!(!text.contains('é') || text.starts_with('é'));
+    }
+
+    #[test]
+    fn grok_drops_available_commands_and_keeps_text() {
+        let raw = concat!(
+            "{\"type\":\"available_commands\",\"tools\":[\"read_file\"]}\n",
+            "{\"type\":\"thought\",\"data\":\"planning\"}\n",
+            "{\"type\":\"text\",\"data\":\"I'll start\"}\n",
+            "{\"type\":\"text\",\"data\":\" by reading\"}\n",
+            "{\"type\":\"tool_call\",\"title\":\"Read\",\"toolName\":\"read_file\",\"rawInput\":{\"path\":\"Cargo.toml\"}}\n",
+        );
+        let out = feed("grok", raw);
+        assert_eq!(out, "I'll start by reading\n\nRead Cargo.toml");
+        assert!(!out.contains("available_commands"));
+        assert!(!out.contains("planning"));
+    }
+
+    #[test]
+    fn claude_keeps_tool_names_and_drops_hooks() {
+        let raw = concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"tools\":[\"Read\"]}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"thinking\",\"thinking\":\"hmm\"},{\"type\":\"tool_use\",\"name\":\"Read\"}]}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Version is 0.4.0.\"}]}}\n",
+        );
+        let out = feed("claude", raw);
+        assert!(out.contains("Read"));
+        assert!(out.contains("Version is 0.4.0."));
+        assert!(!out.contains("ReadVersion"), "{out}");
+        assert!(!out.contains("hmm"));
+        assert!(!out.contains("subtype"));
+    }
+
+    #[test]
+    fn agy_keeps_prose_and_drops_json() {
+        let raw = concat!(
+            "Checking the workspace.\n",
+            "{\"type\":\"unknown\",\"data\":\"nope\"}\n",
+            "Done.\n",
+        );
+        let out = feed("agy", raw);
+        assert!(out.contains("Checking the workspace."));
+        assert!(out.contains("Done."));
+        assert!(!out.contains("unknown"));
+    }
+
+    #[test]
+    fn materialize_writes_readable_from_raw() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-transcript-mat-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let raw = dir.join("run.txt");
+        std::fs::write(
+            &raw,
+            "{\"type\":\"thought\",\"data\":\"x\"}\n{\"type\":\"text\",\"data\":\"hello\"}\n",
+        )
+        .unwrap();
+        let readable = materialize(&raw, "grok");
+        let text = std::fs::read_to_string(&readable).unwrap();
+        assert_eq!(text, "hello");
+        assert!(!looks_like_ndjson(text.as_bytes()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn looks_like_ndjson_detects_grok_streams() {
+        assert!(looks_like_ndjson(b"{\"type\":\"text\",\"data\":\"hi\"}\n"));
+        assert!(!looks_like_ndjson(b"I'll start by reading Cargo.toml"));
+        assert!(!looks_like_ndjson(b""));
+    }
+
+    #[test]
+    fn rematerialize_overwrites_a_raw_readable() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-transcript-re-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let raw = dir.join("run.txt");
+        let body = "{\"type\":\"text\",\"data\":\"hello\"}\n";
+        std::fs::write(&raw, body).unwrap();
+        let readable = readable_path(&raw);
+        std::fs::write(&readable, body).unwrap();
+        assert!(looks_like_ndjson(&std::fs::read(&readable).unwrap()));
+        rematerialize(&raw, "grok", true);
+        let text = std::fs::read_to_string(&readable).unwrap();
+        assert_eq!(text, "hello");
+        assert!(!looks_like_ndjson(text.as_bytes()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn local_grok_run_becomes_prose() {
+        let path = local_run("run-1786840440894.txt");
+        let Some(bytes) = path.and_then(|p| std::fs::read(p).ok()) else {
+            return;
+        };
+        let text = render_raw("grok", &bytes);
+        assert!(!looks_like_ndjson(text.as_bytes()), "must not serve NDJSON");
+        assert!(text.contains("I'll start"), "{text}");
+        assert!(!text.contains("available_commands"));
+        assert!(!text.contains("\"type\":\"thought\""));
+    }
+
+    #[test]
+    fn local_claude_run_becomes_prose() {
+        let path = local_run("run-1786029156900.txt");
+        let Some(bytes) = path.and_then(|p| std::fs::read(p).ok()) else {
+            return;
+        };
+        let text = render_raw("claude", &bytes);
+        assert!(!looks_like_ndjson(text.as_bytes()), "must not serve NDJSON");
+        assert!(!text.contains("\"type\":\"system\""));
+        assert!(!text.contains("\"thinking\""));
+        assert!(
+            text.contains("Read") || text.contains("Version") || !text.is_empty(),
+            "{text}"
+        );
+    }
+
+    fn local_run(name: &str) -> Option<std::path::PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        let path = std::path::PathBuf::from(home)
+            .join("Library/Application Support/ai.tokenstat.tokenstat/runs")
+            .join(name);
+        path.is_file().then_some(path)
     }
 }

@@ -404,12 +404,12 @@ struct AccountView: View {
     private var planLimitsCard: some View {
         Card(
             title: "Plan limits",
-            subtitle: "Share vendor quota windows with your other devices"
+            subtitle: "Track vendor quota windows. Off means this Mac does not read that vendor and does not show it on Home."
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 toggleRow(
                     "Share with my devices",
-                    detail: "Posts how full each window is, so a phone can show what is left while this Mac is asleep. Percentages and reset times only, never a credential.",
+                    detail: "Posts how full each window is, so a phone can show what is left while this Mac is asleep. Percentages and reset times only, never a credential. Turning a vendor off below also stops tracking it on this Mac.",
                     isOn: Binding(
                         get: { model.limitsSyncEnabled },
                         set: { on in Task { await model.setLimitsSync(on) } }
@@ -430,8 +430,6 @@ struct AccountView: View {
                             planLimitRow(provider)
                         }
                     }
-                    .disabled(!model.limitsSyncEnabled)
-                    .opacity(model.limitsSyncEnabled ? 1 : 0.55)
                 }
             }
         }
@@ -457,7 +455,7 @@ struct AccountView: View {
             .toggleStyle(.switch)
             .tint(Theme.accent)
             .labelsHidden()
-            .accessibilityLabel("Share \(harnessName(provider.source))")
+            .accessibilityLabel("Track \(harnessName(provider.source))")
             .fixedSize()
         }
         .padding(.vertical, Theme.Space.xs)

@@ -155,9 +155,9 @@ impl Board {
         let mut changed = false;
         for card in cards.iter_mut() {
             if let Some(delegate) = card.delegate.as_mut() {
-                if delegate.status == "running" {
+                if matches!(delegate.status.as_str(), "running" | "queued") {
                     if let Some(run) = runs.iter().find(|r| r.id == delegate.run_id) {
-                        if run.status != "running" {
+                        if run.status != delegate.status {
                             delegate.status = run.status.clone();
                             delegate.ended_at_ms = run.ended_at_ms;
                             if run.status == "error" {
@@ -204,12 +204,8 @@ impl Board {
         if !COLUMNS.contains(&card.column.as_str()) {
             card.column = "backlog".into();
         }
-        if card.kind == CardKind::Task && card.workspace_id.is_empty() {
-            return Err("a card needs a workspace".into());
-        }
-        if card.budget_seconds == 0 {
-            card.budget_seconds = 900;
-        }
+        // Workspace and backend are chosen at delegate time. A card can be
+        // saved as a reminder of the work before anyone picks an agent.
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         if card.id.is_empty() {
             card.id = format!("todo-{}", Self::now_ms());
@@ -257,29 +253,35 @@ impl Board {
             card.workspace_id = workspace_id.to_string();
         }
         if let Some(budget_seconds) = changes.budget_seconds {
-            if budget_seconds > 0 {
-                card.budget_seconds = budget_seconds;
-            }
+            card.budget_seconds = budget_seconds;
         }
+        let mut column_changed = false;
         if let Some(column) = changes.column.as_deref() {
-            if COLUMNS.contains(&column) {
+            if COLUMNS.contains(&column) && card.column != column {
                 card.column = column.to_string();
+                column_changed = true;
             }
         }
-        if let Some(order) = changes.order {
-            card.order = order.max(0);
-        }
+        let requested_order = changes.order.map(|o| o.max(0));
         card.updated_at_ms = Self::now_ms();
-        // Order is recomputed outside the borrow, so the column's cards can be
-        // counted without touching the card being moved.
-        let (idx, column) = {
-            let idx = cards.iter().position(|c| c.id == id).unwrap();
-            (idx, cards[idx].column.clone())
-        };
-        cards[idx].order = cards
-            .iter()
-            .filter(|c| c.column == column && c.id != id)
-            .count() as i64;
+        let idx = cards.iter().position(|c| c.id == id).unwrap();
+        let column = cards[idx].column.clone();
+        if requested_order.is_some() || column_changed {
+            let mut others: Vec<usize> = cards
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.column == column && c.id != id)
+                .map(|(i, _)| i)
+                .collect();
+            others.sort_by_key(|&i| cards[i].order);
+            let insert_at = requested_order
+                .map(|o| (o as usize).min(others.len()))
+                .unwrap_or(others.len());
+            others.insert(insert_at, idx);
+            for (order, i) in others.into_iter().enumerate() {
+                cards[i].order = order as i64;
+            }
+        }
         let result = cards[idx].clone();
         drop(cards);
         self.save()?;
@@ -316,6 +318,12 @@ impl Board {
             }
             if card.kind == CardKind::Note {
                 return Err("notes cannot be delegated to an agent".into());
+            }
+            if card.workspace_id.is_empty() {
+                return Err("pick a workspace before delegating".into());
+            }
+            if card.backend.is_empty() {
+                return Err("pick an agent before delegating".into());
             }
             crate::automations::Automation {
                 id: format!("todo-{}", card.id),
@@ -361,7 +369,7 @@ impl Board {
         }
         cards[idx].delegate = Some(Delegate {
             run_id: run.id.clone(),
-            status: "running".into(),
+            status: run.status.clone(),
             started_at_ms: run.started_at_ms,
             ended_at_ms: None,
             error: None,
@@ -386,7 +394,7 @@ impl Board {
             .find(|c| c.id == id)
             .ok_or_else(|| format!("no card with id {id}"))?;
         if let Some(delegate) = card.delegate.as_mut() {
-            if delegate.status == "running" {
+            if matches!(delegate.status.as_str(), "running" | "queued") {
                 let _ = crate::automations::shared().kill_run(&delegate.run_id);
             }
         }
@@ -422,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn a_card_needs_a_title_and_a_workspace() {
+    fn a_card_needs_a_title() {
         let dir = std::env::temp_dir().join("tokenstat-todo-test");
         let board = Board::at(dir.join("todo.json"));
         let mut c = card("a");
@@ -430,7 +438,33 @@ mod tests {
         assert!(board.create(c.clone()).is_err());
         c.title = "ok".into();
         c.workspace_id = String::new();
-        assert!(board.create(c).is_err());
+        assert!(board.create(c).is_ok());
+    }
+
+    #[test]
+    fn reorder_honours_the_requested_index() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-reorder");
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        board.create(card("a")).unwrap();
+        board.create(card("b")).unwrap();
+        board.create(card("c")).unwrap();
+        board
+            .update(
+                "c",
+                &CardUpdate {
+                    order: Some(0),
+                    ..CardUpdate::default()
+                },
+            )
+            .unwrap();
+        let ids: Vec<_> = board
+            .list()
+            .into_iter()
+            .filter(|c| c.column == "backlog")
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
     }
 
     #[test]

@@ -36,7 +36,7 @@ struct AutomationsView: View {
             DetailChromeBar {
                 ToolbarIconButton(
                     systemImage: "plus",
-                    help: "Set up an agent to run on a schedule"
+                    help: "Schedule a job"
                 ) {
                     creating = true
                 }
@@ -47,6 +47,7 @@ struct AutomationsView: View {
                         Banner(text: error, severity: .warning)
                     }
                     intro
+                    schedulerCard
                     // A search box, not a rounded text field with the icon glued
                     // on top: the overlay sat on the field's leading edge and
                     // overlapped the placeholder and the first typed characters.
@@ -143,16 +144,58 @@ struct AutomationsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Automations")
                     .font(.system(size: 24, weight: .semibold))
-                Text("Give an agent a job, a folder, and a time. It runs in the background and stops at your limit.")
+                Text("Schedule an agent a job, a folder, and a time. It runs in the background and stops at your limit.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Button { creating = true } label: {
-                Label("Create", systemImage: "plus")
+                Label("Schedule a job", systemImage: "plus")
             }
             .buttonStyle(AccentButtonStyle())
+        }
+    }
+
+    private var schedulerCard: some View {
+        Card(title: "Scheduler", subtitle: "How queued jobs run on this Mac") {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                HStack {
+                    Text("Time limit")
+                        .font(.callout)
+                    Spacer()
+                    TextField("180", text: $model.queueBudgetMinutes)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                    Text("minutes")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("No limit", isOn: $model.queueNoLimit)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .labelsHidden()
+                    Text("No limit")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Max concurrent jobs")
+                        .font(.callout)
+                    Spacer()
+                    TextField("2", text: $model.queueMaxConcurrent)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                }
+                Text("New jobs inherit the time limit. 0 concurrent means no cap. Extra jobs wait in the queue.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Save scheduler") {
+                    Task { await model.saveQueue() }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
         }
     }
 
@@ -367,10 +410,10 @@ struct AutomationsView: View {
         Card(title: "Automations", subtitle: nil) {
             EmptyState(
                 symbol: "clock.arrow.trianglehead.counterclockwise.rotate.90",
-                title: "No automations yet",
+                title: "Nothing scheduled yet",
                 message: """
-                An automation is an agent given a prompt, a folder and a time to \
-                run. The host helper runs it, and stops it at a budget you set. \
+                Schedule an agent a job: a prompt, a folder and a time. \
+                The host helper runs it, and stops it at your time limit. \
                 On a laptop that helper stops when you quit tokenstat unless Always-on host is on.
                 """
             ) {
@@ -382,7 +425,7 @@ struct AutomationsView: View {
                     Button {
                         creating = true
                     } label: {
-                        Label("New automation", systemImage: "plus")
+                        Label("Schedule a job", systemImage: "plus")
                     }
                     .buttonStyle(AccentButtonStyle())
                 }
@@ -750,7 +793,8 @@ struct NewAutomationSheet: View {
     @State private var scheduleWeekday = 0
     /// Custom multi-day pick, Monday = bit 0. Defaults to Mon–Fri.
     @State private var customDays = AutomationSchedule.weekdaysMask
-    @State private var budget = "900"
+    @State private var budgetMinutes = "180"
+    @State private var noTimeLimit = false
     @State private var working = false
     @State private var step = 0
 
@@ -833,13 +877,13 @@ struct NewAutomationSheet: View {
                 modelChoice = existing.model ?? ""
                 effortChoice = existing.effort ?? ""
                 applySchedule(existing.schedule)
-                budget = String(existing.budgetSeconds)
+                applyBudget(existing.budgetSeconds)
             }
             if let template {
                 name = template.name
                 prompt = template.prompt
                 applySchedule(template.schedule)
-                budget = String(template.budgetSeconds)
+                applyBudget(template.budgetSeconds)
                 if model.backends.contains(where: { $0.id == template.backendID }) {
                     backendID = template.backendID
                 }
@@ -933,11 +977,15 @@ struct NewAutomationSheet: View {
                     Text("Time limit")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    TextField("900", text: $budget)
-                        .frame(width: 70)
-                    Text("seconds")
+                    TextField("180", text: $budgetMinutes)
+                        .frame(width: 56)
+                        .disabled(noTimeLimit)
+                    Text("minutes")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    Toggle("No limit", isOn: $noTimeLimit)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
                 }
             }
         }
@@ -1238,6 +1286,19 @@ struct NewAutomationSheet: View {
         }
     }
 
+    private var savedBudget: UInt64 {
+        if noTimeLimit { return 0 }
+        let minutes = UInt64(budgetMinutes) ?? 180
+        return max(minutes, 1) * 60
+    }
+
+    private func applyBudget(_ seconds: UInt64) {
+        noTimeLimit = seconds == 0
+        if seconds > 0 {
+            budgetMinutes = String(max(1, seconds / 60))
+        }
+    }
+
     private func save() async {
         let spec = builtSchedule()
         if let existing {
@@ -1250,7 +1311,7 @@ struct NewAutomationSheet: View {
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 schedule: spec,
-                budgetSeconds: max(UInt64(budget) ?? 900, 60),
+                budgetSeconds: savedBudget,
                 enabled: existing.enabled,
                 lastRunAtMs: existing.lastRunAtMs,
                 // Host recomputes next run from the new schedule on update.
@@ -1266,7 +1327,7 @@ struct NewAutomationSheet: View {
                 workspaceID: workspaceID,
                 prompt: prompt.trimmingCharacters(in: .whitespacesAndNewlines),
                 schedule: spec,
-                budget: max(UInt64(budget) ?? 900, 60)
+                budget: savedBudget
             )
         }
     }

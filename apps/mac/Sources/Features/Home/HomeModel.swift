@@ -480,7 +480,9 @@ final class HomeModel {
     func loadPlanLimits() async {
         isLoadingLimits = true
         defer { isLoadingLimits = false }
-        planLimits = (try? await Bridge.usageLimits()) ?? []
+        let skip = Set((try? await Bridge.limitsSync())?.skip ?? [])
+        let all = (try? await Bridge.usageLimits()) ?? []
+        planLimits = all.filter { !skip.contains($0.source) }
     }
 }
 

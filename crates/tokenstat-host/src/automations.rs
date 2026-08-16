@@ -10,7 +10,7 @@
 //! by the host and killed when the budget expires, so an automation can never
 //! run away.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -22,6 +22,12 @@ use serde::{Deserialize, Serialize};
 
 /// How many completed runs to remember per machine.
 const RUNS_KEPT: usize = 100;
+
+/// Default time limit for a new job or card, in seconds (180 minutes).
+pub const DEFAULT_BUDGET_SECONDS: u64 = 180 * 60;
+
+/// Default number of agent runs that may execute at once.
+pub const DEFAULT_MAX_CONCURRENT: u32 = 2;
 
 /// How often the scheduler looks for due jobs.
 const TICK: Duration = Duration::from_secs(5);
@@ -476,17 +482,55 @@ pub struct RunRecord {
     pub started_at_ms: i64,
     pub ended_at_ms: Option<i64>,
     pub exit_code: Option<i32>,
-    /// running, ok, error, or stopped (by budget).
+    /// running, queued, ok, error, stopped (by budget), or interrupted.
     pub status: String,
     pub transcript_path: String,
     /// The live pty, kept so a run can be stopped before its budget.
     pub pty_id: Option<String>,
 }
 
+/// How long a run may live, and how many may run at once.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueConfig {
+    /// Default per-run budget in seconds. 0 means no limit.
+    #[serde(default = "default_budget_seconds")]
+    pub default_budget_seconds: u64,
+    /// How many runs may execute at once. 0 means no cap.
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent: u32,
+}
+
+fn default_budget_seconds() -> u64 {
+    DEFAULT_BUDGET_SECONDS
+}
+
+fn default_max_concurrent() -> u32 {
+    DEFAULT_MAX_CONCURRENT
+}
+
+impl Default for QueueConfig {
+    fn default() -> Self {
+        Self {
+            default_budget_seconds: DEFAULT_BUDGET_SECONDS,
+            max_concurrent: DEFAULT_MAX_CONCURRENT,
+        }
+    }
+}
+
+/// A job waiting for a free slot.
+struct Pending {
+    job: Automation,
+    run_id: String,
+    transcript_path: PathBuf,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct JobsFile {
     #[serde(default)]
     jobs: Vec<Automation>,
+    #[serde(default)]
+    queue: QueueConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -501,6 +545,11 @@ pub struct Store {
     runs_dir: PathBuf,
     jobs: Mutex<Vec<Automation>>,
     runs: Mutex<Vec<RunRecord>>,
+    queue: Mutex<QueueConfig>,
+    waiting: Mutex<VecDeque<Pending>>,
+    /// Slots currently in use. Separate from the runs list so a count
+    /// cannot race a status write.
+    active: Mutex<u32>,
     /// Run ids the user asked to stop. Drain records those as stopped
     /// rather than as an error from the signal.
     killed: Mutex<HashSet<String>>,
@@ -521,6 +570,9 @@ impl Store {
             runs_dir,
             jobs: Mutex::new(Vec::new()),
             runs: Mutex::new(Vec::new()),
+            queue: Mutex::new(QueueConfig::default()),
+            waiting: Mutex::new(VecDeque::new()),
+            active: Mutex::new(0),
             killed: Mutex::new(HashSet::new()),
         }
     }
@@ -530,11 +582,12 @@ impl Store {
             .map(|d| d.data_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
         let path = dir.join("automations.json");
-        let jobs = std::fs::read_to_string(&path)
+        let file = std::fs::read_to_string(&path)
             .ok()
             .and_then(|text| serde_json::from_str::<JobsFile>(&text).ok())
-            .map(|file| file.jobs)
             .unwrap_or_default();
+        let jobs = file.jobs;
+        let queue = file.queue;
         let runs_dir = dir.join("runs");
         let runs_path = runs_dir.join("runs.json");
         let mut runs = std::fs::read_to_string(&runs_path)
@@ -544,9 +597,9 @@ impl Store {
             .unwrap_or_default();
         let mut recovered = false;
         for run in &mut runs {
-            if run.status == "running" {
-                // The pty belongs to the old daemon process. It cannot still be
-                // observed after a restart, so do not resurrect a false run.
+            if run.status == "running" || run.status == "queued" {
+                // The pty belongs to the old daemon process. A queued run
+                // lost its pending payload. Do not resurrect either.
                 run.status = "interrupted".into();
                 run.ended_at_ms = Some(now_ms());
                 run.pty_id = None;
@@ -559,6 +612,9 @@ impl Store {
             runs_dir,
             jobs: Mutex::new(jobs),
             runs: Mutex::new(runs),
+            queue: Mutex::new(queue),
+            waiting: Mutex::new(VecDeque::new()),
+            active: Mutex::new(0),
             killed: Mutex::new(HashSet::new()),
         };
         if recovered {
@@ -573,8 +629,21 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
-        let body = serde_json::to_string_pretty(&JobsFile { jobs }).map_err(|e| e.to_string())?;
+        let queue = *self.queue.lock().unwrap_or_else(PoisonError::into_inner);
+        let body =
+            serde_json::to_string_pretty(&JobsFile { jobs, queue }).map_err(|e| e.to_string())?;
         write_atomic(&self.path, &body)
+    }
+
+    pub fn queue_config(&self) -> QueueConfig {
+        *self.queue.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn set_queue_config(&self, mut next: QueueConfig) -> Result<QueueConfig, String> {
+        next.max_concurrent = next.max_concurrent.min(32);
+        *self.queue.lock().unwrap_or_else(PoisonError::into_inner) = next;
+        self.save()?;
+        Ok(next)
     }
 
     fn save_runs(&self) -> Result<(), String> {
@@ -713,26 +782,59 @@ impl Store {
 
     /// Bytes of a run's transcript after `offset`.
     ///
-    /// Prefers the readable file the drain wrote. Raw JSON stays on disk for
-    /// debugging and is not what a front end should display. The offset is
-    /// against that file, so a transcript outlives the pty.
+    /// Always the readable file. Raw JSON stays on disk for debugging and is
+    /// never what a front end should display. Runs that finished before
+    /// drain-time parsing are materialised here on first read.
     pub fn transcript(&self, run_id: &str, offset: u64) -> Result<(String, u64), String> {
         let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         let run = runs
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
-        let raw = Path::new(&run.transcript_path);
+        let raw = PathBuf::from(&run.transcript_path);
+        let backend = run.backend.clone();
+        let running = run.status == "running";
+        drop(runs);
         if !raw.is_absolute() {
             return Err("a run transcript is not absolute".into());
         }
-        let readable = transcript::readable_path(raw);
-        let path = if readable.is_file() {
-            readable.as_path()
+        let readable = transcript::readable_path(&raw);
+        let missing = !readable.is_file();
+        let empty = if readable.is_file() {
+            std::fs::metadata(&readable)
+                .map(|m| m.len() == 0)
+                .unwrap_or(true)
         } else {
-            raw
+            false
         };
-        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        // A live drain creates an empty readable file on purpose. Do not
+        // stomp it by re-parsing the raw stream while it is still growing.
+        if missing || (empty && !running) {
+            transcript::materialize(&raw, &backend);
+        }
+        if !readable.is_file() {
+            return Ok(("(No readable output)".into(), 0));
+        }
+        let bytes = std::fs::read(&readable).map_err(|e| e.to_string())?;
+        if bytes.is_empty() {
+            return Ok((
+                if running {
+                    String::new()
+                } else {
+                    "(No readable output)".into()
+                },
+                0,
+            ));
+        }
+        if transcript::looks_like_ndjson(&bytes) {
+            // A stale readable that is actually the raw file. Rebuild it.
+            transcript::rematerialize(&raw, &backend, true);
+            let again = std::fs::read(&readable).unwrap_or_default();
+            if again.is_empty() || transcript::looks_like_ndjson(&again) {
+                return Ok(("(No readable output)".into(), 0));
+            }
+            return Ok(transcript::slice_reply(&again, offset));
+        }
         Ok(transcript::slice_reply(&bytes, offset))
     }
 
@@ -740,13 +842,92 @@ impl Store {
 
     /// Run a job that is not part of the stored list: the todo board's
     /// delegate path. Returns the run so the caller can link it to its card.
+    /// Starts now when a slot is free, otherwise waits in the queue.
     pub fn run_adhoc(self: &Arc<Store>, job: Automation) -> Result<RunRecord, String> {
         let workspace = crate::workspaces::folder(&job.workspace_id)?;
-        let argv = agent_command(
+        // Fail before we take a slot: a bad backend must not occupy the queue.
+        let _argv = agent_command(
             &job.backend,
             &job.prompt,
             job.model.as_deref(),
             job.effort.as_deref(),
+        )?;
+
+        let run_id = format!("run-{}", now_ms());
+        let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
+        let pending = Pending {
+            job: job.clone(),
+            run_id: run_id.clone(),
+            transcript_path: transcript_path.clone(),
+        };
+
+        if self.try_take_slot() {
+            match self.spawn_pending(pending, workspace.id.clone()) {
+                Ok(run) => {
+                    self.push_run(run.clone())?;
+                    Ok(run)
+                }
+                Err(e) => {
+                    self.release_slot();
+                    Err(e)
+                }
+            }
+        } else {
+            let run = RunRecord {
+                id: run_id,
+                job_id: job.id.clone(),
+                name: job.name,
+                backend: job.backend,
+                workspace_id: workspace.id,
+                started_at_ms: now_ms(),
+                ended_at_ms: None,
+                exit_code: None,
+                status: "queued".into(),
+                transcript_path: transcript_path.display().to_string(),
+                pty_id: None,
+            };
+            self.waiting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push_back(pending);
+            self.push_run(run.clone())?;
+            Ok(run)
+        }
+    }
+
+    fn try_take_slot(&self) -> bool {
+        let max = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .max_concurrent;
+        let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if max == 0 || *active < max {
+            *active += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn release_slot(&self) {
+        let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if *active > 0 {
+            *active -= 1;
+        }
+    }
+
+    fn spawn_pending(
+        self: &Arc<Store>,
+        pending: Pending,
+        workspace_id: String,
+    ) -> Result<RunRecord, String> {
+        let workspace = crate::workspaces::folder(&pending.job.workspace_id)?;
+        let argv = agent_command(
+            &pending.job.backend,
+            &pending.job.prompt,
+            pending.job.model.as_deref(),
+            pending.job.effort.as_deref(),
         )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
@@ -763,42 +944,87 @@ impl Store {
             })
             .map_err(|e| e.to_string())?;
 
-        let run_id = format!("run-{}", now_ms());
-        let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
         let run = RunRecord {
-            id: run_id.clone(),
-            job_id: job.id.clone(),
-            name: job.name,
-            backend: job.backend,
-            workspace_id: workspace.id.clone(),
+            id: pending.run_id.clone(),
+            job_id: pending.job.id.clone(),
+            name: pending.job.name.clone(),
+            backend: pending.job.backend.clone(),
+            workspace_id,
             started_at_ms: now_ms(),
             ended_at_ms: None,
             exit_code: None,
             status: "running".into(),
-            transcript_path: transcript_path.display().to_string(),
+            transcript_path: pending.transcript_path.display().to_string(),
             pty_id: Some(info.id.clone()),
         };
 
-        // The pty id and budget are captured, and the transcript is drained on
-        // a background thread: the pty buffer is bounded, so a run nobody is
-        // looking at must still be written down before it falls out.
         let pty_id = info.id.clone();
-        let budget = job.budget_seconds;
+        let budget = pending.job.budget_seconds;
+        let run_id = pending.run_id;
+        let transcript_path = pending.transcript_path;
         let me = Arc::clone(self);
-        std::thread::spawn(move || me.drain(&pty_id, &transcript_path, budget, &run_id));
-
-        self.push_run(run.clone())?;
+        std::thread::spawn(move || {
+            me.drain(&pty_id, &transcript_path, budget, &run_id);
+            me.pump();
+        });
         Ok(run)
+    }
+
+    fn pump(self: &Arc<Store>) {
+        loop {
+            if !self.try_take_slot() {
+                return;
+            }
+            let pending = self
+                .waiting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .pop_front();
+            let Some(pending) = pending else {
+                self.release_slot();
+                return;
+            };
+            let workspace_id = pending.job.workspace_id.clone();
+            let run_id = pending.run_id.clone();
+            match self.spawn_pending(pending, workspace_id) {
+                Ok(run) => {
+                    let _ = self.update_run(run);
+                }
+                Err(err) => {
+                    self.release_slot();
+                    self.finish_run(&run_id, None, "error");
+                    let _ = err;
+                }
+            }
+        }
+    }
+
+    fn update_run(&self, run: RunRecord) -> Result<(), String> {
+        let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(existing) = runs.iter_mut().find(|r| r.id == run.id) {
+            *existing = run;
+        } else {
+            runs.insert(0, run);
+        }
+        drop(runs);
+        self.save_runs()
     }
 
     /// Run one stored job immediately, or one due job from the scheduler.
     pub fn run(self: &Arc<Store>, id: &str) -> Result<Automation, String> {
+        let snapshot = {
+            let jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+            jobs.iter()
+                .find(|job| job.id == id)
+                .cloned()
+                .ok_or_else(|| format!("no automation with id {id}"))?
+        };
+        let run = self.run_adhoc(snapshot)?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
         let job = jobs
             .iter_mut()
             .find(|job| job.id == id)
             .ok_or_else(|| format!("no automation with id {id}"))?;
-        let run = self.run_adhoc(job.clone())?;
         job.last_run_at_ms = Some(run.started_at_ms);
         job.last_run_id = Some(run.id.clone());
         job.next_run_at_ms = if job.enabled {
@@ -813,13 +1039,23 @@ impl Store {
     }
 
     /// Kill the pty behind a run, by its run id. The drain then records the
-    /// run as stopped when the process is gone.
+    /// run as stopped when the process is gone. A queued run is pulled off
+    /// the wait list and marked stopped.
     pub fn kill_run(&self, run_id: &str) -> Result<(), String> {
         let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         let run = runs
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
+        if run.status == "queued" {
+            drop(runs);
+            self.waiting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .retain(|p| p.run_id != run_id);
+            self.finish_run(run_id, None, "stopped");
+            return Ok(());
+        }
         if run.status != "running" {
             return Err("that run is not running".into());
         }
@@ -840,7 +1076,11 @@ impl Store {
     /// the outcome and close the pty. Runs on its own thread.
     pub fn drain(&self, pty_id: &str, path: &Path, budget_seconds: u64, run_id: &str) {
         let manager = tokenstat_pty::manager();
-        let deadline = Instant::now() + Duration::from_secs(budget_seconds);
+        let deadline = if budget_seconds == 0 {
+            None
+        } else {
+            Some(Instant::now() + Duration::from_secs(budget_seconds))
+        };
         let mut file = std::fs::File::create(path).ok();
         let readable_path = transcript::readable_path(path);
         // Create the readable file immediately so a live tail never falls
@@ -900,7 +1140,7 @@ impl Store {
                     take(&chunk.bytes, &mut file, &mut readable_body, &mut parser);
                 }
             }
-            if Instant::now() >= deadline {
+            if deadline.is_some_and(|d| Instant::now() >= d) {
                 let _ = manager.kill(pty_id);
                 stopped_by_budget = true;
             }
@@ -930,6 +1170,7 @@ impl Store {
         };
         let _ = manager.close(pty_id);
         self.finish_run(run_id, exit_code, status);
+        self.release_slot();
     }
 
     /// Wait, briefly, for a process that has stopped producing output to report
@@ -992,9 +1233,7 @@ fn validate(job: &Automation) -> Result<(), String> {
     if job.workspace_id.is_empty() {
         return Err("an automation needs a workspace".into());
     }
-    if job.budget_seconds == 0 {
-        return Err("a budget must be at least one second".into());
-    }
+    // 0 is a real answer: no time limit. The queue settings own the default.
     // backend and prompt are checked where the command is built, so both errors
     // are the ones a user sees when they try to run it.
     Ok(())
@@ -1050,8 +1289,8 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_unbounded_jobs() {
-        assert!(validate(&job("a", ScheduleSpec::default(), 0)).is_err());
+    fn validation_allows_unbounded_jobs() {
+        assert!(validate(&job("a", ScheduleSpec::default(), 0)).is_ok());
     }
 
     #[test]
@@ -1473,6 +1712,93 @@ mod tests {
         assert!(!text.contains("end_turn"));
         assert!(next as usize <= crate::transcript::REPLY_CAP);
         assert!(next as usize >= text.len());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_raw_only_grok_run_is_parsed_on_read() {
+        let dir = temp_dir("raw-only");
+        std::fs::create_dir_all(dir.join("runs")).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let raw_path = dir.join("runs").join("run-old.txt");
+        std::fs::write(
+            &raw_path,
+            concat!(
+                "{\"type\":\"available_commands\",\"tools\":[\"read_file\"]}\n",
+                "{\"type\":\"thought\",\"data\":\"planning\"}\n",
+                "{\"type\":\"text\",\"data\":\"I'll start\"}\n",
+            ),
+        )
+        .unwrap();
+        store
+            .push_run(RunRecord {
+                id: "run-old".into(),
+                job_id: "j".into(),
+                name: "Release".into(),
+                backend: "grok".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: Some(now_ms()),
+                exit_code: None,
+                status: "interrupted".into(),
+                transcript_path: raw_path.display().to_string(),
+                pty_id: None,
+            })
+            .unwrap();
+        let (text, _) = store.transcript("run-old", 0).unwrap();
+        assert_eq!(text, "I'll start");
+        assert!(!text.contains('{'));
+        assert!(crate::transcript::readable_path(&raw_path).is_file());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_readable_that_is_still_ndjson_is_rebuilt() {
+        let dir = temp_dir("ndjson-readable");
+        std::fs::create_dir_all(dir.join("runs")).unwrap();
+        let store = Store::at(dir.join("jobs.json"));
+        let raw_path = dir.join("runs").join("run-stale.txt");
+        let raw = "{\"type\":\"text\",\"data\":\"hello\"}\n";
+        std::fs::write(&raw_path, raw).unwrap();
+        std::fs::write(crate::transcript::readable_path(&raw_path), raw).unwrap();
+        store
+            .push_run(RunRecord {
+                id: "run-stale".into(),
+                job_id: "j".into(),
+                name: "Release".into(),
+                backend: "grok".into(),
+                workspace_id: "w".into(),
+                started_at_ms: now_ms(),
+                ended_at_ms: Some(now_ms()),
+                exit_code: Some(0),
+                status: "ok".into(),
+                transcript_path: raw_path.display().to_string(),
+                pty_id: None,
+            })
+            .unwrap();
+        let (text, _) = store.transcript("run-stale", 0).unwrap();
+        assert_eq!(text, "hello");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn queue_config_defaults_and_persists() {
+        let dir = temp_dir("queue");
+        let store = Store::at(dir.join("automations.json"));
+        let q = store.queue_config();
+        assert_eq!(q.default_budget_seconds, DEFAULT_BUDGET_SECONDS);
+        assert_eq!(q.max_concurrent, DEFAULT_MAX_CONCURRENT);
+        store
+            .set_queue_config(QueueConfig {
+                default_budget_seconds: 0,
+                max_concurrent: 4,
+            })
+            .unwrap();
+        let body = std::fs::read_to_string(dir.join("automations.json")).unwrap();
+        assert!(body.contains("\"defaultBudgetSeconds\": 0"));
+        assert!(body.contains("\"maxConcurrent\": 4"));
+        let parsed: QueueConfig = serde_json::from_str(r#"{"defaultBudgetSeconds":0}"#).unwrap();
+        assert_eq!(parsed.max_concurrent, DEFAULT_MAX_CONCURRENT);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

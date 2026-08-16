@@ -18,6 +18,7 @@ struct TodoInspector: View {
     @State private var notesDraft = ""
     @FocusState private var focused: Field?
     @State private var loadedID: String?
+    @State private var showDelegate = false
 
     private enum Field: Hashable { case title, notes }
 
@@ -53,6 +54,11 @@ struct TodoInspector: View {
             if new == nil { saveDrafts() }
         }
         .onDisappear { saveDrafts() }
+        .sheet(isPresented: $showDelegate) {
+            if let card = model.selectedCard {
+                DelegateSheet(model: model, card: card, folders: folders)
+            }
+        }
     }
 
     private func cardBody(_ card: TodoCard) -> some View {
@@ -96,7 +102,7 @@ struct TodoInspector: View {
                     Button("Open run") { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
                 } else if !card.isNote {
-                    Button("Delegate to agent") { Task { await model.delegate(card) } }
+                    Button("Delegate to agent") { showDelegate = true }
                         .buttonStyle(AccentButtonStyle())
                 }
 

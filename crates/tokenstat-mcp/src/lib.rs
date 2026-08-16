@@ -6,16 +6,17 @@
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
 
-//! MCP server over the local tokenstat archive.
+//! MCP server over the local tokenstat archive, and (when hostd is up) the
+//! local kanban board and automations.
 //!
-//! Speaks JSON-RPC 2.0 with MCP Content-Length framing on stdio. Read-only by
-//! default: agents can ask for totals, models, days, and doctor. `scan` is
-//! offered as an explicit tool so a session can refresh the archive without
-//! shelling out. Nothing is sent off the machine.
+//! Speaks JSON-RPC 2.0 with MCP Content-Length framing on stdio. Archive
+//! tools stay local. Task and automation tools talk to the host helper over
+//! its unix socket, never the network. Nothing is sent off the machine.
 
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -155,6 +156,133 @@ fn tools() -> Vec<Value> {
             "Read new local tool logs into the archive. Local only; does not call tokenstat.ai.",
             json!({ "type": "object", "properties": {} }),
         ),
+        tool(
+            "task_list",
+            "List kanban cards on this machine.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "column": { "type": "string", "enum": ["backlog", "doing", "done"] }
+                }
+            }),
+        ),
+        tool(
+            "task_create",
+            "Create a kanban card. Agent and workspace are optional until you delegate.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "notes": { "type": "string" },
+                    "column": { "type": "string", "enum": ["backlog", "doing", "done"] },
+                    "backend": { "type": "string" },
+                    "workspaceId": { "type": "string" },
+                    "budgetSeconds": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["title"]
+            }),
+        ),
+        tool(
+            "task_update",
+            "Update a kanban card: title, notes, column, order, or agent.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "notes": { "type": "string" },
+                    "column": { "type": "string" },
+                    "order": { "type": "integer" },
+                    "backend": { "type": "string" },
+                    "workspaceId": { "type": "string" },
+                    "budgetSeconds": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "task_remove",
+            "Delete a kanban card.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "task_delegate",
+            "Hand a card to an agent. Requires a workspace and backend on the card.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "automation_list",
+            "List scheduled agent jobs on this machine.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "automation_create",
+            "Schedule an agent job. Pass the same job object the host accepts.",
+            json!({
+                "type": "object",
+                "properties": { "job": { "type": "object" } },
+                "required": ["job"]
+            }),
+        ),
+        tool(
+            "automation_update",
+            "Update a scheduled job.",
+            json!({
+                "type": "object",
+                "properties": { "job": { "type": "object" } },
+                "required": ["job"]
+            }),
+        ),
+        tool(
+            "automation_enable",
+            "Enable or disable a scheduled job.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "enabled": { "type": "boolean" }
+                },
+                "required": ["id", "enabled"]
+            }),
+        ),
+        tool(
+            "automation_run",
+            "Queue a scheduled job to run now.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "automation_runs",
+            "List recent automation runs.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "automation_queue",
+            "Read scheduler settings: default time limit and max concurrent jobs.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "automation_set_queue",
+            "Set scheduler settings. 0 budget is no time limit. 0 concurrent is no cap.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "defaultBudgetSeconds": { "type": "integer", "minimum": 0 },
+                    "maxConcurrent": { "type": "integer", "minimum": 0 }
+                }
+            }),
+        ),
     ]
 }
 
@@ -254,6 +382,35 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
                 "elapsed_ms": report.elapsed_ms
             })
         }
+        "task_list" => {
+            let mut body = host_call(engine, "todo.list", json!({}))?;
+            if let Some(column) = args.get("column").and_then(Value::as_str) {
+                if let Some(cards) = body.as_array_mut() {
+                    cards.retain(|c| c.get("column").and_then(Value::as_str) == Some(column));
+                }
+            }
+            body
+        }
+        "task_create" => host_call(engine, "todo.create", args)?,
+        "task_update" => host_call(engine, "todo.update", args)?,
+        "task_remove" => host_call(engine, "todo.remove", args)?,
+        "task_delegate" => host_call(engine, "todo.delegate", args)?,
+        "automation_list" => host_call(engine, "automation.list", json!({}))?,
+        "automation_create" => host_call(engine, "automation.create", args)?,
+        "automation_update" => host_call(engine, "automation.update", args)?,
+        "automation_enable" => {
+            let enabled = args.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let method = if enabled {
+                "automation.enable"
+            } else {
+                "automation.disable"
+            };
+            host_call(engine, method, args)?
+        }
+        "automation_run" => host_call(engine, "automation.run", args)?,
+        "automation_runs" => host_call(engine, "automation.runs", json!({}))?,
+        "automation_queue" => host_call(engine, "automation.queue", json!({}))?,
+        "automation_set_queue" => host_call(engine, "automation.setQueue", args)?,
         other => return Err(format!("unknown tool: {other}")),
     };
 
@@ -261,6 +418,52 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&body).unwrap_or_default() }],
         "structuredContent": body
     }))
+}
+
+fn host_socket(engine: &Engine) -> PathBuf {
+    engine
+        .db_path()
+        .parent()
+        .map(|p| p.join("host.sock"))
+        .unwrap_or_else(|| PathBuf::from("host.sock"))
+}
+
+/// Talk to hostd over its local unix socket. Archive tools never come here.
+fn host_call(engine: &Engine, method: &str, params: Value) -> Result<Value, String> {
+    #[cfg(not(unix))]
+    {
+        let _ = (engine, method, params);
+        return Err("the host helper is not available on this platform".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::io::BufReader;
+        use std::os::unix::net::UnixStream;
+
+        let path = host_socket(engine);
+        let mut stream = UnixStream::connect(&path).map_err(|e| {
+            format!("host helper is not running ({e}). Start tokenstat or tokenstat-hostd.")
+        })?;
+        let req = json!({"id": 1, "method": method, "params": params});
+        let line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        stream
+            .write_all(line.as_bytes())
+            .and_then(|_| stream.write_all(b"\n"))
+            .map_err(|e| e.to_string())?;
+        let mut reader = BufReader::new(stream);
+        let mut reply = String::new();
+        reader.read_line(&mut reply).map_err(|e| e.to_string())?;
+        let value: Value = serde_json::from_str(&reply).map_err(|e| e.to_string())?;
+        if value.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(value.get("result").cloned().unwrap_or(Value::Null))
+        } else {
+            Err(value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("the host helper refused the request")
+                .to_string())
+        }
+    }
 }
 
 fn bucket_tool(engine: &Engine, group: GroupBy, q: &Query, args: &Value) -> Result<Value, String> {

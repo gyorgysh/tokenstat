@@ -1421,9 +1421,10 @@ struct RunRecord: Codable, Sendable, Identifiable {
     }
 
     var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
-    var isRunning: Bool { status == "running" }
+    var isRunning: Bool { status == "running" || status == "queued" }
     var endedLabel: String {
         switch status {
+        case "queued": return "Queued"
         case "running": return "Running"
         case "ok": return "Done"
         case "stopped": return "Stopped"
@@ -1432,6 +1433,12 @@ struct RunRecord: Codable, Sendable, Identifiable {
         default: return status
         }
     }
+}
+
+/// Shared run queue: default time limit and how many jobs may run at once.
+struct AutomationQueue: Codable, Sendable {
+    var defaultBudgetSeconds: UInt64
+    var maxConcurrent: UInt32
 }
 
 /// A slice of a run's transcript, asked for by byte offset.
@@ -1544,9 +1551,10 @@ struct TodoDelegate: Codable, Sendable, Hashable {
         case runId, status, startedAtMs, endedAtMs, error
     }
 
-    var isRunning: Bool { status == "running" }
+    var isRunning: Bool { status == "running" || status == "queued" }
     var label: String {
         switch status {
+        case "queued": return "Queued"
         case "running": return "Running"
         case "ok": return "Done"
         case "stopped": return "Stopped"

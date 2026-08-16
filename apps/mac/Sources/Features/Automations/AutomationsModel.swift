@@ -36,6 +36,11 @@ final class AutomationsModel {
     var errorMessage: String?
     var noticeMessage: String?
 
+    /// Scheduler settings, edited on the Automations screen.
+    var queueBudgetMinutes = "180"
+    var queueNoLimit = false
+    var queueMaxConcurrent = "2"
+
     /// The run whose transcript is on screen, if any.
     private(set) var watchingRunID: String?
     private(set) var selectedRunID: String?
@@ -77,9 +82,13 @@ final class AutomationsModel {
             async let j = Bridge.automations()
             async let r = Bridge.automationRuns()
             async let b = Bridge.automationBackends()
+            async let q = Bridge.automationQueue()
             jobs = try await j
             runs = try await r
             backends = try await b
+            if let queue = try? await q {
+                applyQueue(queue)
+            }
             hasLoaded = true
             errorMessage = nil
             syncWatching()
@@ -159,6 +168,30 @@ final class AutomationsModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func saveQueue() async {
+        let minutes = UInt64(queueBudgetMinutes) ?? 180
+        let budget: UInt64 = queueNoLimit ? 0 : minutes * 60
+        let max = UInt32(queueMaxConcurrent) ?? 2
+        do {
+            applyQueue(try await Bridge.setAutomationQueue(
+                defaultBudgetSeconds: budget,
+                maxConcurrent: max
+            ))
+            showNotice("Scheduler saved.")
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func applyQueue(_ queue: AutomationQueue) {
+        queueNoLimit = queue.defaultBudgetSeconds == 0
+        if queue.defaultBudgetSeconds > 0 {
+            queueBudgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
+        }
+        queueMaxConcurrent = String(queue.maxConcurrent)
     }
 
     func toggle(_ job: Automation) async {
@@ -385,6 +418,11 @@ final class AutomationsModel {
                 return
             }
             if !chunk.text.isEmpty {
+                if Self.looksLikeRawJSON(chunk.text) {
+                    transcriptText = "(Restart the host helper to read this run)"
+                    stopPolling()
+                    return
+                }
                 transcriptText = Self.capped(transcriptText + chunk.text)
             }
             transcriptOffset = chunk.nextOffset
@@ -431,6 +469,12 @@ final class AutomationsModel {
             if days.isEmpty { return "custom at \(time)" }
             return "\(days) at \(time)"
         }
+    }
+
+    /// An old host serves the raw NDJSON file. That stream freezes a text view.
+    private static func looksLikeRawJSON(_ text: String) -> Bool {
+        let trimmed = text.drop(while: { $0.isWhitespace })
+        return trimmed.first == "{" && trimmed.contains("\"type\":")
     }
 
     private static func capped(_ text: String) -> String {

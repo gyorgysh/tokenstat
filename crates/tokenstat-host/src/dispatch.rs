@@ -328,6 +328,8 @@ struct AutomationParams {
     enabled: Option<bool>,
     /// `automation.transcript` only: where the caller got to last time.
     offset: Option<u64>,
+    default_budget_seconds: Option<u64>,
+    max_concurrent: Option<u32>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1384,6 +1386,20 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 .kill_run(&p.id.ok_or("automation.kill needs a run id")?)?;
             Ok(json!({"killed": true}))
         }
+        "automation.queue" => {
+            serde_json::to_value(crate::automations::shared().queue_config()).envelope()
+        }
+        "automation.setQueue" => {
+            let p: AutomationParams = parse(params)?;
+            let current = crate::automations::shared().queue_config();
+            let next = crate::automations::QueueConfig {
+                default_budget_seconds: p
+                    .default_budget_seconds
+                    .unwrap_or(current.default_budget_seconds),
+                max_concurrent: p.max_concurrent.unwrap_or(current.max_concurrent),
+            };
+            serde_json::to_value(crate::automations::shared().set_queue_config(next)?).envelope()
+        }
 
         "todo.list" => serde_json::to_value(crate::todo::shared().list()).envelope(),
         "todo.create" => {
@@ -1396,11 +1412,13 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 column: p.column.unwrap_or_else(|| "backlog".into()),
                 order: p.order.unwrap_or(0),
                 priority: p.priority.unwrap_or_default(),
-                backend: p.backend.unwrap_or_else(|| "claude".into()),
+                backend: p.backend.unwrap_or_default(),
                 model: p.model,
                 effort: p.effort,
-                workspace_id: p.workspace_id.ok_or("todo.create needs a workspace")?,
-                budget_seconds: p.budget_seconds.unwrap_or(900),
+                workspace_id: p.workspace_id.unwrap_or_default(),
+                budget_seconds: p
+                    .budget_seconds
+                    .unwrap_or(crate::automations::DEFAULT_BUDGET_SECONDS),
                 created_at_ms: 0,
                 updated_at_ms: 0,
                 delegate: None,
@@ -2271,50 +2289,73 @@ fn usage_limits() -> Value {
 
     #[cfg(feature = "local-host")]
     {
+        let skip = tokenstat_sync::config::limits_skip();
+        let skipped = |id: &str| skip.iter().any(|s| s == id);
         let providers = std::thread::scope(|scope| {
-            let claude = scope.spawn(tokenstat_sync::claude_limits::fetch);
-            let cursor = scope.spawn(tokenstat_sync::cursor::limits);
-            let grok = scope.spawn(tokenstat_sync::grok_limits::fetch);
-            let opencode = scope.spawn(tokenstat_sync::opencode_limits::fetch);
-            let antigravity = scope.spawn(tokenstat_sync::antigravity_ide::limits);
-            let codex = tokenstat_core::limits::codex_limits();
-            let claude = claude.join().unwrap_or_else(|_| {
-                tokenstat_core::limits::ProviderLimits::unavailable(
-                    "claude_code",
-                    "Reading the Claude Code limits failed unexpectedly.",
-                )
-            });
-            let cursor = cursor.join().unwrap_or_else(|_| {
-                tokenstat_core::limits::ProviderLimits::unavailable(
-                    "cursor",
-                    "Reading the Cursor limits failed unexpectedly.",
-                )
-            });
-            let grok = grok.join().unwrap_or_else(|_| {
-                tokenstat_core::limits::ProviderLimits::unavailable(
-                    "grok",
-                    "Reading the Grok limits failed unexpectedly.",
-                )
-            });
-            let opencode = opencode.join().unwrap_or_else(|_| {
-                tokenstat_core::limits::ProviderLimits::unavailable(
-                    "opencode",
-                    "Reading the OpenCode limits failed unexpectedly.",
-                )
-            });
-            let antigravity = antigravity.join().unwrap_or_else(|_| {
-                tokenstat_core::limits::ProviderLimits::unavailable(
-                    "antigravity",
-                    "Reading the Antigravity limits failed unexpectedly.",
-                )
-            });
-            vec![claude, codex, cursor, grok, opencode, antigravity]
+            let claude = (!skipped("claude_code"))
+                .then(|| scope.spawn(tokenstat_sync::claude_limits::fetch));
+            let cursor = (!skipped("cursor")).then(|| scope.spawn(tokenstat_sync::cursor::limits));
+            let grok = (!skipped("grok")).then(|| scope.spawn(tokenstat_sync::grok_limits::fetch));
+            let opencode =
+                (!skipped("opencode")).then(|| scope.spawn(tokenstat_sync::opencode_limits::fetch));
+            let antigravity = (!skipped("antigravity"))
+                .then(|| scope.spawn(tokenstat_sync::antigravity_ide::limits));
+            let mut out = Vec::new();
+            if !skipped("codex") {
+                out.push(tokenstat_core::limits::codex_limits());
+            }
+            let take = |handle: Option<
+                std::thread::ScopedJoinHandle<'_, tokenstat_core::limits::ProviderLimits>,
+            >,
+                        source: &str,
+                        fail: &str| {
+                handle.map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        tokenstat_core::limits::ProviderLimits::unavailable(source, fail)
+                    })
+                })
+            };
+            if let Some(p) = take(
+                claude,
+                "claude_code",
+                "Reading the Claude Code limits failed unexpectedly.",
+            ) {
+                out.push(p);
+            }
+            if let Some(p) = take(
+                cursor,
+                "cursor",
+                "Reading the Cursor limits failed unexpectedly.",
+            ) {
+                out.push(p);
+            }
+            if let Some(p) = take(grok, "grok", "Reading the Grok limits failed unexpectedly.") {
+                out.push(p);
+            }
+            if let Some(p) = take(
+                opencode,
+                "opencode",
+                "Reading the OpenCode limits failed unexpectedly.",
+            ) {
+                out.push(p);
+            }
+            if let Some(p) = take(
+                antigravity,
+                "antigravity",
+                "Reading the Antigravity limits failed unexpectedly.",
+            ) {
+                out.push(p);
+            }
+            out
         });
         // A vendor that could not be read this time is not a vendor whose quota is
         // unknown. Remember every real reading and hand back the last one, marked
         // stale and dated, when a refresh comes back with only a reason.
         tokenstat_core::limits::cache::store(&providers);
-        let providers = tokenstat_core::limits::cache::backfill(providers);
+        let providers = tokenstat_core::limits::cache::backfill(providers)
+            .into_iter()
+            .filter(|p| !skipped(&p.source))
+            .collect::<Vec<_>>();
         // Opt-in P2 post: ride the same refresh the Mac already paid for.
         if tokenstat_sync::config::limits_sync_enabled() {
             let _ = tokenstat_sync::post_limits(None, Some(&providers));

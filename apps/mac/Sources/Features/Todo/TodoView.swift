@@ -16,7 +16,10 @@ struct TodoView: View {
     private static let columns: [(String, String)] = [
         ("backlog", "To Do"), ("doing", "Doing"), ("done", "Done"),
     ]
+    @AppStorage("todo.sortNewestFirst") private var newestFirst = true
     @State private var dropTarget: String?
+    /// Card id the drag would land before, or "__end__".
+    @State private var dropBeforeID: String?
     /// The tallest stack of cards on the board, measured.
     @State private var tallestColumn: CGFloat = 0
 
@@ -40,6 +43,15 @@ struct TodoView: View {
                     help: "Add a card to To Do"
                 ) {
                     addingIn = "backlog"
+                }
+                Picker("Order", selection: $newestFirst) {
+                    Text("Newest").tag(true)
+                    Text("Your order").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 220)
+                .onChange(of: newestFirst) { _, on in
+                    model.sortNewestFirst = on
                 }
             }
             if let error = model.errorMessage {
@@ -80,7 +92,13 @@ struct TodoView: View {
             TransientToast(message: $model.noticeMessage, severity: .success)
                 .padding(Theme.Space.l)
         }
-        .task { await model.appeared() }
+        .task {
+            model.sortNewestFirst = newestFirst
+            await model.appeared()
+        }
+        .onChange(of: model.sortNewestFirst) { _, on in
+            newestFirst = on
+        }
         // The model outlives this view, and its poll loop must not.
         .onDisappear { model.disappeared() }
     }
@@ -118,14 +136,30 @@ struct TodoView: View {
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
                     ForEach(model.cards(in: id)) { card in
+                        if dropTarget == id && dropBeforeID == card.id {
+                            insertionLine
+                        }
                         CardView(
                             model: model,
                             card: card,
                             folders: folders,
                             isSelected: model.selectedCardID == card.id,
                             onSelect: { model.selectCard(card.id) },
-                            onViewRun: onViewRun
+                            onViewRun: onViewRun,
+                            onDropBefore: { dragged in
+                                let order = Int64(model.cards(in: id).firstIndex(where: { $0.id == card.id }) ?? 0)
+                                Task { await model.reorder(dragged, to: id, order: order) }
+                            },
+                            onTargeted: { on in
+                                if on {
+                                    dropTarget = id
+                                    dropBeforeID = card.id
+                                }
+                            }
                         )
+                    }
+                    if dropTarget == id && dropBeforeID == "__end__" {
+                        insertionLine
                     }
                     if isWarming {
                         // Card-shaped grey, so the columns are already the
@@ -185,14 +219,20 @@ struct TodoView: View {
             Task { await model.reorder(card, to: id, order: Int64(model.cards(in: id).count)) }
             return true
         } isTargeted: { targeted in
-            // The column's background stays calm until a card is actually over
-            // it. The drop target itself supplies the interaction affordance.
             if targeted {
                 dropTarget = id
+                dropBeforeID = "__end__"
             } else if dropTarget == id {
                 dropTarget = nil
+                dropBeforeID = nil
             }
         }
+    }
+
+    private var insertionLine: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Theme.accent)
+            .frame(height: 2)
     }
 
     /// The height every column takes: what the fullest one needs, never less
@@ -229,6 +269,10 @@ struct TodoView: View {
 
 private struct CardView: View {
     @State private var confirmingDelete = false
+    @State private var editingTitle = false
+    @State private var titleDraft = ""
+    @State private var delegating = false
+    @FocusState private var titleFocused: Bool
     @Bindable var model: TodoModel
     var card: TodoCard
     var folders: [WorkspaceFolder]
@@ -236,10 +280,12 @@ private struct CardView: View {
     var onSelect: () -> Void = {}
     /// Opens the run's transcript on the Automations screen.
     var onViewRun: ((String) -> Void)?
+    var onDropBefore: ((TodoCard) -> Void)?
+    var onTargeted: ((Bool) -> Void)?
 
     private var tint: Color {
         switch card.delegate?.status {
-        case "running": return Theme.accent
+        case "queued", "running": return Theme.accent
         case "ok": return Theme.success
         case "error": return Theme.danger
         case "stopped": return Theme.warning
@@ -253,9 +299,26 @@ private struct CardView: View {
                 FeatureMark(name: card.isNote ? "mark_note" : "mark_todo",
                             tint: card.isNote ? Theme.secondary : Theme.accent,
                             size: 16)
-                Text(card.title)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(2)
+                if editingTitle {
+                    TextField("Title", text: $titleDraft)
+                        .textFieldStyle(.plain)
+                        .font(.callout.weight(.medium))
+                        .focused($titleFocused)
+                        .onSubmit { saveTitle() }
+                        .onChange(of: titleFocused) { _, on in
+                            if !on { saveTitle() }
+                        }
+                } else {
+                    Text(card.title)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(2)
+                        .onTapGesture {
+                            onSelect()
+                            titleDraft = card.title
+                            editingTitle = true
+                            titleFocused = true
+                        }
+                }
                 Spacer()
                 if card.priority == "high" {
                     Image(systemName: "exclamationmark")
@@ -285,7 +348,10 @@ private struct CardView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        if card.budgetSeconds > 0 {
+                        if card.budgetSeconds == 0 {
+                            Label("No time limit", systemImage: "timer")
+                                .foregroundStyle(.tertiary)
+                        } else {
                             Label(Self.budgetLabel(card.budgetSeconds), systemImage: "timer")
                                 .foregroundStyle(.tertiary)
                         }
@@ -312,6 +378,22 @@ private struct CardView: View {
         .contentShape(.rect)
         .simultaneousGesture(TapGesture().onEnded { onSelect() })
         .draggable(card.id)
+        .dropDestination(for: String.self) { ids, _ in
+            guard let cardID = ids.first,
+                  let dragged = model.cards.first(where: { $0.id == cardID }) else { return false }
+            onDropBefore?(dragged)
+            return true
+        } isTargeted: { on in
+            onTargeted?(on)
+        }
+        .sheet(isPresented: $delegating) {
+            DelegateSheet(model: model, card: card, folders: folders)
+        }
+    }
+
+    private func saveTitle() {
+        editingTitle = false
+        Task { await model.updateTitle(card, title: titleDraft) }
     }
 
     private static func budgetLabel(_ seconds: UInt64) -> String {
@@ -367,7 +449,7 @@ private struct CardView: View {
             Divider()
             if !card.isNote {
                 Button("Delegate to agent", systemImage: "paperplane") {
-                    Task { await model.delegate(card) }
+                    delegating = true
                 }
             }
             Button("Delete", role: .destructive) { confirmingDelete = true }
@@ -448,7 +530,8 @@ private struct NewCardForm: View {
     @State private var effortChoice = ""
     /// Minutes, because that is the unit people think in. Converted to seconds
     /// for the daemon, which stores the raw number.
-    @State private var budgetMinutes = "15"
+    @State private var budgetMinutes = "180"
+    @State private var noTimeLimit = false
     @State private var kind: TodoKind = .task
 
     var body: some View {
@@ -483,12 +566,13 @@ private struct NewCardForm: View {
                     HStack(spacing: Theme.Space.s) {
                         AppMenuPicker(
                             title: "Agent",
-                            options: model.backends.map { (value: $0.id, label: $0.label) },
+                            options: [(value: "", label: "Choose later")]
+                                + model.backends.map { (value: $0.id, label: $0.label) },
                             selection: $backendID
                         )
                         AppMenuPicker(
                             title: "Workspace",
-                            options: [(value: "", label: "Choose workspace")]
+                            options: [(value: "", label: "Choose later")]
                                 + folders.map { (value: $0.id, label: $0.name) },
                             selection: $workspaceID
                         )
@@ -521,13 +605,17 @@ private struct NewCardForm: View {
                         Text("Time limit")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TextField("15", text: $budgetMinutes)
+                        TextField("180", text: $budgetMinutes)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 56)
                             .multilineTextAlignment(.trailing)
+                            .disabled(noTimeLimit)
                         Text("minutes")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        Toggle("No limit", isOn: $noTimeLimit)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
                         Spacer()
                     }
                 }
@@ -542,11 +630,6 @@ private struct NewCardForm: View {
                     .controlSize(.small)
                     .disabled(!canSave)
                 }
-            }
-        }
-        .onAppear {
-            if backendID.isEmpty, let first = model.backends.first {
-                backendID = first.id
             }
         }
         .onChange(of: backendID) { _, _ in
@@ -567,18 +650,18 @@ private struct NewCardForm: View {
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (kind == .note || (!workspaceID.isEmpty && !backendID.isEmpty))
     }
 
     private func save() async {
-        let minutes = UInt64(budgetMinutes) ?? 15
+        let minutes = UInt64(budgetMinutes) ?? 180
+        let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
         await model.create(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             kind: kind,
             notes: notes,
             backend: backendID,
             workspaceID: kind == .note ? "" : workspaceID,
-            budgetSeconds: minutes * 60,
+            budgetSeconds: budget,
             column: kind == .note ? "backlog" : column,
             model: modelChoice.isEmpty ? nil : modelChoice,
             effort: effortChoice.isEmpty ? nil : effortChoice
@@ -590,9 +673,132 @@ private struct NewCardForm: View {
         title = ""
         notes = ""
         workspaceID = ""
-        budgetMinutes = "15"
+        budgetMinutes = "180"
+        noTimeLimit = false
+        backendID = ""
         expanded = false
         kind = .task
+    }
+}
+
+/// Last-minute agent pick before a card is handed to a run.
+struct DelegateSheet: View {
+    @Bindable var model: TodoModel
+    var card: TodoCard
+    var folders: [WorkspaceFolder]
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var backendID = ""
+    @State private var workspaceID = ""
+    @State private var modelChoice = ""
+    @State private var effortChoice = ""
+    @State private var budgetMinutes = "180"
+    @State private var noTimeLimit = false
+    @State private var working = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text("Delegate to agent")
+                .font(.system(size: 17, weight: .semibold))
+            Text(card.title)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            AppMenuPicker(
+                title: "Agent",
+                options: model.backends.map { (value: $0.id, label: $0.label) },
+                selection: $backendID
+            )
+            AppMenuPicker(
+                title: "Workspace",
+                options: [(value: "", label: "Choose workspace")]
+                    + folders.map { (value: $0.id, label: $0.name) },
+                selection: $workspaceID
+            )
+            if let backend = model.backends.first(where: { $0.id == backendID }),
+               !backend.models.isEmpty || !backend.efforts.isEmpty {
+                HStack(spacing: Theme.Space.s) {
+                    if !backend.models.isEmpty {
+                        AppMenuPicker(
+                            title: "Model",
+                            options: [(value: "", label: "Default")]
+                                + backend.models.map { (value: $0, label: $0) },
+                            selection: $modelChoice
+                        )
+                    }
+                    if !backend.efforts.isEmpty {
+                        AppMenuPicker(
+                            title: "Effort",
+                            options: [(value: "", label: "Default")]
+                                + backend.efforts.map { (value: $0, label: $0) },
+                            selection: $effortChoice
+                        )
+                    }
+                }
+            }
+            HStack {
+                Text("Time limit")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("180", text: $budgetMinutes)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 56)
+                    .disabled(noTimeLimit)
+                Text("minutes")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("No limit", isOn: $noTimeLimit)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+            }
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(SecondaryButtonStyle())
+                Spacer()
+                Button("Run") {
+                    working = true
+                    Task { await run() }
+                }
+                .buttonStyle(AccentButtonStyle())
+                .disabled(!canRun || working)
+            }
+        }
+        .padding(Theme.Space.l)
+        .frame(width: 420)
+        .onAppear {
+            backendID = card.backend
+            workspaceID = card.workspaceID
+            modelChoice = card.model ?? ""
+            effortChoice = card.effort ?? ""
+            noTimeLimit = card.budgetSeconds == 0
+            if card.budgetSeconds > 0 {
+                budgetMinutes = String(max(1, card.budgetSeconds / 60))
+            }
+            if backendID.isEmpty, let first = model.backends.first {
+                backendID = first.id
+            }
+        }
+    }
+
+    private var canRun: Bool {
+        !backendID.isEmpty && !workspaceID.isEmpty
+    }
+
+    private func run() async {
+        let minutes = UInt64(budgetMinutes) ?? 180
+        let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
+        await model.updateCard(
+            card,
+            backend: backendID,
+            model: modelChoice.isEmpty ? nil : modelChoice,
+            effort: effortChoice.isEmpty ? nil : effortChoice,
+            workspaceID: workspaceID,
+            budgetSeconds: budget
+        )
+        if let latest = model.cards.first(where: { $0.id == card.id }) {
+            await model.delegate(latest)
+        }
+        working = false
+        if model.errorMessage == nil { dismiss() }
     }
 }
 

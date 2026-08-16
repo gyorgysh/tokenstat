@@ -1273,6 +1273,21 @@ extension Bridge {
     static func automationKill(runID: String) async throws {
         _ = try await background("automation.kill", ["id": runID], as: Ack.self)
     }
+
+    static func automationQueue() async throws -> AutomationQueue {
+        try await background("automation.queue", as: AutomationQueue.self)
+    }
+
+    static func setAutomationQueue(defaultBudgetSeconds: UInt64, maxConcurrent: UInt32) async throws -> AutomationQueue {
+        try await background(
+            "automation.setQueue",
+            [
+                "defaultBudgetSeconds": defaultBudgetSeconds,
+                "maxConcurrent": maxConcurrent,
+            ],
+            as: AutomationQueue.self
+        )
+    }
 }
 
 // MARK: - Todo
@@ -1297,7 +1312,9 @@ extension Bridge {
 
     static func todoUpdate(
         id: String, column: String? = nil, order: Int64? = nil, title: String? = nil,
-        kind: TodoKind? = nil, notes: String? = nil
+        kind: TodoKind? = nil, notes: String? = nil, backend: String? = nil,
+        model: String? = nil, effort: String? = nil, workspaceID: String? = nil,
+        budgetSeconds: UInt64? = nil
     ) async throws -> TodoCard {
         var params: [String: Any] = ["id": id]
         if let column { params["column"] = column }
@@ -1305,6 +1322,11 @@ extension Bridge {
         if let title { params["title"] = title }
         if let kind { params["kind"] = kind.rawValue }
         if let notes { params["notes"] = notes }
+        if let backend { params["backend"] = backend }
+        if let model { params["model"] = model }
+        if let effort { params["effort"] = effort }
+        if let workspaceID { params["workspaceId"] = workspaceID }
+        if let budgetSeconds { params["budgetSeconds"] = budgetSeconds }
         return try await background("todo.update", params, as: TodoCard.self)
     }
 

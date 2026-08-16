@@ -49,9 +49,16 @@ final class TodoModel {
         syncPolling()
     }
 
-    /// Cards for a column, in board order.
+    /// Newest first by added date, or the order the person arranged.
+    var sortNewestFirst = true
+
+    /// Cards for a column, in the active sort.
     func cards(in column: String) -> [TodoCard] {
-        cards.filter { $0.column == column }
+        let list = cards.filter { $0.column == column }
+        if sortNewestFirst {
+            return list.sorted { $0.createdAtMs > $1.createdAtMs }
+        }
+        return list.sorted { $0.order < $1.order }
     }
 
     var selectedCard: TodoCard? {
@@ -107,8 +114,32 @@ final class TodoModel {
     }
 
     func reorder(_ card: TodoCard, to column: String, order: Int64) async {
+        sortNewestFirst = false
         do {
             _ = try await Bridge.todoUpdate(id: card.id, column: column, order: order)
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func updateCard(
+        _ card: TodoCard,
+        backend: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        workspaceID: String? = nil,
+        budgetSeconds: UInt64? = nil
+    ) async {
+        do {
+            _ = try await Bridge.todoUpdate(
+                id: card.id,
+                backend: backend,
+                model: model,
+                effort: effort,
+                workspaceID: workspaceID,
+                budgetSeconds: budgetSeconds
+            )
             await load()
         } catch {
             errorMessage = error.localizedDescription
