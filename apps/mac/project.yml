@@ -53,8 +53,9 @@ settings:
     # upload, and bump alongside MARKETING_VERSION in the same commit on each
     # release.
     #
-    # 31 has been uploaded as 0.4.2. This cut is 0.4.3 build 32.
-    CURRENT_PROJECT_VERSION: "32"
+    # 32 has been uploaded as 0.4.3. The next upload of any marketing version
+    # needs 33.
+    CURRENT_PROJECT_VERSION: "33"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
