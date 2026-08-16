@@ -130,7 +130,8 @@ struct TodoInspector: View {
                     }
                     Button("Open run") { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
-                } else if !card.isNote {
+                }
+                if !card.isNote, card.delegate?.isRunning != true {
                     if canRun {
                         RunModeButtons(
                             canRun: canRun,
@@ -262,15 +263,15 @@ struct TodoInspector: View {
     private func moveButtons(_ card: TodoCard) -> some View {
         HStack(spacing: Theme.Space.s) {
             if card.column != "backlog" {
-                Button("To Do") { Task { await model.move(card, to: "backlog") } }
+                Button("Move to To Do") { Task { await model.move(card, to: "backlog") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column != "doing" {
-                Button("Doing") { Task { await model.move(card, to: "doing") } }
+                Button("Move to Doing") { Task { await model.move(card, to: "doing") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column != "done" {
-                Button("Done") { Task { await model.move(card, to: "done") } }
+                Button("Move to Done") { Task { await model.move(card, to: "done") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }
