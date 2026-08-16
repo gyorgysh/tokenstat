@@ -1177,6 +1177,30 @@ struct UsageWindow: Codable, Sendable, Hashable, Identifiable {
     var fraction: Double { min(1, max(0, percent / 100)) }
 }
 
+/// Opt-in plan-limit posting, plus the last readings this Mac has.
+struct LimitsSyncState: Codable, Sendable {
+    var enabled: Bool
+    var skip: [String]
+    var providers: [ProviderLimits]
+
+    init(enabled: Bool = false, skip: [String] = [], providers: [ProviderLimits] = []) {
+        self.enabled = enabled
+        self.skip = skip
+        self.providers = providers
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, skip, providers
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        skip = try c.decodeIfPresent([String].self, forKey: .skip) ?? []
+        providers = try c.decodeIfPresent([ProviderLimits].self, forKey: .providers) ?? []
+    }
+}
+
 /// What one provider says about its own limits.
 struct ProviderLimits: Codable, Sendable, Hashable, Identifiable {
     /// Archive source id, so the brand mark is the same one used elsewhere.

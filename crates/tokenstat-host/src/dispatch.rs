@@ -1185,12 +1185,32 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             struct LimitsSyncParams {
                 #[serde(default)]
                 enabled: Option<bool>,
+                #[serde(default)]
+                skip: Option<Vec<String>>,
+                #[serde(default)]
+                source: Option<String>,
+                #[serde(default)]
+                shared: Option<bool>,
             }
             let p: LimitsSyncParams = parse(params)?;
             if let Some(on) = p.enabled {
                 tokenstat_sync::config::set_limits_sync(on).envelope()?;
             }
-            Ok(json!({ "enabled": tokenstat_sync::config::limits_sync_enabled() }))
+            if let Some(skip) = p.skip {
+                tokenstat_sync::config::set_limits_skip(skip).envelope()?;
+            }
+            if let (Some(source), Some(shared)) = (p.source, p.shared) {
+                tokenstat_sync::config::set_limits_source_shared(&source, shared).envelope()?;
+            }
+            let providers: Vec<tokenstat_core::limits::ProviderLimits> =
+                tokenstat_core::limits::cache::load()
+                    .into_values()
+                    .collect();
+            Ok(json!({
+                "enabled": tokenstat_sync::config::limits_sync_enabled(),
+                "skip": tokenstat_sync::config::limits_skip(),
+                "providers": providers,
+            }))
         }
 
         // Long running and it talks to the network. Same rule as `scan`: not

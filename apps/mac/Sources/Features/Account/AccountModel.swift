@@ -28,6 +28,11 @@ final class AccountModel {
     var isSigningOut = false
     /// P2: post plan-limit readings after sync / limits refresh. Opt-in.
     var limitsSyncEnabled = false
+    /// Sources the user turned off. Still shown, not posted.
+    var limitsSkip: [String] = []
+    /// Last vendor readings this Mac has, for the Plan limits card.
+    var limitsProviders: [ProviderLimits] = []
+    var isLoadingLimits = false
     #if os(macOS)
     /// Nil until the host has answered. The switch must not flash the wrong default.
     var hostPolicy: HostPolicy?
@@ -126,7 +131,7 @@ final class AccountModel {
             authCheckError = nil
             authChecked = true
             #if os(macOS)
-            limitsSyncEnabled = (try? await Bridge.limitsSyncEnabled()) ?? false
+            applyLimitsSync((try? await Bridge.limitsSync()) ?? LimitsSyncState())
             hostPolicy = try? await Bridge.hostPolicy()
             #endif
             await Self.broadcastIfEntitlementChanged(from: previous, to: next)
@@ -174,6 +179,43 @@ final class AccountModel {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func setLimitsSourceShared(_ source: String, shared: Bool) async {
+        do {
+            applyLimitsSync(try await Bridge.setLimitsSourceShared(source, shared: shared))
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fill the card from the cache, then refresh vendors if we have nothing.
+    func loadLimitsIfNeeded() async {
+        guard !isLoadingLimits else { return }
+        isLoadingLimits = true
+        defer { isLoadingLimits = false }
+        applyLimitsSync((try? await Bridge.limitsSync()) ?? LimitsSyncState())
+        if limitsProviders.isEmpty {
+            let fresh = (try? await Bridge.usageLimits()) ?? []
+            applyLimitsSync((try? await Bridge.limitsSync()) ?? LimitsSyncState())
+            if limitsProviders.isEmpty {
+                limitsProviders = PlanLimits.visible(fresh)
+            }
+        }
+    }
+
+    private func applyLimitsSync(_ state: LimitsSyncState) {
+        limitsSyncEnabled = state.enabled
+        limitsSkip = state.skip
+        let visible = PlanLimits.visible(state.providers)
+        if !visible.isEmpty {
+            limitsProviders = visible
+        }
+    }
+
+    func sharesLimits(of source: String) -> Bool {
+        !limitsSkip.contains(source)
     }
     #endif
 

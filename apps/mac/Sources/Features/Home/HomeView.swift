@@ -246,9 +246,9 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your phone cannot see these numbers")
                     .font(.callout.weight(.medium))
-                Text("Share plan limits with my devices posts how full each window is, "
+                Text("Account has a Plan limits card that posts how full each window is, "
                     + "so the phone still shows what is left while this Mac is asleep. "
-                    + "Percentages and reset times only, never a credential.")
+                    + "Turn a vendor off there if you do not want it shared.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

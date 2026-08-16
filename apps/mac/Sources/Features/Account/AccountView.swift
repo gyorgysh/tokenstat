@@ -123,6 +123,9 @@ struct AccountView: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             identity(account)
             syncCard(account)
+            #if os(macOS)
+            planLimitsCard
+            #endif
             machinesCard(account)
         }
     }
@@ -227,23 +230,6 @@ struct AccountView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-
-                // P2: plan-limit readings to the account, for the phone. Off by
-                // default. Percentages and reset times only; never credentials.
-                Toggle(isOn: Binding(
-                    get: { model.limitsSyncEnabled },
-                    set: { on in Task { await model.setLimitsSync(on) } }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Share plan limits with my devices")
-                            .font(.callout)
-                        Text("Posts how full each vendor window is, so the phone can show what is left while this Mac is asleep.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-                .tint(Theme.accent)
 
                 Button {
                     confirmSignOut = true
@@ -410,6 +396,95 @@ struct AccountView: View {
     }
 
     #if os(macOS)
+    /// Opt-in posting of vendor quota windows, one switch per reading we have.
+    ///
+    /// The master switch is still the privacy gate (off by default). Each
+    /// row is a source the user can leave on this Mac, for an expired
+    /// subscription or a tool they do not want on the phone.
+    private var planLimitsCard: some View {
+        Card(
+            title: "Plan limits",
+            subtitle: "Share vendor quota windows with your other devices"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                toggleRow(
+                    "Share with my devices",
+                    detail: "Posts how full each window is, so a phone can show what is left while this Mac is asleep. Percentages and reset times only, never a credential.",
+                    isOn: Binding(
+                        get: { model.limitsSyncEnabled },
+                        set: { on in Task { await model.setLimitsSync(on) } }
+                    )
+                )
+                if model.limitsProviders.isEmpty {
+                    Text(model.isLoadingLimits
+                         ? "Looking for vendor readings…"
+                         : "No readings yet. Open Home, or wait for the hourly pass, then come back.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.limitsProviders.enumerated()), id: \.element.id) { index, provider in
+                            if index > 0 {
+                                Divider().padding(.vertical, Theme.Space.xs)
+                            }
+                            planLimitRow(provider)
+                        }
+                    }
+                    .disabled(!model.limitsSyncEnabled)
+                    .opacity(model.limitsSyncEnabled ? 1 : 0.55)
+                }
+            }
+        }
+        .task { await model.loadLimitsIfNeeded() }
+    }
+
+    private func planLimitRow(_ provider: ProviderLimits) -> some View {
+        HStack(alignment: .center, spacing: Theme.Space.m) {
+            HarnessMark(id: provider.source, size: 22)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(harnessName(provider.source))
+                    .font(.callout)
+                Text(planLimitDetail(provider))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: Theme.Space.m)
+            Toggle("", isOn: Binding(
+                get: { model.sharesLimits(of: provider.source) },
+                set: { on in Task { await model.setLimitsSourceShared(provider.source, shared: on) } }
+            ))
+            .toggleStyle(.switch)
+            .tint(Theme.accent)
+            .labelsHidden()
+            .accessibilityLabel("Share \(harnessName(provider.source))")
+            .fixedSize()
+        }
+        .padding(.vertical, Theme.Space.xs)
+    }
+
+    private func planLimitDetail(_ provider: ProviderLimits) -> String {
+        var parts: [String] = []
+        if let plan = provider.plan, !plan.isEmpty {
+            parts.append(plan)
+        }
+        if provider.hasWindows {
+            let windows = provider.windows
+                .map { "\($0.label) \(Int($0.percent.rounded()))%" }
+                .joined(separator: ", ")
+            parts.append(windows)
+        } else if let note = provider.note, !note.isEmpty {
+            parts.append(note)
+        }
+        if provider.isStale {
+            parts.append("last reading is old")
+        }
+        if parts.isEmpty {
+            return "No windows reported"
+        }
+        return parts.joined(separator: " · ")
+    }
+
     private var hostCard: some View {
         Card(
             title: "This Mac",

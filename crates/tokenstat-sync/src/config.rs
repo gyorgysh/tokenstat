@@ -60,6 +60,13 @@ pub struct SyncConfig {
     /// times only; vendor credentials never leave the machine.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<bool>,
+    /// Sources that must not be posted even when `limits` is on.
+    ///
+    /// A vendor the user turned off (expired plan, do not track) stays out
+    /// of the account payload. Empty means share every reading that has
+    /// numbers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits_skip: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +210,44 @@ pub fn set_limits_sync(on: bool) -> Result<(), ConfigError> {
     save(&cfg)
 }
 
+/// Source ids that must not be posted, even when limits sync is on.
+pub fn limits_skip() -> Vec<String> {
+    load().ok().map(|c| c.sync.limits_skip).unwrap_or_default()
+}
+
+/// Replace the skip list. Empty ids and junk are dropped.
+pub fn set_limits_skip(skip: Vec<String>) -> Result<(), ConfigError> {
+    let mut cfg = load()?;
+    cfg.sync.limits_skip = clean_skip(skip);
+    save(&cfg)
+}
+
+/// Turn posting for one source on or off. Off adds it to the skip list.
+pub fn set_limits_source_shared(source: &str, shared: bool) -> Result<(), ConfigError> {
+    let mut skip = limits_skip();
+    if shared {
+        skip.retain(|s| s != source);
+    } else if is_skip_id(source) && !skip.iter().any(|s| s == source) {
+        skip.push(source.to_string());
+    }
+    set_limits_skip(skip)
+}
+
+fn clean_skip(skip: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = skip.into_iter().filter(|s| is_skip_id(s)).collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+fn is_skip_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+}
+
 /// Turn automatic update applying on or off.
 ///
 /// Default is on. Persist an explicit value so a scheduler entry (which does
@@ -323,5 +368,21 @@ mod tests {
     fn hex_roundtrip() {
         let b = vec![0xab, 0xcd, 0x00, 0xff];
         assert_eq!(hex_decode(&hex_encode(&b)).unwrap(), b);
+    }
+
+    #[test]
+    fn skip_list_drops_junk_and_dedupes() {
+        assert_eq!(
+            clean_skip(vec![
+                "cursor".into(),
+                "cursor".into(),
+                "".into(),
+                "bad id".into(),
+                "claude_code".into(),
+            ]),
+            vec!["claude_code".to_string(), "cursor".to_string()]
+        );
+        assert!(is_skip_id("antigravity_ide"));
+        assert!(!is_skip_id("no spaces"));
     }
 }

@@ -1172,11 +1172,22 @@ pub struct AccountLimitWindow {
     pub resets_at_ms: Option<i64>,
 }
 
+/// Readings that may leave this machine: numbers, current, and not skipped.
+pub(crate) fn eligible_limit_providers<'a>(
+    list: &'a [tokenstat_core::limits::ProviderLimits],
+    skip: &[String],
+) -> Vec<&'a tokenstat_core::limits::ProviderLimits> {
+    list.iter()
+        .filter(|p| p.has_reading() && !p.stale && !skip.iter().any(|s| s == &p.source))
+        .collect()
+}
+
 /// POST current plan-limit readings for this machine.
 ///
 /// Only readings that have windows and are not stale. Uses the same local
 /// cache the Mac Insights card uses after a limits refresh; callers that want
-/// a fresh vendor pass should refresh first.
+/// a fresh vendor pass should refresh first. Sources in the skip list stay
+/// on this machine.
 pub fn post_limits(
     host_flag: Option<&str>,
     providers: Option<&[tokenstat_core::limits::ProviderLimits]>,
@@ -1191,9 +1202,9 @@ pub fn post_limits(
             .into_values()
             .collect(),
     };
-    let body_providers: Vec<serde_json::Value> = list
-        .iter()
-        .filter(|p| p.has_reading() && !p.stale)
+    let skip = config::limits_skip();
+    let body_providers: Vec<serde_json::Value> = eligible_limit_providers(&list, &skip)
+        .into_iter()
         .map(|p| {
             serde_json::json!({
                 "src": p.source,
@@ -1762,6 +1773,37 @@ mod tests {
         let a = jitter_offset("m_0123456789abcdef", JITTER_WINDOW_SECS);
         assert_eq!(a, jitter_offset("m_0123456789abcdef", JITTER_WINDOW_SECS));
         assert!(a < JITTER_WINDOW_SECS);
+    }
+
+    fn reading(source: &str, stale: bool) -> tokenstat_core::limits::ProviderLimits {
+        tokenstat_core::limits::ProviderLimits {
+            source: source.into(),
+            plan: Some("pro".into()),
+            windows: vec![tokenstat_core::limits::UsageWindow {
+                label: "weekly".into(),
+                percent: 40.0,
+                resets_at_ms: None,
+                severity: tokenstat_core::limits::LimitSeverity::Normal,
+            }],
+            observed_at_ms: 1,
+            note: None,
+            stale,
+        }
+    }
+
+    #[test]
+    fn a_skipped_or_stale_limit_does_not_leave_the_machine() {
+        let list = vec![
+            reading("claude_code", false),
+            reading("cursor", false),
+            reading("grok", true),
+            tokenstat_core::limits::ProviderLimits::unavailable("codex", "not signed in"),
+        ];
+        let posted = eligible_limit_providers(&list, &["cursor".into()]);
+        assert_eq!(
+            posted.iter().map(|p| p.source.as_str()).collect::<Vec<_>>(),
+            vec!["claude_code"]
+        );
     }
 
     #[test]
