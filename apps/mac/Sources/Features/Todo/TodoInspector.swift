@@ -189,6 +189,8 @@ struct TodoInspector: View {
         )
         .onChange(of: backendID) { old, new in
             guard !applyingAgent, old != new, loadedID == card.id else { return }
+            // A card load writes backendID to match the card. That is not a pick.
+            guard new != card.backend else { return }
             modelChoice = ""
             effortChoice = ""
             Task { await persistAgent(card) }
@@ -322,8 +324,8 @@ struct TodoInspector: View {
         _ = await model.updateCard(
             card,
             backend: backendID,
-            model: modelValue.isEmpty ? nil : modelValue,
-            effort: effortChoice.isEmpty ? nil : effortChoice,
+            model: modelValue,
+            effort: effortChoice,
             workspaceID: workspaceID,
             budgetSeconds: budget
         )
@@ -347,7 +349,6 @@ struct TodoInspector: View {
                 prompt: latest.promptForRun,
                 title: latest.title
             ))
-            model.noticeOpenedInFront(latest.title)
             starting = false
             return
         }

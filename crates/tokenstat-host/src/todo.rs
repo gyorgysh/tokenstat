@@ -96,6 +96,17 @@ pub struct Board {
     cards: Mutex<Vec<Card>>,
 }
 
+/// Same body the Mac In front path sends: notes, or the title if notes
+/// are empty. The inspector Prompt field is the notes.
+fn prompt_for_run(card: &Card) -> String {
+    let body = card.notes.trim();
+    if !body.is_empty() {
+        body.to_string()
+    } else {
+        card.title.trim().to_string()
+    }
+}
+
 fn run_error_note(run: &crate::automations::RunRecord) -> String {
     let raw = std::path::PathBuf::from(&run.transcript_path);
     let readable = crate::transcript::readable_path(&raw);
@@ -271,10 +282,18 @@ impl Board {
             cards[idx].backend = backend.to_string();
         }
         if let Some(model) = changes.model.as_deref() {
-            cards[idx].model = Some(model.to_string());
+            cards[idx].model = if model.trim().is_empty() {
+                None
+            } else {
+                Some(model.to_string())
+            };
         }
         if let Some(effort) = changes.effort.as_deref() {
-            cards[idx].effort = Some(effort.to_string());
+            cards[idx].effort = if effort.trim().is_empty() {
+                None
+            } else {
+                Some(effort.to_string())
+            };
         }
         if let Some(workspace_id) = changes.workspace_id.as_deref() {
             cards[idx].workspace_id = workspace_id.to_string();
@@ -358,7 +377,7 @@ impl Board {
                 model: card.model.clone(),
                 effort: card.effort.clone(),
                 workspace_id: card.workspace_id.clone(),
-                prompt: format!("{}\n\n{}", card.title, card.notes),
+                prompt: prompt_for_run(card),
                 schedule: crate::automations::ScheduleSpec::default(),
                 budget_seconds: card.budget_seconds,
                 enabled: false,
@@ -563,6 +582,41 @@ mod tests {
         let pos_b = all.iter().position(|c| c.id == "b").unwrap();
         let pos_a = all.iter().position(|c| c.id == "a").unwrap();
         assert!(pos_b < pos_a);
+    }
+
+    #[test]
+    fn empty_model_clears_the_stored_alias() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-todo-clear-model-{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("a");
+        c.model = Some("gemini-flash".into());
+        c.effort = Some("high".into());
+        board.create(c).unwrap();
+        let updated = board
+            .update(
+                "a",
+                &CardUpdate {
+                    model: Some(String::new()),
+                    effort: Some("  ".into()),
+                    ..CardUpdate::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.model, None);
+        assert_eq!(updated.effort, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prompt_for_run_prefers_notes() {
+        let mut c = card("a");
+        c.title = "Card title".into();
+        c.notes = "do the work".into();
+        assert_eq!(prompt_for_run(&c), "do the work");
+        c.notes = "  ".into();
+        assert_eq!(prompt_for_run(&c), "Card title");
     }
 
     #[test]

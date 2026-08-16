@@ -123,9 +123,16 @@ final class AutomationsModel {
     ///
     /// Name plus workspace, not schedule: one folder gets one Auto commit
     /// job. A later start with a different agent edits that job.
-    func autoCommitJob(in workspaceID: String) -> Automation? {
-        let matches = jobs.filter {
+    func autoCommitJobs(in workspaceID: String) -> [Automation] {
+        jobs.filter {
             $0.workspaceID == workspaceID && Self.isAutoCommitName($0.name)
+        }
+    }
+
+    func autoCommitJob(in workspaceID: String) -> Automation? {
+        let matches = autoCommitJobs(in: workspaceID)
+        if let live = matches.first(where: { lastRun(for: $0)?.isRunning == true }) {
+            return live
         }
         return matches.first { lastRun(for: $0) != nil } ?? matches.first
     }
@@ -137,8 +144,7 @@ final class AutomationsModel {
 
     /// True while this folder's Auto commit run is queued or live.
     func isAutoCommitRunning(in workspaceID: String) -> Bool {
-        guard let job = autoCommitJob(in: workspaceID) else { return false }
-        return lastRun(for: job)?.isRunning == true
+        autoCommitJobs(in: workspaceID).contains { lastRun(for: $0)?.isRunning == true }
     }
 
     /// Jobs in this folder whose last run is still going. The workspace

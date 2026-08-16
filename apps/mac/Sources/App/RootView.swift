@@ -1713,11 +1713,17 @@ struct RootView: View {
                     workspaces.showTerminal(in: folder.id)
                     isInspectorPresented = true
                 }
-                _ = await terminals.start(
+                let session = await terminals.start(
                     workspace: folder,
                     command: command,
                     args: Array(argv.dropFirst())
                 )
+                if session == nil {
+                    todo.errorMessage = terminals.errorMessage
+                        ?? "Could not start a terminal."
+                    return
+                }
+                todo.noticeOpenedInFront(launch.title)
             } catch {
                 todo.errorMessage = error.localizedDescription
             }

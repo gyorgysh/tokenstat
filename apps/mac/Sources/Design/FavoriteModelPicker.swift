@@ -175,6 +175,7 @@ struct TaskRunBar: View {
 
     @ViewBuilder
     private var content: some View {
+        #if os(macOS)
         SegmentedCapsulePicker(
             options: [
                 (TaskRunPlacement.background, "Background", "bolt.fill"),
@@ -182,8 +183,13 @@ struct TaskRunBar: View {
             ],
             selection: placement
         )
+        #endif
         Button(running ? "Starting…" : "Run") {
+            #if os(macOS)
             action(placement.wrappedValue)
+            #else
+            action(.background)
+            #endif
         }
         .buttonStyle(AccentButtonStyle())
         .disabled(!canRun || running)

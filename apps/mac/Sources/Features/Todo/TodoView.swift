@@ -932,11 +932,8 @@ struct DelegateSheet: View {
         let saved = await model.updateCard(
             card,
             backend: backendID,
-            model: {
-                let cleaned = TodoCard.cleanModelID(modelChoice)
-                return cleaned.isEmpty ? nil : cleaned
-            }(),
-            effort: effortChoice.isEmpty ? nil : effortChoice,
+            model: TodoCard.cleanModelID(modelChoice),
+            effort: effortChoice,
             workspaceID: workspaceID,
             budgetSeconds: budget
         )
@@ -953,7 +950,6 @@ struct DelegateSheet: View {
                 prompt: latest.promptForRun,
                 title: latest.title
             ))
-            model.noticeOpenedInFront(latest.title)
             working = false
             if model.errorMessage == nil { dismiss() }
             return

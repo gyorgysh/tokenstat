@@ -892,6 +892,15 @@ impl Store {
         validate(&job)?;
         job.schedule.validate()?;
         let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+        if is_auto_commit_name(&job.name)
+            && jobs.iter().any(|other| {
+                other.id != job.id
+                    && other.workspace_id == job.workspace_id
+                    && is_auto_commit_name(&other.name)
+            })
+        {
+            return Err("this folder already has an Auto commit job".into());
+        }
         let current = jobs
             .iter_mut()
             .find(|existing| existing.id == job.id)
@@ -1728,6 +1737,11 @@ mod tests {
         other.workspace_id = "other".into();
         let other = store.create(other).unwrap();
         assert_ne!(other.id, first.id);
+        assert_eq!(store.list().len(), 2);
+
+        let mut rename = other.clone();
+        rename.workspace_id = first.workspace_id.clone();
+        assert!(store.update(rename).is_err());
         assert_eq!(store.list().len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
