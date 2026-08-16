@@ -83,6 +83,16 @@ impl Parser {
     fn emit(&mut self, out: &mut String, piece: Piece) {
         match piece {
             Piece::Text(text) => {
+                // Grok sends a lone space between tokens (" ship" + " " +
+                // "0.4.0"). Dropping that space glued words. Keep it only
+                // when it continues a paragraph already started.
+                if text.trim().is_empty() {
+                    if self.last_was_text {
+                        out.push_str(&text);
+                        self.last_block.push_str(&text);
+                    }
+                    return;
+                }
                 // Cursor (and some Claude streams) repeat the whole segment
                 // after the deltas. Skip that exact copy.
                 if text == self.last_block {
@@ -251,7 +261,7 @@ fn append_piece(out: &mut String, piece: &str, had_prior: bool) {
 fn render_grok(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type")?.as_str()?;
     match kind {
-        "text" => nonempty(value.get("data").and_then(|v| v.as_str())).map(Piece::Text),
+        "text" => text_delta(value.get("data").and_then(|v| v.as_str())).map(Piece::Text),
         "error" => nonempty(value.get("message").and_then(|v| v.as_str())).map(Piece::Block),
         "tool_call" => {
             let title = value
@@ -260,7 +270,10 @@ fn render_grok(value: &serde_json::Value) -> Option<Piece> {
                 .filter(|s| !s.is_empty())
                 .or_else(|| value.get("toolName").and_then(|v| v.as_str()))
                 .unwrap_or("tool");
-            Some(Piece::Block(format_tool(title, value.get("rawInput"))))
+            Some(Piece::Block(format_tool(
+                &display_verb(title),
+                value.get("rawInput"),
+            )))
         }
         _ => None,
     }
@@ -301,7 +314,7 @@ fn render_cursor(value: &serde_json::Value) -> Option<Piece> {
             }
             let map = value.get("tool_call")?.as_object()?;
             let (key, call) = map.iter().next()?;
-            let title = tool_label(key);
+            let title = display_verb(&tool_label(key));
             Some(Piece::Block(format_tool(&title, call.get("args"))))
         }
         _ => None,
@@ -361,7 +374,7 @@ fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
                 .get("input")
                 .or_else(|| part.get("args"))
                 .or_else(|| part.get("state"));
-            Some(Piece::Block(format_tool(&tool_label(tool), input)))
+            Some(Piece::Block(format_tool(&display_verb(tool), input)))
         }
         "error" => {
             let msg = match value.get("error") {
@@ -396,13 +409,15 @@ fn format_tool(verb: &str, input: Option<&serde_json::Value>) -> String {
 
 fn tool_arg(input: Option<&serde_json::Value>) -> Option<&str> {
     let value = input?;
-    const KEYS: [&str; 6] = [
+    const KEYS: [&str; 8] = [
         "path",
         "file_path",
         "file",
         "target_file",
+        "target_directory",
         "command",
         "pattern",
+        "query",
     ];
     for key in KEYS {
         if let Some(s) = value
@@ -462,6 +477,54 @@ fn render_edit_snippet(old: &str, new: &str) -> String {
     out
 }
 
+/// Canonical inspector verb. Grok titles are snake_case (`read_file`);
+/// Claude already sends `Read`. The Swift timeline matches these words.
+fn display_verb(name: &str) -> String {
+    let leaf = name
+        .rsplit("__")
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches("ToolCall");
+    match leaf {
+        "read_file" | "Read" | "view_file" | "view_file_outline" | "view_code_item" => {
+            "Read".into()
+        }
+        "write" | "Write" | "write_file" | "write_to_file" | "create_file" => "Write".into(),
+        "search_replace"
+        | "Edit"
+        | "str_replace"
+        | "edit_file"
+        | "replace_file_content"
+        | "NotebookEdit" => "Edit".into(),
+        "run_terminal_command" | "run_command" | "shell_exec" => "Shell".into(),
+        "Bash" | "bash" => "Bash".into(),
+        "Shell" | "shell" => "Shell".into(),
+        "grep" | "Grep" | "grep_search" | "code_search" => "Grep".into(),
+        "list_dir" | "list_directory" | "Glob" | "glob" | "find_by_name" => "Glob".into(),
+        "WebFetch" | "web_fetch" | "read_url_content" => "WebFetch".into(),
+        "WebSearch" | "web_search" | "search_web" => "WebSearch".into(),
+        "TodoWrite" | "todo_write" => "TodoWrite".into(),
+        "get_command_or_subagent_output" | "Task" | "task" => "Subagent".into(),
+        other if other.contains('_') => other
+            .split('_')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        other => tool_label(other),
+    }
+}
+
+fn text_delta(s: Option<&str>) -> Option<String> {
+    s.filter(|s| !s.is_empty()).map(str::to_string)
+}
+
 fn tool_label(name: &str) -> String {
     let base = name.trim_end_matches("ToolCall");
     if base.is_empty() {
@@ -498,7 +561,7 @@ fn assistant_split(value: &serde_json::Value) -> (Vec<String>, Vec<String>) {
                 let kind = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if kind == "tool_use" {
                     if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
-                        tools.push(format_tool(&tool_label(name), block.get("input")));
+                        tools.push(format_tool(&display_verb(name), block.get("input")));
                     }
                     continue;
                 }
@@ -735,6 +798,34 @@ mod tests {
     }
 
     #[test]
+    fn grok_snake_case_tools_become_verbs() {
+        let raw = concat!(
+            "{\"type\":\"tool_call\",\"title\":\"read_file\",\"toolName\":\"read_file\",\"rawInput\":{\"target_file\":\"Cargo.toml\"}}\n",
+            "{\"type\":\"tool_call\",\"title\":\"run_terminal_command\",\"rawInput\":{\"command\":\"git status\"}}\n",
+            "{\"type\":\"tool_call\",\"title\":\"list_dir\",\"rawInput\":{\"target_directory\":\"/tmp\"}}\n",
+            "{\"type\":\"tool_call\",\"title\":\"search_replace\",\"rawInput\":{\"file_path\":\"a.rs\",\"old_string\":\"foo\",\"new_string\":\"bar\"}}\n",
+        );
+        let out = feed("grok", raw);
+        assert!(out.contains("Read Cargo.toml"), "{out}");
+        assert!(out.contains("Shell git status"), "{out}");
+        assert!(out.contains("Glob /tmp"), "{out}");
+        assert!(out.contains("Edit a.rs"), "{out}");
+        assert!(out.contains("- foo") && out.contains("+ bar"), "{out}");
+        assert!(!out.contains("read_file"), "{out}");
+        assert!(!out.contains("run_terminal_command"), "{out}");
+    }
+
+    #[test]
+    fn grok_keeps_a_space_only_text_delta() {
+        let raw = concat!(
+            "{\"type\":\"text\",\"data\":\"ship\"}\n",
+            "{\"type\":\"text\",\"data\":\" \"}\n",
+            "{\"type\":\"text\",\"data\":\"0.4.0\"}\n",
+        );
+        assert_eq!(feed("grok", raw), "ship 0.4.0");
+    }
+
+    #[test]
     fn claude_keeps_tool_names_and_drops_hooks() {
         let raw = concat!(
             "{\"type\":\"system\",\"subtype\":\"init\",\"tools\":[\"Read\"]}\n",
@@ -814,6 +905,13 @@ mod tests {
         let text = render_raw("grok", &bytes);
         assert!(!looks_like_ndjson(text.as_bytes()), "must not serve NDJSON");
         assert!(text.contains("I'll start"), "{text}");
+        assert!(text.contains("Read "), "{text}");
+        assert!(
+            text.contains("ship 0.4.0") || text.contains(" 0.4.0"),
+            "{text}"
+        );
+        assert!(!text.contains("read_file"), "{text}");
+        assert!(!text.contains("run_terminal_command"), "{text}");
         assert!(!text.contains("available_commands"));
         assert!(!text.contains("\"type\":\"thought\""));
     }

@@ -279,8 +279,7 @@ pub fn agent_command(
                 [
                     "exec",
                     "--skip-git-repo-check",
-                    "--sandbox",
-                    "workspace-write",
+                    "--dangerously-bypass-approvals-and-sandbox",
                     "--json",
                     "--",
                     p,
@@ -339,7 +338,18 @@ pub fn agent_command(
                 args.push("--effort".into());
                 args.push(e.into());
             }
-            args.extend(["--print", p, "--print-timeout", "30m"].map(str::to_string));
+            args.extend(
+                [
+                    "--print",
+                    p,
+                    "--print-timeout",
+                    "30m",
+                    // Headless: agy cannot prompt, so a tool that needs
+                    // "command" is denied unless this is on.
+                    "--dangerously-skip-permissions",
+                ]
+                .map(str::to_string),
+            );
         }
         "opencode" => {
             args.push("opencode".into());
@@ -351,7 +361,7 @@ pub fn agent_command(
                 args.push("--variant".into());
                 args.push(e.into());
             }
-            args.extend(["run", "--format", "json", "--", p].map(str::to_string));
+            args.extend(["run", "--auto", "--format", "json", "--", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
     }
@@ -1482,8 +1492,23 @@ mod tests {
         // Regression: claude rejects stream-json print output without this.
         let claude = agent_command("claude", "do it", None, None).unwrap();
         assert!(claude.iter().any(|a| a == "--verbose"));
+        assert!(claude.iter().any(|a| a == "--dangerously-skip-permissions"));
+        let agy = agent_command("agy", "do it", None, None).unwrap();
+        assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));
+        let grok = agent_command("grok", "do it", None, None).unwrap();
+        assert!(
+            grok.windows(2)
+                .any(|w| w == ["--permission-mode", "bypassPermissions"])
+        );
         let opencode = agent_command("opencode", "do it", None, None).unwrap();
         assert!(opencode.windows(2).any(|w| w == ["--format", "json"]));
+        assert!(opencode.iter().any(|a| a == "--auto"));
+        let codex = agent_command("codex", "do it", None, None).unwrap();
+        assert!(
+            codex
+                .iter()
+                .any(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+        );
         assert!(agent_command("nope", "do it", None, None).is_err());
         assert!(agent_command("claude", "   ", None, None).is_err());
     }

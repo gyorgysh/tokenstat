@@ -42,7 +42,8 @@ struct TranscriptView: View {
     /// Verbs the host writes as the first token of a tool paragraph.
     private static let verbs: Set<String> = [
         "Read", "Write", "Edit", "Shell", "Grep", "Glob", "Find", "Search",
-        "Bash", "Task", "NotebookEdit", "WebFetch", "WebSearch", "TodoWrite",
+        "Bash", "Task", "Subagent", "NotebookEdit", "WebFetch", "WebSearch",
+        "TodoWrite",
     ]
 
     static func parse(_ raw: String) -> [Block] {
@@ -155,7 +156,7 @@ private struct ToolRow: View {
         case "Grep", "Search": return "magnifyingglass"
         case "Glob", "Find": return "folder"
         case "WebFetch", "WebSearch": return "globe"
-        case "Task": return "person.2"
+        case "Task", "Subagent": return "person.2"
         case "TodoWrite": return "checklist"
         default: return "wrench"
         }
