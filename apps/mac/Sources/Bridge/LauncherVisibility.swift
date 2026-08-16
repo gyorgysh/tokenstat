@@ -43,9 +43,15 @@ final class LauncherVisibility {
         persist(set, scope: scope)
     }
 
+    /// Replace the set from the owning host's catalog.
+    func replace(_ ids: Set<String>, scope: String) {
+        hidden[scope] = ids
+        persist(ids, scope: scope)
+    }
+
     /// Cached after the first write. Reads fall back to defaults so a view
     /// body never mutates this object.
-    private func ids(for scope: String) -> Set<String> {
+    func ids(for scope: String) -> Set<String> {
         hidden[scope] ?? Set(UserDefaults.standard.stringArray(forKey: Self.key(scope)) ?? [])
     }
 

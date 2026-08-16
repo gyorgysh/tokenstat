@@ -174,6 +174,16 @@ enum ClientRemote {
         )
     }
 
+    static func launcherHide(peer: String, id: String) async throws {
+        struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
+        _ = try await Bridge.onPeer(peer, "launcher.hide", ["id": id], as: Result.self)
+    }
+
+    static func launcherShow(peer: String, id: String) async throws {
+        struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
+        _ = try await Bridge.onPeer(peer, "launcher.show", ["id": id], as: Result.self)
+    }
+
     // MARK: - Files on a peer
 
     static func tree(peer: String, workspace: String, path: String) async throws -> [TreeEntry] {

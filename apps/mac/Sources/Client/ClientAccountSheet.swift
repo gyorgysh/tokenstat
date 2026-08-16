@@ -165,6 +165,7 @@ private struct ClientAccountContent: View {
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
@@ -210,6 +211,7 @@ private struct ClientAccountContent: View {
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
@@ -236,6 +238,7 @@ private struct ClientAccountContent: View {
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
+                        .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
@@ -453,6 +456,7 @@ private struct ClientAccountContent: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
         }
@@ -480,6 +484,7 @@ private struct ClientAccountContent: View {
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .foregroundStyle(Theme.danger)

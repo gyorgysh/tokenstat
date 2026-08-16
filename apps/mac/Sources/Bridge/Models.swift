@@ -811,6 +811,12 @@ struct RemoteLaunchProfile: Codable, Sendable, Hashable {
     /// Whether the command is on this machine's PATH (or in its own install
     /// directory). False when the profile is only offered to be installed.
     var installed: Bool
+    /// Taken off this machine's launcher. The binary is still there. Stored
+    /// on the owning host so a phone and the Mac see the same grid.
+    ///
+    /// Optional so a daemon from before this field still decodes. Missing
+    /// means not hidden.
+    var hidden: Bool?
     /// The tool's official one-shot installer, shown for a profile that is
     /// not installed. Data to display, never a command this app runs: the
     /// host executes it and the app only sends the profile id.
@@ -938,6 +944,28 @@ struct ProjectHarnesses: Identifiable, Hashable {
         let trimmed = path.hasSuffix("/") ? String(path.dropLast()) : path
         let leaf = trimmed.split(separator: "/").last.map(String.init)
         return leaf?.isEmpty == false ? leaf! : (trimmed.isEmpty ? "unknown" : trimmed)
+    }
+}
+
+/// Archive source id for a launched command, or nil for a plain shell.
+///
+/// Matched on the basename so `/Users/…/bin/claude` and `claude` are the
+/// same harness. Used by session rows on both the Mac and the phone.
+func harnessID(forCommand command: String) -> String? {
+    switch URL(fileURLWithPath: command).lastPathComponent {
+    case "claude": return "claude_code"
+    case "codex": return "codex"
+    case "opencode", "opencode2": return "opencode"
+    case "grok": return "grok"
+    case "copilot": return "copilot"
+    case "cline": return "cline"
+    case "openclaw": return "openclaw"
+    case "muse": return "muse"
+    case "pi": return "pi"
+    case "zed": return "zed"
+    case "agy": return "antigravity"
+    case "agent", "cursor": return "cursor"
+    default: return nil
     }
 }
 

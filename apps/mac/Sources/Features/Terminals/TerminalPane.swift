@@ -85,7 +85,7 @@ struct TerminalPane: View {
         let all = peer == nil ? launcher.available : launcher.remoteAvailable
         let scope = peer ?? "local"
         let visibility = LauncherVisibility.shared
-        return all.filter { !visibility.isHidden($0.id, scope: scope) }
+        return all.filter { !$0.hidden && !visibility.isHidden($0.id, scope: scope) }
     }
 
     /// Every supported harness on the owning machine, installed or not, for
@@ -873,13 +873,20 @@ private struct LaunchSurface: View {
     }
 
     /// Installed and still on the grid. Hidden ones live under +.
+    ///
+    /// Host `hidden` and this device's defaults both count: a hide from the
+    /// phone lands as catalog.hidden, a hide on an older host is local only.
     private var visibleProfiles: [LaunchProfile] {
-        profiles.filter { $0.installed && !visibility.isHidden($0.id, scope: visibilityScope) }
+        profiles.filter { $0.installed && !isOffGrid($0) }
     }
 
     /// Not installed, or installed and hidden. Same catalog order.
     private var extraProfiles: [LaunchProfile] {
-        profiles.filter { !$0.installed || visibility.isHidden($0.id, scope: visibilityScope) }
+        profiles.filter { !$0.installed || isOffGrid($0) }
+    }
+
+    private func isOffGrid(_ profile: LaunchProfile) -> Bool {
+        profile.hidden || visibility.isHidden(profile.id, scope: visibilityScope)
     }
 
     /// The workspace's stored selection. The list itself lives in the chrome
@@ -985,7 +992,7 @@ private struct LaunchSurface: View {
         ) {
             Button("Remove", role: .destructive) {
                 if let profile = pendingHide {
-                    visibility.hide(profile.id, scope: visibilityScope)
+                    Task { await LaunchCatalog.shared.hide(profile.id, peer: modelPeer) }
                 }
                 pendingHide = nil
             }
@@ -1036,7 +1043,7 @@ private struct LaunchSurface: View {
     /// something that has a bundled installer, a muted card for the rest.
     @ViewBuilder
     private func tile(for profile: LaunchProfile) -> some View {
-        if profile.installed, !visibility.isHidden(profile.id, scope: visibilityScope) {
+        if profile.installed, !isOffGrid(profile) {
             launchButton(profile)
         } else if profile.installed {
             showAgainButton(profile)
@@ -1094,7 +1101,7 @@ private struct LaunchSurface: View {
         LaunchInstallTile(
             profile: profile,
             isInstalling: false,
-            onInstall: { visibility.show(profile.id, scope: visibilityScope) }
+            onInstall: { Task { await LaunchCatalog.shared.show(profile.id, peer: modelPeer) } }
         )
         .help("\(profile.name) is installed. Click to add it back to the launcher.")
     }

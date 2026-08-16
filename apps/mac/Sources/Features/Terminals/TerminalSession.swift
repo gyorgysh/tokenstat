@@ -113,18 +113,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated let cwd: String
 
     /// The archive source id when this command is a known harness.
-    var harnessID: String? {
-        switch URL(fileURLWithPath: command).lastPathComponent {
-        case "claude": return "claude_code"
-        case "codex": return "codex"
-        case "opencode", "opencode2": return "opencode"
-        case "grok": return "grok"
-        case "copilot": return "copilot"
-        case "muse": return "muse"
-        case "pi": return "pi"
-        default: return nil
-        }
-    }
+    var harnessID: String? { Tokenstat.harnessID(forCommand: command) }
 
     /// True while the process is running. Set from `pty.info` polls.
     var alive: Bool

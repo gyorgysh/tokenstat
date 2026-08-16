@@ -21,6 +21,7 @@ struct ClientWorkspaceDetailView: View {
     @State private var openSession: ClientTerminalSession?
     @State private var errorMessage: String?
     @State private var isLaunching = false
+    @State private var launchingID: String?
     @State private var installingID: String?
     @State private var showingCatalog = false
     @State private var pendingInstall: RemoteLaunchProfile?
@@ -42,13 +43,20 @@ struct ClientWorkspaceDetailView: View {
     private var visibilityScope: String { peer }
 
     /// Installed and still on the row. Hidden ones live under +.
+    ///
+    /// Host `hidden` and this device's defaults both count: a hide on the
+    /// Mac lands as catalog.hidden even when this phone has never hid it.
     private var visibleCatalog: [RemoteLaunchProfile] {
-        catalog.filter { $0.installed && !visibility.isHidden($0.id, scope: visibilityScope) }
+        catalog.filter { $0.installed && !isOffGrid($0) }
     }
 
     /// Not installed, or installed and hidden.
     private var extraCatalog: [RemoteLaunchProfile] {
-        catalog.filter { !$0.installed || visibility.isHidden($0.id, scope: visibilityScope) }
+        catalog.filter { !$0.installed || isOffGrid($0) }
+    }
+
+    private func isOffGrid(_ profile: RemoteLaunchProfile) -> Bool {
+        profile.hidden == true || visibility.isHidden(profile.id, scope: visibilityScope)
     }
 
     var body: some View {
@@ -136,7 +144,7 @@ struct ClientWorkspaceDetailView: View {
         ) {
             Button("Remove", role: .destructive) {
                 if let profile = pendingHide {
-                    visibility.hide(profile.id, scope: visibilityScope)
+                    Task { await hideOnHost(profile) }
                 }
                 pendingHide = nil
             }
@@ -191,36 +199,43 @@ struct ClientWorkspaceDetailView: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Start")
                 .font(ClientType.sectionTitle)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Space.s) {
-                    if catalog.isEmpty {
-                        // Keep the surface useful while the owning host's
-                        // catalog is loading. Once it arrives, it supplies the
-                        // host's actual shell and the Shell tile is not added a
-                        // second time here.
-                        launchChip(RemoteLaunchProfile(
-                            id: "shell",
-                            name: "Shell",
-                            command: "/bin/zsh",
-                            args: ["-l"],
-                            bypassArgs: [],
-                            harnessId: nil,
-                            symbol: "terminal",
-                            openUrl: nil,
-                            installed: true,
-                            installCommand: nil
-                        ))
-                    } else {
-                        ForEach(visibleCatalog, id: \.id) { profile in
-                            launchChip(profile)
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: Theme.Space.s),
+                    GridItem(.flexible(), spacing: Theme.Space.s),
+                ],
+                spacing: Theme.Space.s
+            ) {
+                if catalog.isEmpty {
+                    // Keep the surface useful while the owning host's
+                    // catalog is loading. Once it arrives, it supplies the
+                    // host's actual shell and the Shell tile is not added a
+                    // second time here.
+                    launchTile(RemoteLaunchProfile(
+                        id: "shell",
+                        name: "Shell",
+                        command: "/bin/zsh",
+                        args: ["-l"],
+                        bypassArgs: [],
+                        harnessId: nil,
+                        symbol: "terminal",
+                        openUrl: nil,
+                        installed: true,
+                        hidden: false,
+                        installCommand: nil
+                    ))
+                } else {
+                    ForEach(visibleCatalog, id: \.id) { profile in
+                        launchTile(profile)
+                    }
+                    if !extraCatalog.isEmpty {
+                        ClientMoreTile(showing: showingCatalog) {
+                            showingCatalog.toggle()
                         }
-                        if !extraCatalog.isEmpty {
-                            addChip
-                        }
-                        if showingCatalog {
-                            ForEach(extraCatalog, id: \.id) { profile in
-                                launchChip(profile)
-                            }
+                    }
+                    if showingCatalog {
+                        ForEach(extraCatalog, id: \.id) { profile in
+                            launchTile(profile)
                         }
                     }
                 }
@@ -228,67 +243,37 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
-    private var addChip: some View {
-        Button {
-            showingCatalog.toggle()
-        } label: {
-            Text(showingCatalog ? "Hide" : "+")
-                .font(ClientType.caption.weight(.semibold))
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.vertical, Theme.Space.s)
-                .background(Color.secondary.opacity(0.12))
-                .foregroundStyle(.secondary)
-                .clipShape(Capsule())
-        }
-        .accessibilityLabel(showingCatalog ? "Hide extra tools" : "Show more tools")
-    }
-
     @ViewBuilder
-    private func launchChip(_ profile: RemoteLaunchProfile) -> some View {
-        if profile.installed, !visibility.isHidden(profile.id, scope: visibilityScope) {
-            Button {
+    private func launchTile(_ profile: RemoteLaunchProfile) -> some View {
+        if profile.installed, !isOffGrid(profile) {
+            ClientLaunchTile(
+                profile: profile,
+                isLaunching: launchingID == profile.id,
+                isBusy: isLaunching && launchingID != profile.id
+            ) {
                 Task { await launch(profile) }
-            } label: {
-                Text(profile.name)
-                    .font(ClientType.caption.weight(.semibold))
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, Theme.Space.s)
-                    .background(Theme.accent.opacity(0.15))
-                    .foregroundStyle(Theme.accent)
-                    .clipShape(Capsule())
             }
-            .disabled(isLaunching)
             .contextMenu {
                 if profile.id != "shell" {
                     Button("Remove from launcher") { pendingHide = profile }
                 }
             }
         } else if profile.installed {
-            Button {
-                visibility.show(profile.id, scope: visibilityScope)
-            } label: {
-                mutedChipLabel(profile.name)
+            ClientLaunchTile(profile: profile, isMuted: true) {
+                Task { await showAgain(profile) }
             }
         } else if profile.installCommand != nil {
-            Button {
+            ClientLaunchTile(
+                profile: profile,
+                isMuted: true,
+                isBusy: installingID != nil && installingID != profile.id,
+                caption: installingID == profile.id ? "Installing…" : profile.name
+            ) {
                 pendingInstall = profile
-            } label: {
-                mutedChipLabel(installingID == profile.id ? "Installing…" : profile.name)
             }
-            .disabled(installingID != nil)
         } else {
-            mutedChipLabel(profile.name)
+            ClientLaunchTile(profile: profile, isMuted: true, isBusy: true) {}
         }
-    }
-
-    private func mutedChipLabel(_ title: String) -> some View {
-        Text(title)
-            .font(ClientType.caption.weight(.semibold))
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.s)
-            .background(Color.secondary.opacity(0.12))
-            .foregroundStyle(.secondary)
-            .clipShape(Capsule())
     }
 
     private func install(_ profile: RemoteLaunchProfile) async {
@@ -306,6 +291,7 @@ struct ClientWorkspaceDetailView: View {
             }
             visibility.show(profile.id, scope: visibilityScope)
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
+            adoptHostHidden()
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
@@ -328,22 +314,7 @@ struct ClientWorkspaceDetailView: View {
                         Button {
                             openExisting(session)
                         } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(URL(fileURLWithPath: session.command).lastPathComponent)
-                                        .font(ClientType.label.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                    Text(session.alive ? "Running · tap to open" : "Stopped · tap to open")
-                                        .font(ClientType.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: "terminal")
-                                    .foregroundStyle(Theme.accent)
-                            }
-                            .padding(Theme.Space.m)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .cardSurface()
+                            ClientSessionRow(session: session)
                         }
                         .buttonStyle(.plain)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
@@ -445,9 +416,8 @@ struct ClientWorkspaceDetailView: View {
                 // Fall back to cwd match when the host did not tag workspace.
                 return session.cwd == folder.path || session.cwd.hasPrefix(folder.path + "/")
             }
-            if catalog.isEmpty {
-                catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? []
-            }
+            catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
+            adoptHostHidden()
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
@@ -476,9 +446,43 @@ struct ClientWorkspaceDetailView: View {
         }
     }
 
+    private func adoptHostHidden() {
+        let hostHidden = Set(catalog.compactMap { $0.hidden == true ? $0.id : nil })
+        if !hostHidden.isEmpty {
+            visibility.replace(hostHidden, scope: visibilityScope)
+        }
+    }
+
+    private func hideOnHost(_ profile: RemoteLaunchProfile) async {
+        visibility.hide(profile.id, scope: visibilityScope)
+        do {
+            try await ClientRemote.launcherHide(peer: peer, id: profile.id)
+        } catch {
+            // Older host: the local set is the whole answer.
+        }
+        catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
+        adoptHostHidden()
+    }
+
+    private func showAgain(_ profile: RemoteLaunchProfile) async {
+        visibility.show(profile.id, scope: visibilityScope)
+        do {
+            try await ClientRemote.launcherShow(peer: peer, id: profile.id)
+        } catch {
+            // Older host: the local set is the whole answer.
+        }
+        catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
+        adoptHostHidden()
+    }
+
     private func launch(_ profile: RemoteLaunchProfile) async {
+        guard profile.installed, !isOffGrid(profile) else { return }
         isLaunching = true
-        defer { isLaunching = false }
+        launchingID = profile.id
+        defer {
+            isLaunching = false
+            launchingID = nil
+        }
         errorMessage = nil
         let dark = UITraitCollection.current.userInterfaceStyle == .dark
         let pending = ClientTerminalSession(

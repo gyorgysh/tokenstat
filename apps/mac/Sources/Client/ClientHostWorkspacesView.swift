@@ -59,7 +59,7 @@ struct ClientHostWorkspacesView: View {
                                 folder: folder
                             )
                         } label: {
-                            row(title: folder.name, subtitle: folder.path, symbol: "folder")
+                            ClientFolderRow(folder: folder)
                         }
                         .buttonStyle(.plain)
                     }
@@ -74,11 +74,7 @@ struct ClientHostWorkspacesView: View {
                         Button {
                             model.open(session, peer: peerKey)
                         } label: {
-                            row(
-                                title: URL(fileURLWithPath: session.command).lastPathComponent,
-                                subtitle: session.alive ? "Running · \(session.cwd)" : "Stopped",
-                                symbol: "terminal"
-                            )
+                            ClientSessionRow(session: session)
                         }
                         .buttonStyle(.plain)
                     }
@@ -107,27 +103,6 @@ struct ClientHostWorkspacesView: View {
         }
     }
 
-    private func row(title: String, subtitle: String, symbol: String) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(ClientType.label.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            Image(systemName: symbol)
-                .foregroundStyle(Theme.accent)
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
 }
 
 @Observable

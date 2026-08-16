@@ -1226,6 +1226,18 @@ extension Bridge {
             as: LauncherInstallResult.self
         )
     }
+
+    /// Take a profile off this machine's launcher. The binary stays.
+    static func launcherHide(id: String) async throws {
+        struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
+        _ = try await background("launcher.hide", ["id": id], as: Result.self)
+    }
+
+    /// Put a hidden profile back on this machine's launcher.
+    static func launcherShow(id: String) async throws {
+        struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
+        _ = try await background("launcher.show", ["id": id], as: Result.self)
+    }
 }
 
 // MARK: - Automations

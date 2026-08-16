@@ -47,6 +47,8 @@ struct LaunchProfile: Identifiable, Sendable {
     /// The tool's official one-shot installer. The host runs it when the
     /// user clicks Install; this app only displays it.
     var installCommand: String? = nil
+    /// Taken off the owning machine's launcher. The binary is still there.
+    var hidden: Bool = false
 
     /// Whether pointing this harness at a local model server means anything.
     ///
@@ -242,6 +244,7 @@ final class LaunchCatalog {
             catalog = dtos.map(Self.profile(from:))
             available = catalog.filter { $0.installed }
             resolved = true
+            await adoptHostHidden(from: catalog, scope: "local", peer: nil)
         } catch {
             // The launch-time list stays; the next appearance retries.
         }
@@ -261,9 +264,121 @@ final class LaunchCatalog {
             )
             remoteCatalog = dtos.map(Self.profile(from:))
             remoteAvailable = remoteCatalog.filter { $0.installed }
+            await adoptHostHidden(from: remoteCatalog, scope: peer, peer: peer)
         } catch {
             remoteFetched.remove(peer)
         }
+    }
+
+    /// Hide a profile on the machine that owns it, then refresh that catalog.
+    ///
+    /// Local defaults update first so the tile moves before the socket
+    /// returns. An older host that does not know `launcher.hide` keeps the
+    /// local set only.
+    func hide(_ id: String, peer: String?) async {
+        let scope = peer ?? "local"
+        LauncherVisibility.shared.hide(id, scope: scope)
+        setHidden(id, true, peer: peer)
+        do {
+            if let peer {
+                _ = try await Bridge.onPeer(peer, "launcher.hide", ["id": id], as: HiddenAck.self)
+            } else {
+                try await Bridge.launcherHide(id: id)
+            }
+        } catch {
+            // Older host: the local set is the whole answer.
+        }
+        await refreshAfterVisibilityChange(peer: peer)
+    }
+
+    /// Put a hidden profile back on the owning machine's launcher.
+    func show(_ id: String, peer: String?) async {
+        let scope = peer ?? "local"
+        LauncherVisibility.shared.show(id, scope: scope)
+        setHidden(id, false, peer: peer)
+        do {
+            if let peer {
+                _ = try await Bridge.onPeer(peer, "launcher.show", ["id": id], as: HiddenAck.self)
+            } else {
+                try await Bridge.launcherShow(id: id)
+            }
+        } catch {
+            // Older host: the local set is the whole answer.
+        }
+        await refreshAfterVisibilityChange(peer: peer)
+    }
+
+    private struct HiddenAck: Codable, Sendable {
+        var hidden: Bool?
+        var id: String?
+    }
+
+    private func setHidden(_ id: String, _ hidden: Bool, peer: String?) {
+        if peer == nil {
+            catalog = catalog.map { profile in
+                var next = profile
+                if next.id == id { next.hidden = hidden }
+                return next
+            }
+        } else {
+            remoteCatalog = remoteCatalog.map { profile in
+                var next = profile
+                if next.id == id { next.hidden = hidden }
+                return next
+            }
+        }
+    }
+
+    private func refreshAfterVisibilityChange(peer: String?) async {
+        if let peer {
+            remoteFetched.remove(peer)
+            await resolveRemote(peer: peer)
+        } else {
+            resolved = false
+            await resolve()
+        }
+    }
+
+    /// Host list wins. If the host has never stored a set and this Mac still
+    /// has one in defaults, push it once so a phone sees the same hide.
+    private func adoptHostHidden(from profiles: [LaunchProfile], scope: String, peer: String?) async {
+        let hostHidden = Set(profiles.filter(\.hidden).map(\.id))
+        if hostHidden.isEmpty {
+            let local = LauncherVisibility.shared.ids(for: scope)
+            if !local.isEmpty {
+                for id in local.sorted() {
+                    do {
+                        if let peer {
+                            _ = try await Bridge.onPeer(
+                                peer,
+                                "launcher.hide",
+                                ["id": id],
+                                as: HiddenAck.self
+                            )
+                        } else {
+                            try await Bridge.launcherHide(id: id)
+                        }
+                    } catch {
+                        return
+                    }
+                }
+                if peer == nil {
+                    catalog = catalog.map { profile in
+                        var next = profile
+                        if local.contains(next.id) { next.hidden = true }
+                        return next
+                    }
+                } else {
+                    remoteCatalog = remoteCatalog.map { profile in
+                        var next = profile
+                        if local.contains(next.id) { next.hidden = true }
+                        return next
+                    }
+                }
+                return
+            }
+        }
+        LauncherVisibility.shared.replace(hostHidden, scope: scope)
     }
 
     /// Run a profile's official installer, then re-resolve so the muted tile
@@ -319,7 +434,8 @@ final class LaunchCatalog {
             symbol: dto.symbol,
             openUrl: dto.openUrl,
             installed: dto.installed,
-            installCommand: dto.installCommand
+            installCommand: dto.installCommand,
+            hidden: dto.hidden ?? false
         )
     }
 

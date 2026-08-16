@@ -108,7 +108,7 @@ struct ClientWorkspacesView: View {
                                         )
                                     }
                                 } label: {
-                                    folderRow(folder)
+                                    ClientFolderRow(folder: folder)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -125,7 +125,7 @@ struct ClientWorkspacesView: View {
                                     Button {
                                         model.openSession(session)
                                     } label: {
-                                        sessionRow(session)
+                                        ClientSessionRow(session: session)
                                     }
                                     .buttonStyle(.plain)
                                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: Theme.Space.s, trailing: 0))
@@ -267,55 +267,6 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    private func folderRow(_ folder: WorkspaceFolder) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(folder.name)
-                    .font(ClientType.label.weight(.medium))
-                    .foregroundStyle(.primary)
-                Text(folder.path)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if let subtitle = folder.subtitle {
-                    Text(subtitle)
-                        .font(ClientType.caption)
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
-    }
-
-    private func sessionRow(_ session: PtySessionInfo) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(URL(fileURLWithPath: session.command).lastPathComponent)
-                    .font(ClientType.label.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(session.alive ? "Running · \(session.cwd)" : "Stopped")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            Spacer()
-            Image(systemName: "terminal")
-                .foregroundStyle(Theme.accent)
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

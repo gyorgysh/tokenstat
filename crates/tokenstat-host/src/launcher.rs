@@ -13,9 +13,12 @@
 //! answers the same question here and the app asks over the remote call when
 //! the folder belongs to a peer.
 
+use std::collections::HashSet;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -262,6 +265,87 @@ const PROFILES: &[Profile] = &[
     },
 ];
 
+/// Tools taken off this machine's launcher. Display only: the binary stays.
+///
+/// Lives beside the machine key, not in the viewing app's defaults, so a
+/// phone that asks this host sees the same grid the Mac does.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct LauncherPrefs {
+    #[serde(default)]
+    hidden: Vec<String>,
+}
+
+fn prefs_path_in(dir: &Path) -> PathBuf {
+    dir.join("launcher.json")
+}
+
+fn load_prefs_in(dir: &Path) -> LauncherPrefs {
+    std::fs::read_to_string(prefs_path_in(dir))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn save_prefs_in(dir: &Path, prefs: &LauncherPrefs) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(dir);
+    let path = prefs_path_in(dir);
+    let text = serde_json::to_string_pretty(prefs).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Read only. A catalog draw must not create the identity directory.
+fn load_prefs() -> LauncherPrefs {
+    tokenstat_identity::identity_dir_path()
+        .ok()
+        .map(|dir| load_prefs_in(&dir))
+        .unwrap_or_default()
+}
+
+/// Hide an installed profile on this machine's launcher.
+///
+/// The shell stays: a machine without a shell tile cannot start a session
+/// at all. Unknown ids are refused the same way install is, so a remote
+/// caller cannot write an arbitrary string into the set.
+pub(crate) fn hide(id: &str) -> Result<Value, String> {
+    let dir = tokenstat_identity::identity_dir().map_err(|e| e.to_string())?;
+    hide_in(&dir, id)
+}
+
+fn hide_in(dir: &Path, id: &str) -> Result<Value, String> {
+    if id == "shell" {
+        return Err("the shell cannot be hidden".into());
+    }
+    if !PROFILES.iter().any(|p| p.id == id) {
+        return Err(format!("no launcher profile {id}"));
+    }
+    let mut prefs = load_prefs_in(dir);
+    if !prefs.hidden.iter().any(|hidden| hidden == id) {
+        prefs.hidden.push(id.to_string());
+        prefs.hidden.sort();
+        save_prefs_in(dir, &prefs)?;
+    }
+    Ok(json!({ "id": id, "hidden": true }))
+}
+
+/// Put a hidden profile back on this machine's launcher.
+pub(crate) fn show(id: &str) -> Result<Value, String> {
+    let dir = tokenstat_identity::identity_dir().map_err(|e| e.to_string())?;
+    show_in(&dir, id)
+}
+
+fn show_in(dir: &Path, id: &str) -> Result<Value, String> {
+    if !PROFILES.iter().any(|p| p.id == id) && id != "shell" {
+        return Err(format!("no launcher profile {id}"));
+    }
+    let mut prefs = load_prefs_in(dir);
+    let before = prefs.hidden.len();
+    prefs.hidden.retain(|hidden| hidden != id);
+    if prefs.hidden.len() != before {
+        save_prefs_in(dir, &prefs)?;
+    }
+    Ok(json!({ "id": id, "hidden": false }))
+}
+
 /// Everything a launcher can run in a workspace, with whether it is on this
 /// machine, as its daemon reports it. The shell profile is always available:
 /// every Unix box has a shell.
@@ -270,7 +354,8 @@ const PROFILES: &[Profile] = &[
 /// front end shows what is here as something to start, and everything else
 /// as something that can be installed from here. `installed` is the verdict
 /// the UI draws on, and the front end never launches a profile that reports
-/// false.
+/// false. `hidden` is the user's own take-off-the-grid set, stored on this
+/// machine so every client that asks sees the same list.
 pub(crate) fn catalog() -> Value {
     let path = search_path();
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
@@ -280,6 +365,7 @@ pub(crate) fn catalog() -> Value {
         &[]
     };
     let home = std::env::var("HOME").unwrap_or_default();
+    let hidden = load_prefs().hidden.into_iter().collect::<HashSet<_>>();
     let available: Vec<Value> = PROFILES
         .iter()
         .map(|profile| {
@@ -296,6 +382,7 @@ pub(crate) fn catalog() -> Value {
                 "symbol": profile.symbol,
                 "openUrl": profile.open_url,
                 "installed": installed,
+                "hidden": hidden.contains(profile.id),
                 "installCommand": profile.install_command,
             });
             if profile.id == "shell" {
@@ -736,7 +823,7 @@ fn search_path() -> Vec<String> {
         "/bin".into(),
     ];
     paths.append(&mut conventional);
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     paths.retain(|p| !p.is_empty() && seen.insert(p.clone()));
     paths
 }
@@ -744,8 +831,8 @@ fn search_path() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PROFILES, Profile, catalog, install, model_arguments, model_environment, resolve_profile,
-        strip_ansi,
+        PROFILES, Profile, catalog, hide_in, install, load_prefs_in, model_arguments,
+        model_environment, resolve_profile, show_in, strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
@@ -877,6 +964,10 @@ mod tests {
             assert!(
                 entry.get("installed").and_then(|v| v.as_bool()).is_some(),
                 "{entry} must carry an installed verdict"
+            );
+            assert!(
+                entry.get("hidden").and_then(|v| v.as_bool()).is_some(),
+                "{entry} must carry a hidden verdict"
             );
         }
         let claude = entries
@@ -1054,5 +1145,52 @@ mod tests {
     fn no_selection_means_no_arguments() {
         assert!(model_arguments("claude", None, None).is_empty());
         assert!(model_arguments("claude", Some("lmstudio"), None).is_empty());
+    }
+
+    fn temp_prefs_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-launcher-prefs-{}-{}-{}",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("a temp prefs dir");
+        dir
+    }
+
+    #[test]
+    fn hide_persists_and_show_removes() {
+        let dir = temp_prefs_dir("hide");
+        hide_in(&dir, "opencode").expect("hide");
+        hide_in(&dir, "codex").expect("hide");
+        let prefs = load_prefs_in(&dir);
+        assert_eq!(prefs.hidden, vec!["codex", "opencode"]);
+        show_in(&dir, "opencode").expect("show");
+        let prefs = load_prefs_in(&dir);
+        assert_eq!(prefs.hidden, vec!["codex"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hide_refuses_the_shell_and_unknown_ids() {
+        let dir = temp_prefs_dir("refuse");
+        let shell = hide_in(&dir, "shell").expect_err("shell");
+        assert!(shell.contains("cannot be hidden"), "{shell}");
+        let unknown = hide_in(&dir, "definitely-not-a-launcher-profile").expect_err("unknown");
+        assert!(unknown.contains("no launcher profile"), "{unknown}");
+        assert!(load_prefs_in(&dir).hidden.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn hide_is_idempotent() {
+        let dir = temp_prefs_dir("twice");
+        hide_in(&dir, "grok").expect("first");
+        hide_in(&dir, "grok").expect("second");
+        assert_eq!(load_prefs_in(&dir).hidden, vec!["grok"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

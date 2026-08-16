@@ -2230,6 +2230,32 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
             crate::launcher::install(&p.id)
         }
 
+        // Take a profile off this machine's launcher, or put it back. The
+        // set lives on the host so a phone that asks `launcher.catalog`
+        // sees the same grid as the Mac. Id only, same rule as install.
+        "launcher.hide" => {
+            #[derive(Deserialize)]
+            struct HideParams {
+                id: String,
+            }
+            let p: HideParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::launcher::hide(&p.id)
+        }
+        "launcher.show" => {
+            #[derive(Deserialize)]
+            struct ShowParams {
+                id: String,
+            }
+            let p: ShowParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::launcher::show(&p.id)
+        }
+
         // Remove a machine from the account directory. The server deletes its
         // uploaded rows, so this is an explicit action for a machine id that
         // is stale (a reinstall) or otherwise holding a machine-cap slot.
