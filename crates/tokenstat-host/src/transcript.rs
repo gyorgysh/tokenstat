@@ -21,11 +21,19 @@ pub const REPLY_CAP: usize = 64 * 1024;
 /// How much readable text to keep on disk for one run.
 pub const READABLE_CAP: usize = 256 * 1024;
 
+enum Piece {
+    /// A streamed text delta. Consecutive ones join without a blank line.
+    Text(String),
+    /// A tool line, an error, or any other standalone paragraph.
+    Block(String),
+}
+
 /// Incremental NDJSON (or plain) renderer for one backend.
 pub struct Parser {
     backend: String,
     leftover: String,
     last_block: String,
+    last_was_text: bool,
 }
 
 impl Parser {
@@ -34,6 +42,7 @@ impl Parser {
             backend: backend.to_string(),
             leftover: String::new(),
             last_block: String::new(),
+            last_was_text: false,
         }
     }
 
@@ -49,7 +58,7 @@ impl Parser {
                 line.pop();
             }
             if let Some(piece) = self.line(&line) {
-                append_block(&mut out, &piece);
+                self.emit(&mut out, piece);
             }
         }
         out
@@ -62,10 +71,42 @@ impl Parser {
             return String::new();
         }
         let leftover = std::mem::take(&mut self.leftover);
-        self.line(&leftover).unwrap_or_default()
+        let mut out = String::new();
+        if let Some(piece) = self.line(&leftover) {
+            self.emit(&mut out, piece);
+        }
+        out
     }
 
-    fn line(&mut self, raw: &str) -> Option<String> {
+    fn emit(&mut self, out: &mut String, piece: Piece) {
+        match piece {
+            Piece::Text(text) => {
+                // Cursor (and some Claude streams) repeat the whole segment
+                // after the deltas. Skip that exact copy.
+                if text == self.last_block {
+                    return;
+                }
+                if self.last_was_text {
+                    out.push_str(&text);
+                    self.last_block.push_str(&text);
+                } else {
+                    append_block(out, &text);
+                    self.last_block = text;
+                    self.last_was_text = true;
+                }
+            }
+            Piece::Block(text) => {
+                if text == self.last_block {
+                    return;
+                }
+                append_block(out, &text);
+                self.last_block = text;
+                self.last_was_text = false;
+            }
+        }
+    }
+
+    fn line(&self, raw: &str) -> Option<Piece> {
         let cleaned = strip_ansi(raw)
             .trim()
             .trim_start_matches('\u{feff}')
@@ -80,29 +121,23 @@ impl Parser {
                     return None;
                 }
             }
-            return Some(cleaned);
+            return Some(Piece::Block(cleaned));
         }
         let value: serde_json::Value = serde_json::from_str(&cleaned).ok()?;
-        let rendered = match self.backend.as_str() {
+        match self.backend.as_str() {
             "grok" => render_grok(&value),
-            "claude" | "cursor" => render_claude_family(&value),
+            "claude" => render_claude_family(&value),
+            "cursor" => render_cursor(&value),
             "codex" => render_codex(&value),
+            "opencode" => render_opencode(&value),
             _ => None,
-        };
-        match rendered {
-            Some(text) if text == self.last_block => None,
-            Some(text) => {
-                self.last_block = text.clone();
-                Some(text)
-            }
-            None => None,
         }
     }
 
     fn is_json_backend(&self) -> bool {
         matches!(
             self.backend.as_str(),
-            "grok" | "claude" | "cursor" | "codex"
+            "grok" | "claude" | "cursor" | "codex" | "opencode"
         )
     }
 }
@@ -150,11 +185,11 @@ fn append_block(out: &mut String, piece: &str) {
     out.push_str(piece);
 }
 
-fn render_grok(value: &serde_json::Value) -> Option<String> {
+fn render_grok(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type")?.as_str()?;
     match kind {
-        "text" => nonempty(value.get("data").and_then(|v| v.as_str())),
-        "error" => nonempty(value.get("message").and_then(|v| v.as_str())),
+        "text" => nonempty(value.get("data").and_then(|v| v.as_str())).map(Piece::Text),
+        "error" => nonempty(value.get("message").and_then(|v| v.as_str())).map(Piece::Block),
         "tool_call" => {
             let title = value
                 .get("title")
@@ -166,25 +201,57 @@ fn render_grok(value: &serde_json::Value) -> Option<String> {
                 .get("rawInput")
                 .and_then(|v| v.get("path").or_else(|| v.get("file")))
                 .and_then(|v| v.as_str());
-            Some(match path {
+            Some(Piece::Block(match path {
                 Some(p) => format!("{title} {p}"),
                 None => title.to_string(),
-            })
+            }))
         }
         _ => None,
     }
 }
 
-fn render_claude_family(value: &serde_json::Value) -> Option<String> {
+fn render_claude_family(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type")?.as_str()?;
     match kind {
-        "assistant" => assistant_texts(value),
-        "result" => nonempty(value.get("result").and_then(|v| v.as_str())),
+        "assistant" => assistant_texts(value).map(Piece::Text),
+        "result" => nonempty(value.get("result").and_then(|v| v.as_str())).map(Piece::Text),
         _ => None,
     }
 }
 
-fn render_codex(value: &serde_json::Value) -> Option<String> {
+fn render_cursor(value: &serde_json::Value) -> Option<Piece> {
+    let kind = value.get("type")?.as_str()?;
+    match kind {
+        "assistant" => assistant_texts(value).map(Piece::Text),
+        "result" => nonempty(value.get("result").and_then(|v| v.as_str())).map(Piece::Text),
+        "tool_call" => {
+            // Only the start of a call. The completed event is the same name
+            // again and would double every tool in the inspector.
+            let subtype = value.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
+            if !subtype.is_empty() && subtype != "started" {
+                return None;
+            }
+            let map = value.get("tool_call")?.as_object()?;
+            let (key, call) = map.iter().next()?;
+            let title = tool_label(key);
+            let args = call.get("args");
+            let path = args
+                .and_then(|v| {
+                    v.get("path")
+                        .or_else(|| v.get("file"))
+                        .or_else(|| v.get("target_file"))
+                })
+                .and_then(|v| v.as_str());
+            Some(Piece::Block(match path {
+                Some(p) => format!("{title} {p}"),
+                None => title,
+            }))
+        }
+        _ => None,
+    }
+}
+
+fn render_codex(value: &serde_json::Value) -> Option<Piece> {
     let kind = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
     if kind == "item.completed" {
         let item = value.get("item")?;
@@ -194,20 +261,73 @@ fn render_codex(value: &serde_json::Value) -> Option<String> {
                 item.get("text")
                     .and_then(|v| v.as_str())
                     .or_else(|| item.get("content").and_then(|v| v.as_str())),
-            );
+            )
+            .map(Piece::Text);
+        }
+        if item_type == "command_execution" {
+            let command = item
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("shell");
+            let one_line = command.lines().next().unwrap_or(command);
+            return Some(Piece::Block(format!("Shell {one_line}")));
         }
         return None;
     }
     if kind == "message" && value.get("role").and_then(|v| v.as_str()) == Some("assistant") {
         if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
-            return nonempty(Some(text));
+            return nonempty(Some(text)).map(Piece::Text);
         }
-        return assistant_texts(value);
+        return assistant_texts(value).map(Piece::Text);
     }
     if kind == "agent_message" {
-        return nonempty(value.get("text").and_then(|v| v.as_str()));
+        return nonempty(value.get("text").and_then(|v| v.as_str())).map(Piece::Text);
     }
     None
+}
+
+fn render_opencode(value: &serde_json::Value) -> Option<Piece> {
+    let kind = value.get("type")?.as_str()?;
+    match kind {
+        "text" => nonempty(
+            value
+                .get("part")
+                .and_then(|p| p.get("text"))
+                .and_then(|v| v.as_str())
+                .or_else(|| value.get("text").and_then(|v| v.as_str())),
+        )
+        .map(Piece::Text),
+        "tool_use" => {
+            let part = value.get("part").unwrap_or(value);
+            let tool = part.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+            Some(Piece::Block(tool_label(tool)))
+        }
+        "error" => {
+            let msg = match value.get("error") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(obj) => obj
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                None => String::new(),
+            };
+            nonempty(Some(&msg)).map(Piece::Block)
+        }
+        _ => None,
+    }
+}
+
+fn tool_label(name: &str) -> String {
+    let base = name.trim_end_matches("ToolCall");
+    if base.is_empty() {
+        return "Tool".into();
+    }
+    let mut chars = base.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => "Tool".into(),
+    }
 }
 
 fn assistant_texts(value: &serde_json::Value) -> Option<String> {
@@ -215,19 +335,31 @@ fn assistant_texts(value: &serde_json::Value) -> Option<String> {
         .get("message")
         .and_then(|m| m.get("content"))
         .or_else(|| value.get("content"));
-    let texts: Vec<&str> = match content {
-        Some(serde_json::Value::Array(blocks)) => blocks
-            .iter()
-            .filter_map(|block| block.get("text").and_then(|v| v.as_str()))
-            .filter(|s| !s.is_empty())
-            .collect(),
-        Some(serde_json::Value::String(s)) if !s.is_empty() => vec![s.as_str()],
-        _ => Vec::new(),
-    };
-    if texts.is_empty() {
+    let mut parts: Vec<String> = Vec::new();
+    match content {
+        Some(serde_json::Value::Array(blocks)) => {
+            for block in blocks {
+                let kind = block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if kind == "tool_use" {
+                    if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
+                        parts.push(tool_label(name));
+                    }
+                    continue;
+                }
+                if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                    if !text.is_empty() {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+        }
+        Some(serde_json::Value::String(s)) if !s.is_empty() => parts.push(s.clone()),
+        _ => {}
+    }
+    if parts.is_empty() {
         None
     } else {
-        Some(texts.join("\n"))
+        Some(parts.join("\n"))
     }
 }
 
@@ -314,6 +446,43 @@ mod tests {
         assert!(first.is_empty(), "partial line must wait");
         let second = p.push(b"lo\"}\n");
         assert_eq!(second, "Hello");
+    }
+
+    #[test]
+    fn grok_text_deltas_join() {
+        let raw = concat!(
+            "{\"type\":\"text\",\"data\":\"Hel\"}\n",
+            "{\"type\":\"text\",\"data\":\"lo\"}\n",
+        );
+        assert_eq!(feed("grok", raw), "Hello");
+    }
+
+    #[test]
+    fn cursor_tool_call_and_repeat_are_readable() {
+        let raw = concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"H\"}]}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"i\"}]}}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Hi\"}]}}\n",
+            "{\"type\":\"tool_call\",\"subtype\":\"started\",\"tool_call\":{\"shellToolCall\":{\"args\":{\"command\":\"ls\"}}}}\n",
+            "{\"type\":\"tool_call\",\"subtype\":\"completed\",\"tool_call\":{\"shellToolCall\":{}}}\n",
+        );
+        let out = feed("cursor", raw);
+        assert!(out.contains("Hi"));
+        assert!(out.contains("Shell"));
+        assert_eq!(out.matches("Shell").count(), 1);
+        assert_eq!(out.matches("Hi").count(), 1);
+    }
+
+    #[test]
+    fn opencode_keeps_text_and_tools() {
+        let raw = concat!(
+            "{\"type\":\"text\",\"part\":{\"text\":\"Done.\"}}\n",
+            "{\"type\":\"tool_use\",\"part\":{\"tool\":\"bash\",\"state\":{\"status\":\"completed\"}}}\n",
+            "{\"type\":\"step_finish\",\"part\":{\"reason\":\"stop\"}}\n",
+        );
+        let out = feed("opencode", raw);
+        assert!(out.contains("Done."));
+        assert!(out.contains("Bash"));
     }
 
     #[test]

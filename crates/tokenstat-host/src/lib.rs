@@ -49,6 +49,8 @@ pub mod account_activity;
 #[cfg(feature = "local-host")]
 pub mod activity;
 #[cfg(feature = "local-host")]
+pub(crate) mod agent_models;
+#[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
 pub mod dispatch;

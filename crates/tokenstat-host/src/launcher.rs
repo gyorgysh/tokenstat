@@ -643,6 +643,35 @@ fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<St
         .map(|candidate| candidate.display().to_string())
 }
 
+/// Where a bare command name is on this machine: PATH, the login PATH,
+/// conventional install dirs, then a catalog profile's own directory.
+///
+/// Automations use this so `grok models` and friends resolve the same way
+/// a launcher tile does. The daemon's launchd PATH is too small on its own.
+pub(crate) fn resolve_command(command: &str) -> Option<String> {
+    let path = search_path();
+    if let Some(found) = resolve_on_path(command, &path) {
+        return Some(found);
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return None;
+    }
+    let home = Path::new(&home);
+    for profile in PROFILES {
+        if profile.command == command {
+            return resolve_profile(profile, &path, home);
+        }
+    }
+    None
+}
+
+/// The search path as one `PATH` value, for a child that must see the same
+/// tools the catalog does (helpers a CLI may re-exec).
+pub(crate) fn search_path_var() -> String {
+    search_path().join(":")
+}
+
 /// First executable match for a bare command name on the search path.
 fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
     if command.starts_with('/') {

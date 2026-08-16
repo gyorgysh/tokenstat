@@ -345,7 +345,7 @@ pub fn agent_command(
                 args.push("--variant".into());
                 args.push(e.into());
             }
-            args.extend(["run", p].map(str::to_string));
+            args.extend(["run", "--format", "json", "--", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
     }
@@ -364,17 +364,16 @@ fn shell_argv(prompt: &str) -> Vec<&str> {
 
 /// The backends a client can choose from, in picker order.
 ///
-/// `models` and `efforts` are the values the CLI accepts on its `--model` /
-/// effort flags, curated per backend from the CLI's own model listing
-/// (`grok models`, `cursor-agent --list-models`, `agy models`) or, where the
-/// list needs an account, from the aliases the CLI documents in `--help`. A
-/// backend with an empty list gets no picker at all in the client; the flags
-/// were verified against each CLI's `--help`. Keep these in sync with what
-/// the installed CLIs actually advertise — a stale id is a run that fails at
-/// launch, which is why the lists are deliberately small.
+/// `models` are taken from the installed CLI when it can list them
+/// (`grok models`, `cursor-agent models`, `agy models`, `opencode models`).
+/// The arrays below are the fallback when that CLI is missing, errors, or
+/// times out. Claude has no list command: `--help` documents aliases, and
+/// those stay the contract. A backend with an empty list gets no model
+/// picker. Effort values are still the flags each CLI's `--help` names.
 pub fn backends() -> Vec<serde_json::Value> {
+    crate::agent_models::refresh();
     [
-        ("sh", "Shell", "sh -c \"…\"", serde_json::json!([]), serde_json::json!([])),
+        ("sh", "Shell", "sh -c \"…\"", &[] as &[&str], serde_json::json!([])),
         (
             "claude",
             "Claude",
@@ -383,22 +382,23 @@ pub fn backends() -> Vec<serde_json::Value> {
             // "sonnet" per its `--help`); haiku is the long-standing third
             // tier. Full ids change with every release and need an account to
             // enumerate, so the aliases are the stable contract.
-            serde_json::json!(["fable", "opus", "sonnet", "haiku"]),
+            &["fable", "opus", "sonnet", "haiku"],
             serde_json::json!(["low", "medium", "high"]),
         ),
-        ("codex", "Codex", "codex exec … -- \"…\"", serde_json::json!([]), serde_json::json!([])),
+        ("codex", "Codex", "codex exec … -- \"…\"", &[], serde_json::json!([])),
         (
             "grok",
             "Grok",
             "grok -p \"…\"",
-            serde_json::json!(["grok-4.5"]),
+            &["grok-4.6", "grok-4.5"],
             serde_json::json!(["low", "medium", "high"]),
         ),
         (
             "cursor",
             "Cursor",
             "cursor-agent -p …",
-            serde_json::json!([
+            &[
+                "auto",
                 "gpt-5.4-nano-medium",
                 "gpt-5.1",
                 "gpt-5.1-high",
@@ -407,32 +407,33 @@ pub fn backends() -> Vec<serde_json::Value> {
                 "gemini-3-flash",
                 "gpt-5-mini",
                 "glm-5.2-high",
-            ]),
+            ],
             serde_json::json!([]),
         ),
         (
             "agy",
             "Antigravity",
             "agy --print \"…\"",
-            serde_json::json!([
+            &[
                 "gemini-3.6-flash-high",
                 "gemini-3.5-flash-high",
                 "gemini-3.1-pro-high",
                 "claude-sonnet-4-6",
                 "gpt-oss-120b-medium",
-            ]),
+            ],
             serde_json::json!(["low", "medium", "high"]),
         ),
         (
             "opencode",
             "OpenCode",
             "opencode run \"…\"",
-            serde_json::json!([]),
+            &[],
             serde_json::json!(["minimal", "medium", "high", "max"]),
         ),
     ]
     .into_iter()
-    .map(|(id, label, command, models, efforts)| {
+    .map(|(id, label, command, fallback, efforts)| {
+        let models = crate::agent_models::for_backend(id, fallback);
         serde_json::json!({"id": id, "label": label, "command": command, "models": models, "efforts": efforts})
     })
     .collect()
@@ -859,9 +860,9 @@ impl Store {
         let mut stopped_by_budget = false;
 
         let take = |bytes: &[u8],
-                        file: &mut Option<std::fs::File>,
-                        readable_body: &mut String,
-                        parser: &mut Parser| {
+                    file: &mut Option<std::fs::File>,
+                    readable_body: &mut String,
+                    parser: &mut Parser| {
             if let Some(f) = file {
                 let _ = f.write_all(bytes);
             }
@@ -1198,8 +1199,26 @@ mod tests {
         // Regression: claude rejects stream-json print output without this.
         let claude = agent_command("claude", "do it", None, None).unwrap();
         assert!(claude.iter().any(|a| a == "--verbose"));
+        let opencode = agent_command("opencode", "do it", None, None).unwrap();
+        assert!(opencode.windows(2).any(|w| w == ["--format", "json"]));
         assert!(agent_command("nope", "do it", None, None).is_err());
         assert!(agent_command("claude", "   ", None, None).is_err());
+    }
+
+    #[test]
+    fn grok_models_include_the_current_default() {
+        let grok = backends()
+            .into_iter()
+            .find(|v| v.get("id").and_then(|id| id.as_str()) == Some("grok"))
+            .expect("grok is a backend");
+        let models = grok
+            .get("models")
+            .and_then(|v| v.as_array())
+            .expect("a model list");
+        assert!(
+            models.iter().any(|m| m.as_str() == Some("grok-4.6")),
+            "picker must offer grok-4.6 (live list or fallback), got {models:?}"
+        );
     }
 
     #[test]
