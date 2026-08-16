@@ -463,7 +463,11 @@ pub fn interactive_agent_command(
                 args.push("--model".into());
                 args.push(m.into());
             }
-            args.extend(["--dangerously-skip-permissions", p].map(str::to_string));
+            // A positional prompt is ignored. `-i` / `--prompt-interactive`
+            // starts the TUI with that first message.
+            args.extend(
+                ["--dangerously-skip-permissions", "--prompt-interactive", p].map(str::to_string),
+            );
         }
         "opencode" => {
             args.push("opencode".into());
@@ -475,12 +479,12 @@ pub fn interactive_agent_command(
                 args.push("--variant".into());
                 args.push(e.into());
             }
-            args.extend(["--auto", p].map(str::to_string));
+            args.extend(["--auto", "--prompt", p].map(str::to_string));
         }
         "opencode2" => {
-            // Root command rejects `--model`. The TUI is the place to pick one.
+            // Root command rejects `--model`. `--prompt` is the TUI seed.
             args.push("opencode2".into());
-            args.extend(["--auto", p].map(str::to_string));
+            args.extend(["--auto", "--prompt", p].map(str::to_string));
         }
         other => return Err(format!("unknown backend {other}")),
     }
@@ -1797,10 +1801,14 @@ mod tests {
             interactive_agent_command("agy", "do it", Some("gemini-3.6-flash-high"), None).unwrap();
         assert!(!agy.iter().any(|a| a == "--print"));
         assert!(agy.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(
+            agy.windows(2)
+                .any(|w| w == ["--prompt-interactive", "do it"])
+        );
 
         let next =
             interactive_agent_command("opencode2", "do it", Some("opencode/foo"), None).unwrap();
-        assert_eq!(next, vec!["opencode2", "--auto", "do it"]);
+        assert_eq!(next, vec!["opencode2", "--auto", "--prompt", "do it"]);
 
         assert!(interactive_agent_command("nope", "do it", None, None).is_err());
         assert!(interactive_agent_command("claude", "   ", None, None).is_err());
