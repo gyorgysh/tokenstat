@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.4.1"
+    MARKETING_VERSION: "0.4.2"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -53,8 +53,8 @@ settings:
     # upload, and bump alongside MARKETING_VERSION in the same commit on each
     # release.
     #
-    # 30 has been uploaded, so the next upload of any marketing version needs
-    # 31.
+    # 30 has been uploaded as 0.4.1. The next upload of any marketing version
+    # needs 31, including this 0.4.2 TestFlight.
     CURRENT_PROJECT_VERSION: "31"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
