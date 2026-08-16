@@ -224,47 +224,46 @@ impl Board {
 
     pub fn update(&self, id: &str, changes: &CardUpdate) -> Result<Card, String> {
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
-        let card = cards
-            .iter_mut()
-            .find(|c| c.id == id)
+        let idx = cards
+            .iter()
+            .position(|c| c.id == id)
             .ok_or_else(|| format!("no card with id {id}"))?;
         if let Some(title) = changes.title.as_deref() {
             if title.trim().is_empty() {
                 return Err("a card needs a title".into());
             }
-            card.title = title.to_string();
+            cards[idx].title = title.to_string();
         }
         if let Some(notes) = changes.notes.as_deref() {
-            card.notes = notes.to_string();
+            cards[idx].notes = notes.to_string();
         }
         if let Some(kind) = changes.kind {
-            card.kind = kind;
+            cards[idx].kind = kind;
         }
         if let Some(backend) = changes.backend.as_deref() {
-            card.backend = backend.to_string();
+            cards[idx].backend = backend.to_string();
         }
         if let Some(model) = changes.model.as_deref() {
-            card.model = Some(model.to_string());
+            cards[idx].model = Some(model.to_string());
         }
         if let Some(effort) = changes.effort.as_deref() {
-            card.effort = Some(effort.to_string());
+            cards[idx].effort = Some(effort.to_string());
         }
         if let Some(workspace_id) = changes.workspace_id.as_deref() {
-            card.workspace_id = workspace_id.to_string();
+            cards[idx].workspace_id = workspace_id.to_string();
         }
         if let Some(budget_seconds) = changes.budget_seconds {
-            card.budget_seconds = budget_seconds;
+            cards[idx].budget_seconds = budget_seconds;
         }
         let mut column_changed = false;
         if let Some(column) = changes.column.as_deref() {
-            if COLUMNS.contains(&column) && card.column != column {
-                card.column = column.to_string();
+            if COLUMNS.contains(&column) && cards[idx].column != column {
+                cards[idx].column = column.to_string();
                 column_changed = true;
             }
         }
         let requested_order = changes.order.map(|o| o.max(0));
-        card.updated_at_ms = Self::now_ms();
-        let idx = cards.iter().position(|c| c.id == id).unwrap();
+        cards[idx].updated_at_ms = Self::now_ms();
         let column = cards[idx].column.clone();
         if requested_order.is_some() || column_changed {
             let mut others: Vec<usize> = cards
@@ -312,7 +311,7 @@ impl Board {
             if card
                 .delegate
                 .as_ref()
-                .is_some_and(|d| d.status == "running")
+                .is_some_and(|d| matches!(d.status.as_str(), "running" | "queued"))
             {
                 return Err(format!("{} is already running", card.title));
             }
@@ -358,7 +357,7 @@ impl Board {
         if cards[idx]
             .delegate
             .as_ref()
-            .is_some_and(|d| d.status == "running")
+            .is_some_and(|d| matches!(d.status.as_str(), "running" | "queued"))
         {
             // Another delegate claimed the card while the process spawned;
             // keep the original run, not this duplicate.
@@ -465,6 +464,33 @@ mod tests {
             .map(|c| c.id)
             .collect();
         assert_eq!(ids, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn moving_the_first_card_down_one_slot_does_not_overshoot() {
+        let dir = std::env::temp_dir().join("tokenstat-todo-reorder-down");
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        board.create(card("a")).unwrap();
+        board.create(card("b")).unwrap();
+        board.create(card("c")).unwrap();
+        // Visual [A, B, C]. Drop A before C after A is removed: insert at 1.
+        board
+            .update(
+                "a",
+                &CardUpdate {
+                    order: Some(1),
+                    ..CardUpdate::default()
+                },
+            )
+            .unwrap();
+        let ids: Vec<_> = board
+            .list()
+            .into_iter()
+            .filter(|c| c.column == "backlog")
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, vec!["b", "a", "c"]);
     }
 
     #[test]

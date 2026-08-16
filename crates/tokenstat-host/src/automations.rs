@@ -646,6 +646,27 @@ impl Store {
         Ok(next)
     }
 
+    /// Persist the queue and start any waiters the new cap can take.
+    pub fn apply_queue_config(self: &Arc<Self>, next: QueueConfig) -> Result<QueueConfig, String> {
+        let next = self.set_queue_config(next)?;
+        self.pump();
+        Ok(next)
+    }
+
+    fn is_killed(&self, run_id: &str) -> bool {
+        self.killed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(run_id)
+    }
+
+    fn mark_killed(&self, run_id: &str) {
+        self.killed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(run_id.to_string());
+    }
+
     fn save_runs(&self) -> Result<(), String> {
         let runs = self
             .runs
@@ -922,6 +943,9 @@ impl Store {
         pending: Pending,
         workspace_id: String,
     ) -> Result<RunRecord, String> {
+        if self.is_killed(&pending.run_id) {
+            return Err("stopped".into());
+        }
         let workspace = crate::workspaces::folder(&pending.job.workspace_id)?;
         let argv = agent_command(
             &pending.job.backend,
@@ -962,6 +986,11 @@ impl Store {
         let budget = pending.job.budget_seconds;
         let run_id = pending.run_id;
         let transcript_path = pending.transcript_path;
+        if self.is_killed(&run_id) {
+            let _ = tokenstat_pty::manager().kill(&pty_id);
+            let _ = tokenstat_pty::manager().close(&pty_id);
+            return Err("stopped".into());
+        }
         let me = Arc::clone(self);
         std::thread::spawn(move || {
             me.drain(&pty_id, &transcript_path, budget, &run_id);
@@ -986,14 +1015,28 @@ impl Store {
             };
             let workspace_id = pending.job.workspace_id.clone();
             let run_id = pending.run_id.clone();
+            let transcript_path = pending.transcript_path.clone();
+            if self.is_killed(&run_id) {
+                self.release_slot();
+                self.finish_run(&run_id, None, "stopped");
+                continue;
+            }
             match self.spawn_pending(pending, workspace_id) {
                 Ok(run) => {
                     let _ = self.update_run(run);
                 }
                 Err(err) => {
                     self.release_slot();
-                    self.finish_run(&run_id, None, "error");
-                    let _ = err;
+                    if self.is_killed(&run_id) || err == "stopped" {
+                        self.finish_run(&run_id, None, "stopped");
+                    } else {
+                        let note = format!("(failed to start: {err})\n");
+                        let _ = std::fs::write(
+                            transcript::readable_path(&transcript_path),
+                            note.as_bytes(),
+                        );
+                        self.finish_run(&run_id, None, "error");
+                    }
                 }
             }
         }
@@ -1042,18 +1085,25 @@ impl Store {
     /// run as stopped when the process is gone. A queued run is pulled off
     /// the wait list and marked stopped.
     pub fn kill_run(&self, run_id: &str) -> Result<(), String> {
+        // Mark first so a pump that already popped this id will not spawn it.
+        self.mark_killed(run_id);
+        let removed = {
+            let mut waiting = self.waiting.lock().unwrap_or_else(PoisonError::into_inner);
+            let before = waiting.len();
+            waiting.retain(|p| p.run_id != run_id);
+            before != waiting.len()
+        };
+        if removed {
+            self.finish_run(run_id, None, "stopped");
+            return Ok(());
+        }
         let runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         let run = runs
             .iter()
             .find(|run| run.id == run_id)
             .ok_or("no run with that id")?;
         if run.status == "queued" {
-            drop(runs);
-            self.waiting
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .retain(|p| p.run_id != run_id);
-            self.finish_run(run_id, None, "stopped");
+            // pump owns it now. spawn_pending / pump will see the kill mark.
             return Ok(());
         }
         if run.status != "running" {
@@ -1061,10 +1111,6 @@ impl Store {
         }
         let pty_id = run.pty_id.clone().ok_or("that run has no live pty")?;
         drop(runs);
-        self.killed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(run_id.to_string());
         match tokenstat_pty::manager().kill(&pty_id) {
             Ok(()) => Ok(()),
             Err(tokenstat_pty::PtyError::NoSession(_)) => Ok(()),
@@ -1800,5 +1846,96 @@ mod tests {
         let parsed: QueueConfig = serde_json::from_str(r#"{"defaultBudgetSeconds":0}"#).unwrap();
         assert_eq!(parsed.max_concurrent, DEFAULT_MAX_CONCURRENT);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn raising_the_cap_starts_a_waiter() {
+        let dir = temp_dir("queue-pump");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        store
+            .set_queue_config(QueueConfig {
+                default_budget_seconds: 30,
+                max_concurrent: 1,
+            })
+            .unwrap();
+        let workspace_id = sh_workspace(&dir);
+        let make = |id: &str| Automation {
+            id: id.into(),
+            name: id.into(),
+            backend: "sh".into(),
+            model: None,
+            effort: None,
+            workspace_id: workspace_id.clone(),
+            prompt: "sleep 8".into(),
+            schedule: ScheduleSpec::default(),
+            budget_seconds: 15,
+            enabled: false,
+            last_run_at_ms: None,
+            next_run_at_ms: None,
+            last_run_id: None,
+        };
+        let first = store.run_adhoc(make("a")).unwrap();
+        let second = store.run_adhoc(make("b")).unwrap();
+        assert_eq!(first.status, "running");
+        assert_eq!(second.status, "queued");
+        store
+            .apply_queue_config(QueueConfig {
+                default_budget_seconds: 30,
+                max_concurrent: 2,
+            })
+            .unwrap();
+        let second_now = store
+            .runs()
+            .into_iter()
+            .find(|r| r.id == second.id)
+            .unwrap();
+        assert_eq!(second_now.status, "running");
+        let _ = store.kill_run(&first.id);
+        let _ = store.kill_run(&second.id);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn killing_a_queued_run_does_not_start_it() {
+        let dir = temp_dir("queue-kill");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        store
+            .set_queue_config(QueueConfig {
+                default_budget_seconds: 30,
+                max_concurrent: 1,
+            })
+            .unwrap();
+        let workspace_id = sh_workspace(&dir);
+        let make = |id: &str| Automation {
+            id: id.into(),
+            name: id.into(),
+            backend: "sh".into(),
+            model: None,
+            effort: None,
+            workspace_id: workspace_id.clone(),
+            prompt: "sleep 8".into(),
+            schedule: ScheduleSpec::default(),
+            budget_seconds: 15,
+            enabled: false,
+            last_run_at_ms: None,
+            next_run_at_ms: None,
+            last_run_id: None,
+        };
+        let first = store.run_adhoc(make("a")).unwrap();
+        let second = store.run_adhoc(make("b")).unwrap();
+        assert_eq!(second.status, "queued");
+        store.kill_run(&second.id).unwrap();
+        store.pump();
+        let second_now = store
+            .runs()
+            .into_iter()
+            .find(|r| r.id == second.id)
+            .unwrap();
+        assert_eq!(second_now.status, "stopped");
+        assert_eq!(second_now.pty_id, None);
+        let _ = store.kill_run(&first.id);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

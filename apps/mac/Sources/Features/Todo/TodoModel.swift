@@ -52,6 +52,10 @@ final class TodoModel {
     /// Newest first by added date, or the order the person arranged.
     var sortNewestFirst = true
 
+    /// Scheduler default, used when a new card does not set its own limit.
+    var defaultBudgetMinutes = "180"
+    var defaultNoLimit = false
+
     /// Cards for a column, in the active sort.
     func cards(in column: String) -> [TodoCard] {
         let list = cards.filter { $0.column == column }
@@ -77,6 +81,12 @@ final class TodoModel {
             async let b = Bridge.automationBackends()
             cards = try await c
             backends = try await b
+            if let queue = try? await Bridge.automationQueue() {
+                defaultNoLimit = queue.defaultBudgetSeconds == 0
+                if queue.defaultBudgetSeconds > 0 {
+                    defaultBudgetMinutes = String(max(1, queue.defaultBudgetSeconds / 60))
+                }
+            }
             hasLoaded = true
             errorMessage = nil
             syncPolling()
@@ -123,6 +133,7 @@ final class TodoModel {
         }
     }
 
+    @discardableResult
     func updateCard(
         _ card: TodoCard,
         backend: String? = nil,
@@ -130,7 +141,7 @@ final class TodoModel {
         effort: String? = nil,
         workspaceID: String? = nil,
         budgetSeconds: UInt64? = nil
-    ) async {
+    ) async -> Bool {
         do {
             _ = try await Bridge.todoUpdate(
                 id: card.id,
@@ -140,9 +151,12 @@ final class TodoModel {
                 workspaceID: workspaceID,
                 budgetSeconds: budgetSeconds
             )
+            errorMessage = nil
             await load()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 

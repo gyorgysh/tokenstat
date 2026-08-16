@@ -418,11 +418,6 @@ final class AutomationsModel {
                 return
             }
             if !chunk.text.isEmpty {
-                if Self.looksLikeRawJSON(chunk.text) {
-                    transcriptText = "(Restart the host helper to read this run)"
-                    stopPolling()
-                    return
-                }
                 transcriptText = Self.capped(transcriptText + chunk.text)
             }
             transcriptOffset = chunk.nextOffset
@@ -469,12 +464,6 @@ final class AutomationsModel {
             if days.isEmpty { return "custom at \(time)" }
             return "\(days) at \(time)"
         }
-    }
-
-    /// An old host serves the raw NDJSON file. That stream freezes a text view.
-    private static func looksLikeRawJSON(_ text: String) -> Bool {
-        let trimmed = text.drop(while: { $0.isWhitespace })
-        return trimmed.first == "{" && trimmed.contains("\"type\":")
     }
 
     private static func capped(_ text: String) -> String {

@@ -894,6 +894,13 @@ struct NewAutomationSheet: View {
             if workspaceID.isEmpty, let first = folders.first {
                 workspaceID = first.id
             }
+            if existing == nil && template == nil {
+                applyBudget(
+                    model.queueNoLimit
+                        ? 0
+                        : (UInt64(model.queueBudgetMinutes) ?? 180) * 60
+                )
+            }
         }
         .onChange(of: backendID) { _, _ in
             // A model that meant something to one backend means nothing to

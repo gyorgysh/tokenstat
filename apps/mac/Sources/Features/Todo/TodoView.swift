@@ -147,7 +147,9 @@ struct TodoView: View {
                             onSelect: { model.selectCard(card.id) },
                             onViewRun: onViewRun,
                             onDropBefore: { dragged in
-                                let order = Int64(model.cards(in: id).firstIndex(where: { $0.id == card.id }) ?? 0)
+                                guard dragged.id != card.id else { return }
+                                let list = model.cards(in: id).filter { $0.id != dragged.id }
+                                let order = Int64(list.firstIndex(where: { $0.id == card.id }) ?? list.count)
                                 Task { await model.reorder(dragged, to: id, order: order) }
                             },
                             onTargeted: { on in
@@ -216,7 +218,8 @@ struct TodoView: View {
         .dropDestination(for: String.self) { ids, _ in
             guard let cardID = ids.first,
                   let card = model.cards.first(where: { $0.id == cardID }) else { return false }
-            Task { await model.reorder(card, to: id, order: Int64(model.cards(in: id).count)) }
+            let others = model.cards(in: id).filter { $0.id != card.id }.count
+            Task { await model.reorder(card, to: id, order: Int64(others)) }
             return true
         } isTargeted: { targeted in
             if targeted {
@@ -632,6 +635,10 @@ private struct NewCardForm: View {
                 }
             }
         }
+        .onAppear {
+            budgetMinutes = model.defaultBudgetMinutes
+            noTimeLimit = model.defaultNoLimit
+        }
         .onChange(of: backendID) { _, _ in
             // A model that meant something to one backend means nothing to
             // the next; go back to defaults when the agent changes.
@@ -673,8 +680,8 @@ private struct NewCardForm: View {
         title = ""
         notes = ""
         workspaceID = ""
-        budgetMinutes = "180"
-        noTimeLimit = false
+        budgetMinutes = model.defaultBudgetMinutes
+        noTimeLimit = model.defaultNoLimit
         backendID = ""
         expanded = false
         kind = .task
@@ -786,7 +793,7 @@ struct DelegateSheet: View {
     private func run() async {
         let minutes = UInt64(budgetMinutes) ?? 180
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
-        await model.updateCard(
+        let saved = await model.updateCard(
             card,
             backend: backendID,
             model: modelChoice.isEmpty ? nil : modelChoice,
@@ -794,9 +801,8 @@ struct DelegateSheet: View {
             workspaceID: workspaceID,
             budgetSeconds: budget
         )
-        if let latest = model.cards.first(where: { $0.id == card.id }) {
-            await model.delegate(latest)
-        }
+        guard saved, let latest = model.cards.first(where: { $0.id == card.id }) else { return }
+        await model.delegate(latest)
         working = false
         if model.errorMessage == nil { dismiss() }
     }

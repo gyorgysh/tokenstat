@@ -1398,7 +1398,7 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                     .unwrap_or(current.default_budget_seconds),
                 max_concurrent: p.max_concurrent.unwrap_or(current.max_concurrent),
             };
-            serde_json::to_value(crate::automations::shared().set_queue_config(next)?).envelope()
+            serde_json::to_value(crate::automations::shared().apply_queue_config(next)?).envelope()
         }
 
         "todo.list" => serde_json::to_value(crate::todo::shared().list()).envelope(),
@@ -1416,9 +1416,11 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 model: p.model,
                 effort: p.effort,
                 workspace_id: p.workspace_id.unwrap_or_default(),
-                budget_seconds: p
-                    .budget_seconds
-                    .unwrap_or(crate::automations::DEFAULT_BUDGET_SECONDS),
+                budget_seconds: p.budget_seconds.unwrap_or_else(|| {
+                    crate::automations::shared()
+                        .queue_config()
+                        .default_budget_seconds
+                }),
                 created_at_ms: 0,
                 updated_at_ms: 0,
                 delegate: None,
