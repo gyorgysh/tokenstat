@@ -57,3 +57,41 @@ final class LauncherVisibility {
         defaultsPrefix + scope
     }
 }
+
+extension AgentBackend {
+    /// Workspace launcher tiles that stand for this automation backend.
+    var launcherIDs: [String] {
+        switch id {
+        case "sh": return ["shell"]
+        case "claude": return ["claude_code"]
+        case "codex": return ["codex"]
+        case "grok": return ["grok"]
+        case "cursor": return ["cursor", "cursor_agent"]
+        case "agy": return ["antigravity"]
+        case "opencode": return ["opencode"]
+        case "opencode2": return ["opencode2"]
+        default: return [id]
+        }
+    }
+
+    /// Hidden only when every matching tile is hidden. Cursor has two tiles.
+    @MainActor
+    func isHiddenFromLaunchers(scope: String = "local") -> Bool {
+        let ids = launcherIDs
+        guard !ids.isEmpty else { return false }
+        return ids.allSatisfy { LauncherVisibility.shared.isHidden($0, scope: scope) }
+    }
+}
+
+extension [AgentBackend] {
+    /// Picker list: hidden tiles stay out, unless this card or job already uses one.
+    @MainActor
+    func visibleForPicker(keeping id: String? = nil, scope: String = "local") -> [AgentBackend] {
+        var out = filter { !$0.isHiddenFromLaunchers(scope: scope) }
+        if let id, !id.isEmpty, !out.contains(where: { $0.id == id }),
+           let extra = first(where: { $0.id == id }) {
+            out.append(extra)
+        }
+        return out
+    }
+}

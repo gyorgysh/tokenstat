@@ -310,9 +310,15 @@ private struct ClientAccountContent: View {
                             .foregroundStyle(Theme.accent)
                     }
                 }
-                Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
+                if machine.reportsArchiveSync {
+                    Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                    Text("last used \(seen)")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 0)
         }

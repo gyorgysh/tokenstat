@@ -56,9 +56,26 @@ final class TodoModel {
     var defaultBudgetMinutes = "180"
     var defaultNoLimit = false
 
+    /// When true, the Done column shows archived cards instead.
+    var showingArchive = false
+
+    var archivedCount: Int { cards.filter { $0.column == "archive" }.count }
+
+    /// Picker list: hidden workspace tiles stay out, except the current pick.
+    func pickerBackends(keeping id: String? = nil) -> [AgentBackend] {
+        backends.visibleForPicker(keeping: id)
+    }
+
+    /// Board column id to the stored column (Archive lives under Done).
+    func storageColumn(_ column: String) -> String {
+        if column == "done", showingArchive { return "archive" }
+        return column
+    }
+
     /// Cards for a column, in the active sort.
     func cards(in column: String) -> [TodoCard] {
-        let list = cards.filter { $0.column == column }
+        let target = storageColumn(column)
+        let list = cards.filter { $0.column == target }
         if sortNewestFirst {
             return list.sorted { $0.createdAtMs > $1.createdAtMs }
         }
@@ -77,7 +94,7 @@ final class TodoModel {
 
     func load() async {
         do {
-            async let c = Bridge.todoCards()
+            async let c = Bridge.todoCards(includeArchived: true)
             async let b = Bridge.automationBackends()
             cards = try await c
             backends = try await b

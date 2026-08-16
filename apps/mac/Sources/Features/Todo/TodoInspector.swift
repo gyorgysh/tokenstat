@@ -184,7 +184,7 @@ struct TodoInspector: View {
         AppMenuPicker(
             title: "Agent",
             options: [(value: "", label: "Choose later")]
-                + model.backends.map { (value: $0.id, label: $0.label) },
+                + model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
             selection: $backendID
         )
         .onChange(of: backendID) { old, new in
@@ -270,8 +270,16 @@ struct TodoInspector: View {
                 Button("Move to Doing") { Task { await model.move(card, to: "doing") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
-            if card.column != "done" {
+            if card.column != "done" && card.column != "archive" {
                 Button("Move to Done") { Task { await model.move(card, to: "done") } }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            if card.column == "done" {
+                Button("Archive") { Task { await model.move(card, to: "archive") } }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            if card.column == "archive" {
+                Button("Restore to Done") { Task { await model.move(card, to: "done") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }

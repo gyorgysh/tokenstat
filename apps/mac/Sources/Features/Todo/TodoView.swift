@@ -59,6 +59,19 @@ struct TodoView: View {
                 .onChange(of: newestFirst) { _, on in
                     model.sortNewestFirst = on
                 }
+                ToolbarIconButton(
+                    systemImage: model.showingArchive ? "archivebox.fill" : "archivebox",
+                    help: model.showingArchive
+                        ? "Show Done"
+                        : (model.archivedCount == 0
+                            ? "No archived cards"
+                            : "Show \(model.archivedCount) archived card\(model.archivedCount == 1 ? "" : "s")"),
+                    isAccent: model.showingArchive,
+                    showsBadge: model.archivedCount > 0 && !model.showingArchive
+                ) {
+                    model.showingArchive.toggle()
+                }
+                .disabled(model.archivedCount == 0 && !model.showingArchive)
             }
             if let error = model.errorMessage {
                 Banner(text: error, severity: .warning)
@@ -119,7 +132,7 @@ struct TodoView: View {
             HStack(spacing: Theme.Space.s) {
                 FeatureMark(name: id == "doing" ? "mark_automation" : (id == "done" ? "mark_note" : "mark_todo"), tint: tint(for: id))
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(label)
+                    Text(columnTitle(id, label))
                         .font(.system(size: DisplayFit.dp(13), weight: .semibold))
                     Text("\(model.cards(in: id).count) card\(model.cards(in: id).count == 1 ? "" : "s")")
                         .font(.caption2)
@@ -130,14 +143,16 @@ struct TodoView: View {
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.xs)
 
-            AddCardTrigger(
-                expanded: Binding(
-                    get: { addingIn == id },
-                    set: { open in
-                        if open { addingIn = id } else if addingIn == id { addingIn = nil }
-                    }
+            if !(id == "done" && model.showingArchive) {
+                AddCardTrigger(
+                    expanded: Binding(
+                        get: { addingIn == id },
+                        set: { open in
+                            if open { addingIn = id } else if addingIn == id { addingIn = nil }
+                        }
+                    )
                 )
-            )
+            }
 
             ScrollView {
                 VStack(spacing: Theme.Space.s) {
@@ -158,7 +173,7 @@ struct TodoView: View {
                                 let list = model.cards(in: id).filter { $0.id != dragged.id }
                                 let order = Int64(list.firstIndex(where: { $0.id == card.id }) ?? list.count)
                                 clearDropChrome()
-                                Task { await model.reorder(dragged, to: id, order: order) }
+                                Task { await model.reorder(dragged, to: model.storageColumn(id), order: order) }
                             },
                             onTargeted: { on in
                                 if on {
@@ -183,7 +198,7 @@ struct TodoView: View {
                         }
                         .transition(.opacity)
                     } else if model.cards(in: id).isEmpty {
-                        Text(id == "done" ? "Nothing done yet" : "No cards")
+                        Text(emptyCopy(for: id))
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
@@ -231,17 +246,19 @@ struct TodoView: View {
             }
             .frame(maxWidth: .infinity)
 
-            NewCardForm(
-                model: model,
-                folders: folders,
-                column: id,
-                expanded: Binding(
-                    get: { addingIn == id },
-                    set: { open in
-                        if open { addingIn = id } else if addingIn == id { addingIn = nil }
-                    }
+            if !(id == "done" && model.showingArchive) {
+                NewCardForm(
+                    model: model,
+                    folders: folders,
+                    column: id,
+                    expanded: Binding(
+                        get: { addingIn == id },
+                        set: { open in
+                            if open { addingIn = id } else if addingIn == id { addingIn = nil }
+                        }
+                    )
                 )
-            )
+            }
         }
         .frame(width: width)
         .padding(Theme.Space.s)
@@ -285,7 +302,7 @@ struct TodoView: View {
         guard let cardID = ids.first,
               let card = model.cards.first(where: { $0.id == cardID }) else { return false }
         let others = model.cards(in: column).filter { $0.id != card.id }.count
-        Task { await model.reorder(card, to: column, order: Int64(others)) }
+        Task { await model.reorder(card, to: model.storageColumn(column), order: Int64(others)) }
         clearDropChrome()
         return true
     }
@@ -301,6 +318,18 @@ struct TodoView: View {
         let chrome: CGFloat = 182
         let resting = available * restingFraction
         return min(available, max(resting, tallestColumn + chrome))
+    }
+
+    private func columnTitle(_ id: String, _ label: String) -> String {
+        if id == "done", model.showingArchive { return "Archive" }
+        return label
+    }
+
+    private func emptyCopy(for id: String) -> String {
+        if id == "done" {
+            return model.showingArchive ? "Nothing archived" : "Nothing done yet"
+        }
+        return "No cards"
     }
 
     private func symbol(for id: String) -> String {
@@ -582,8 +611,14 @@ private struct CardView: View {
             if card.column != "doing" {
                 Button("Move to Doing") { Task { await model.move(card, to: "doing") } }
             }
-            if card.column != "done" {
+            if card.column != "done" && card.column != "archive" {
                 Button("Move to Done") { Task { await model.move(card, to: "done") } }
+            }
+            if card.column == "done" {
+                Button("Archive") { Task { await model.move(card, to: "archive") } }
+            }
+            if card.column == "archive" {
+                Button("Restore to Done") { Task { await model.move(card, to: "done") } }
             }
             Divider()
             if !card.isNote {
@@ -706,7 +741,7 @@ private struct NewCardForm: View {
                         AppMenuPicker(
                             title: "Agent",
                             options: [(value: "", label: "Choose later")]
-                                + model.backends.map { (value: $0.id, label: $0.label) },
+                                + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
                             selection: $backendID
                         )
                         AppMenuPicker(
@@ -850,7 +885,7 @@ struct DelegateSheet: View {
                 .foregroundStyle(.secondary)
             AppMenuPicker(
                 title: "Agent",
-                options: model.backends.map { (value: $0.id, label: $0.label) },
+                options: model.pickerBackends(keeping: card.backend).map { (value: $0.id, label: $0.label) },
                 selection: $backendID
             )
             AppMenuPicker(
@@ -911,7 +946,7 @@ struct DelegateSheet: View {
             if card.budgetSeconds > 0 {
                 budgetMinutes = String(max(1, card.budgetSeconds / 60))
             }
-            if backendID.isEmpty, let first = model.backends.first {
+            if backendID.isEmpty, let first = model.pickerBackends().first {
                 backendID = first.id
             }
         }

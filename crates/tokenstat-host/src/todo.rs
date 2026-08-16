@@ -10,9 +10,13 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 
-/// The columns, in order. Fixed, because a board with user-editable columns is
-/// a settings screen, and this milestone is the cards.
-pub const COLUMNS: [&str; 3] = ["backlog", "doing", "done"];
+/// The columns, in order. Archive is hidden from the default list.
+pub const COLUMNS: [&str; 4] = ["backlog", "doing", "done", "archive"];
+
+/// Done cards older than this move to archive on the next list/create/update.
+const ARCHIVE_AFTER_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// Extra Done cards above this count are archived, oldest first.
+const DONE_CAP: usize = 20;
 
 /// Whether a card is executable work or a private reminder.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -214,13 +218,18 @@ impl Board {
         }
     }
 
-    pub fn list(&self) -> Vec<Card> {
+    /// Active cards, or the full board including archive.
+    pub fn list_with(&self, include_archived: bool) -> Vec<Card> {
         self.reconcile();
+        self.auto_archive();
         let mut cards = self
             .cards
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
+        if !include_archived {
+            cards.retain(|c| c.column != "archive");
+        }
         cards.sort_by(|a, b| {
             let ac = COLUMNS
                 .iter()
@@ -235,10 +244,46 @@ impl Board {
         cards
     }
 
+    /// Hide finished work: week-old Done cards, then the oldest extras
+    /// once Done is over the cap. Notes stay on the card.
+    fn auto_archive(&self) {
+        let now = Self::now_ms();
+        let cutoff = now.saturating_sub(ARCHIVE_AFTER_MS);
+        let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut changed = false;
+        for card in cards.iter_mut() {
+            if card.column == "done" && card.updated_at_ms > 0 && card.updated_at_ms < cutoff {
+                card.column = "archive".into();
+                card.updated_at_ms = now;
+                changed = true;
+            }
+        }
+        let mut done: Vec<usize> = cards
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.column == "done")
+            .map(|(i, _)| i)
+            .collect();
+        if done.len() > DONE_CAP {
+            done.sort_by_key(|&i| cards[i].updated_at_ms);
+            let extra = done.len() - DONE_CAP;
+            for &i in done.iter().take(extra) {
+                cards[i].column = "archive".into();
+                cards[i].updated_at_ms = now;
+                changed = true;
+            }
+        }
+        drop(cards);
+        if changed {
+            let _ = self.save();
+        }
+    }
+
     pub fn create(&self, mut card: Card) -> Result<Card, String> {
         if card.title.trim().is_empty() {
             return Err("a card needs a title".into());
         }
+        self.auto_archive();
         if !COLUMNS.contains(&card.column.as_str()) {
             card.column = "backlog".into();
         }
@@ -261,6 +306,7 @@ impl Board {
     }
 
     pub fn update(&self, id: &str, changes: &CardUpdate) -> Result<Card, String> {
+        self.auto_archive();
         let mut cards = self.cards.lock().unwrap_or_else(PoisonError::into_inner);
         let idx = cards
             .iter()
@@ -504,7 +550,7 @@ mod tests {
             )
             .unwrap();
         let ids: Vec<_> = board
-            .list()
+            .list_with(false)
             .into_iter()
             .filter(|c| c.column == "backlog")
             .map(|c| c.id)
@@ -531,7 +577,7 @@ mod tests {
             )
             .unwrap();
         let ids: Vec<_> = board
-            .list()
+            .list_with(false)
             .into_iter()
             .filter(|c| c.column == "backlog")
             .map(|c| c.id)
@@ -576,7 +622,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(moved.column, "doing");
-        let all = board.list();
+        let all = board.list_with(false);
         // Columns sort backlog first, so the card moved to doing sits after the
         // one still in backlog.
         let pos_b = all.iter().position(|c| c.id == "b").unwrap();
@@ -606,6 +652,83 @@ mod tests {
             .unwrap();
         assert_eq!(updated.model, None);
         assert_eq!(updated.effort, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn week_old_done_cards_move_to_archive() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-todo-archive-age-{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("old");
+        c.column = "done".into();
+        board.create(c).unwrap();
+        {
+            let mut cards = board.cards.lock().unwrap();
+            cards[0].updated_at_ms = 1;
+        }
+        let active = board.list_with(false);
+        assert!(active.is_empty(), "{active:?}");
+        let archived = board.list_with(true);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].column, "archive");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn extra_done_cards_above_the_cap_are_archived() {
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-todo-archive-cap-{}", std::process::id()));
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        for i in 0..(DONE_CAP + 3) {
+            let mut c = card(&format!("d{i}"));
+            c.column = "done".into();
+            board.create(c).unwrap();
+        }
+        {
+            // Recent stamps so the 7-day rule does not take them first.
+            // Older first so the cap picks a stable extra of 3.
+            let now = Board::now_ms();
+            let mut cards = board.cards.lock().unwrap();
+            for (i, card) in cards.iter_mut().enumerate() {
+                card.updated_at_ms = now - i as i64;
+                if card.column == "archive" {
+                    card.column = "done".into();
+                }
+            }
+        }
+        let active = board.list_with(false);
+        let done: Vec<_> = active.iter().filter(|c| c.column == "done").collect();
+        assert_eq!(done.len(), DONE_CAP);
+        let archived = board
+            .list_with(true)
+            .into_iter()
+            .filter(|c| c.column == "archive")
+            .count();
+        assert_eq!(archived, 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn archive_keeps_notes() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-todo-archive-notes-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(dir.join("todo.json"));
+        let board = Board::at(dir.join("todo.json"));
+        let mut c = card("keep");
+        c.column = "done".into();
+        c.notes = "remember this".into();
+        board.create(c).unwrap();
+        {
+            let mut cards = board.cards.lock().unwrap();
+            cards[0].updated_at_ms = 1;
+        }
+        let archived = board.list_with(true);
+        assert_eq!(archived[0].notes, "remember this");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

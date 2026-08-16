@@ -750,6 +750,9 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     /// Hosts only; clients (phones) are not dialable from Devices.
     var isHost: Bool { kind != "client" }
 
+    /// Phones never upload an archive. lastSyncAt is not a product fact there.
+    var reportsArchiveSync: Bool { isHost }
+
     /// Falls back to the label so two unnamed machines do not collapse into
     /// one row in a ForEach.
     var id: String { machineID ?? label ?? "unidentified" }
@@ -1537,9 +1540,12 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
         switch column {
         case "doing": return "Doing"
         case "done": return "Done"
+        case "archive": return "Archive"
         default: return "To Do"
         }
     }
+
+    var isArchived: Bool { column == "archive" }
 
     var isNote: Bool { kind == .note }
 

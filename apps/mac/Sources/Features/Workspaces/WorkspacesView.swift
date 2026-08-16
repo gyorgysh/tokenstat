@@ -449,8 +449,8 @@ private struct CommitBox: View {
 
     /// Agent backends only. Shell cannot write commit messages from a diff.
     private var commitBackends: [AgentBackend] {
-        automations.backends.filter { !$0.models.isEmpty || $0.id != "sh" }
-            .filter { $0.id != "sh" }
+        automations.pickerBackends(keeping: model.autoCommitBackend[folder.id])
+            .filter { !$0.models.isEmpty && $0.id != "sh" }
     }
 
     private var selectedBackend: AgentBackend? {

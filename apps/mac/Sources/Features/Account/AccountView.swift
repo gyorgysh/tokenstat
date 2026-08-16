@@ -370,10 +370,16 @@ struct AccountView: View {
 
             Spacer()
 
-            Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help(formatServerDate(machine.lastSyncAt) ?? "never synced")
+            if machine.reportsArchiveSync {
+                Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help(formatServerDate(machine.lastSyncAt) ?? "never synced")
+            } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                Text("last used \(seen)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, Theme.Space.xs)
     }

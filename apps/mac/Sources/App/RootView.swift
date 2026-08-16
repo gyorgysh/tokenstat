@@ -1723,6 +1723,12 @@ struct RootView: View {
                         ?? "Could not start a terminal."
                     return
                 }
+                // OpenCode 2 seeds the prompt box but does not submit it.
+                // `run -i` covers OpenCode 1. Wait for the TUI, then Enter.
+                if launch.backend == "opencode2" {
+                    try? await Task.sleep(for: .milliseconds(1200))
+                    session?.sendEnter()
+                }
                 todo.noticeOpenedInFront(launch.title)
             } catch {
                 todo.errorMessage = error.localizedDescription

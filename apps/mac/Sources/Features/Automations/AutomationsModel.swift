@@ -91,6 +91,11 @@ final class AutomationsModel {
         stopPolling()
     }
 
+    /// Picker list: hidden workspace tiles stay out, except the current pick.
+    func pickerBackends(keeping id: String? = nil) -> [AgentBackend] {
+        backends.visibleForPicker(keeping: id)
+    }
+
     func load() async {
         do {
             async let j = Bridge.automations()

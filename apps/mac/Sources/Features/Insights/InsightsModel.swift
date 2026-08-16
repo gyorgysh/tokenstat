@@ -161,10 +161,10 @@ final class InsightsModel {
     }()
 
     func load() async {
-        if info == nil {
-            do {
-                info = try await Bridge.info()
-            } catch {
+        do {
+            info = try await Bridge.info()
+        } catch {
+            if info == nil {
                 errorMessage = error.localizedDescription
                 return
             }
@@ -195,8 +195,12 @@ final class InsightsModel {
             async let bySession = Bridge.report(group: .session, query: sessionQuery)
             async let activeBlock = Bridge.activeBlock(q)
             async let split = Bridge.reportSplit(group: .project, splitBy: .source, query: q)
+            async let freshInfo = Bridge.info()
 
             self.totals = try await totals
+            if let next = try? await freshInfo {
+                self.info = next
+            }
             self.daily = try await daily
             self.byModel = try await byModel
             self.byProject = try await byProject

@@ -1324,6 +1324,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     ///
     /// Queued like a keystroke, so a drop cannot overtake what the user typed a
     /// moment earlier.
+    /// Type a raw Enter. OpenCode 2 fills the prompt from `--prompt` and
+    /// waits; this submits it after the TUI is up.
+    func sendEnter() {
+        wake()
+        eventStream.continuation.yield(.write([0x0d]))
+    }
+
     func paste(text: String) {
         guard !text.isEmpty else { return }
         wake()

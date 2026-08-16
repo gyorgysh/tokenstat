@@ -353,6 +353,7 @@ struct TodoParams {
     effort: Option<String>,
     workspace_id: Option<String>,
     budget_seconds: Option<u64>,
+    include_archived: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1424,7 +1425,13 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             serde_json::to_value(crate::automations::shared().apply_queue_config(next)?).envelope()
         }
 
-        "todo.list" => serde_json::to_value(crate::todo::shared().list()).envelope(),
+        "todo.list" => {
+            let p: TodoParams = parse(params)?;
+            serde_json::to_value(
+                crate::todo::shared().list_with(p.include_archived.unwrap_or(false)),
+            )
+            .envelope()
+        }
         "todo.create" => {
             let p: TodoParams = parse(params)?;
             let card = crate::todo::Card {

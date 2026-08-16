@@ -470,7 +470,11 @@ pub fn interactive_agent_command(
             );
         }
         "opencode" => {
+            // `--prompt` only fills the TUI box. `run -i` sends the first
+            // message and stays in the interactive split-footer, so a task
+            // opened In front does not wait for Enter.
             args.push("opencode".into());
+            args.extend(["run", "-i", "--auto"].map(str::to_string));
             if let Some(m) = model {
                 args.push("--model".into());
                 args.push(m.into());
@@ -479,10 +483,12 @@ pub fn interactive_agent_command(
                 args.push("--variant".into());
                 args.push(e.into());
             }
-            args.extend(["--auto", "--prompt", p].map(str::to_string));
+            args.extend(["--", p].map(str::to_string));
         }
         "opencode2" => {
             // Root command rejects `--model`. `--prompt` is the TUI seed.
+            // OpenCode 2 has no `run -i`. The front end submits Enter once
+            // the TUI is up.
             args.push("opencode2".into());
             args.extend(["--auto", "--prompt", p].map(str::to_string));
         }
@@ -1885,6 +1891,24 @@ mod tests {
         let next =
             interactive_agent_command("opencode2", "do it", Some("opencode/foo"), None).unwrap();
         assert_eq!(next, vec!["opencode2", "--auto", "--prompt", "do it"]);
+
+        let oc = interactive_agent_command("opencode", "do it", Some("opencode/foo"), Some("high"))
+            .unwrap();
+        assert_eq!(
+            oc,
+            vec![
+                "opencode",
+                "run",
+                "-i",
+                "--auto",
+                "--model",
+                "opencode/foo",
+                "--variant",
+                "high",
+                "--",
+                "do it"
+            ]
+        );
 
         assert!(interactive_agent_command("nope", "do it", None, None).is_err());
         assert!(interactive_agent_command("claude", "   ", None, None).is_err());

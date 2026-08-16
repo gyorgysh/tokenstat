@@ -75,12 +75,14 @@ enum AppInstaller {
         try replaceRunningBundle(with: mounted)
         // The Dock and LaunchServices cache a bundle's icon and identity the
         // first time they see it. Replacing the bundle in place leaves that
-        // cache pointing at the old entry, which is how an update sometimes
-        // ends with a stale or duplicate dock icon. Re-register the new
-        // bundle and point this still-running instance's dock tile at the new
-        // icon, so the update is visible before the relaunch, not only after.
+        // cache pointing at the old entry. Refresh the record, and only
+        // unregister when the identifier itself changed: `-u` on a same-id
+        // update forgets the pinned Dock tile, and the next launch draws a
+        // second icon below it.
         let current = Bundle.main.bundleURL
-        refreshLaunchServices(bundle: current)
+        let runningID = Bundle.main.bundleIdentifier
+        let diskID = bundleIdentifier(at: current)
+        refreshLaunchServices(bundle: current, unregisterFirst: runningID != diskID)
         DispatchQueue.main.async {
             updateDockIcon(to: current)
         }
@@ -277,12 +279,34 @@ enum AppInstaller {
     /// activation, rather than a child of a process that is about to die.
     @MainActor
     static func relaunch() {
-        let bundle = Bundle.main.bundleURL
+        // `open -n` is a new instance. The Dock treats that as a new tile,
+        // so a pinned app grows a second icon under the pin. Wait for this
+        // process to die, then a normal `open` of the same path reuses the
+        // persistent tile.
+        let bundle = Bundle.main.bundleURL.path
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let quoted = shellQuote(bundle)
+        let script = """
+        ( while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.2; done
+          /usr/bin/open \(quoted)
+        ) >/dev/null 2>&1 &
+        """
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        task.arguments = ["-n", bundle.path]
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", script]
+        task.standardInput = FileHandle.nullDevice
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
         try? task.run()
+        task.waitUntilExit()
         NSApp.terminate(nil)
+    }
+
+    /// CFBundleIdentifier on disk, after an in-place replace.
+    private static func bundleIdentifier(at bundle: URL) -> String? {
+        let plist = bundle.appendingPathComponent("Contents/Info.plist")
+        guard let dict = NSDictionary(contentsOf: plist) as? [String: Any] else { return nil }
+        return dict["CFBundleIdentifier"] as? String
     }
 
     /// Re-register the bundle with LaunchServices.
@@ -290,21 +314,17 @@ enum AppInstaller {
     /// `lsregister -f` forces the icon and metadata caches to re-read the
     /// bundle, which is what stops an in-place update from leaving the old
     /// icon in the Dock or Launchpad.
-    private static func refreshLaunchServices(bundle: URL) {
+    private static func refreshLaunchServices(bundle: URL, unregisterFirst: Bool) {
         let tool = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-        // Unregister the path before registering it again.
-        //
-        // The bundle at this path was `ai.tokenstat.Tokenstat` and is now
-        // `ai.tokenstat.tokenstat`. LaunchServices keys its records by
-        // identifier as well as by path, so registering alone can leave the old
-        // identifier's record pointing at a bundle that no longer claims it,
-        // which is how one app starts appearing twice in Spotlight, the Dock
-        // and Open With. There is one application here and the database should
-        // say so.
-        //
-        // Harmless when the identifier has not changed: `-u` on a path that is
-        // about to be registered again is exactly a refresh.
-        for arguments in [["-u", bundle.path], ["-f", bundle.path]] {
+        // Unregister the path before registering it again only when the
+        // identifier changed. LaunchServices keys records by identifier as
+        // well as by path, so a rename otherwise leaves the old identifier's
+        // record pointing at a bundle that no longer claims it.
+        var passes: [[String]] = [["-f", bundle.path]]
+        if unregisterFirst {
+            passes.insert(["-u", bundle.path], at: 0)
+        }
+        for arguments in passes {
             let task = Process()
             task.executableURL = URL(fileURLWithPath: tool)
             task.arguments = arguments

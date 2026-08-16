@@ -935,7 +935,7 @@ struct NewAutomationSheet: View {
                     backendID = template.backendID
                 }
             }
-            if backendID.isEmpty, let first = model.backends.first {
+            if backendID.isEmpty, let first = model.pickerBackends(keeping: existing?.backend).first {
                 backendID = first.id
             }
             if workspaceID.isEmpty, let first = folders.first {
@@ -986,6 +986,11 @@ struct NewAutomationSheet: View {
                     setupHint("No supported agent CLI is installed yet. Install one, then reload this screen.", action: "Refresh agents") {
                         Task { await model.load() }
                     }
+                } else if model.pickerBackends(keeping: backendID).isEmpty {
+                    setupHint("Every installed agent is hidden on Workspaces. Show one there to pick it here.", action: "Go to Workspaces") {
+                        dismiss()
+                        onNavigate?(.workspaces)
+                    }
                 } else if folders.isEmpty {
                     setupHint("Add a workspace before choosing where this task should run.", action: "Go to Workspaces") {
                         dismiss()
@@ -994,7 +999,7 @@ struct NewAutomationSheet: View {
                 }
                 AppMenuPicker(
                     title: "Agent",
-                    options: model.backends.map { (value: $0.id, label: $0.label) },
+                    options: model.pickerBackends(keeping: existing?.backend ?? backendID).map { (value: $0.id, label: $0.label) },
                     selection: $backendID
                 )
                 AppMenuPicker(

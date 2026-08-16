@@ -157,7 +157,13 @@ struct MachinesView: View {
         if !model.known.isEmpty {
             knownMachines
         }
-        addDeviceAction
+        // Account-linked machines already appear above. Pairing is only
+        // needed for a machine that is not on the account yet, so the
+        // paste card stays off the first screenful once a list exists.
+        // The toolbar plus still opens the same sheet.
+        if model.accountMachines.isEmpty {
+            addDeviceAction
+        }
         encryptionNote
     }
 
@@ -337,7 +343,11 @@ struct MachinesView: View {
                 }
                 Divider()
                 serving
-                Text("Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides.")
+                Text(
+                    model.accountMachines.isEmpty
+                        ? "Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides."
+                        : "Machines on this account are listed above. Use + only to pair a computer that is not signed in yet."
+                )
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             }

@@ -1314,8 +1314,12 @@ extension Bridge {
 // MARK: - Todo
 
 extension Bridge {
-    static func todoCards() async throws -> [TodoCard] {
-        try await background("todo.list", as: [TodoCard].self)
+    static func todoCards(includeArchived: Bool = false) async throws -> [TodoCard] {
+        try await background(
+            "todo.list",
+            ["includeArchived": includeArchived],
+            as: [TodoCard].self
+        )
     }
 
     static func todoCreate(

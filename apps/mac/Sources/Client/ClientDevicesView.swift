@@ -464,7 +464,11 @@ struct ClientDeviceDetailView: View {
             if let id = machine.machineID {
                 DetailLine(label: "Device id", value: id)
             }
-            DetailLine(label: "Last sync", value: DeviceCopy.lastSync(machine))
+            if machine.reportsArchiveSync {
+                DetailLine(label: "Last sync", value: DeviceCopy.lastSync(machine))
+            } else if let seen = formatRelativeDate(machine.lastSeenAt) {
+                DetailLine(label: "Last used", value: seen)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
@@ -559,12 +563,15 @@ private enum DeviceCopy {
     static func lastSeen(_ machine: Machine, isThisDevice: Bool = false) -> String {
         if isThisDevice || machine.online == true { return "Awake now" }
         if let seen = formatRelativeDate(machine.lastSeenAt) { return "Last seen \(seen)" }
-        if let synced = formatRelativeDate(machine.lastSyncAt) { return "Last synced \(synced)" }
+        if machine.reportsArchiveSync, let synced = formatRelativeDate(machine.lastSyncAt) {
+            return "Last synced \(synced)"
+        }
         return "Has not reported in yet"
     }
 
     static func lastSync(_ machine: Machine) -> String {
-        formatServerDate(machine.lastSyncAt) ?? "never"
+        guard machine.reportsArchiveSync else { return "—" }
+        return formatServerDate(machine.lastSyncAt) ?? "never"
     }
 
     static func reach(_ machine: Machine, isThisDevice: Bool) -> String {
