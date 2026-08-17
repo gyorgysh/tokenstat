@@ -78,27 +78,25 @@ struct WorkflowsEditor: View {
                     model.writeWorking { $0.name = next }
                 }
             if let graph = model.working {
-                Picker("Scope", selection: Binding(
-                    get: { graph.scope },
-                    set: { model.setWorkingScope($0, workspaceID: graph.workspaceID ?? folders.first?.id) }
-                )) {
-                    ForEach(WorkflowScope.allCases, id: \.self) { scope in
-                        Text(scope.label).tag(scope)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 140)
+                AppMenuPicker(
+                    title: "",
+                    options: WorkflowScope.allCases.map { (value: $0, label: $0.label) },
+                    selection: Binding(
+                        get: { graph.scope },
+                        set: { model.setWorkingScope($0, workspaceID: graph.workspaceID ?? folders.first?.id) }
+                    )
+                )
+                .frame(width: 148)
                 if graph.scope == .workspace {
-                    Picker("Folder", selection: Binding(
-                        get: { graph.workspaceID ?? "" },
-                        set: { model.setWorkingScope(.workspace, workspaceID: $0) }
-                    )) {
-                        ForEach(folders) { folder in
-                            Text(folder.name).tag(folder.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 160)
+                    AppMenuPicker(
+                        title: "",
+                        options: folders.map { (value: $0.id, label: $0.name) },
+                        selection: Binding(
+                            get: { graph.workspaceID ?? folders.first?.id ?? "" },
+                            set: { model.setWorkingScope(.workspace, workspaceID: $0) }
+                        )
+                    )
+                    .frame(width: 168)
                 }
             }
             if model.isDirty {
@@ -184,6 +182,8 @@ struct WorkflowPalette: View {
                 paletteButton(title: "HTTP", subtitle: "Host-owned request", kind: .http, mark: "mark_sync")
                 paletteButton(title: "Command", subtitle: "Shell in the folder", kind: .command, mark: "mark_terminal")
                 paletteButton(title: "Gate", subtitle: "Wait for you", kind: .gate, mark: "mark_note")
+                paletteButton(title: "If", subtitle: "Then or else", kind: .condition, mark: "mark_plan")
+                paletteButton(title: "Loop", subtitle: "Repeat a body", kind: .loop, mark: "mark_scheduler")
                 if !model.jobs.isEmpty {
                     Text("AUTOMATIONS")
                         .font(Theme.sectionHeader)
@@ -261,13 +261,9 @@ struct WorkflowDesignSheet: View {
 
     @State private var prompt = ""
     @State private var backend = ""
+    @State private var modelID = ""
+    @State private var effort = ""
     @State private var workspaceID = ""
-
-    private static let chips = [
-        "Plan then build then review",
-        "Commit and push",
-        "Run tests then notify",
-    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -289,30 +285,18 @@ struct WorkflowDesignSheet: View {
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...8)
                 .disabled(model.isDesigning)
-            HStack(spacing: Theme.Space.s) {
-                ForEach(Self.chips, id: \.self) { chip in
-                    Button(chip, .create) { prompt = chip }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                }
+            if !designRecipes.isEmpty {
+                WorkflowRecipeChips(recipes: designRecipes) { prompt = $0.prompt }
             }
+            WorkflowDesignPickers(
+                agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: backend)),
+                folders: folders,
+                backendID: $backend,
+                modelID: $modelID,
+                effort: $effort,
+                workspaceID: $workspaceID
+            )
             HStack(spacing: Theme.Space.s) {
-                Picker("Backend", selection: $backend) {
-                    ForEach(model.pickerBackends(keeping: backend)) { item in
-                        Text(item.label).tag(item.id)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 180)
-                if !folders.isEmpty {
-                    Picker("Folder", selection: $workspaceID) {
-                        Text("No folder").tag("")
-                        ForEach(folders) { folder in
-                            Text(folder.name).tag(folder.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 200)
-                }
                 Spacer()
                 Button("Cancel", .dismiss) { dismiss() }
                     .buttonStyle(SecondaryButtonStyle())
@@ -321,7 +305,9 @@ struct WorkflowDesignSheet: View {
                         await model.design(
                             prompt: prompt,
                             workspaceID: workspaceID.isEmpty ? nil : workspaceID,
-                            backend: backend.isEmpty ? nil : backend
+                            backend: backend.isEmpty ? nil : backend,
+                            model: modelID.isEmpty ? nil : modelID,
+                            effort: effort.isEmpty ? nil : effort
                         )
                         if model.errorMessage == nil {
                             dismiss()
@@ -329,15 +315,23 @@ struct WorkflowDesignSheet: View {
                     }
                 }
                 .buttonStyle(AccentButtonStyle())
-                .disabled(model.isDesigning || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    model.isDesigning
+                        || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || WorkflowRecipes.designAgents(from: model.pickerBackends()).isEmpty
+                )
             }
         }
         .padding(Theme.Space.l)
         .frame(minWidth: 460)
         .onAppear {
-            backend = model.pickerBackends().first?.id ?? ""
+            backend = WorkflowRecipes.defaultBackend(from: model.pickerBackends())
             workspaceID = model.working?.workspaceID ?? folders.first?.id ?? ""
         }
+    }
+
+    private var designRecipes: [WorkflowRecipe] {
+        WorkflowRecipes.recipes(from: model.pickerBackends())
     }
 }
 #endif

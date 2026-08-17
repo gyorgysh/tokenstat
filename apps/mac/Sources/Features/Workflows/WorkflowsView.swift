@@ -18,15 +18,11 @@ struct WorkflowsView: View {
     @FocusState private var designFocused: Bool
     @State private var designPrompt = ""
     @State private var designBackend = ""
+    @State private var designModel = ""
+    @State private var designEffort = ""
     @State private var designWorkspaceID = ""
     @State private var running: WorkflowGraph?
     @State private var confirmingDelete: WorkflowGraph?
-
-    private static let chips = [
-        "Plan then build then review",
-        "Commit and push",
-        "Run tests then notify",
-    ]
 
     var body: some View {
         Group {
@@ -71,9 +67,12 @@ struct WorkflowsView: View {
                 .padding(Theme.Space.l)
         }
         .task {
+            #if os(macOS)
+            await LaunchCatalog.shared.resolve()
+            #endif
             await model.appeared()
             if designBackend.isEmpty {
-                designBackend = model.pickerBackends().first?.id ?? ""
+                designBackend = WorkflowRecipes.defaultBackend(from: model.pickerBackends())
             }
             if designWorkspaceID.isEmpty {
                 designWorkspaceID = folders.first?.id ?? ""
@@ -145,6 +144,10 @@ struct WorkflowsView: View {
         }
     }
 
+    private var designRecipes: [WorkflowRecipe] {
+        WorkflowRecipes.recipes(from: model.pickerBackends())
+    }
+
     private var isWarming: Bool {
         !model.hasLoaded && model.errorMessage == nil
     }
@@ -189,37 +192,27 @@ struct WorkflowsView: View {
                     .lineLimit(3...8)
                     .focused($designFocused)
                     .disabled(model.isDesigning)
-                HStack(spacing: Theme.Space.s) {
-                    ForEach(Self.chips, id: \.self) { chip in
-                        Button(chip, .create) { designPrompt = chip }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
-                    }
+                if !designRecipes.isEmpty {
+                    WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
                 }
+                WorkflowDesignPickers(
+                    agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: designBackend)),
+                    folders: folders,
+                    backendID: $designBackend,
+                    modelID: $designModel,
+                    effort: $designEffort,
+                    workspaceID: $designWorkspaceID
+                )
                 HStack(spacing: Theme.Space.s) {
-                    Picker("Backend", selection: $designBackend) {
-                        ForEach(model.pickerBackends(keeping: designBackend)) { backend in
-                            Text(backend.label).tag(backend.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 180)
-                    if !folders.isEmpty {
-                        Picker("Folder", selection: $designWorkspaceID) {
-                            Text("No folder").tag("")
-                            ForEach(folders) { folder in
-                                Text(folder.name).tag(folder.id)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(maxWidth: 200)
-                    }
                     Spacer()
                     Button(model.isDesigning ? "Designing" : "Design", .create) {
                         Task {
                             await model.design(
                                 prompt: designPrompt,
                                 workspaceID: designWorkspaceID.isEmpty ? nil : designWorkspaceID,
-                                backend: designBackend.isEmpty ? nil : designBackend
+                                backend: designBackend.isEmpty ? nil : designBackend,
+                                model: designModel.isEmpty ? nil : designModel,
+                                effort: designEffort.isEmpty ? nil : designEffort
                             )
                         }
                     }
@@ -228,6 +221,7 @@ struct WorkflowsView: View {
                         model.isDesigning
                             || !model.canStartNewDraft
                             || designPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || WorkflowRecipes.designAgents(from: model.pickerBackends()).isEmpty
                     )
                 }
             }
@@ -563,12 +557,12 @@ struct RunWorkflowSheet: View {
             TextField("Starting prompt", text: $input, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...8)
-            if graph.scope == .global {
-                Picker("Folder", selection: $workspaceID) {
-                    ForEach(folders) { folder in
-                        Text(folder.name).tag(folder.id)
-                    }
-                }
+            if graph.scope == .global, !folders.isEmpty {
+                AppMenuPicker(
+                    title: "Folder",
+                    options: folders.map { (value: $0.id, label: $0.name) },
+                    selection: $workspaceID
+                )
             }
             HStack {
                 Spacer()

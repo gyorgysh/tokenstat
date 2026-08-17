@@ -84,7 +84,7 @@ struct WorkflowsInspector: View {
                             set: { model.updateSelectedEdge(when: $0) }
                         )
                     )
-                    Text("Option-drag a new link to start it as on error.")
+                    Text("Green is on success. Red is on error. Always runs either way. A loop leaves on always after the last pass.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Button("Delete edge", .delete, role: .destructive) {
@@ -348,29 +348,54 @@ private struct WorkflowNodeInspector: View {
     @State private var headers = ""
     @State private var command = ""
     @State private var promptOverride = ""
+    @State private var conditionPattern = ""
+    @State private var loopTimes = ""
+    @State private var loopUntil = ""
     @State private var loadedID: String?
     @State private var applying = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if let node = model.selectedNode {
-                    fields(node)
-                    if let step = step(for: node) {
-                        StatusPill(status: step.status, text: step.endedLabel)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let node = model.selectedNode {
+                        fields(node)
                     }
-                    if !model.transcriptText.isEmpty, model.selectedStepID == node.id {
-                        TranscriptView(text: model.transcriptText, empty: "")
-                            .frame(maxHeight: 180)
-                    }
+                }
+                .padding(Theme.Space.m)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let node = model.selectedNode, let step = step(for: node) {
+                Divider()
+                HStack {
+                    StatusPill(status: step.status, text: step.endedLabel)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+            }
+            if let node = model.selectedNode,
+               !model.transcriptText.isEmpty,
+               model.selectedStepID == node.id {
+                Divider()
+                ScrollView {
+                    TranscriptView(text: model.transcriptText, empty: "")
+                        .padding(Theme.Space.m)
+                }
+                .frame(minHeight: 140, maxHeight: 260)
+                .clipped()
+            }
+            if model.selectedNode != nil {
+                Divider()
+                HStack {
                     Button("Delete node", .delete, role: .destructive) {
                         model.deleteSelection()
                     }
                     .buttonStyle(SecondaryButtonStyle())
+                    Spacer(minLength: 0)
                 }
+                .padding(Theme.Space.m)
             }
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear { if let node = model.selectedNode { load(node) } }
         .onChange(of: model.selectedNodeID) { _, _ in
@@ -408,6 +433,10 @@ private struct WorkflowNodeInspector: View {
             Text("The run pauses here. Continue or Stop from the canvas.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .condition:
+            conditionFields(node)
+        case .loop:
+            loopFields(node)
         case .mcp:
             Text("Reserved. This kind cannot be saved yet.")
                 .font(.caption)
@@ -487,6 +516,43 @@ private struct WorkflowNodeInspector: View {
             }
         }
         Text("{{input}} is the starting prompt. {{nodeId.output}} is an earlier step.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func conditionFields(_ node: WorkflowNode) -> some View {
+        AppMenuPicker(
+            title: "Test",
+            options: [
+                (value: "contains", label: "Contains"),
+                (value: "equals", label: "Equals"),
+                (value: "matches", label: "Matches"),
+            ],
+            selection: Binding(
+                get: { node.test ?? "contains" },
+                set: { next in
+                    model.updateSelectedNode { $0.test = next }
+                }
+            )
+        )
+        labeledField("Pattern", text: $conditionPattern, axis: .vertical) { next in
+            write(node.id) { $0.pattern = next }
+        }
+        Text("Then is on success. Else is on error. The test reads the previous step.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func loopFields(_ node: WorkflowNode) -> some View {
+        labeledField("Times", text: $loopTimes) { next in
+            write(node.id) { $0.times = UInt32(next) ?? 3 }
+        }
+        labeledField("Until", text: $loopUntil) { next in
+            write(node.id) { $0.until = next.isEmpty ? nil : next }
+        }
+        Text("The green out is the body. The run leaves on the always edge after the last pass, or when Until matches. At most 20 passes.")
             .font(.caption)
             .foregroundStyle(.secondary)
     }
@@ -604,6 +670,9 @@ private struct WorkflowNodeInspector: View {
         headers = Self.headersText(node.headers)
         command = node.command ?? ""
         promptOverride = node.promptOverride ?? ""
+        conditionPattern = node.pattern ?? ""
+        loopTimes = node.times.map { String($0) } ?? "3"
+        loopUntil = node.until ?? ""
         loadedID = node.id
         Task { @MainActor in
             applying = false

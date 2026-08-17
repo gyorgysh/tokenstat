@@ -1567,10 +1567,10 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
         )
     }
 
-    /// Place nodes in DAG columns when every position is still the origin.
+    /// Place nodes top to bottom when every position is still the origin.
     ///
     /// Design-from-prompt often omits `x`/`y`. The runner ignores them. The
-    /// canvas needs something it can show.
+    /// canvas needs something it can show. Layers go down. Siblings share a row.
     mutating func layoutIfNeeded() {
         guard !nodes.isEmpty else { return }
         if nodes.contains(where: { $0.x != 0 || $0.y != 0 }) { return }
@@ -1609,13 +1609,13 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
             }
         }
 
-        var rowInColumn: [Int: Int] = [:]
+        var siblingInLayer: [Int: Int] = [:]
         for idx in nodes.indices {
-            let col = layer[nodes[idx].id] ?? 0
-            let row = rowInColumn[col] ?? 0
-            rowInColumn[col] = row + 1
-            nodes[idx].x = 80 + Double(col) * 240
-            nodes[idx].y = 80 + Double(row) * 120
+            let depth = layer[nodes[idx].id] ?? 0
+            let sibling = siblingInLayer[depth] ?? 0
+            siblingInLayer[depth] = sibling + 1
+            nodes[idx].x = 80 + Double(sibling) * 252
+            nodes[idx].y = 80 + Double(depth) * 160
         }
     }
 }
@@ -1639,6 +1639,8 @@ enum WorkflowNodeKind: String, Codable, Sendable, Hashable, CaseIterable {
     case http
     case command
     case gate
+    case condition
+    case loop
     case mcp
 
     var label: String {
@@ -1649,6 +1651,8 @@ enum WorkflowNodeKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .http: return "HTTP"
         case .command: return "Command"
         case .gate: return "Gate"
+        case .condition: return "If"
+        case .loop: return "Loop"
         case .mcp: return "MCP"
         }
     }
@@ -1661,6 +1665,8 @@ enum WorkflowNodeKind: String, Codable, Sendable, Hashable, CaseIterable {
         case .http: return "mark_sync"
         case .command: return "mark_terminal"
         case .gate: return "mark_note"
+        case .condition: return "mark_plan"
+        case .loop: return "mark_scheduler"
         case .mcp: return "mark_host"
         }
     }
@@ -1699,11 +1705,15 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
     var headers: [String: String]?
     var body: String?
     var command: String?
+    var test: String?
+    var pattern: String?
+    var times: UInt32?
+    var until: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, x, y, title, backend, model, effort, prompt, wait
         case waitPattern, automationID = "automationId", promptOverride
-        case method, url, headers, body, command
+        case method, url, headers, body, command, test, pattern, times, until
     }
 
     init(
@@ -1724,7 +1734,11 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         url: String? = nil,
         headers: [String: String]? = nil,
         body: String? = nil,
-        command: String? = nil
+        command: String? = nil,
+        test: String? = nil,
+        pattern: String? = nil,
+        times: UInt32? = nil,
+        until: String? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -1744,6 +1758,10 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         self.headers = headers
         self.body = body
         self.command = command
+        self.test = test
+        self.pattern = pattern
+        self.times = times
+        self.until = until
     }
 
     init(from decoder: Decoder) throws {
@@ -1766,6 +1784,10 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         headers = try c.decodeIfPresent([String: String].self, forKey: .headers)
         body = try c.decodeIfPresent(String.self, forKey: .body)
         command = try c.decodeIfPresent(String.self, forKey: .command)
+        test = try c.decodeIfPresent(String.self, forKey: .test)
+        pattern = try c.decodeIfPresent(String.self, forKey: .pattern)
+        times = try c.decodeIfPresent(UInt32.self, forKey: .times)
+        until = try c.decodeIfPresent(String.self, forKey: .until)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1788,6 +1810,10 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
         try c.encodeIfPresent(headers, forKey: .headers)
         try c.encodeIfPresent(body, forKey: .body)
         try c.encodeIfPresent(command, forKey: .command)
+        try c.encodeIfPresent(test, forKey: .test)
+        try c.encodeIfPresent(pattern, forKey: .pattern)
+        try c.encodeIfPresent(times, forKey: .times)
+        try c.encodeIfPresent(until, forKey: .until)
     }
 
     var displayTitle: String {
@@ -1812,6 +1838,12 @@ struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
             return command ?? prompt ?? "Command"
         case .gate:
             return "Waits for you"
+        case .condition:
+            return pattern?.isEmpty == false ? (pattern ?? "If") : "Then or else"
+        case .loop:
+            if let until, !until.isEmpty { return "until \(until)" }
+            let n = times ?? 3
+            return "\(n)×"
         case .mcp:
             return "Reserved"
         }

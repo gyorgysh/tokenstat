@@ -17,7 +17,7 @@ struct TranscriptView: View {
 
     var body: some View {
         let blocks = Self.parse(text.isEmpty ? empty : text)
-        LazyVStack(alignment: .leading, spacing: Theme.Space.s) {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .text(let body):

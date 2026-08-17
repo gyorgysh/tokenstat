@@ -1376,13 +1376,25 @@ extension Bridge {
     }
 
     /// Cheap local backend. Does not save or run the draft.
-    static func designWorkflow(prompt: String, workspaceID: String?, backend: String?) async throws -> WorkflowDesignResult {
+    static func designWorkflow(
+        prompt: String,
+        workspaceID: String?,
+        backend: String?,
+        model: String? = nil,
+        effort: String? = nil
+    ) async throws -> WorkflowDesignResult {
         var params: [String: Any] = ["prompt": prompt]
         if let workspaceID, !workspaceID.isEmpty {
             params["workspaceId"] = workspaceID
         }
         if let backend, !backend.isEmpty {
             params["backend"] = backend
+        }
+        if let model, !model.isEmpty {
+            params["model"] = model
+        }
+        if let effort, !effort.isEmpty {
+            params["effort"] = effort
         }
         return try await background(
             "workflow.design",

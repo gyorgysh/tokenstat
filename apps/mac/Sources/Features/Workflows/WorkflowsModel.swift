@@ -323,7 +323,8 @@ final class WorkflowsModel {
     func addNode(kind: WorkflowNodeKind, backend: String? = nil, automationID: String? = nil) {
         mutate { graph in
             let id = nextNodeID(in: graph)
-            let origin = nextNodeOrigin(in: graph)
+            let sourceID = selectedNodeID
+            let origin = nextNodeOrigin(in: graph, under: sourceID)
             var node = WorkflowNode(id: id, kind: kind, x: origin.x, y: origin.y, title: kind.label)
             node.backend = backend
             node.automationID = automationID
@@ -338,7 +339,17 @@ final class WorkflowsModel {
             if kind == .command {
                 node.command = "echo ok"
             }
+            if kind == .condition {
+                node.test = "contains"
+            }
+            if kind == .loop {
+                node.times = 3
+            }
             graph.nodes.append(node)
+            if let sourceID, sourceID != id, graph.nodes.contains(where: { $0.id == sourceID }) {
+                graph.edges.removeAll { $0.from == sourceID && $0.to == id }
+                graph.edges.append(WorkflowEdge(from: sourceID, to: id, when: .ok))
+            }
             selectedNodeID = id
         }
     }
@@ -353,8 +364,8 @@ final class WorkflowsModel {
     func moveNode(id: String, x: Double, y: Double) {
         guard var graph = working else { return }
         if let idx = graph.nodes.firstIndex(where: { $0.id == id }) {
-            graph.nodes[idx].x = max(0, x)
-            graph.nodes[idx].y = max(0, y)
+            graph.nodes[idx].x = x
+            graph.nodes[idx].y = y
             working = graph
             isDirty = true
         }
@@ -433,11 +444,14 @@ final class WorkflowsModel {
         return id
     }
 
-    private func nextNodeOrigin(in graph: WorkflowGraph) -> (x: Double, y: Double) {
-        guard let last = graph.nodes.max(by: { $0.x < $1.x }) else {
-            return (80, 120)
+    private func nextNodeOrigin(in graph: WorkflowGraph, under id: String?) -> (x: Double, y: Double) {
+        if let id, let source = graph.nodes.first(where: { $0.id == id }) {
+            return (source.x, source.y + 160)
         }
-        return (last.x + 240, last.y)
+        guard let last = graph.nodes.max(by: { $0.y < $1.y }) else {
+            return (80, 80)
+        }
+        return (last.x, last.y + 160)
     }
 
     func selectRun(_ run: WorkflowRunRecord) {
@@ -496,7 +510,25 @@ final class WorkflowsModel {
         }
     }
 
-    func design(prompt: String, workspaceID: String?, backend: String?) async {
+    /// Replace the working graph with a local recipe. Does not call Design
+    /// and does not run.
+    func applyRecipe(_ recipe: WorkflowRecipe) {
+        guard working != nil else { return }
+        mutate { graph in
+            graph.nodes = recipe.nodes
+            graph.edges = recipe.edges
+            let name = graph.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty || name == "Untitled" {
+                graph.name = recipe.name
+            }
+            graph.layoutIfNeeded()
+        }
+        selectedNodeID = working?.nodes.first?.id
+        selectedEdgeID = nil
+        editorEpoch += 1
+    }
+
+    func design(prompt: String, workspaceID: String?, backend: String?, model: String? = nil, effort: String? = nil) async {
         let intent = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !intent.isEmpty else {
             errorMessage = "Describe the run first."
@@ -512,7 +544,9 @@ final class WorkflowsModel {
             let result = try await Bridge.designWorkflow(
                 prompt: intent,
                 workspaceID: workspaceID,
-                backend: backend
+                backend: backend,
+                model: model,
+                effort: effort
             )
             var graph = result.workflow
             graph.id = ""
