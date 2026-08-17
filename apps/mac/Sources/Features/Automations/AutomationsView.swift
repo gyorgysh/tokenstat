@@ -191,10 +191,26 @@ struct AutomationsView: View {
                             schedulerJustSaved = false
                         }
                 }
+                // Three hours is neither long nor short until you see it
+                // against the marks either side of it.
+                if !model.queueNoLimit {
+                    ScaleBar(
+                        ticks: [(15, "15m"), (60, "1h"), (180, "3h"), (480, "8h")],
+                        value: Double(model.queueBudgetMinutes) ?? 0
+                    )
+                    .frame(maxWidth: 260)
+                }
                 HStack {
                     Text("Max concurrent jobs")
                         .font(.callout)
                     Spacer()
+                    // Places at the table, filled by what is running now, so
+                    // "the next job waits" is visible rather than inferred.
+                    SlotGauge(
+                        filled: runningCount,
+                        total: Int(model.queueMaxConcurrent) ?? 0,
+                        uncapped: (Int(model.queueMaxConcurrent) ?? 0) == 0
+                    )
                     TextField("2", text: $model.queueMaxConcurrent)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 56)
@@ -236,6 +252,12 @@ struct AutomationsView: View {
                 }
             }
         }
+    }
+
+    /// Jobs occupying a slot right now. Queued ones are waiting for one, so
+    /// they are not counted as filling it.
+    private var runningCount: Int {
+        model.runs.filter { $0.status == "running" }.count
     }
 
     /// Suggested setups sit under the user's own jobs. Open by default only
@@ -542,6 +564,7 @@ struct AutomationsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
             Text(run.startedAt.formatted(date: .omitted, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -559,16 +582,19 @@ struct AutomationsView: View {
 
 
 
+    /// Seconds a run took, or has taken so far.
+    private func seconds(of run: RunRecord) -> Double {
+        guard let ended = run.endedAtMs else { return 0 }
+        return max(0, Double(ended - run.startedAtMs) / 1000)
+    }
+
+    /// Scale for the duration bars, from the runs actually on screen.
+    private var longestRunSeconds: Double {
+        model.runs.prefix(6).map { seconds(of: $0) }.max() ?? 0
+    }
+
     static func statusTint(_ status: String) -> Color {
-        switch status {
-        case "running": return Theme.accent
-        case "waiting": return Theme.warning
-        case "ok": return Theme.success
-        case "stopped": return Theme.warning
-        case "error": return Theme.danger
-        case "interrupted": return Theme.warning
-        default: return .secondary
-        }
+        RunOutcome.tint(status)
     }
 }
 
@@ -626,7 +652,15 @@ private struct AutomationRow: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.s) {
-            FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
+            // The rhythm, not the feature mark. Every row on this screen is an
+            // automation, so a mark saying so on all of them says nothing,
+            // while the week ring says which day this one fires.
+            CadenceGlyph(
+                schedule: job.schedule,
+                enabled: job.enabled,
+                size: 20,
+                summary: model.scheduleSummary(job.schedule)
+            )
             Text(job.name)
                 .font(.callout.weight(.medium))
                 .lineLimit(1)
@@ -662,11 +696,14 @@ private struct AutomationRow: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             if job.enabled, let next = job.nextRun {
-                Text("Next \(next.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                // A ring closing on the next fire, rather than a date the
+                // reader has to subtract today from.
+                NextRunBadge(start: model.lastRun(for: job)?.startedAt, end: next)
             }
+            // How the last dozen went, beside the job rather than in a shared
+            // list at the bottom of the screen. Three red ticks in a row is the
+            // fact this page most needs to carry.
+            RunHistoryStrip(ticks: ticks, height: 12)
             if let last = model.lastRun(for: job) {
                 // The time is the useful half. The outcome is already a pill up
                 // in the header, so repeating the word here would say it twice.
@@ -713,6 +750,18 @@ private struct AutomationRow: View {
         }
         .sheet(isPresented: $editing) {
             NewAutomationSheet(model: model, folders: folders, existing: job)
+        }
+    }
+
+    /// Oldest first, which is the direction the strip reads. The model keeps
+    /// them newest first.
+    private var ticks: [RunHistoryStrip.Tick] {
+        model.runs(of: job).reversed().map { run in
+            RunHistoryStrip.Tick(
+                id: run.id,
+                status: run.status,
+                label: "\(run.endedLabel) · \(run.startedAt.formatted(date: .abbreviated, time: .shortened))"
+            )
         }
     }
 }
