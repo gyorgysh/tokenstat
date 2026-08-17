@@ -415,8 +415,20 @@ impl Store {
     ) -> Result<(String, u64), String> {
         let path = self.step_path(run_id, node_id);
         let bytes = std::fs::read(&path).unwrap_or_default();
-        let text = String::from_utf8_lossy(&bytes);
-        let start = (offset as usize).min(text.len());
+        let text = if bytes.is_empty() {
+            self.get_run(run_id)
+                .ok()
+                .and_then(|run| {
+                    run.steps
+                        .into_iter()
+                        .find(|s| s.node_id == node_id)
+                        .map(|s| s.output)
+                })
+                .unwrap_or_default()
+        } else {
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
+        let start = align_char_boundary(&text, offset as usize);
         let slice = &text[start..];
         Ok((slice.to_string(), start as u64 + slice.len() as u64))
     }
@@ -487,7 +499,10 @@ impl Store {
             live_pty_ids: Vec::new(),
             budget_seconds: workflow.budget_seconds,
         };
-        self.upsert_run(run.clone())?;
+        if let Err(e) = self.upsert_run(run.clone()) {
+            automations::shared().release_slot();
+            return Err(e);
+        }
         {
             let mut all = self
                 .workflows
@@ -505,10 +520,20 @@ impl Store {
         let me = Arc::clone(self);
         let graph = workflow;
         let run_id = run.id.clone();
-        std::thread::spawn(move || {
-            me.execute(&graph, &run_id);
+        if let Err(e) = std::thread::Builder::new()
+            .name(format!("workflow-{run_id}"))
+            .spawn(move || {
+                me.execute(&graph, &run_id);
+                automations::shared().release_slot();
+            })
+        {
             automations::shared().release_slot();
-        });
+            let mut failed = run;
+            self.kill_live(&mut failed);
+            fail_run(&mut failed, &format!("could not start the run: {e}"));
+            let _ = self.upsert_run(failed);
+            return Err(e.to_string());
+        }
         Ok(run)
     }
 
@@ -528,35 +553,51 @@ impl Store {
     }
 
     pub fn continue_run(self: &Arc<Self>, run_id: &str) -> Result<WorkflowRun, String> {
-        let run = self.get_run(run_id)?;
-        if run.status != "waiting" {
-            return Err("that run is not waiting on a gate".into());
-        }
-        let Some(node_id) = run.current_node_id.clone() else {
-            return Err("that run has no gate to continue".into());
+        let (workflow, run, gate_id) = {
+            let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(existing) = runs.iter_mut().find(|run| run.id == run_id) else {
+                return Err(format!("no workflow run with id {run_id}"));
+            };
+            if existing.status != "waiting" {
+                return Err("that run is not waiting on a gate".into());
+            }
+            let Some(node_id) = existing.current_node_id.clone() else {
+                return Err("that run has no gate to continue".into());
+            };
+            let workflow = self.get(&existing.workflow_id)?;
+            if !automations::shared().try_take_slot() {
+                return Err("the run queue is full".into());
+            }
+            if let Some(step) = existing.steps.iter_mut().find(|s| s.node_id == node_id) {
+                step.status = "ok".into();
+                step.ended_at_ms = Some(now_ms());
+                step.output = "continued".into();
+            }
+            existing.status = "running".into();
+            existing.current_node_id = None;
+            (workflow, existing.clone(), node_id)
         };
-        let workflow = self.get(&run.workflow_id)?;
-        if !automations::shared().try_take_slot() {
-            return Err("the run queue is full".into());
-        }
-        let mut run = run;
-        if let Some(step) = run.steps.iter_mut().find(|s| s.node_id == node_id) {
-            step.status = "ok".into();
-            step.ended_at_ms = Some(now_ms());
-            step.output = "continued".into();
-        }
-        run.status = "running".into();
-        run.current_node_id = None;
-        if let Err(e) = self.upsert_run(run.clone()) {
+        if let Err(e) = self.save_runs() {
+            if let Ok(mut waiting) = self.get_run(run_id) {
+                waiting.status = "waiting".into();
+                waiting.current_node_id = Some(gate_id);
+                let _ = self.upsert_run(waiting);
+            }
             automations::shared().release_slot();
             return Err(e);
         }
         let me = Arc::clone(self);
         let id = run.id.clone();
-        std::thread::spawn(move || {
-            me.execute(&workflow, &id);
+        if let Err(e) = std::thread::Builder::new()
+            .name(format!("workflow-{id}"))
+            .spawn(move || {
+                me.execute(&workflow, &id);
+                automations::shared().release_slot();
+            })
+        {
             automations::shared().release_slot();
-        });
+            return Err(e.to_string());
+        }
         Ok(run)
     }
 
@@ -567,19 +608,15 @@ impl Store {
         let workspace = match crate::workspaces::folder(&run.workspace_id) {
             Ok(ws) => ws,
             Err(e) => {
+                self.kill_live(&mut run);
                 fail_run(&mut run, &e);
                 let _ = self.upsert_run(run);
                 return;
             }
         };
         let workspace_path = workspace.path.to_string_lossy().into_owned();
-        let deadline = if workflow.budget_seconds == 0 {
-            None
-        } else {
-            Some(Instant::now() + Duration::from_secs(workflow.budget_seconds))
-        };
+        let deadline = run_deadline(&run);
 
-        // Seed implicit or explicit input nodes.
         for node in &workflow.nodes {
             if node.kind != NodeKind::Input {
                 continue;
@@ -601,34 +638,24 @@ impl Store {
 
         loop {
             if self.is_killed(run_id) {
-                run.status = "stopped".into();
-                run.ended_at_ms = Some(now_ms());
-                self.kill_live(&mut run);
-                let _ = self.upsert_run(run);
+                self.finish_run(&mut run, "stopped");
                 return;
             }
-            if deadline.is_some_and(|d| Instant::now() >= d) {
-                run.status = "stopped".into();
-                run.ended_at_ms = Some(now_ms());
-                self.kill_live(&mut run);
-                let _ = self.upsert_run(run);
+            if deadline.is_some_and(|d| Instant::now() >= d) || budget_spent(&run) {
+                self.finish_run(&mut run, "stopped");
                 return;
             }
 
             let ready = ready_nodes(workflow, &run);
             if ready.is_empty() {
+                skip_unreachable(workflow, &mut run);
                 if unfinished(workflow, &run).is_empty() {
-                    run.status = "ok".into();
-                    run.ended_at_ms = Some(now_ms());
-                    run.current_node_id = None;
-                    let _ = self.upsert_run(run);
-                    return;
-                }
-                // A predecessor failed and no error/always edge remains.
-                if remaining_can_never_run(workflow, &run) {
-                    run.status = "error".into();
-                    run.ended_at_ms = Some(now_ms());
-                    let _ = self.upsert_run(run);
+                    let status = if run.steps.iter().any(|s| s.status == "error") {
+                        "error"
+                    } else {
+                        "ok"
+                    };
+                    self.finish_run(&mut run, status);
                     return;
                 }
                 std::thread::sleep(DRAIN_POLL);
@@ -656,6 +683,14 @@ impl Store {
         }
     }
 
+    fn finish_run(&self, run: &mut WorkflowRun, status: &str) {
+        run.status = status.into();
+        run.ended_at_ms = Some(now_ms());
+        run.current_node_id = None;
+        self.kill_live(run);
+        let _ = self.upsert_run(run.clone());
+    }
+
     fn run_node(&self, run: &mut WorkflowRun, node: &Node, workspace_path: &str) -> NodeOutcome {
         let started = now_ms();
         let mut step = StepRecord {
@@ -668,6 +703,15 @@ impl Store {
             ended_at_ms: None,
             exit_code: None,
         };
+        if !matches!(node.kind, NodeKind::Gate | NodeKind::Input) {
+            if let Some(existing) = run.steps.iter_mut().find(|s| s.node_id == node.id) {
+                *existing = step.clone();
+            } else {
+                run.steps.push(step.clone());
+            }
+            self.write_step_file(&run.id, &node.id, "");
+            let _ = self.upsert_run(run.clone());
+        }
         let outputs = outputs_so_far(run);
         let result = match node.kind {
             NodeKind::Input => Ok(("ok".into(), run.input.clone(), None)),
@@ -724,6 +768,9 @@ impl Store {
         if prompt.trim().is_empty() {
             return Err("an agent node needs a prompt".into());
         }
+        if budget_spent(run) {
+            return Err("the run budget is spent".into());
+        }
         let remaining = remaining_budget(run);
         let argv = automations::agent_command(
             backend,
@@ -732,13 +779,22 @@ impl Store {
             node.effort.as_deref(),
             remaining,
         )?;
+        let run_id = run.id.clone();
+        let node_id = node.id.clone();
         drain_pty(
-            run,
-            &argv,
-            workspace_path,
-            remaining,
-            node,
-            &format!("workflow:{}:{}", run.id, node.id),
+            DrainPty {
+                run,
+                argv: &argv,
+                cwd: workspace_path,
+                budget_seconds: remaining,
+                node,
+                reader: &format!("workflow:{run_id}:{node_id}"),
+            },
+            |current| {
+                let _ = self.upsert_run(current.clone());
+            },
+            || self.is_killed(&run_id),
+            |text| self.write_step_file(&run_id, &node_id, text),
         )
     }
 
@@ -758,15 +814,27 @@ impl Store {
         if command.trim().is_empty() {
             return Err("a command node needs a command".into());
         }
+        if budget_spent(run) {
+            return Err("the run budget is spent".into());
+        }
         let remaining = remaining_budget(run);
         let argv = automations::agent_command("sh", &command, None, None, remaining)?;
+        let run_id = run.id.clone();
+        let node_id = node.id.clone();
         drain_pty(
-            run,
-            &argv,
-            workspace_path,
-            remaining,
-            node,
-            &format!("workflow:{}:{}", run.id, node.id),
+            DrainPty {
+                run,
+                argv: &argv,
+                cwd: workspace_path,
+                budget_seconds: remaining,
+                node,
+                reader: &format!("workflow:{run_id}:{node_id}"),
+            },
+            |current| {
+                let _ = self.upsert_run(current.clone());
+            },
+            || self.is_killed(&run_id),
+            |text| self.write_step_file(&run_id, &node_id, text),
         )
     }
 
@@ -781,10 +849,11 @@ impl Store {
             .automation_id
             .as_deref()
             .ok_or("an automation node needs automationId")?;
-        if let Some(over) = node.prompt_override.as_deref() {
-            let _ = expand(over, &run.input, workspace_path, outputs);
-        }
-        let started = automations::shared().start_now(id)?;
+        let override_prompt = node
+            .prompt_override
+            .as_deref()
+            .map(|over| expand(over, &run.input, workspace_path, outputs));
+        let started = automations::shared().start_now(id, override_prompt.as_deref())?;
         loop {
             if self.is_killed(&run.id) {
                 let _ = automations::shared().kill_run(&started.id);
@@ -915,7 +984,19 @@ pub fn design(
         ..Node::default()
     };
     let design_reader = format!("workflow-design:{}", scratch.id);
-    let (status, transcript, _) = drain_pty(&mut scratch, &argv, &cwd, 180, &node, &design_reader)?;
+    let (status, transcript, _) = drain_pty(
+        DrainPty {
+            run: &mut scratch,
+            argv: &argv,
+            cwd: &cwd,
+            budget_seconds: 180,
+            node: &node,
+            reader: &design_reader,
+        },
+        |_| {},
+        || false,
+        |_| {},
+    )?;
     if status != "ok" {
         return Err(format!(
             "the design backend did not finish cleanly:\n{transcript}"
@@ -1133,16 +1214,56 @@ fn unfinished(workflow: &Workflow, run: &WorkflowRun) -> Vec<String> {
         .collect()
 }
 
-fn remaining_can_never_run(workflow: &Workflow, run: &WorkflowRun) -> bool {
-    let ready = ready_nodes(workflow, run);
-    if !ready.is_empty() {
+fn skip_unreachable(workflow: &Workflow, run: &mut WorkflowRun) {
+    loop {
+        let leftover = unfinished(workflow, run);
+        let mut skipped = false;
+        for id in leftover {
+            if !node_can_never_run(workflow, run, &id) {
+                continue;
+            }
+            let node = workflow.nodes.iter().find(|n| n.id == id);
+            run.steps.push(StepRecord {
+                node_id: id,
+                kind: node
+                    .map(|n| kind_name(n.kind).to_string())
+                    .unwrap_or_else(|| "node".into()),
+                title: node.map(display_title).unwrap_or_default(),
+                status: "skipped".into(),
+                output: String::new(),
+                started_at_ms: now_ms(),
+                ended_at_ms: Some(now_ms()),
+                exit_code: None,
+            });
+            skipped = true;
+        }
+        if !skipped {
+            break;
+        }
+    }
+}
+
+fn node_can_never_run(workflow: &Workflow, run: &WorkflowRun, id: &str) -> bool {
+    let incoming: Vec<&Edge> = workflow.edges.iter().filter(|e| e.to == id).collect();
+    if incoming.is_empty() {
         return false;
     }
-    let started: HashSet<&str> = run.steps.iter().map(|s| s.node_id.as_str()).collect();
-    workflow
-        .nodes
-        .iter()
-        .any(|n| !started.contains(n.id.as_str()))
+    let mut all_settled = true;
+    let mut all_match = true;
+    for edge in incoming {
+        match run.steps.iter().find(|s| s.node_id == edge.from) {
+            Some(step) if matches!(step.status.as_str(), "ok" | "error" | "stopped") => {
+                if !edge_matches(edge.when, step.status.as_str()) {
+                    all_match = false;
+                }
+            }
+            Some(step) if step.status == "skipped" => {
+                all_match = false;
+            }
+            _ => all_settled = false,
+        }
+    }
+    all_settled && !all_match
 }
 
 fn edge_matches(when: EdgeWhen, status: &str) -> bool {
@@ -1254,21 +1375,47 @@ fn kind_name(kind: NodeKind) -> &'static str {
     }
 }
 
+fn align_char_boundary(text: &str, index: usize) -> usize {
+    let mut index = index.min(text.len());
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
+}
+
 fn cap_output(text: &str) -> String {
     if text.len() <= OUTPUT_CAP {
         text.to_string()
     } else {
-        text[text.len() - OUTPUT_CAP..].to_string()
+        text[align_char_boundary(text, text.len() - OUTPUT_CAP)..].to_string()
     }
 }
 
+/// Seconds left on the run budget. `0` means no limit when `budget_seconds`
+/// is 0, and "already spent" otherwise.
 fn remaining_budget(run: &WorkflowRun) -> u64 {
-    // The whole run shares one budget. Per-step drain uses what is left.
     if run.budget_seconds == 0 {
         return 0;
     }
     let elapsed = ((now_ms() - run.started_at_ms).max(0) as u64) / 1000;
-    run.budget_seconds.saturating_sub(elapsed).max(30)
+    run.budget_seconds.saturating_sub(elapsed)
+}
+
+fn budget_spent(run: &WorkflowRun) -> bool {
+    run.budget_seconds != 0 && remaining_budget(run) == 0
+}
+
+fn run_deadline(run: &WorkflowRun) -> Option<Instant> {
+    if run.budget_seconds == 0 {
+        return None;
+    }
+    let elapsed_ms = (now_ms() - run.started_at_ms).max(0) as u64;
+    let budget_ms = run.budget_seconds.saturating_mul(1000);
+    if elapsed_ms >= budget_ms {
+        Some(Instant::now())
+    } else {
+        Some(Instant::now() + Duration::from_millis(budget_ms - elapsed_ms))
+    }
 }
 
 fn pick_design_backend(requested: Option<&str>) -> String {
@@ -1320,14 +1467,29 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 
 // MARK: - Process and HTTP
 
-fn drain_pty(
-    run: &mut WorkflowRun,
-    argv: &[String],
-    cwd: &str,
+struct DrainPty<'a> {
+    run: &'a mut WorkflowRun,
+    argv: &'a [String],
+    cwd: &'a str,
     budget_seconds: u64,
-    node: &Node,
-    reader: &str,
+    node: &'a Node,
+    reader: &'a str,
+}
+
+fn drain_pty(
+    ctx: DrainPty<'_>,
+    mut persist: impl FnMut(&WorkflowRun),
+    is_killed: impl Fn() -> bool,
+    mut on_output: impl FnMut(&str),
 ) -> Result<(String, String, Option<i32>), String> {
+    let DrainPty {
+        run,
+        argv,
+        cwd,
+        budget_seconds,
+        node,
+        reader,
+    } = ctx;
     let info = tokenstat_pty::manager()
         .spawn(&tokenstat_pty::Spawn {
             command: argv[0].clone(),
@@ -1342,7 +1504,9 @@ fn drain_pty(
             environment: Vec::new(),
         })
         .map_err(|e| e.to_string())?;
-    run.live_pty_ids.push(info.id.clone());
+    let pty_id = info.id.clone();
+    run.live_pty_ids.push(pty_id.clone());
+    persist(run);
     let wait_output = node.wait.as_deref() == Some("output");
     let pattern = node.wait_pattern.clone();
     let deadline = if budget_seconds == 0 {
@@ -1356,11 +1520,13 @@ fn drain_pty(
     let backend = node.backend.as_deref().unwrap_or("sh");
     let mut parser = crate::transcript::Parser::new(backend);
     let manager = tokenstat_pty::manager();
+    let mut stopped = false;
     let matched = loop {
-        if deadline.is_some_and(|d| Instant::now() >= d) {
-            let _ = manager.kill(&info.id);
+        if is_killed() || deadline.is_some_and(|d| Instant::now() >= d) {
+            let _ = manager.kill(&pty_id);
+            stopped = is_killed();
         }
-        match manager.read_for_viewer(&info.id, reader, offset) {
+        match manager.read_for_viewer(&pty_id, reader, offset) {
             Ok(chunk) => {
                 if !chunk.bytes.is_empty() {
                     raw.extend_from_slice(&chunk.bytes);
@@ -1370,9 +1536,10 @@ fn drain_pty(
                         if readable.len() > OUTPUT_CAP {
                             readable = cap_output(&readable);
                         }
+                        on_output(&readable);
                     }
                     offset = chunk.next_offset;
-                    if wait_output {
+                    if wait_output && !stopped {
                         if let Some(pat) = &pattern {
                             if readable.contains(pat.as_str()) {
                                 break true;
@@ -1385,18 +1552,21 @@ fn drain_pty(
             }
             Err(_) => break false,
         }
-        let alive = manager.info(&info.id).map(|i| i.alive).unwrap_or(false);
-        if !alive {
+        let alive = manager.info(&pty_id).map(|i| i.alive).unwrap_or(false);
+        if !alive || stopped {
             let settle = Instant::now() + EXIT_SETTLE;
             while Instant::now() < settle {
-                if let Ok(chunk) = manager.read_for_viewer(&info.id, reader, offset) {
-                    if !chunk.bytes.is_empty() {
-                        raw.extend_from_slice(&chunk.bytes);
-                        readable.push_str(&parser.push(&chunk.bytes));
-                        offset = chunk.next_offset;
-                    }
+                if let Ok(chunk) = manager.read_for_viewer(&pty_id, reader, offset)
+                    && !chunk.bytes.is_empty()
+                {
+                    raw.extend_from_slice(&chunk.bytes);
+                    readable.push_str(&parser.push(&chunk.bytes));
+                    offset = chunk.next_offset;
                 }
                 std::thread::sleep(DRAIN_POLL);
+            }
+            if !readable.is_empty() {
+                on_output(&readable);
             }
             break false;
         }
@@ -1404,16 +1574,19 @@ fn drain_pty(
     };
     if readable.trim().is_empty() && !raw.is_empty() {
         readable = String::from_utf8_lossy(&raw).into_owned();
+        on_output(&readable);
     }
-    let info = manager.info(&info.id).ok();
+    let info = manager.info(&pty_id).ok();
     let exit = info.as_ref().and_then(|i| i.exit_code);
     let alive = info.as_ref().map(|i| i.alive).unwrap_or(false);
     if !matched {
-        run.live_pty_ids
-            .retain(|id| id != &info.as_ref().map(|i| i.id.clone()).unwrap_or_default());
-        let _ = manager.close(&info.as_ref().map(|i| i.id.clone()).unwrap_or_default());
+        run.live_pty_ids.retain(|id| id != &pty_id);
+        persist(run);
+        let _ = manager.close(&pty_id);
     }
-    let status = if matched {
+    let status = if stopped {
+        "stopped"
+    } else if matched {
         "ok"
     } else if exit == Some(0) || (exit.is_none() && !alive) {
         if exit.unwrap_or(0) == 0 {
@@ -1722,5 +1895,152 @@ thanks"#;
         assert!(validate(&wf).unwrap_err().contains("workspace"));
         wf.workspace_id = Some("ws-1".into());
         validate(&wf).unwrap();
+    }
+
+    #[test]
+    fn leftover_error_branch_is_skipped_on_success() {
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                node("a", NodeKind::Command),
+                node("http", NodeKind::Http),
+                node("notify", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "a", EdgeWhen::Ok),
+                edge("a", "http", EdgeWhen::Ok),
+                edge("a", "notify", EdgeWhen::Error),
+            ],
+        );
+        let mut run = WorkflowRun {
+            id: "r".into(),
+            workflow_id: wf.id.clone(),
+            name: wf.name.clone(),
+            workspace_id: "ws".into(),
+            input: String::new(),
+            status: "running".into(),
+            started_at_ms: 0,
+            ended_at_ms: None,
+            current_node_id: None,
+            steps: vec![
+                StepRecord {
+                    node_id: "in".into(),
+                    kind: "input".into(),
+                    title: "in".into(),
+                    status: "ok".into(),
+                    output: String::new(),
+                    started_at_ms: 0,
+                    ended_at_ms: Some(0),
+                    exit_code: None,
+                },
+                StepRecord {
+                    node_id: "a".into(),
+                    kind: "command".into(),
+                    title: "a".into(),
+                    status: "ok".into(),
+                    output: String::new(),
+                    started_at_ms: 0,
+                    ended_at_ms: Some(0),
+                    exit_code: Some(0),
+                },
+                StepRecord {
+                    node_id: "http".into(),
+                    kind: "http".into(),
+                    title: "http".into(),
+                    status: "ok".into(),
+                    output: String::new(),
+                    started_at_ms: 0,
+                    ended_at_ms: Some(0),
+                    exit_code: Some(200),
+                },
+            ],
+            live_pty_ids: Vec::new(),
+            budget_seconds: 60,
+        };
+        skip_unreachable(&wf, &mut run);
+        assert!(
+            run.steps
+                .iter()
+                .any(|s| s.node_id == "notify" && s.status == "skipped"),
+            "{:?}",
+            run.steps
+        );
+        assert!(unfinished(&wf, &run).is_empty());
+        assert!(!run.steps.iter().any(|s| s.status == "error"));
+    }
+
+    #[test]
+    fn remaining_budget_is_zero_once_spent() {
+        let run = WorkflowRun {
+            id: "r".into(),
+            workflow_id: "wf".into(),
+            name: "t".into(),
+            workspace_id: "ws".into(),
+            input: String::new(),
+            status: "running".into(),
+            started_at_ms: now_ms() - 120_000,
+            ended_at_ms: None,
+            current_node_id: None,
+            steps: Vec::new(),
+            live_pty_ids: Vec::new(),
+            budget_seconds: 60,
+        };
+        assert_eq!(remaining_budget(&run), 0);
+        assert!(budget_spent(&run));
+        let unlimited = WorkflowRun {
+            budget_seconds: 0,
+            started_at_ms: now_ms() - 120_000,
+            ..run
+        };
+        assert_eq!(remaining_budget(&unlimited), 0);
+        assert!(!budget_spent(&unlimited));
+    }
+
+    #[test]
+    fn cap_output_does_not_panic_on_multibyte() {
+        let text = "é".repeat(OUTPUT_CAP);
+        let capped = cap_output(&text);
+        assert!(capped.len() <= OUTPUT_CAP);
+        assert!(!capped.is_empty());
+    }
+
+    #[test]
+    fn transcript_offset_clamps_to_a_char_boundary() {
+        let dir = std::env::temp_dir().join(format!(
+            "tokenstat-wf-tx-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let store = Store::at(dir.join("workflows.json"));
+        let run = WorkflowRun {
+            id: "wfr-tx".into(),
+            workflow_id: "wf".into(),
+            name: "t".into(),
+            workspace_id: "ws".into(),
+            input: String::new(),
+            status: "ok".into(),
+            started_at_ms: 0,
+            ended_at_ms: Some(0),
+            current_node_id: None,
+            steps: vec![StepRecord {
+                node_id: "n".into(),
+                kind: "command".into(),
+                title: "n".into(),
+                status: "ok".into(),
+                output: "éé".into(),
+                started_at_ms: 0,
+                ended_at_ms: Some(0),
+                exit_code: Some(0),
+            }],
+            live_pty_ids: Vec::new(),
+            budget_seconds: 60,
+        };
+        store.write_step_file(&run.id, "n", "éé");
+        let _ = store.upsert_run(run);
+        let (text, next) = store.transcript("wfr-tx", "n", 1).unwrap();
+        assert!(text.starts_with('é'), "{text:?}");
+        assert_eq!(next, 4);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

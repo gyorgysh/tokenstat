@@ -173,6 +173,7 @@ struct WorkflowsView: View {
                 model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
             }
             .buttonStyle(SecondaryButtonStyle())
+            .disabled(!model.canStartNewDraft)
         }
     }
 
@@ -223,7 +224,11 @@ struct WorkflowsView: View {
                         }
                     }
                     .buttonStyle(AccentButtonStyle())
-                    .disabled(model.isDesigning || designPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        model.isDesigning
+                            || !model.canStartNewDraft
+                            || designPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                 }
             }
         }
@@ -267,6 +272,7 @@ struct WorkflowsView: View {
                     model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
                 }
                 .buttonStyle(AccentButtonStyle())
+                .disabled(!model.canStartNewDraft)
             }
         }
     }

@@ -461,7 +461,16 @@ final class WorkflowsModel {
         syncWatching()
     }
 
+    /// True when Library Design or Blank would overwrite a stashed dirty graph.
+    var canStartNewDraft: Bool {
+        !isDirty && draft == nil
+    }
+
     func startBlank(scope: WorkflowScope = .global, workspaceID: String? = nil) {
+        guard canStartNewDraft else {
+            errorMessage = "Save or discard the unsaved graph first."
+            return
+        }
         draft = WorkflowGraph.blank(scope: scope, workspaceID: workspaceID)
         designTranscript = ""
         selectDraft()
@@ -491,6 +500,10 @@ final class WorkflowsModel {
         let intent = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !intent.isEmpty else {
             errorMessage = "Describe the run first."
+            return
+        }
+        guard canStartNewDraft else {
+            errorMessage = "Save or discard the unsaved graph first."
             return
         }
         isDesigning = true

@@ -989,14 +989,23 @@ impl Store {
 
     /// Start a stored job without taking a queue slot. A workflow that already
     /// occupies the cap uses this so an automation node cannot deadlock.
-    pub fn start_now(self: &Arc<Store>, id: &str) -> Result<RunRecord, String> {
-        let snapshot = {
+    ///
+    /// `prompt_override` replaces the stored prompt when it is non-empty.
+    pub fn start_now(
+        self: &Arc<Store>,
+        id: &str,
+        prompt_override: Option<&str>,
+    ) -> Result<RunRecord, String> {
+        let mut snapshot = {
             let jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
             jobs.iter()
                 .find(|job| job.id == id)
                 .cloned()
                 .ok_or_else(|| format!("no automation with id {id}"))?
         };
+        if let Some(over) = prompt_override.map(str::trim).filter(|s| !s.is_empty()) {
+            snapshot.prompt = over.to_string();
+        }
         let workspace = crate::workspaces::folder(&snapshot.workspace_id)?;
         let _argv = agent_command(
             &snapshot.backend,
@@ -1016,7 +1025,7 @@ impl Store {
             Ok((run, budget)) => {
                 let started = run.started_at_ms;
                 let started_id = run.id.clone();
-                let out = self.persist_and_drain(run, budget, |r| self.push_run(r))?;
+                let out = self.persist_and_drain(run, budget, |r| self.push_run(r), false)?;
                 let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
                 if let Some(job) = jobs.iter_mut().find(|job| job.id == id) {
                     job.last_run_at_ms = Some(started);
@@ -1142,7 +1151,9 @@ impl Store {
 
         if self.try_take_slot() {
             match self.spawn_pending(pending, workspace.id.clone()) {
-                Ok((run, budget)) => self.persist_and_drain(run, budget, |r| self.push_run(r)),
+                Ok((run, budget)) => {
+                    self.persist_and_drain(run, budget, |r| self.push_run(r), true)
+                }
                 Err(e) => {
                     self.release_slot();
                     Err(e)
@@ -1191,6 +1202,11 @@ impl Store {
         if *active > 0 {
             *active -= 1;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_slots(&self) -> u32 {
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn spawn_pending(
@@ -1254,6 +1270,7 @@ impl Store {
         run: RunRecord,
         budget: u64,
         persist: impl FnOnce(RunRecord) -> Result<(), String>,
+        owns_slot: bool,
     ) -> Result<RunRecord, String> {
         if let Err(e) = persist(run.clone()) {
             if let Some(pty_id) = &run.pty_id {
@@ -1262,11 +1279,11 @@ impl Store {
             }
             return Err(e);
         }
-        self.start_drain(&run, budget);
+        self.start_drain(&run, budget, owns_slot);
         Ok(run)
     }
 
-    fn start_drain(self: &Arc<Store>, run: &RunRecord, budget: u64) {
+    fn start_drain(self: &Arc<Store>, run: &RunRecord, budget: u64, owns_slot: bool) {
         let Some(pty_id) = run.pty_id.clone() else {
             return;
         };
@@ -1275,8 +1292,17 @@ impl Store {
         let backend = run.backend.clone();
         let me = Arc::clone(self);
         std::thread::spawn(move || {
-            me.drain(&pty_id, &transcript_path, budget, &run_id, &backend);
-            me.pump();
+            me.drain(
+                &pty_id,
+                &transcript_path,
+                budget,
+                &run_id,
+                &backend,
+                owns_slot,
+            );
+            if owns_slot {
+                me.pump();
+            }
         });
     }
 
@@ -1305,7 +1331,7 @@ impl Store {
             match self.spawn_pending(pending, workspace_id) {
                 Ok((run, budget)) => {
                     if self
-                        .persist_and_drain(run, budget, |r| self.update_run(r))
+                        .persist_and_drain(run, budget, |r| self.update_run(r), true)
                         .is_err()
                     {
                         self.release_slot();
@@ -1425,6 +1451,7 @@ impl Store {
         budget_seconds: u64,
         run_id: &str,
         backend: &str,
+        owns_slot: bool,
     ) {
         let manager = tokenstat_pty::manager();
         let deadline = if budget_seconds == 0 {
@@ -1517,7 +1544,9 @@ impl Store {
         };
         let _ = manager.close(pty_id);
         self.finish_run(run_id, exit_code, status);
-        self.release_slot();
+        if owns_slot {
+            self.release_slot();
+        }
     }
 
     /// Wait, briefly, for a process that has stopped producing output to report
@@ -2043,7 +2072,7 @@ mod tests {
         // A budget long enough for a shell to start and print, short enough
         // that a run which never ends fails the test quickly instead of
         // holding the suite for the whole allowance.
-        store.drain(&pty_id, &transcript_path, 10, run_id, "sh");
+        store.drain(&pty_id, &transcript_path, 10, run_id, "sh", true);
 
         let record = store
             .runs()
@@ -2131,7 +2160,7 @@ mod tests {
             })
             .unwrap();
         let pty_id = info.id.clone();
-        store.drain(&pty_id, &transcript_path, 1, run_id, "sh");
+        store.drain(&pty_id, &transcript_path, 1, run_id, "sh", true);
 
         let record = store
             .runs()
@@ -2482,6 +2511,119 @@ mod tests {
             assert!(Instant::now() < deadline, "fast exit still {}", row.status);
             std::thread::sleep(Duration::from_millis(40));
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_now_does_not_release_a_slot_it_never_took() {
+        let dir = temp_dir("start-now-slot");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        store
+            .set_queue_config(QueueConfig {
+                default_budget_seconds: 30,
+                max_concurrent: 1,
+            })
+            .unwrap();
+        assert!(store.try_take_slot());
+        assert_eq!(store.active_slots(), 1);
+        let workspace_id = sh_workspace(&dir);
+        let job = store
+            .create(Automation {
+                id: "nested".into(),
+                name: "nested".into(),
+                backend: "sh".into(),
+                model: None,
+                effort: None,
+                workspace_id,
+                prompt: if cfg!(windows) {
+                    "exit 0".into()
+                } else {
+                    "true".into()
+                },
+                schedule: ScheduleSpec::default(),
+                budget_seconds: 15,
+                enabled: false,
+                last_run_at_ms: None,
+                next_run_at_ms: None,
+                last_run_id: None,
+            })
+            .unwrap();
+        let run = store.start_now(&job.id, None).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let row = store.get_run(&run.id).unwrap();
+            if row.status != "running" && row.status != "queued" {
+                assert_eq!(row.status, "ok", "nested run left as {}", row.status);
+                break;
+            }
+            assert!(Instant::now() < deadline, "nested run still {}", row.status);
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        assert_eq!(store.active_slots(), 1);
+        store.release_slot();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn start_now_uses_the_prompt_override() {
+        let dir = temp_dir("start-now-override");
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Arc::new(Store::at(dir.join("jobs.json")));
+        let workspace_id = sh_workspace(&dir);
+        let job = store
+            .create(Automation {
+                id: "over".into(),
+                name: "over".into(),
+                backend: "sh".into(),
+                model: None,
+                effort: None,
+                workspace_id,
+                prompt: if cfg!(windows) {
+                    "echo STORED".into()
+                } else {
+                    "printf STORED".into()
+                },
+                schedule: ScheduleSpec::default(),
+                budget_seconds: 15,
+                enabled: false,
+                last_run_at_ms: None,
+                next_run_at_ms: None,
+                last_run_id: None,
+            })
+            .unwrap();
+        let run = store
+            .start_now(
+                &job.id,
+                Some(if cfg!(windows) {
+                    "echo OVERRIDE"
+                } else {
+                    "printf OVERRIDE"
+                }),
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(8);
+        loop {
+            let row = store.get_run(&run.id).unwrap();
+            if row.status != "running" && row.status != "queued" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "override run still {}",
+                row.status
+            );
+            std::thread::sleep(Duration::from_millis(40));
+        }
+        let (text, _) = store.transcript(&run.id, 0).unwrap();
+        assert!(
+            text.contains("OVERRIDE"),
+            "override missing from transcript: {text:?}"
+        );
+        assert!(
+            !text.contains("STORED"),
+            "stored prompt still ran: {text:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

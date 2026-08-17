@@ -1385,10 +1385,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
 /// that is a concurrency change rather than a compilation one.
 #[cfg(feature = "local-host")]
 fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
-    if !method.starts_with("automation.")
-        && !method.starts_with("todo.")
-        && !method.starts_with("workflow.")
-    {
+    if !method.starts_with("automation.") && !method.starts_with("todo.") {
         return None;
     }
     Some(local_job_call(method, params))
@@ -1485,78 +1482,6 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 max_concurrent: p.max_concurrent.unwrap_or(current.max_concurrent),
             };
             serde_json::to_value(crate::automations::shared().apply_queue_config(next)?).envelope()
-        }
-
-        "workflow.list" => serde_json::to_value(crate::workflows::shared().list()).envelope(),
-        "workflow.get" => {
-            let p: WorkflowParams = parse(params)?;
-            serde_json::to_value(
-                crate::workflows::shared().get(&p.id.ok_or("workflow.get needs id")?)?,
-            )
-            .envelope()
-        }
-        "workflow.create" => {
-            let mut p: WorkflowParams = parse(params)?;
-            let mut workflow = p.workflow.take().ok_or("workflow.create needs workflow")?;
-            if workflow.id.is_empty() {
-                workflow.id = format!("wf-{}", now_ms());
-            }
-            serde_json::to_value(crate::workflows::shared().create(workflow)?).envelope()
-        }
-        "workflow.update" => {
-            let p: WorkflowParams = parse(params)?;
-            serde_json::to_value(
-                crate::workflows::shared()
-                    .update(p.workflow.ok_or("workflow.update needs workflow")?)?,
-            )
-            .envelope()
-        }
-        "workflow.remove" => {
-            let p: WorkflowParams = parse(params)?;
-            Ok(json!({
-                "removed": crate::workflows::shared()
-                    .remove(&p.id.ok_or("workflow.remove needs id")?)?
-            }))
-        }
-        "workflow.run" => {
-            let p: WorkflowParams = parse(params)?;
-            serde_json::to_value(crate::workflows::shared().run(
-                &p.id.ok_or("workflow.run needs id")?,
-                p.input,
-                p.workspace_id,
-            )?)
-            .envelope()
-        }
-        "workflow.runs" => serde_json::to_value(crate::workflows::shared().runs()).envelope(),
-        "workflow.transcript" => {
-            let p: WorkflowParams = parse(params)?;
-            let id = p.id.ok_or("workflow.transcript needs a run id")?;
-            let node = p.node_id.ok_or("workflow.transcript needs nodeId")?;
-            let (text, next) =
-                crate::workflows::shared().transcript(&id, &node, p.offset.unwrap_or(0))?;
-            Ok(json!({"text": text, "nextOffset": next}))
-        }
-        "workflow.kill" => {
-            let p: WorkflowParams = parse(params)?;
-            crate::workflows::shared().kill(&p.id.ok_or("workflow.kill needs a run id")?)?;
-            Ok(json!({"killed": true}))
-        }
-        "workflow.continue" => {
-            let p: WorkflowParams = parse(params)?;
-            serde_json::to_value(
-                crate::workflows::shared()
-                    .continue_run(&p.id.ok_or("workflow.continue needs a run id")?)?,
-            )
-            .envelope()
-        }
-        "workflow.design" => {
-            let p: WorkflowParams = parse(params)?;
-            crate::workflows::design(
-                p.prompt.as_deref().ok_or("workflow.design needs prompt")?,
-                p.workspace_id.as_deref(),
-                p.backend.as_deref(),
-            )
-            .map_err(DispatchError::from)
         }
 
         "todo.list" => {
@@ -1656,22 +1581,107 @@ fn is_test_workspace(ws: &tokenstat_workspace::Workspace) -> bool {
     ws.path.starts_with(temp)
 }
 
-/// Methods that never touch the session.
-///
-/// The pty manager is process-wide and independent of the archive, so none of
-/// these need the session at all. That is not a detail: a transport keeps the
-/// session behind a lock, and a terminal polls for output continuously. Routing
-/// these through the lock made every keystroke queue behind whatever else was
-/// running, and a `workspace.list` shells out to git three times per folder. A
-/// terminal that stalls for the length of a git status is not a terminal.
-///
-/// `pty.spawn` is deliberately not here: it resolves a workspace id, which only
-/// the session knows. It happens once per session rather than per frame.
-///
-/// `highlight` is here for the same reason as the terminal: it is called on a
-/// keystroke debounce, and it is a pure function of the text the caller already
-/// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
-/// file colours correctly and so highlighting never reads the disk.
+#[cfg(feature = "local-host")]
+fn workflows(method: &str, params: &str) -> Option<Result<Value, String>> {
+    if !method.starts_with("workflow.") {
+        return None;
+    }
+    Some(workflow_call(method, params))
+}
+
+/// Workflow graphs live on their own store. Design drains a backend for up
+/// to three minutes, so it must not sit on the archive lock.
+#[cfg(feature = "local-host")]
+fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
+    match method {
+        "workflow.list" => {
+            serde_json::to_value(crate::workflows::shared().list()).map_err(|e| e.to_string())
+        }
+        "workflow.get" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            serde_json::to_value(
+                crate::workflows::shared().get(&p.id.ok_or("workflow.get needs id")?)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "workflow.create" => {
+            let mut p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let mut workflow = p.workflow.take().ok_or("workflow.create needs workflow")?;
+            if workflow.id.is_empty() {
+                workflow.id = format!("wf-{}", now_ms());
+            }
+            serde_json::to_value(crate::workflows::shared().create(workflow)?)
+                .map_err(|e| e.to_string())
+        }
+        "workflow.update" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            serde_json::to_value(
+                crate::workflows::shared()
+                    .update(p.workflow.ok_or("workflow.update needs workflow")?)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "workflow.remove" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            Ok(json!({
+                "removed": crate::workflows::shared()
+                    .remove(&p.id.ok_or("workflow.remove needs id")?)?
+            }))
+        }
+        "workflow.run" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            serde_json::to_value(crate::workflows::shared().run(
+                &p.id.ok_or("workflow.run needs id")?,
+                p.input,
+                p.workspace_id,
+            )?)
+            .map_err(|e| e.to_string())
+        }
+        "workflow.runs" => {
+            serde_json::to_value(crate::workflows::shared().runs()).map_err(|e| e.to_string())
+        }
+        "workflow.transcript" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let id = p.id.ok_or("workflow.transcript needs a run id")?;
+            let node = p.node_id.ok_or("workflow.transcript needs nodeId")?;
+            let (text, next) =
+                crate::workflows::shared().transcript(&id, &node, p.offset.unwrap_or(0))?;
+            Ok(json!({"text": text, "nextOffset": next}))
+        }
+        "workflow.kill" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            crate::workflows::shared().kill(&p.id.ok_or("workflow.kill needs a run id")?)?;
+            Ok(json!({"killed": true}))
+        }
+        "workflow.continue" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            serde_json::to_value(
+                crate::workflows::shared()
+                    .continue_run(&p.id.ok_or("workflow.continue needs a run id")?)?,
+            )
+            .map_err(|e| e.to_string())
+        }
+        "workflow.design" => {
+            let p: WorkflowParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            crate::workflows::design(
+                p.prompt.as_deref().ok_or("workflow.design needs prompt")?,
+                p.workspace_id.as_deref(),
+                p.backend.as_deref(),
+            )
+        }
+        other => Err(format!("unknown method: {other}")),
+    }
+}
+
 /// The registered folders, and the terminals that run in them.
 ///
 /// A separate function, and tried before the session lock, because all of this
@@ -1974,6 +1984,22 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
     }
 }
 
+/// Methods that never touch the session.
+///
+/// The pty manager is process-wide and independent of the archive, so none of
+/// these need the session at all. That is not a detail: a transport keeps the
+/// session behind a lock, and a terminal polls for output continuously. Routing
+/// these through the lock made every keystroke queue behind whatever else was
+/// running, and a `workspace.list` shells out to git three times per folder. A
+/// terminal that stalls for the length of a git status is not a terminal.
+///
+/// `pty.spawn` is deliberately not here: it resolves a workspace id, which only
+/// the session knows. It happens once per session rather than per frame.
+///
+/// `highlight` is here for the same reason as the terminal: it is called on a
+/// keystroke debounce, and it is a pure function of the text the caller already
+/// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
+/// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     // Identity and the peer list. Sessionless because the Machines screen is
     // where somebody goes when something is wrong, and an archive that will not
@@ -1999,6 +2025,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         return Some(answer);
     }
     if let Some(answer) = terminals(method, params) {
+        return Some(answer);
+    }
+
+    #[cfg(feature = "local-host")]
+    if let Some(answer) = workflows(method, params) {
         return Some(answer);
     }
 
@@ -3062,6 +3093,17 @@ mod tests {
                 folders("workspace.list", "{}").is_some(),
                 "workspace.list must not need the session"
             );
+            let listed = call_sessionless("workflow.list", "{}")
+                .expect("workflow.list must be answerable without a session");
+            let listed: Value = serde_json::from_str(&listed).expect("workflow.list JSON");
+            assert!(
+                listed["ok"].is_boolean(),
+                "workflow.list lacks ok: {listed}"
+            );
+            let design = call_sessionless("workflow.design", "{}")
+                .expect("workflow.design must be answerable without a session");
+            let design: Value = serde_json::from_str(&design).expect("workflow.design JSON");
+            assert_eq!(design["ok"], false, "{design}");
         }
 
         // Anything that reads the archive still does.
