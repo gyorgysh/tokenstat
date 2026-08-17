@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 # Paths that are always generated and must never be tracked.
-FORBIDDEN_PATHS='(\.xcodeproj/|\.xcworkspace/|/Vendor/|\.xcframework/|(^|/)DerivedData/|(^|/)target/)'
+FORBIDDEN_PATHS='(\.xcodeproj/|\.xcworkspace/|/Vendor/|\.xcframework/|(^|/)DerivedData[^/]*/|(^|/)target/)'
 
 # Extensions that are build output rather than source.
 FORBIDDEN_EXTS='\.(a|o|so|dylib|dll|exe|rlib|rmeta|pdb|zip|tar|gz|dmg|pkg)$'

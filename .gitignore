@@ -71,8 +71,10 @@ desktop.ini
 /apps/mac/Resources/PriceBookSeed.etag
 # Every app's build output, whatever the tool put it there. Xcode writes
 # `build/` next to the project when a scheme is built from the command line,
-# and it is hundreds of megabytes of derived data.
+# and local sessions often pass `-derivedDataPath DerivedData<Name>`, so the
+# folder is not always literally `DerivedData/`. Hundreds of megabytes either
+# way. Never committed.
 /apps/*/build/
-/apps/*/DerivedData/
+/apps/*/DerivedData*/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
