@@ -85,6 +85,123 @@ enum WorkflowLayering {
     }
 }
 
+/// Lays subviews out left to right and wraps to the next line.
+///
+/// SwiftUI has no wrapping stack, and the alternatives are worse: an `HStack`
+/// truncates a pipeline at whatever the window is wide today, and a `LazyVGrid`
+/// gives every step the width of the longest one. Steps are named, so their
+/// widths differ and the row has to close up around them.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var rowSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = rows(subviews: subviews, width: width)
+        let height = rows.reduce(0) { $0 + $1.height } + rowSpacing * CGFloat(max(0, rows.count - 1))
+        let widest = rows.map(\.width).max() ?? 0
+        return CGSize(width: min(width, max(widest, 0)), height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = rows(subviews: subviews, width: bounds.width)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + rowSpacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func rows(subviews: Subviews, width: CGFloat) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let next = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            // A single item wider than the line still gets its own row rather
+            // than being dropped.
+            if next > width, !row.indices.isEmpty {
+                rows.append(row)
+                row = Row()
+                row.indices = [index]
+                row.width = size.width
+                row.height = size.height
+            } else {
+                row.indices.append(index)
+                row.width = next
+                row.height = max(row.height, size.height)
+            }
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
+    }
+}
+
+/// A workflow drawn as named steps: mark, label, arrow, next step.
+///
+/// The compact `MiniGraph` is right in a list of workflows you already know,
+/// where the shape distinguishes one row from another. It is wrong for an
+/// example, which is being read for the first time by somebody deciding what
+/// the thing does: four unlabelled tiles and a `+2` is a shape with no
+/// meaning yet. This spells the steps out and still fits on a line or two.
+struct WorkflowStepStrip: View {
+    var nodes: [WorkflowNode]
+    var edges: [WorkflowEdge] = []
+    var mark: CGFloat = 18
+
+    private var steps: [WorkflowNode] {
+        WorkflowLayering.layers(nodes: nodes, edges: edges).flatMap { $0 }
+    }
+
+    var body: some View {
+        // Wraps rather than truncating: an example is worth two lines, and a
+        // pipeline that ends in "+2" hides exactly the step somebody wanted to
+        // know about.
+        FlowLayout(spacing: 6, rowSpacing: 6) {
+            ForEach(Array(steps.enumerated()), id: \.element.id) { index, node in
+                HStack(spacing: 5) {
+                    if index > 0 {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    HStack(spacing: 5) {
+                        if node.kind == .agent, let backend = node.backend, !backend.isEmpty {
+                            HarnessMark(id: backend, size: mark)
+                        } else {
+                            FeatureMark(name: node.kind.mark, tint: Theme.accent, size: mark)
+                        }
+                        Text(node.displayTitle)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Theme.accentSoft, in: Capsule())
+                }
+                .help(node.subtitle)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(WorkflowLayering.sentence(nodes: nodes, edges: edges))
+    }
+}
+
 /// A workflow drawn small: node marks in columns, joined by connectors.
 ///
 /// Pass `steps` and `currentNodeID` from a run and the same strip becomes a

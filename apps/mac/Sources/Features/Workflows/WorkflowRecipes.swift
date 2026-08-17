@@ -350,7 +350,11 @@ struct WorkflowRecipeChips: View {
                             Text(recipe.name)
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.primary)
-                            MiniGraph(nodes: recipe.nodes, edges: recipe.edges, dot: 20)
+                            // Named steps, not tiles. An example is read by
+                            // somebody who does not know yet what the workflow
+                            // does, and "four squares and a +2" tells them
+                            // nothing they can act on.
+                            WorkflowStepStrip(nodes: recipe.nodes, edges: recipe.edges)
                         }
                         Spacer(minLength: 0)
                     }

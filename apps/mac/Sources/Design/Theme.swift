@@ -1430,6 +1430,15 @@ extension CGFloat {
     /// underneath instead (see `InsightsView`).
     static var threeAcrossWidth: CGFloat { DisplayFit.box(1200) }
 
+    /// Width at which a list row has room for its secondary detail.
+    ///
+    /// Below this a row keeps its name, its state and its buttons, and drops
+    /// the things beside them: the folder it lives in, when it last ran, the
+    /// history strip. Those are worth a glance on a wide window and worth
+    /// nothing at all when they squeeze the name of the thing down to an
+    /// ellipsis.
+    static var rowDetailWidth: CGFloat { DisplayFit.box(720) }
+
     /// How wide a self-contained panel wants to be in a flowing grid.
     ///
     /// A quota panel is a title and a few bars, so it needs about this much to

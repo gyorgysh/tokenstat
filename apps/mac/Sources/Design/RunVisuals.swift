@@ -46,29 +46,31 @@ struct RunHistoryStrip: View {
     var width: CGFloat = 4
     var onSelect: ((Tick) -> Void)?
 
+    /// Slots always drawn, so the strip reads as a track that is filling up.
+    ///
+    /// Two amber ticks on their own are a pause glyph, and next to a Run button
+    /// that is exactly how they were read. Empty slots behind them give the
+    /// filled ones something to be part of.
+    private static let slots = 8
+
     private var shown: [Tick] {
         ticks.count > limit ? Array(ticks.suffix(limit)) : ticks
     }
 
     var body: some View {
         HStack(spacing: 2) {
-            if shown.isEmpty {
-                // Not an empty frame: the absence of runs is itself a fact, and
-                // a row that silently loses its trailing element looks broken.
-                ForEach(0..<3, id: \.self) { _ in
-                    Capsule()
-                        .strokeBorder(Theme.border, lineWidth: 1)
-                        .frame(width: width, height: height)
-                }
-            } else {
-                ForEach(shown) { tick in
-                    Capsule()
-                        .fill(RunOutcome.tint(tick.status))
-                        .frame(width: width, height: height)
-                        .opacity(tick.status == "ok" ? 0.85 : 1)
-                        .help(tick.label)
-                        .onTapGesture { onSelect?(tick) }
-                }
+            ForEach(0..<max(0, Self.slots - shown.count), id: \.self) { _ in
+                Capsule()
+                    .fill(Theme.border.opacity(0.5))
+                    .frame(width: width, height: height)
+            }
+            ForEach(shown) { tick in
+                Capsule()
+                    .fill(RunOutcome.tint(tick.status))
+                    .frame(width: width, height: height)
+                    .opacity(tick.status == "ok" ? 0.85 : 1)
+                    .help(tick.label)
+                    .onTapGesture { onSelect?(tick) }
             }
         }
         .accessibilityElement(children: .ignore)
@@ -76,7 +78,7 @@ struct RunHistoryStrip: View {
     }
 
     private var summary: String {
-        if shown.isEmpty { return "No runs yet" }
+        if shown.isEmpty { return "Never run" }
         let failed = shown.filter { $0.status == "error" }.count
         if failed == 0 { return "Last \(shown.count) runs, none failed" }
         return "Last \(shown.count) runs, \(failed) failed"

@@ -21,6 +21,8 @@ struct WorkflowsView: View {
     @State private var designModel = ""
     @State private var designEffort = ""
     @State private var designWorkspaceID = ""
+    /// "1", "0", or empty for "nobody has said yet".
+    @AppStorage("workflows.builderExpanded") private var builderExpandedStored = ""
     @State private var running: WorkflowGraph?
     @State private var confirmingDelete: WorkflowGraph?
 
@@ -100,7 +102,7 @@ struct WorkflowsView: View {
                         Banner(text: error, severity: .warning)
                     }
                     intro
-                    designCard
+                    builderCard
                     if let draft = model.draft, draft.id.isEmpty {
                         draftCard(draft)
                     }
@@ -180,19 +182,117 @@ struct WorkflowsView: View {
         }
     }
 
+    /// Whether the builder is open.
+    ///
+    /// Remembered, because the two people using this screen want opposite
+    /// things: somebody with no workflows needs the builder open with its
+    /// explanation, and somebody with a library wants their list at the top of
+    /// the window and not a form they use once a month. Until a choice is
+    /// stored, the empty library decides. Same rule as the Automations
+    /// examples, deliberately.
+    private var builderExpanded: Bool {
+        switch builderExpandedStored {
+        case "1": return true
+        case "0": return false
+        default: return model.hasLoaded && model.graphs.isEmpty
+        }
+    }
+
+    private var builderCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    builderExpandedStored = builderExpanded ? "0" : "1"
+                }
+            } label: {
+                HStack(alignment: .center, spacing: Theme.Space.s) {
+                    FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 22)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Workflow builder")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        Text("Describe a run and a cheap local agent drafts the steps, or lay them out yourself.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(builderExpanded ? 0 : -90))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(builderExpanded ? "Collapse the workflow builder" : "Expand the workflow builder")
+            if builderExpanded {
+                builderBody
+                    .padding(.top, Theme.Space.m)
+            }
+        }
+        .padding(Theme.cardPadding)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private var builderBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            designCard
+            manualCard
+        }
+    }
+
+    /// The manual path, for somebody who already knows the shape they want.
+    ///
+    /// A blank draft used to be one unlabelled button in the header, which is
+    /// no way to find the half of this feature that does not involve a model.
+    /// It says what you get before you press it.
+    private var manualCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Build it yourself")
+                .font(.callout.weight(.medium))
+            Text("""
+            Opens the blank canvas with a Start card. Add a step under any card, \
+            drag from the dot on the bottom to join two of them, and pick who runs \
+            each step in the inspector. Green joins run on success, red on error. \
+            Nothing runs until you press Run.
+            """)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Theme.Space.s) {
+                Button("Start blank", .create) {
+                    model.startBlank(scope: defaultScope, workspaceID: defaultWorkspaceID)
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .disabled(!model.canStartNewDraft)
+                Spacer()
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Space.s).strokeBorder(Theme.border))
+    }
+
     private var designCard: some View {
-        Card(
-            title: "Design",
-            subtitle: "A cheap local backend drafts the graph. You review it. It does not run.",
-            mark: "mark_workflow"
-        ) {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Describe the run")
+                .font(.callout.weight(.medium))
+            Text("A cheap local agent turns the description into steps. It writes a draft you review, and it never starts the run.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                TextField("Describe the run", text: $designPrompt, axis: .vertical)
+                TextField("Rewrite the prompt, plan it, build it, then review", text: $designPrompt, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(3...8)
                     .focused($designFocused)
                     .disabled(model.isDesigning)
                 if !designRecipes.isEmpty {
+                    Text("Or start from an example")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
                     WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
                 }
                 WorkflowDesignPickers(
@@ -235,10 +335,10 @@ struct WorkflowsView: View {
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                // Shape first, then the outline that spells it out. A draft is
-                // reviewed before it is saved, and the shape is what tells you
-                // the model understood the run you described.
-                MiniGraph(nodes: draft.nodes, edges: draft.edges, maxColumns: 7)
+                // Steps first, then the outline that spells each one out. A
+                // draft is reviewed before it is saved, and the run in one line
+                // is what tells you the model understood the description.
+                WorkflowStepStrip(nodes: draft.nodes, edges: draft.edges)
                 WorkflowOutline(nodes: draft.nodes, edges: draft.edges)
                 HStack(spacing: Theme.Space.s) {
                     Button("Save", .save) { Task { await model.saveDraft() } }
@@ -312,10 +412,12 @@ struct WorkflowsView: View {
                     .font(Theme.sectionHeader)
                     .foregroundStyle(.tertiary)
                     .padding(.bottom, Theme.Space.xs)
+                WidthReader { width in
                 VStack(spacing: 0) {
                     ForEach(graphs) { graph in
                         WorkflowRow(
                             graph: graph,
+                            compact: width > 0 && width < .rowDetailWidth,
                             last: model.lastRun(for: graph),
                             history: model.runs(of: graph),
                             folder: folders.first { $0.id == graph.workspaceID },
@@ -331,6 +433,7 @@ struct WorkflowsView: View {
                 .padding(.horizontal, Theme.Space.s)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
                 .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+                }
             }
         }
     }
@@ -396,6 +499,10 @@ struct WorkflowsView: View {
 /// One saved graph in the library.
 private struct WorkflowRow: View {
     let graph: WorkflowGraph
+    /// A narrow window. The name and the state stay, the detail beside them
+    /// goes, rather than every element keeping a share of a width none of them
+    /// can use.
+    var compact: Bool = false
     let last: WorkflowRunRecord?
     /// Newest first, as the model keeps them.
     let history: [WorkflowRunRecord]
@@ -428,11 +535,13 @@ private struct WorkflowRow: View {
                         )
                     }
                     Spacer(minLength: 0)
-                    Text(caption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    RunHistoryStrip(ticks: ticks, height: 12)
+                    if !compact {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        RunHistoryStrip(ticks: ticks, height: 12)
+                    }
                     if let last {
                         StatusPill(status: last.status, text: last.endedLabel)
                     }

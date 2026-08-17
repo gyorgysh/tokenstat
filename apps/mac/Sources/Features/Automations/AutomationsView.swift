@@ -428,11 +428,13 @@ struct AutomationsView: View {
                 .font(Theme.sectionHeader)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, Theme.Space.xs)
+            WidthReader { width in
             VStack(spacing: 0) {
                 ForEach(jobs) { job in
                     AutomationRow(job: job, model: model,
                                   folders: folders,
                                   folder: folders.first { $0.id == job.workspaceID },
+                                  compact: width > 0 && width < .rowDetailWidth,
                                   isSelected: model.selectedJobID == job.id,
                                   onSelect: { model.selectJob(job.id) },
                                   onViewRun: { model.selectRun($0) })
@@ -442,6 +444,7 @@ struct AutomationsView: View {
             .padding(.horizontal, Theme.Space.s)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+            }
         })
     }
 
@@ -611,6 +614,10 @@ private struct AutomationRow: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
     var folder: WorkspaceFolder?
+    /// A narrow window. The name, the rhythm and the buttons stay, the facts
+    /// beside them go: they are worth a glance on a wide window and worth
+    /// nothing when they squeeze the row's own name into an ellipsis.
+    var compact: Bool = false
     var isSelected: Bool = false
     var onSelect: () -> Void = {}
     /// Opens the selected run in the inspector.
@@ -691,11 +698,13 @@ private struct AutomationRow: View {
     /// three facts are read together or not at all.
     private var facts: some View {
         HStack(spacing: Theme.Space.m) {
-            Label(model.scheduleSummary(job.schedule), systemImage: "clock")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-            if job.enabled, let next = job.nextRun {
+            if !compact {
+                Label(model.scheduleSummary(job.schedule), systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            if !compact, job.enabled, let next = job.nextRun {
                 // A ring closing on the next fire, rather than a date the
                 // reader has to subtract today from.
                 NextRunBadge(start: model.lastRun(for: job)?.startedAt, end: next)
@@ -704,24 +713,27 @@ private struct AutomationRow: View {
             // list at the bottom of the screen. Three red ticks in a row is the
             // fact this page most needs to carry.
             RunHistoryStrip(ticks: ticks, height: 12)
-            if let last = model.lastRun(for: job) {
-                // The time is the useful half. The outcome is already a pill up
-                // in the header, so repeating the word here would say it twice.
-                Text("Last ran \(last.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            } else {
-                Text("Never run")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            if let folder {
-                Label(folder.name, systemImage: "folder")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+            if !compact {
+                if let last = model.lastRun(for: job) {
+                    // The time is the useful half. The outcome is already a
+                    // pill up in the header, so repeating the word here would
+                    // say it twice.
+                    Text("Last ran \(last.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                } else {
+                    Text("Never run")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if let folder {
+                    Label(folder.name, systemImage: "folder")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             if let last = model.lastRun(for: job), last.isRunning {
