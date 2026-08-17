@@ -6,9 +6,9 @@ import SwiftUI
 
 /// The workflow library. Global graphs, then one section per workspace.
 ///
-/// Opening a row shows the read-only node outline in the inspector. The
-/// visual canvas edits the same IR later. Empty state is the design prompt,
-/// not an empty form.
+/// Opening a row on the Mac opens the canvas. Empty state is the design
+/// prompt, not an empty form. The inspector stays the outline and the
+/// selected-node form.
 struct WorkflowsView: View {
     @Bindable var model: WorkflowsModel
     var folders: [WorkspaceFolder]
@@ -29,65 +29,20 @@ struct WorkflowsView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
-            DetailChromeBar {
-                ToolbarIconButton(
-                    systemImage: "plus",
-                    help: "Start a blank draft"
-                ) {
-                    model.startBlank(
-                        scope: defaultScope,
-                        workspaceID: defaultWorkspaceID
-                    )
-                }
+        Group {
+            #if os(macOS)
+            if model.isEditing {
+                WorkflowsEditor(
+                    model: model,
+                    folders: folders,
+                    onBack: { model.closeEditor() }
+                )
+            } else {
+                library
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    if let error = model.errorMessage {
-                        Banner(text: error, severity: .warning)
-                    }
-                    intro
-                    designCard
-                    if let draft = model.draft {
-                        draftCard(draft)
-                    }
-                    HStack(spacing: Theme.Space.s) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.tertiary)
-                        TextField("Search workflows", text: $search)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 13))
-                            .focused($searchFocused)
-                    }
-                    .padding(.horizontal, Theme.Space.s)
-                    .padding(.vertical, 6)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Space.s)
-                            .strokeBorder(
-                                searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
-                                lineWidth: searchFocused ? 1.5 : 1
-                            )
-                    )
-                    .padding(.leading, 4)
-                    if isWarming {
-                        VStack(alignment: .leading, spacing: Theme.Space.s) {
-                            Skeleton.CardPlaceholder(rows: 2)
-                            Skeleton.CardPlaceholder(rows: 2)
-                        }
-                        .transition(.opacity)
-                    } else if filtered.isEmpty && model.draft == nil {
-                        nothingYet
-                    } else {
-                        library
-                    }
-                    if !model.runs.isEmpty {
-                        recentRuns
-                    }
-                }
-                .padding(Theme.Space.m)
-            }
+            #else
+            library
+            #endif
         }
         .navigationTitle("Workflows")
         .background(Theme.background)
@@ -125,6 +80,69 @@ struct WorkflowsView: View {
             }
         }
         .onDisappear { model.disappeared() }
+    }
+
+    private var library: some View {
+        VStack(spacing: 0) {
+            DetailChromeBar {
+                ToolbarIconButton(
+                    systemImage: "plus",
+                    help: "Start a blank draft"
+                ) {
+                    model.startBlank(
+                        scope: defaultScope,
+                        workspaceID: defaultWorkspaceID
+                    )
+                }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    if let error = model.errorMessage {
+                        Banner(text: error, severity: .warning)
+                    }
+                    intro
+                    designCard
+                    if let draft = model.draft, draft.id.isEmpty {
+                        draftCard(draft)
+                    }
+                    HStack(spacing: Theme.Space.s) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                        TextField("Search workflows", text: $search)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13))
+                            .focused($searchFocused)
+                    }
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.vertical, 6)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Space.s)
+                            .strokeBorder(
+                                searchFocused ? Theme.accent.opacity(0.7) : Theme.border,
+                                lineWidth: searchFocused ? 1.5 : 1
+                            )
+                    )
+                    .padding(.leading, 4)
+                    if isWarming {
+                        VStack(alignment: .leading, spacing: Theme.Space.s) {
+                            Skeleton.CardPlaceholder(rows: 2)
+                            Skeleton.CardPlaceholder(rows: 2)
+                        }
+                        .transition(.opacity)
+                    } else if filtered.isEmpty && model.draft == nil {
+                        nothingYet
+                    } else {
+                        librarySections
+                    }
+                    if !model.runs.isEmpty {
+                        recentRuns
+                    }
+                }
+                .padding(Theme.Space.m)
+            }
+        }
     }
 
     private var isWarming: Bool {
@@ -265,7 +283,7 @@ struct WorkflowsView: View {
         }
     }
 
-    private var library: some View {
+    private var librarySections: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             section(
                 title: "Global",

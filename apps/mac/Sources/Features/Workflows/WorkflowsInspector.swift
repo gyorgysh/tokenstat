@@ -7,10 +7,10 @@
 
 import SwiftUI
 
-/// The selected workflow or run. The list stays an overview.
+/// The selected workflow, node, or run. The list stays an overview.
 ///
-/// The outline is the VoiceOver representation of the graph. The canvas
-/// that will edit the same IR is not this pane.
+/// The outline is the VoiceOver representation of the graph. When the
+/// canvas is open, this pane edits the selected node on the same IR.
 struct WorkflowsInspector: View {
     @Bindable var model: WorkflowsModel
     var folders: [WorkspaceFolder]
@@ -31,7 +31,11 @@ struct WorkflowsInspector: View {
             Group {
                 if let run = model.selectedRun, model.selectedFocus == .run {
                     runBody(run)
-                } else if let graph = model.selectedGraph {
+                } else if model.isEditing, model.selectedNode != nil {
+                    WorkflowNodeInspector(model: model)
+                } else if model.isEditing, model.selectedEdgeID != nil {
+                    edgeBody
+                } else if let graph = model.working ?? model.selectedGraph {
                     graphBody(graph)
                 } else {
                     InspectorEmptyState(
@@ -52,6 +56,8 @@ struct WorkflowsInspector: View {
     }
 
     private var chromeTitle: String {
+        if model.isEditing, model.selectedNode != nil { return "Node" }
+        if model.isEditing, model.selectedEdgeID != nil { return "Edge" }
         switch model.selectedFocus {
         case .run: return "Run"
         case .graph: return "Workflow"
@@ -59,10 +65,76 @@ struct WorkflowsInspector: View {
         }
     }
 
+    private var edgeBody: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let id = model.selectedEdgeID,
+                   let edge = model.working?.edges.first(where: { $0.id == id }) {
+                    labeled("From", edge.from)
+                    labeled("To", edge.to)
+                    AppMenuPicker(
+                        title: "When",
+                        options: [
+                            (value: WorkflowEdgeWhen.ok, label: WorkflowEdgeWhen.ok.label),
+                            (value: .error, label: WorkflowEdgeWhen.error.label),
+                            (value: .always, label: WorkflowEdgeWhen.always.label),
+                        ],
+                        selection: Binding(
+                            get: { edge.when },
+                            set: { model.updateSelectedEdge(when: $0) }
+                        )
+                    )
+                    Text("Option-drag a new link to start it as on error.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Delete edge", .delete, role: .destructive) {
+                        model.deleteSelection()
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private func graphBody(_ graph: WorkflowGraph) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
-                if graph.id.isEmpty {
+                if model.isEditing {
+                    TextField("Name", text: Binding(
+                        get: { model.working?.name ?? graph.name },
+                        set: { next in
+                            model.beginGroupedEdit()
+                            model.writeWorking { $0.name = next }
+                        }
+                    ))
+                    .textFieldStyle(.roundedBorder)
+                    if graph.id.isEmpty {
+                        Text("Unsaved draft. It will not run until you save and press Run.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    AppMenuPicker(
+                        title: "Scope",
+                        options: WorkflowScope.allCases.map { (value: $0, label: $0.label) },
+                        selection: Binding(
+                            get: { model.working?.scope ?? graph.scope },
+                            set: { model.setWorkingScope($0, workspaceID: graph.workspaceID ?? folders.first?.id) }
+                        )
+                    )
+                    if (model.working?.scope ?? graph.scope) == .workspace {
+                        AppMenuPicker(
+                            title: "Folder",
+                            options: folders.map { (value: $0.id, label: $0.name) },
+                            selection: Binding(
+                                get: { model.working?.workspaceID ?? "" },
+                                set: { model.setWorkingScope(.workspace, workspaceID: $0) }
+                            )
+                        )
+                    }
+                    WorkflowBudgetField(model: model)
+                } else if graph.id.isEmpty {
                     TextField("Name", text: Binding(
                         get: { model.draft?.name ?? graph.name },
                         set: { model.draft?.name = $0 }
@@ -74,26 +146,43 @@ struct WorkflowsInspector: View {
                 } else {
                     Text(graph.name)
                         .font(.system(size: 15, weight: .semibold))
+                    labeled("Scope", graph.scope.label)
+                    if let folder = folders.first(where: { $0.id == graph.workspaceID }) {
+                        labeled("Folder", folder.name)
+                    }
+                    labeled("Budget", budgetLabel(graph.budgetSeconds))
                 }
 
-                labeled("Scope", graph.scope.label)
-                if let folder = folders.first(where: { $0.id == graph.workspaceID }) {
-                    labeled("Folder", folder.name)
-                }
-                labeled("Budget", budgetLabel(graph.budgetSeconds))
                 labeled("Nodes", "\(graph.nodes.count)")
                 if let last = model.lastRun(for: graph) {
                     labeled("Last", last.startedAt.formatted(date: .abbreviated, time: .shortened))
                 }
 
-                WorkflowOutline(nodes: graph.nodes, edges: graph.edges)
+                if !model.designTranscript.isEmpty {
+                    Text("Design transcript")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    TranscriptView(text: model.designTranscript, empty: "")
+                        .frame(maxHeight: 160)
+                }
+
+                WorkflowOutline(
+                    nodes: graph.nodes,
+                    edges: graph.edges,
+                    selectedID: model.selectedNodeID,
+                    onSelect: { model.selectNode($0) }
+                )
 
                 HStack(spacing: Theme.Space.s) {
                     if graph.id.isEmpty {
-                        Button("Save", .save) { Task { await model.saveDraft() } }
+                        Button("Save", .save) { Task { await model.saveWorking() } }
                             .buttonStyle(AccentButtonStyle())
                         Button("Discard", .dismiss) { model.discardDraft() }
                             .buttonStyle(SecondaryButtonStyle())
+                    } else if model.isEditing {
+                        Button("Save", .save) { Task { await model.saveWorking() } }
+                            .buttonStyle(AccentButtonStyle())
+                            .disabled(!model.isDirty)
                     } else if let last = model.lastRun(for: graph), last.isLive {
                         if last.isWaiting {
                             Button("Continue", .next) { Task { await model.continueRun(last) } }
@@ -144,7 +233,7 @@ struct WorkflowsInspector: View {
             }
             .padding(Theme.Space.m)
 
-            if let graph = model.graphs.first(where: { $0.id == run.workflowID }) ?? model.selectedGraph {
+            if let graph = model.working ?? model.graphs.first(where: { $0.id == run.workflowID }) ?? model.selectedGraph {
                 WorkflowOutline(
                     nodes: graph.nodes,
                     edges: graph.edges,
@@ -191,5 +280,350 @@ struct WorkflowsInspector: View {
         if seconds == 0 { return "No limit" }
         let minutes = max(1, seconds / 60)
         return "\(minutes) min"
+    }
+}
+
+/// Minutes on the working graph. 0 means no limit.
+private struct WorkflowBudgetField: View {
+    @Bindable var model: WorkflowsModel
+    @State private var minutes = ""
+    @State private var noLimit = false
+    @State private var applying = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Text("Time limit")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("180", text: $minutes)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 56)
+                .multilineTextAlignment(.trailing)
+                .disabled(noLimit)
+                .onSubmit { commit() }
+            Text("minutes")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            BrandToggleChip(title: "No limit", isOn: $noLimit)
+                .onChange(of: noLimit) { _, on in
+                    guard !applying else { return }
+                    if on {
+                        model.setWorkingBudgetMinutes(0)
+                    } else {
+                        commit()
+                    }
+                }
+        }
+        .onAppear { load() }
+        .onChange(of: model.working?.budgetSeconds) { _, _ in load() }
+    }
+
+    private func load() {
+        applying = true
+        let seconds = model.working?.budgetSeconds ?? 10_800
+        noLimit = seconds == 0
+        minutes = seconds == 0 ? "180" : String(max(1, seconds / 60))
+        applying = false
+    }
+
+    private func commit() {
+        if noLimit {
+            model.setWorkingBudgetMinutes(0)
+            return
+        }
+        let value = UInt64(minutes) ?? 180
+        model.setWorkingBudgetMinutes(value)
+    }
+}
+
+/// Fields for the selected node. Pickers write immediately. Text is one undo.
+private struct WorkflowNodeInspector: View {
+    @Bindable var model: WorkflowsModel
+
+    @State private var title = ""
+    @State private var prompt = ""
+    @State private var waitPattern = ""
+    @State private var url = ""
+    @State private var bodyText = ""
+    @State private var headers = ""
+    @State private var command = ""
+    @State private var promptOverride = ""
+    @State private var loadedID: String?
+    @State private var applying = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let node = model.selectedNode {
+                    fields(node)
+                    if let step = step(for: node) {
+                        StatusPill(status: step.status, text: step.endedLabel)
+                    }
+                    if !model.transcriptText.isEmpty, model.selectedStepID == node.id {
+                        TranscriptView(text: model.transcriptText, empty: "")
+                            .frame(maxHeight: 180)
+                    }
+                    Button("Delete node", .delete, role: .destructive) {
+                        model.deleteSelection()
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear { if let node = model.selectedNode { load(node) } }
+        .onChange(of: model.selectedNodeID) { _, _ in
+            model.endGroupedEdit()
+            if let node = model.selectedNode { load(node) }
+        }
+    }
+
+    @ViewBuilder
+    private func fields(_ node: WorkflowNode) -> some View {
+        Text(node.kind.label)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+        TextField("Title", text: $title)
+            .textFieldStyle(.roundedBorder)
+            .onChange(of: title) { _, next in
+                guard !applying else { return }
+                write(node.id) { $0.title = next }
+            }
+
+        switch node.kind {
+        case .input:
+            Text("The starting prompt fills {{input}} when you press Run.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .agent:
+            agentFields(node)
+        case .automation:
+            automationFields(node)
+        case .http:
+            httpFields(node)
+        case .command:
+            commandFields(node)
+        case .gate:
+            Text("The run pauses here. Continue or Stop from the canvas.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .mcp:
+            Text("Reserved. This kind cannot be saved yet.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func agentFields(_ node: WorkflowNode) -> some View {
+        AppMenuPicker(
+            title: "Agent",
+            options: model.pickerBackends(keeping: node.backend).map { (value: $0.id, label: $0.label) },
+            selection: Binding(
+                get: { node.backend ?? "" },
+                set: { next in
+                    model.updateSelectedNode { item in
+                        item.backend = next.isEmpty ? nil : next
+                        if let backend = model.backends.first(where: { $0.id == next }) {
+                            if let current = item.model, !backend.models.contains(current) {
+                                item.model = nil
+                            }
+                            if let current = item.effort, !backend.efforts.contains(current) {
+                                item.effort = nil
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        if let backend = model.backends.first(where: { $0.id == (node.backend ?? "") }) {
+            if !backend.models.isEmpty {
+                FavoriteModelPicker(
+                    backendID: backend.id,
+                    models: backend.models,
+                    extra: node.model ?? "",
+                    selection: Binding(
+                        get: { node.model ?? "" },
+                        set: { next in
+                            model.updateSelectedNode { $0.model = next.isEmpty ? nil : next }
+                        }
+                    )
+                )
+            }
+            if !backend.efforts.isEmpty {
+                AppMenuPicker(
+                    title: "Effort",
+                    options: [(value: "", label: "Default")]
+                        + backend.efforts.map { (value: $0, label: $0) },
+                    selection: Binding(
+                        get: { node.effort ?? "" },
+                        set: { next in
+                            model.updateSelectedNode { $0.effort = next.isEmpty ? nil : next }
+                        }
+                    )
+                )
+            }
+        }
+        labeledField("Prompt", text: $prompt, axis: .vertical) { next in
+            write(node.id) { $0.prompt = next }
+        }
+        AppMenuPicker(
+            title: "Wait",
+            options: [
+                (value: "exit", label: "Until the process exits"),
+                (value: "output", label: "Until output matches"),
+            ],
+            selection: Binding(
+                get: { node.wait ?? "exit" },
+                set: { next in
+                    model.updateSelectedNode { $0.wait = next }
+                }
+            )
+        )
+        if node.wait == "output" {
+            labeledField("Match", text: $waitPattern) { next in
+                write(node.id) { $0.waitPattern = next.isEmpty ? nil : next }
+            }
+        }
+        Text("{{input}} is the starting prompt. {{nodeId.output}} is an earlier step.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func automationFields(_ node: WorkflowNode) -> some View {
+        AppMenuPicker(
+            title: "Automation",
+            options: model.jobs.map { (value: $0.id, label: $0.name) },
+            selection: Binding(
+                get: { node.automationID ?? "" },
+                set: { next in
+                    model.updateSelectedNode { $0.automationID = next.isEmpty ? nil : next }
+                }
+            )
+        )
+        labeledField("Prompt override", text: $promptOverride, axis: .vertical) { next in
+            write(node.id) { $0.promptOverride = next.isEmpty ? nil : next }
+        }
+        Text("A timer cannot commit. This step runs because you press Run.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func httpFields(_ node: WorkflowNode) -> some View {
+        AppMenuPicker(
+            title: "Method",
+            options: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"].map { (value: $0, label: $0) },
+            selection: Binding(
+                get: { node.method ?? "GET" },
+                set: { next in
+                    model.updateSelectedNode { $0.method = next }
+                }
+            )
+        )
+        labeledField("URL", text: $url) { next in
+            write(node.id) { $0.url = next }
+        }
+        labeledField("Headers", text: $headers, axis: .vertical) { next in
+            write(node.id) { $0.headers = Self.parseHeaders(next) }
+        }
+        labeledField("Body", text: $bodyText, axis: .vertical) { next in
+            write(node.id) { $0.body = next.isEmpty ? nil : next }
+        }
+        Text("This leaves the machine only because you press Run. Authorization is a header you type.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func commandFields(_ node: WorkflowNode) -> some View {
+        labeledField("Command", text: $command, axis: .vertical) { next in
+            write(node.id) { $0.command = next }
+        }
+        Text("Runs in the folder, as you. A timer cannot commit.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private func labeledField(
+        _ title: String,
+        text: Binding<String>,
+        axis: Axis = .horizontal,
+        onChange: @escaping (String) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(
+                title,
+                text: Binding(
+                    get: { text.wrappedValue },
+                    set: { next in
+                        text.wrappedValue = next
+                        onChange(next)
+                    }
+                ),
+                axis: axis == .vertical ? .vertical : .horizontal
+            )
+            .textFieldStyle(.roundedBorder)
+            .lineLimit(axis == .vertical ? 3...10 : 1...1)
+        }
+    }
+
+    private func step(for node: WorkflowNode) -> WorkflowStep? {
+        if let step = model.selectedRun?.steps.first(where: { $0.nodeID == node.id }) {
+            return step
+        }
+        if let working = model.working {
+            return model.lastRun(for: working)?.steps.first(where: { $0.nodeID == node.id })
+        }
+        return nil
+    }
+
+    private func write(_ id: String, _ body: (inout WorkflowNode) -> Void) {
+        guard !applying, loadedID == id else { return }
+        model.beginGroupedEdit()
+        model.writeWorking { graph in
+            if let idx = graph.nodes.firstIndex(where: { $0.id == id }) {
+                body(&graph.nodes[idx])
+            }
+        }
+    }
+
+    private func load(_ node: WorkflowNode) {
+        applying = true
+        loadedID = nil
+        title = node.title
+        prompt = node.prompt ?? ""
+        waitPattern = node.waitPattern ?? ""
+        url = node.url ?? ""
+        bodyText = node.body ?? ""
+        headers = Self.headersText(node.headers)
+        command = node.command ?? ""
+        promptOverride = node.promptOverride ?? ""
+        loadedID = node.id
+        Task { @MainActor in
+            applying = false
+        }
+    }
+
+    private static func headersText(_ headers: [String: String]?) -> String {
+        guard let headers, !headers.isEmpty else { return "" }
+        return headers.sorted(by: { $0.key < $1.key }).map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+    }
+
+    private static func parseHeaders(_ text: String) -> [String: String]? {
+        var out: [String: String] = [:]
+        for line in text.split(whereSeparator: \.isNewline) {
+            let raw = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty, let idx = raw.firstIndex(of: ":") else { continue }
+            let key = String(raw[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = String(raw[raw.index(after: idx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty { out[key] = value }
+        }
+        return out.isEmpty ? nil : out
     }
 }

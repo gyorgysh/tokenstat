@@ -1563,8 +1563,60 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
             name: name,
             scope: scope,
             workspaceID: workspaceID,
-            nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+            nodes: [WorkflowNode(id: "in", kind: .input, x: 80, y: 120, title: "Start")]
         )
+    }
+
+    /// Place nodes in DAG columns when every position is still the origin.
+    ///
+    /// Design-from-prompt often omits `x`/`y`. The runner ignores them. The
+    /// canvas needs something it can show.
+    mutating func layoutIfNeeded() {
+        guard !nodes.isEmpty else { return }
+        if nodes.contains(where: { $0.x != 0 || $0.y != 0 }) { return }
+
+        var incomingCount: [String: Int] = [:]
+        var outgoing: [String: [String]] = [:]
+        for node in nodes {
+            incomingCount[node.id] = 0
+        }
+        for edge in edges {
+            incomingCount[edge.to, default: 0] += 1
+            outgoing[edge.from, default: []].append(edge.to)
+        }
+
+        var layer: [String: Int] = [:]
+        var queue = nodes.filter { (incomingCount[$0.id] ?? 0) == 0 }.map(\.id)
+        if queue.isEmpty {
+            queue = nodes.map(\.id)
+        }
+        for id in queue {
+            layer[id] = 0
+        }
+
+        var i = 0
+        var seen = Set(queue)
+        while i < queue.count {
+            let id = queue[i]
+            i += 1
+            let current = layer[id] ?? 0
+            for next in outgoing[id] ?? [] {
+                layer[next] = max(layer[next] ?? 0, current + 1)
+                if !seen.contains(next) {
+                    seen.insert(next)
+                    queue.append(next)
+                }
+            }
+        }
+
+        var rowInColumn: [Int: Int] = [:]
+        for idx in nodes.indices {
+            let col = layer[nodes[idx].id] ?? 0
+            let row = rowInColumn[col] ?? 0
+            rowInColumn[col] = row + 1
+            nodes[idx].x = 80 + Double(col) * 240
+            nodes[idx].y = 80 + Double(row) * 120
+        }
     }
 }
 
