@@ -101,9 +101,6 @@ struct MiniGraph: View {
     var maxColumns: Int = 5
     var dot: CGFloat = 22
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulsing = false
-
     private var columns: [[WorkflowNode]] {
         WorkflowLayering.layers(nodes: nodes, edges: edges)
     }
@@ -130,10 +127,6 @@ struct MiniGraph: View {
         .frame(height: dot)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(WorkflowLayering.sentence(nodes: nodes, edges: edges))
-        .onAppear {
-            guard !reduceMotion else { return }
-            pulsing = true
-        }
     }
 
     private var connector: some View {
@@ -142,31 +135,9 @@ struct MiniGraph: View {
             .frame(width: 8, height: 1.5)
     }
 
-    @ViewBuilder
     private func mark(for node: WorkflowNode) -> some View {
         let state = state(of: node)
-        ZStack {
-            RoundedRectangle(cornerRadius: dot / 3, style: .continuous)
-                .fill(state.tint.opacity(0.14))
-            RoundedRectangle(cornerRadius: dot / 3, style: .continuous)
-                .strokeBorder(state.tint.opacity(state.emphatic ? 0.75 : 0.3), lineWidth: 1)
-            if node.kind == .agent, let backend = node.backend, !backend.isEmpty {
-                HarnessMark(id: backend, size: dot * 0.6)
-            } else {
-                FeatureMark(name: node.kind.mark, tint: state.tint, size: dot * 0.6)
-            }
-        }
-        .frame(width: dot, height: dot)
-        // Only the node a run is sitting on breathes. A whole strip of moving
-        // tiles says nothing about where the work is.
-        .opacity(state.live && pulsing ? 0.55 : 1)
-        .animation(
-            state.live && !reduceMotion
-                ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
-                : .default,
-            value: pulsing
-        )
-        .help(node.displayTitle)
+        return MiniGraphNode(node: node, tint: state.tint, emphatic: state.emphatic, live: state.live, dot: dot)
     }
 
     private func overflow(_ count: Int) -> some View {
@@ -182,6 +153,11 @@ struct MiniGraph: View {
     }
 
     /// Resting, or coloured by what the run did with this node.
+    ///
+    /// Note the tuple is read once per render into `MiniGraphNode`, which owns
+    /// the pulse. A run usually starts while the library is already on screen,
+    /// so "began breathing" has to be a change the node itself sees rather
+    /// than something the strip sets up once when it appears.
     private func state(of node: WorkflowNode) -> (tint: Color, emphatic: Bool, live: Bool) {
         if node.id == currentNodeID {
             return (Theme.stateWorking, true, true)
@@ -191,5 +167,53 @@ struct MiniGraph: View {
         }
         let running = step.status == "running" || step.status == "waiting"
         return (RunOutcome.tint(step.status), true, running)
+    }
+}
+
+/// One tile in the strip, and the only thing here that moves.
+///
+/// Its own view because the pulse has to start when the node goes live, not
+/// when the strip appears: the interesting case is a run beginning under a list
+/// that is already on screen, and an animation keyed to the parent's `onAppear`
+/// would leave that node dimmed and still.
+private struct MiniGraphNode: View {
+    var node: WorkflowNode
+    var tint: Color
+    var emphatic: Bool
+    var live: Bool
+    var dot: CGFloat
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimmed = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: dot / 3, style: .continuous)
+                .fill(tint.opacity(0.14))
+            RoundedRectangle(cornerRadius: dot / 3, style: .continuous)
+                .strokeBorder(tint.opacity(emphatic ? 0.75 : 0.3), lineWidth: 1)
+            if node.kind == .agent, let backend = node.backend, !backend.isEmpty {
+                HarnessMark(id: backend, size: dot * 0.6)
+            } else {
+                FeatureMark(name: node.kind.mark, tint: tint, size: dot * 0.6)
+            }
+        }
+        .frame(width: dot, height: dot)
+        // Only the node a run is sitting on breathes. A whole strip of moving
+        // tiles says nothing about where the work is.
+        .opacity(dimmed ? 0.55 : 1)
+        .animation(
+            dimmed
+                ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true)
+                : .easeInOut(duration: 0.2),
+            value: dimmed
+        )
+        .onAppear { dimmed = shouldPulse }
+        .onChange(of: live) { _, _ in dimmed = shouldPulse }
+        .help(node.displayTitle)
+    }
+
+    private var shouldPulse: Bool {
+        live && !reduceMotion
     }
 }

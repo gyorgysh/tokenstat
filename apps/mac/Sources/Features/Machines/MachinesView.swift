@@ -547,14 +547,16 @@ struct MachinesView: View {
     /// The same iPhone appeared twice, once as `m_1ab6c8e5d261fdab` under
     /// Account-linked devices and again as `mellow-zebra-reef` under Your
     /// devices, with different names and different buttons. One physical
-    /// device, one row: the account row already carries Approve, Connect and
-    /// Revoke for a peer it can match, so this section is left with the
-    /// devices that are genuinely only paired locally.
+    /// device, one row.
+    ///
+    /// A peer is only hidden where the row above carries the same actions for
+    /// it, which is why the match is by identity rather than by name: dropping
+    /// a device from here on a weaker match would leave nowhere to revoke it.
     private var unlistedKnown: [Peer] {
-        let listed = Set(
-            model.listedAccountMachines.compactMap { model.peer(for: $0)?.key }
+        let covered = Set(
+            model.listedAccountMachines.compactMap { linkedPeer(for: $0)?.key }
         )
-        return model.known.filter { !listed.contains($0.key) }
+        return model.known.filter { !covered.contains($0.key) }
     }
 
     #if os(macOS)
@@ -698,13 +700,18 @@ struct MachinesView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if isSelf || !machine.isHost {
+                        if isSelf {
                             // The machine you are sitting at has no Connect and
                             // no revoke; "This device" under the name is the
-                            // whole mark. A phone has none either: it is the
-                            // side that dials, and approving it happens in
-                            // "Your devices" when it knocks.
+                            // whole mark.
                             EmptyView()
+                        } else if !machine.isHost {
+                            // A phone is never dialled from here, so it has no
+                            // Connect. It can still be turned away, and this is
+                            // the row that has to offer it: a phone on the
+                            // account is listed here, so its access cannot only
+                            // be revocable from a card further down the page.
+                            phoneAccess(for: machine)
                         } else {
                             if let peer = model.peer(for: machine) {
                                 if model.isConnected(machine) {
@@ -750,6 +757,39 @@ struct MachinesView: View {
             .transition(.smoothIn(reduceMotion: reduceMotion))
         }
         .animation(.easeOut(duration: 0.22), value: model.accountMachines.isEmpty)
+    }
+
+    /// Approve, revoke and forget for a phone listed on the account.
+    ///
+    /// Never Connect: a client reaches a host, not the reverse (P5).
+    @ViewBuilder
+    private func phoneAccess(for machine: Machine) -> some View {
+        if let peer = linkedPeer(for: machine) {
+            switch peer.trust {
+            case .approved:
+                Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    .help("Stops this phone from reaching this Mac")
+            case .pending, .revoked:
+                Button("Approve", .approve) { Task { await model.approve(peer) } }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .help("Removes the pairing. The phone has to knock again.")
+        }
+    }
+
+    /// The peer record for an account machine, matched on identity only.
+    ///
+    /// Deliberately stricter than `MachinesModel.peer(for:)`, which also
+    /// matches on equal labels: two devices nobody has named both carry an
+    /// empty label, so that fallback can pair a peer with a machine it has
+    /// nothing to do with. That is tolerable when it decides whether to offer a
+    /// Connect button and not when it decides which rows to hide.
+    private func linkedPeer(for machine: Machine) -> Peer? {
+        guard let identity = machine.publicIdentity, !identity.isEmpty else { return nil }
+        return model.peers.first { $0.key == identity || $0.fingerprint == identity }
     }
 
     /// What to call a machine in a list. Never its id: the code sits under the

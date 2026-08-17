@@ -81,6 +81,13 @@ struct CadenceGlyph: View {
         case .weekdays:
             return day < 5
         case .weekly:
+            // The host accepts a weekly schedule either way and sends both, so
+            // prefer the bitset when it carries days. `scheduleSummary` makes
+            // the same choice, and the ring must not contradict the words it
+            // sits beside.
+            if schedule.weekdays & 0b0111_1111 != 0 {
+                return schedule.weekdays & (1 << day) != 0
+            }
             return day == schedule.weekday
         case .custom:
             return schedule.weekdays & (1 << day) != 0
@@ -159,6 +166,18 @@ struct SlotGauge: View {
     var uncapped: Bool = false
     var tile: CGFloat = 10
 
+    /// Tiles actually drawn.
+    ///
+    /// The number comes from a text field somebody is still typing into, so it
+    /// has to be bounded: `100000` is a valid thing to type and a hundred
+    /// thousand rectangles in an HStack hangs the window before the value is
+    /// ever saved. Past this many the count is words, not shapes.
+    private static let maxTiles = 12
+
+    private var drawn: Int {
+        min(max(total, 1), Self.maxTiles)
+    }
+
     var body: some View {
         HStack(spacing: 3) {
             if uncapped {
@@ -166,10 +185,15 @@ struct SlotGauge: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(0..<max(total, 1), id: \.self) { index in
+                ForEach(0..<drawn, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(index < filled ? Theme.accent : Theme.border)
                         .frame(width: tile, height: tile)
+                }
+                if total > drawn {
+                    Text("+\(total - drawn)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -197,33 +221,46 @@ struct ScaleBar: View {
     var height: CGFloat = 5
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Theme.border)
-                        .frame(height: height)
-                    Capsule()
-                        .fill(Theme.accent.opacity(0.75))
-                        .frame(width: max(height, geo.size.width * fraction), height: height)
+        // One mapping for the fill, the marks and the labels. Spacing the
+        // labels evenly while filling the bar proportionally puts "3h" two
+        // thirds along and the 180 minute fill barely past "1h", which reads
+        // as the limit being an hour.
+        GeometryReader { geo in
+            let width = geo.size.width
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Theme.border)
+                    .frame(width: width, height: height)
+                Capsule()
+                    .fill(Theme.accent.opacity(0.75))
+                    .frame(width: max(height, width * fraction(of: value)), height: height)
+                ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
+                    Rectangle()
+                        .fill(Theme.background)
+                        .frame(width: 1, height: height)
+                        .offset(x: width * fraction(of: tick.value))
                 }
-                .frame(height: height, alignment: .center)
             }
             .frame(height: height)
-            HStack(spacing: 0) {
-                ForEach(Array(ticks.enumerated()), id: \.offset) { index, tick in
-                    Text(tick.label)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    if index != ticks.count - 1 { Spacer(minLength: 0) }
-                }
+            .position(x: width / 2, y: height / 2)
+            ForEach(Array(ticks.enumerated()), id: \.offset) { _, tick in
+                Text(tick.label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    // Clamped off the ends so the first and last labels stay
+                    // inside the bar's own width rather than being clipped.
+                    .position(
+                        x: min(max(width * fraction(of: tick.value), 12), max(width - 12, 12)),
+                        y: height + 8
+                    )
             }
         }
+        .frame(height: height + 18)
         .accessibilityHidden(true)
     }
 
-    private var fraction: Double {
+    private func fraction(of amount: Double) -> Double {
         guard let last = ticks.last?.value, last > 0 else { return 0 }
-        return min(1, max(0, value / last))
+        return min(1, max(0, amount / last))
     }
 }
