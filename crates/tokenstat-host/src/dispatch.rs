@@ -266,6 +266,9 @@ fn add_activity(item: &mut Value) {
         json!((reading.cpu_percent * 10.0).round() / 10.0),
     );
     map.insert("memoryMb".into(), json!(reading.memory_mb.round()));
+    if let Some(attention) = reading.attention {
+        map.insert("attention".into(), json!(attention.as_str()));
+    }
 }
 
 #[cfg(feature = "local-host")]

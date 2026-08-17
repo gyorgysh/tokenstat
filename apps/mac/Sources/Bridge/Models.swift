@@ -1676,6 +1676,9 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var cpuPercent: Double?
     /// Resident memory of the process subtree, in megabytes.
     var memoryMb: Double?
+    /// Why the person should look: `permission`, `gate`, or `error`.
+    /// Absent when nothing needs them. Not the same as idle.
+    var attention: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1694,6 +1697,7 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case activity
         case cpuPercent
         case memoryMb
+        case attention
     }
 }
 

@@ -88,6 +88,25 @@ impl Activity {
     }
 }
 
+/// Why a person should look at this session.
+///
+/// Separate from [`Activity`]: idle-for-twenty-seconds is not a reason to
+/// look, and a false alarm is worse than a quiet row. Only the detectors
+/// below set this, and they stay conservative on purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Attention {
+    /// The agent is waiting on a permission or approval prompt.
+    Permission,
+}
+
+impl Attention {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Attention::Permission => "permission",
+        }
+    }
+}
+
 /// One session's answer, and the number behind it.
 #[derive(Debug, Clone, Copy)]
 pub struct Reading {
@@ -101,6 +120,8 @@ pub struct Reading {
     /// Not smoothed. Memory moves in steps rather than in noise, so an
     /// average would only lag the number the process actually holds.
     pub memory_mb: f64,
+    /// Why the person should look, when we are sure. Absent is not idle.
+    pub attention: Option<Attention>,
 }
 
 /// Per-session smoothing state.
@@ -238,10 +259,8 @@ fn tick() {
         let usage = subtree_usage(&table, &children, w.pid);
         let sample = usage.cpu_percent;
         let memory_mb = usage.memory_mb;
-        let hook = hooks
-            .iter()
-            .find(|r| r.matches(w, &usage.pids))
-            .map(|r| r.working);
+        let hook = hooks.iter().find(|r| r.matches(w, &usage.pids));
+        let hook_working = hook.map(|r| r.working);
         let evidence = w
             .harness
             .as_deref()
@@ -253,7 +272,7 @@ fn tick() {
             t.states.get(&w.pid).copied().unwrap_or_default(),
             sample,
             evidence,
-            hook,
+            hook_working,
         );
 
         // Grace bridges quiet stretches between tokens for the CPU and
@@ -261,7 +280,7 @@ fn tick() {
         // hooks beat every measurement, and a three-minute Working after the
         // agent has asked the user a question is worse than a brief flap.
         let previous = t.last_working.get(&w.pid).copied();
-        let hook_says_idle = hook == Some(false);
+        let hook_says_idle = hook_working == Some(false);
         let within_grace = previous.is_some_and(|at| now.duration_since(at) < GRACE);
         if state.working {
             last_working.insert(w.pid, now);
@@ -271,12 +290,16 @@ fn tick() {
             last_working.insert(w.pid, at);
         }
 
+        let attention = hook
+            .and_then(|r| r.attention)
+            .or_else(|| permission_prompt_for(w.pid));
         readings.insert(
             w.pid,
             Reading {
                 activity: reported_activity(state.working, within_grace, hook_says_idle),
                 cpu_percent: state.average.unwrap_or(0.0),
                 memory_mb,
+                attention,
             },
         );
         states.insert(w.pid, state);
@@ -549,6 +572,32 @@ struct HookRecord {
     agent_pid: Option<u32>,
     owner_pid: Option<u32>,
     working: bool,
+    /// The hook said the agent is waiting on the person.
+    attention: Option<Attention>,
+}
+
+/// Strings a permission prompt actually prints. Conservative on purpose:
+/// matching "permission" in a file the agent is editing would light every
+/// session that touched an auth crate. These are UI phrases, not topics.
+const PERMISSION_MARKERS: &[&str] = &[
+    "Do you want to proceed",
+    "Yes, and don't ask again",
+    "Allow this command",
+    "Approve and run",
+    "waiting-approval",
+    "Do you want to allow",
+];
+
+/// Look at the live pty tail for a permission prompt. In memory only.
+fn permission_prompt_for(pid: u32) -> Option<Attention> {
+    let bytes = tokenstat_pty::manager().tail_for_pid(pid, 8 * 1024)?;
+    let tail = String::from_utf8_lossy(&bytes);
+    permission_prompt_in(&tail).then_some(Attention::Permission)
+}
+
+/// True when the text contains a known permission prompt.
+fn permission_prompt_in(tail: &str) -> bool {
+    PERMISSION_MARKERS.iter().any(|m| tail.contains(m))
 }
 
 impl HookRecord {
@@ -623,6 +672,10 @@ fn hook_records() -> Vec<HookRecord> {
         };
         let state = value.get("state").and_then(|v| v.as_str()).unwrap_or("");
         let detail = value.get("detail").and_then(|v| v.as_str());
+        // "waiting" is the agent asking the person something. That is
+        // Needs Attention, not Working: a row that stays accent-coloured
+        // while it waits for a yes is why nobody trusted the old indicator.
+        let waiting = state == "waiting" || detail == Some("waiting-approval");
         out.push(HookRecord {
             cwd: value
                 .get("cwd")
@@ -640,13 +693,8 @@ fn hook_records() -> Vec<HookRecord> {
                 .get("ownerPid")
                 .and_then(|v| v.as_u64())
                 .map(|v| v as u32),
-            // "waiting" is the agent asking the user something. It is not
-            // working, and a row that says Working while it waits for a
-            // permission answer is why nobody would trust the indicator. The
-            // exception is a pending approval, where the agent is blocked
-            // mid-task and will resume the moment it is answered.
-            working: state == "working"
-                || (state == "waiting" && detail == Some("waiting-approval")),
+            working: state == "working",
+            attention: waiting.then_some(Attention::Permission),
         });
     }
     out
@@ -742,7 +790,24 @@ mod tests {
             agent_pid: None,
             owner_pid: None,
             working: true,
+            attention: None,
         }
+    }
+
+    #[test]
+    fn permission_prompt_markers_are_narrow() {
+        assert!(permission_prompt_in(
+            "Do you want to proceed?\n❯ 1. Yes\n  2. Yes, and don't ask again"
+        ));
+        assert!(permission_prompt_in("Allow this command to run?"));
+        assert!(
+            !permission_prompt_in("edit crates/tokenstat-host/src/activity.rs"),
+            "a file path about activity is not a prompt"
+        );
+        assert!(
+            !permission_prompt_in("checking file permissions on the tree"),
+            "talking about permissions is not a prompt"
+        );
     }
 
     fn subtree(pids: &[u32]) -> HashSet<u32> {

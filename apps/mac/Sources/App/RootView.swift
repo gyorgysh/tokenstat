@@ -2078,6 +2078,7 @@ private struct StateBadge: View {
         switch state {
         case .working: return Theme.stateWorking
         case .starting: return Theme.stateWorking.opacity(0.5)
+        case .needsAttention: return Theme.warning
         case .stopped: return Theme.danger
         case .idle, .none: return Theme.stateIdle
         }
@@ -2089,7 +2090,18 @@ private struct StateBadge: View {
         case .working: return "Working"
         case .starting: return "Starting"
         case .idle: return "Idle"
+        case .needsAttention: return "Needs attention"
         case .stopped: return "Stopped"
+        }
+    }
+
+    /// Working and attention carry colour. Everything else stays grey so
+    /// the one row that needs a person is the one that draws the eye.
+    private var labelStyle: AnyShapeStyle {
+        switch state {
+        case .working: return AnyShapeStyle(Theme.stateWorking)
+        case .needsAttention: return AnyShapeStyle(Theme.warning)
+        default: return AnyShapeStyle(.tertiary)
         }
     }
 
@@ -2108,7 +2120,7 @@ private struct StateBadge: View {
             }
             Text(label)
                 .font(.system(size: DisplayFit.dp(RowMetrics.meta)))
-                .foregroundStyle(state == .working ? AnyShapeStyle(Theme.stateWorking) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(labelStyle)
                 .lineLimit(1)
             if state == .idle, let since {
                 Text("·").font(.system(size: DisplayFit.dp(RowMetrics.meta))).foregroundStyle(.quaternary)

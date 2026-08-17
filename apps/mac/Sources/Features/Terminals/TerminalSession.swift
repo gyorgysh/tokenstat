@@ -25,6 +25,9 @@ enum SessionState: Equatable {
     case working
     /// The process is alive but has been quiet for a while.
     case idle
+    /// The process is waiting on the person: a permission prompt, a gate,
+    /// or a failed step that paused the run.
+    case needsAttention
     /// The process has exited.
     case stopped
 
@@ -34,6 +37,7 @@ enum SessionState: Equatable {
         case .starting: return "Starting"
         case .working: return "Working"
         case .idle: return "Idle"
+        case .needsAttention: return "Needs attention"
         case .stopped: return "Stopped"
         }
     }
@@ -320,7 +324,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             lastActivityAtMs: info.lastActivityAtMs,
             activity: info.activity,
             cpuPercent: info.cpuPercent,
-            memoryMb: info.memoryMb
+            memoryMb: info.memoryMb,
+            attention: info.attention
         )
         // Adopted from the host: the process already exists, so the emulator
         // is built now and polling starts immediately.
@@ -377,7 +382,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             lastActivityAtMs: info.lastActivityAtMs,
             activity: info.activity,
             cpuPercent: info.cpuPercent,
-            memoryMb: info.memoryMb
+            memoryMb: info.memoryMb,
+            attention: info.attention
         )
         // Build the emulator now that a process exists. Before this there was
         // nothing to draw.
@@ -756,7 +762,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                     applyActivity(
                         info.activity,
                         cpuPercent: info.cpuPercent,
-                        memoryMb: info.memoryMb
+                        memoryMb: info.memoryMb,
+                        attention: info.attention
                     )
                 }
                 if let code = info.exitCode {
@@ -1133,7 +1140,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         lastActivityAtMs: Int64?,
         activity: String? = nil,
         cpuPercent: Double? = nil,
-        memoryMb: Double? = nil
+        memoryMb: Double? = nil,
+        attention: String? = nil
     ) {
         idleCheckTask?.cancel()
         idleCheckTask = nil
@@ -1141,8 +1149,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             state = exitCode != nil ? .stopped : .none
             return
         }
-        if activity != nil {
-            applyActivity(activity, cpuPercent: cpuPercent, memoryMb: memoryMb)
+        if activity != nil || attention != nil {
+            applyActivity(
+                activity,
+                cpuPercent: cpuPercent,
+                memoryMb: memoryMb,
+                attention: attention
+            )
             return
         }
         if let last = lastActivityAtMs {
@@ -1163,9 +1176,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// transcript writes, and answers with one word. That is a far better
     /// answer than this side can compute, so once it arrives the local timer
     /// is cancelled and never runs again for this session.
-    private func applyActivity(_ activity: String?, cpuPercent: Double?, memoryMb: Double? = nil) {
-        guard let activity else { return }
-        hostReportedActivity = true
+    private func applyActivity(
+        _ activity: String?,
+        cpuPercent: Double?,
+        memoryMb: Double? = nil,
+        attention: String? = nil
+    ) {
+        if activity == nil && attention == nil { return }
+        if activity != nil { hostReportedActivity = true }
         idleCheckTask?.cancel()
         idleCheckTask = nil
         // Store what is displayed, not what was measured. These arrive four
@@ -1177,7 +1195,16 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         let memory = memoryMb.map { ($0).rounded() }
         if self.cpuPercent != cpu { self.cpuPercent = cpu }
         if self.memoryMb != memory { self.memoryMb = memory }
-        let next: SessionState = activity == "working" ? .working : .idle
+        let next: SessionState
+        if attention != nil, !(attention?.isEmpty ?? true) {
+            next = .needsAttention
+        } else if activity == "working" {
+            next = .working
+        } else if activity != nil {
+            next = .idle
+        } else {
+            return
+        }
         if state != next { state = next }
     }
 

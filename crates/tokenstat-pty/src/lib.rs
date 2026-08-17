@@ -913,6 +913,31 @@ impl Manager {
         Ok(self.snapshot(&s))
     }
 
+    /// Last bytes of output for the session whose child is `pid`.
+    ///
+    /// The activity sampler uses this to look for a permission prompt. The
+    /// bytes stay in memory: they are not logged and not written to the store.
+    pub fn tail_for_pid(&self, pid: u32, max: usize) -> Option<Vec<u8>> {
+        if max == 0 {
+            return None;
+        }
+        let sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
+        for s in sessions.values() {
+            let child_pid = s
+                .child
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .process_id();
+            if child_pid != Some(pid) {
+                continue;
+            }
+            let buf = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
+            let n = buf.data.len().min(max);
+            return Some(buf.data[buf.data.len() - n..].to_vec());
+        }
+        None
+    }
+
     pub fn list(&self) -> Vec<SessionInfo> {
         // Clone the handles under the map lock, then snapshot outside it:
         // snapshot takes the per-session child/info/buffer locks, and holding
