@@ -313,6 +313,37 @@ fn split_agy_id(line: &str) -> Option<String> {
     None
 }
 
+const CHEAP_MARKERS: &[&str] = &["haiku", "nano", "mini", "flash", "fast", "lite", "small"];
+
+/// First listed id that looks cheap. Claude falls back to the last alias.
+pub fn cheapest_model(backend: &str, models: &[String]) -> Option<String> {
+    if models.is_empty() {
+        return None;
+    }
+    for marker in CHEAP_MARKERS {
+        if let Some(id) = models
+            .iter()
+            .find(|m| m.to_ascii_lowercase().contains(marker))
+        {
+            return Some(id.clone());
+        }
+    }
+    if backend == "claude" {
+        return models.last().cloned();
+    }
+    models.first().cloned()
+}
+
+/// `low` or `minimal` when advertised, otherwise the first level.
+pub fn lowest_effort(efforts: &[String]) -> Option<String> {
+    for prefer in ["low", "minimal"] {
+        if let Some(found) = efforts.iter().find(|e| e.eq_ignore_ascii_case(prefer)) {
+            return Some(found.clone());
+        }
+    }
+    efforts.first().cloned()
+}
+
 fn is_model_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -324,6 +355,26 @@ fn is_model_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cheapest_model_prefers_a_haiku_alias() {
+        let models = ["fable", "opus", "sonnet", "haiku"].map(String::from);
+        assert_eq!(cheapest_model("claude", &models).as_deref(), Some("haiku"));
+    }
+
+    #[test]
+    fn cheapest_model_on_claude_without_a_marker_uses_the_last() {
+        let models = ["opus", "sonnet"].map(String::from);
+        assert_eq!(cheapest_model("claude", &models).as_deref(), Some("sonnet"));
+    }
+
+    #[test]
+    fn lowest_effort_prefers_low_then_minimal() {
+        let high_first = ["high", "medium", "low"].map(String::from);
+        assert_eq!(lowest_effort(&high_first).as_deref(), Some("low"));
+        let max_stack = ["max", "high", "minimal"].map(String::from);
+        assert_eq!(lowest_effort(&max_stack).as_deref(), Some("minimal"));
+    }
 
     #[test]
     fn grok_list_puts_the_default_first() {

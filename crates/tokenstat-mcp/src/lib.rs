@@ -383,7 +383,9 @@ fn tools() -> Vec<Value> {
                 "properties": {
                     "prompt": { "type": "string" },
                     "workspaceId": { "type": "string" },
-                    "backend": { "type": "string" }
+                    "backend": { "type": "string" },
+                    "model": { "type": "string" },
+                    "effort": { "type": "string" }
                 },
                 "required": ["prompt"]
             }),

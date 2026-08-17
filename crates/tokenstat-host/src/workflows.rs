@@ -972,12 +972,15 @@ pub fn design(
     prompt: &str,
     workspace_id: Option<&str>,
     backend: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<Value, String> {
     let intent = prompt.trim();
     if intent.is_empty() {
         return Err("describe the run first".into());
     }
     let backend = pick_design_backend(backend);
+    let (model, effort) = design_model_effort(&backend, model, effort);
     let workspace = match workspace_id {
         Some(id) => Some(crate::workspaces::folder(id)?),
         None => None,
@@ -1000,7 +1003,8 @@ pub fn design(
     let brief = format!(
         "{DESIGN_PROMPT}\n\nAvailable backends: {backends}\nExisting automations: {automations}\nWorkspace path: {folder}\n\nIntent:\n{intent}\n"
     );
-    let argv = automations::agent_command(&backend, &brief, None, None, 180)?;
+    let argv =
+        automations::agent_command(&backend, &brief, model.as_deref(), effort.as_deref(), 180)?;
     let cwd = if folder.is_empty() {
         std::env::temp_dir().display().to_string()
     } else {
@@ -1699,16 +1703,98 @@ fn pick_design_backend(requested: Option<&str>) -> String {
     if let Some(id) = requested.filter(|id| !id.is_empty()) {
         return id.to_string();
     }
-    let ids: Vec<String> = automations::backends()
+    let listed: Vec<(String, Vec<String>, Vec<String>)> = automations::backends()
         .into_iter()
-        .filter_map(|b| b.get("id").and_then(Value::as_str).map(str::to_string))
+        .filter_map(|b| {
+            let id = b.get("id")?.as_str()?.to_string();
+            if id == "sh" {
+                return None;
+            }
+            let models = b
+                .get("models")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let efforts = b
+                .get("efforts")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some((id, models, efforts))
+        })
         .collect();
-    for preferred in ["grok", "opencode", "claude"] {
-        if ids.iter().any(|id| id == preferred) {
-            return preferred.to_string();
-        }
+    if let Some((id, _, _)) = listed.iter().find(|(id, models, efforts)| {
+        crate::agent_models::cheapest_model(id, models).is_some()
+            || crate::agent_models::lowest_effort(efforts).is_some()
+    }) {
+        return id.clone();
     }
-    ids.into_iter().next().unwrap_or_else(|| "grok".into())
+    listed
+        .into_iter()
+        .next()
+        .map(|(id, _, _)| id)
+        .unwrap_or_else(|| "grok".into())
+}
+
+fn design_model_effort(
+    backend: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let listed = automations::backends()
+        .into_iter()
+        .find(|b| b.get("id").and_then(Value::as_str) == Some(backend));
+    let models: Vec<String> = listed
+        .as_ref()
+        .and_then(|b| b.get("models"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let efforts: Vec<String> = listed
+        .as_ref()
+        .and_then(|b| b.get("efforts"))
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    resolve_design_model_effort(backend, model, effort, &models, &efforts)
+}
+
+fn resolve_design_model_effort(
+    backend: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    models: &[String],
+    efforts: &[String],
+) -> (Option<String>, Option<String>) {
+    let model = model
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| crate::agent_models::cheapest_model(backend, models));
+    let effort = effort
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| crate::agent_models::lowest_effort(efforts));
+    (model, effort)
 }
 
 fn fail_run(run: &mut WorkflowRun, message: &str) {
@@ -2546,5 +2632,34 @@ thanks"#;
         let (status, out, _) = advance_loop(&wf, &mut run, &wf.nodes[1], "", &outs).unwrap();
         assert_eq!(status, "ok", "{out}");
         assert!(out.contains("done after 1"), "{out}");
+    }
+
+    #[test]
+    fn omitted_model_effort_on_claude_is_haiku_and_low() {
+        let models = ["fable", "opus", "sonnet", "haiku"].map(String::from);
+        let efforts = ["high", "medium", "low"].map(String::from);
+        let (model, effort) = resolve_design_model_effort("claude", None, None, &models, &efforts);
+        assert_eq!(model.as_deref(), Some("haiku"));
+        assert_eq!(effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn explicit_model_effort_are_honoured() {
+        let models = ["fable", "opus", "sonnet", "haiku"].map(String::from);
+        let efforts = ["high", "medium", "low"].map(String::from);
+        let (model, effort) =
+            resolve_design_model_effort("claude", Some("opus"), Some("high"), &models, &efforts);
+        assert_eq!(model.as_deref(), Some("opus"));
+        assert_eq!(effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn empty_model_effort_are_treated_as_omitted() {
+        let models = ["fable", "opus", "sonnet", "haiku"].map(String::from);
+        let efforts = ["high", "medium", "low"].map(String::from);
+        let (model, effort) =
+            resolve_design_model_effort("claude", Some(""), Some(""), &models, &efforts);
+        assert_eq!(model.as_deref(), Some("haiku"));
+        assert_eq!(effort.as_deref(), Some("low"));
     }
 }

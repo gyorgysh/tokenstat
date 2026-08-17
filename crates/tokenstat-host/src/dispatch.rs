@@ -373,6 +373,8 @@ struct WorkflowParams {
     input: Option<String>,
     workspace_id: Option<String>,
     backend: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
     prompt: Option<String>,
     node_id: Option<String>,
     offset: Option<u64>,
@@ -1676,6 +1678,8 @@ fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
                 p.prompt.as_deref().ok_or("workflow.design needs prompt")?,
                 p.workspace_id.as_deref(),
                 p.backend.as_deref(),
+                p.model.as_deref(),
+                p.effort.as_deref(),
             )
         }
         other => Err(format!("unknown method: {other}")),
