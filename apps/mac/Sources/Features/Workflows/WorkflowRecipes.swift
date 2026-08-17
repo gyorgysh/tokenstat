@@ -75,6 +75,7 @@ struct WorkflowRecipe: Identifiable {
     var edges: [WorkflowEdge]
 }
 
+@MainActor
 enum WorkflowRecipes {
     /// Agents whose CLI is on this Mac. Hidden tiles stay out. Shell is not
     /// an agent. Empty means the example chips should hide.
