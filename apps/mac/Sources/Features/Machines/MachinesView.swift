@@ -154,7 +154,7 @@ struct MachinesView: View {
         if !model.accountMachines.isEmpty {
             accountDevices
         }
-        if !model.known.isEmpty {
+        if !unlistedKnown.isEmpty {
             knownMachines
         }
         // Account-linked machines already appear above. Pairing is only
@@ -238,9 +238,7 @@ struct MachinesView: View {
                 StatusDot(online: machine.online)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(resolved
-                    ?? machine.machineID.map { "Machine \($0)" }
-                    ?? "Unnamed device")
+                Text(deviceTitle(resolved: resolved, machine: machine))
                     .font(.callout.weight(.medium))
                 Text(statusLine(for: machine, isSelf: isSelf))
                     .font(.caption)
@@ -515,9 +513,9 @@ struct MachinesView: View {
     }
 
     private var knownMachines: some View {
-        Card(title: "Your devices", subtitle: "Manage connections you have already approved.", mark: "mark_device") {
+        Card(title: "Other approved devices", subtitle: "Devices that are paired with this Mac but not on the account.", mark: "mark_device") {
             VStack(spacing: Theme.Space.s) {
-                ForEach(model.known) { peer in
+                ForEach(unlistedKnown) { peer in
                     PeerRow(
                         peer: peer,
                         resolvedName: model.accountName(for: peer),
@@ -541,7 +539,22 @@ struct MachinesView: View {
             }
             .transition(.smoothIn(reduceMotion: reduceMotion))
         }
-        .animation(.easeOut(duration: 0.22), value: model.known.isEmpty)
+        .animation(.easeOut(duration: 0.22), value: unlistedKnown.isEmpty)
+    }
+
+    /// Approved peers that the account list above does not already show.
+    ///
+    /// The same iPhone appeared twice, once as `m_1ab6c8e5d261fdab` under
+    /// Account-linked devices and again as `mellow-zebra-reef` under Your
+    /// devices, with different names and different buttons. One physical
+    /// device, one row: the account row already carries Approve, Connect and
+    /// Revoke for a peer it can match, so this section is left with the
+    /// devices that are genuinely only paired locally.
+    private var unlistedKnown: [Peer] {
+        let listed = Set(
+            model.listedAccountMachines.compactMap { model.peer(for: $0)?.key }
+        )
+        return model.known.filter { !listed.contains($0.key) }
     }
 
     #if os(macOS)
@@ -593,6 +606,12 @@ struct MachinesView: View {
 
     private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
+            // Awake or asleep, as a picture. The paragraph beside it is
+            // accurate and long, and this is the half somebody reads.
+            Image(systemName: isOn.wrappedValue ? "bolt.horizontal.circle.fill" : "moon.zzz.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(isOn.wrappedValue ? Theme.accent : Theme.stateIdle)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.callout)
@@ -614,6 +633,11 @@ struct MachinesView: View {
     private var accountDevices: some View {
         Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.", mark: "mark_device") {
             VStack(spacing: 0) {
+                // The screen's whole subject is what can reach what, and it was
+                // answered with a column of identifiers. The diagram answers it
+                // first, the rows carry the detail.
+                DeviceHub(centre: hubCentre, others: hubOthers)
+                    .padding(.bottom, Theme.Space.s)
                 ForEach(model.listedAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
                     // host, not the reverse (P5). Hiding them made a device
@@ -653,17 +677,14 @@ struct MachinesView: View {
                         }
                         VStack(alignment: .leading, spacing: 2) {
                             // An unnamed machine is still known by name when it
-                            // is this one or a peer this Mac has approved: the
-                            // account row keeps its code, but the title says
-                            // who it actually is instead of "Device abc".
-                            if let name = resolved {
-                                Text(name)
-                                    .font(.callout.weight(.medium))
-                            } else {
-                                Text(machine.machineID.map { "Machine \($0)" } ?? "Unnamed device")
-                                    .font(.callout.weight(.medium))
-                            }
-                            if let id = machine.machineID, machine.label?.isEmpty == false || resolved != nil {
+                            // is this one or a peer this Mac has approved. Where
+                            // nobody knows it, it gets a description of what it
+                            // is rather than its primary key: `Machine
+                            // m_c9826340c403872c` as a row title is a database
+                            // showing through the window.
+                            Text(deviceTitle(resolved: resolved, machine: machine))
+                                .font(.callout.weight(.medium))
+                            if let id = machine.machineID {
                                 Text(id)
                                     .font(Theme.mono(11))
                                     .foregroundStyle(.tertiary)
@@ -729,6 +750,40 @@ struct MachinesView: View {
             .transition(.smoothIn(reduceMotion: reduceMotion))
         }
         .animation(.easeOut(duration: 0.22), value: model.accountMachines.isEmpty)
+    }
+
+    /// What to call a machine in a list. Never its id: the code sits under the
+    /// title in monospace, where an identifier belongs.
+    private func deviceTitle(resolved: String?, machine: Machine) -> String {
+        if let resolved, !resolved.isEmpty { return resolved }
+        return machine.isHost ? "Unnamed computer" : "Unnamed phone"
+    }
+
+    /// This Mac, at the middle of the diagram.
+    private var hubCentre: DeviceHub.Node {
+        DeviceHub.Node(
+            id: "self",
+            name: model.identity?.label ?? model.status?.label ?? "This Mac",
+            symbol: "laptopcomputer",
+            online: model.status?.tunnelOnline == true,
+            connected: false
+        )
+    }
+
+    /// Everything linked to it, minus this machine itself.
+    private var hubOthers: [DeviceHub.Node] {
+        model.listedAccountMachines.compactMap { machine in
+            let isSelf = machine.machineID == model.account?.thisMachineID
+                || machine.publicIdentity == model.identity?.key
+            guard !isSelf else { return nil }
+            return DeviceHub.Node(
+                id: machine.id,
+                name: deviceTitle(resolved: model.resolvedName(for: machine), machine: machine),
+                symbol: machine.isHost ? "desktopcomputer" : "iphone",
+                online: machine.online,
+                connected: model.isConnected(machine)
+            )
+        }
     }
 
     /// One caption line under a machine's name. The presence light is the
