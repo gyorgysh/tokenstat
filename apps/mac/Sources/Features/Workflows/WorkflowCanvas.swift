@@ -80,6 +80,12 @@ struct WorkflowCanvas: View {
         .onAppear { fitIfNeeded() }
         .onChange(of: model.editorEpoch) { _, _ in fitIfNeeded() }
         .focusable()
+        // The canvas is focusable so Escape and Delete reach it, and AppKit
+        // repays that by drawing a system focus ring around the whole pane the
+        // moment a node is clicked: a blue rectangle down every edge of the
+        // editor, in the system accent rather than any colour this app uses.
+        // The selected node already shows what is selected.
+        .focusEffectDisabled()
         .onExitCommand { armed = nil }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Workflow canvas")
@@ -457,7 +463,11 @@ struct WorkflowCanvas: View {
         let maxY = CGFloat(graph.nodes.map { $0.y + Double(WorkflowNodeMetrics.height) }.max() ?? 120)
         let width = max(maxX - minX, 1) + pad * 2
         let height = max(maxY - minY, 1) + pad * 2
-        let z = min(2.2, max(0.4, min(canvasSize.width / width, canvasSize.height / height)))
+        // Fit only ever zooms out. A blank draft is one card in a large window,
+        // so fitting it to the glass magnified it past 200% and opened the
+        // editor on a wall of one node. Anything that already fits is shown at
+        // its own size, which is what a canvas opening at "normal" means.
+        let z = min(1, max(0.4, min(canvasSize.width / width, canvasSize.height / height)))
         zoom = z
         pan = CGSize(
             width: (canvasSize.width - width * z) / 2 - (minX - pad) * z,

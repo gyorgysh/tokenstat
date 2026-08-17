@@ -19,25 +19,36 @@ struct WorkflowsEditor: View {
     @State private var designing = false
     @State private var name = ""
 
+    /// Width below which the palette would leave no canvas worth having.
+    ///
+    /// A 220 point column beside a 480 point window is most of the editor spent
+    /// on a list of things to add, with nowhere to put them. Below this the
+    /// canvas keeps the pane and nodes are added with the + under each card,
+    /// which is the way most of them get added anyway.
+    private static let paletteFloor: CGFloat = 700
+
     var body: some View {
-        VStack(spacing: 0) {
-            chrome
-            if let error = model.errorMessage {
-                Banner(text: error, severity: .warning)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.top, Theme.Space.s)
-            }
-            Divider()
-            HStack(spacing: 0) {
-                if paletteOpen {
-                    WorkflowPalette(model: model)
-                        .frame(width: 220)
-                    Divider()
+        WidthReader { width in
+            let roomForPalette = width >= Self.paletteFloor
+            VStack(spacing: 0) {
+                chrome(roomForPalette: roomForPalette)
+                if let error = model.errorMessage {
+                    Banner(text: error, severity: .warning)
+                        .padding(.horizontal, Theme.Space.m)
+                        .padding(.top, Theme.Space.s)
                 }
-                WorkflowCanvas(
-                    model: model,
-                    run: liveRun
-                )
+                Divider()
+                HStack(spacing: 0) {
+                    if paletteOpen && roomForPalette {
+                        WorkflowPalette(model: model)
+                            .frame(width: 220)
+                        Divider()
+                    }
+                    WorkflowCanvas(
+                        model: model,
+                        run: liveRun
+                    )
+                }
             }
         }
         .background(Theme.background)
@@ -61,17 +72,35 @@ struct WorkflowsEditor: View {
         return model.lastRun(for: graph)?.isLive == true ? model.lastRun(for: graph) : nil
     }
 
-    private var chrome: some View {
+    private func chrome(roomForPalette: Bool) -> some View {
+        // Horizontally scrollable rather than compressible. In a narrow window
+        // the row used to keep every control and take the width out of their
+        // labels, so "Library" came out as one letter per line and the toolbar
+        // grew taller than the canvas. Nothing here is optional enough to drop,
+        // so it scrolls and every button keeps its own width.
+        ScrollView(.horizontal, showsIndicators: false) {
+            chromeContent(roomForPalette: roomForPalette)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, 8)
+        }
+        .background(Theme.tabStrip)
+    }
+
+    private func chromeContent(roomForPalette: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
             Button("Library", .back) { onBack() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
-            Button(paletteOpen ? "Hide palette" : "Palette", .layout) {
-                paletteOpen.toggle()
+            // No button for a palette this window has no room for: a toggle
+            // that changes nothing is worse than the missing column.
+            if roomForPalette {
+                Button(paletteOpen ? "Hide palette" : "Palette", .layout) {
+                    paletteOpen.toggle()
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
             }
-            .buttonStyle(SecondaryButtonStyle(small: true))
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 220)
+                .frame(width: 220)
                 .onChange(of: name) { _, next in
                     guard next != model.working?.name else { return }
                     model.beginGroupedEdit()
@@ -140,9 +169,10 @@ struct WorkflowsEditor: View {
                 }
             }
         }
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, 8)
-        .background(Theme.tabStrip)
+        // Every control keeps the width its label needs. Without this the
+        // scroll view proposes its own width to the row and the labels wrap
+        // again, inside a view that was supposed to fix exactly that.
+        .fixedSize()
     }
 
     private func discardEdits() {
