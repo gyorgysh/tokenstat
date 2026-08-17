@@ -244,7 +244,7 @@ private struct NoticeCard: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             if showSignIn {
-                Button("Sign in") { account.signIn() }
+                Button("Sign in", .signIn) { account.signIn() }
                     .clientGlassStyle()
                     .tint(Theme.accent)
             }

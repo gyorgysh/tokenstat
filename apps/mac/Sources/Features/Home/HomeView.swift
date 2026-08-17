@@ -254,7 +254,7 @@ struct HomeView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: Theme.Space.s)
-            Button("Open Account") { onShowAccount() }
+            Button("Open Account", .account) { onShowAccount() }
                 .buttonStyle(SecondaryButtonStyle())
             Button {
                 limitsSyncHintDismissed = true
@@ -575,7 +575,7 @@ struct HomeView: View {
                 account.signIn()
                 onShowAccount()
             } label: {
-                Text(account.signedIn ? "Reconnect" : "Sign in")
+                ActionIcon.signIn.label(account.signedIn ? "Reconnect" : "Sign in")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)

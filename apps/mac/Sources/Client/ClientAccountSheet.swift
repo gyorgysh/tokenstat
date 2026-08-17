@@ -207,7 +207,8 @@ private struct ClientAccountContent: View {
                 Button {
                     showPaywall = true
                 } label: {
-                    Text("See plans")
+                    ActionIcon.plans.label("See plans")
+                        .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -234,7 +235,8 @@ private struct ClientAccountContent: View {
                 Button {
                     showPaywall = true
                 } label: {
-                    Text("See plans")
+                    ActionIcon.plans.label("See plans")
+                        .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -347,7 +349,8 @@ private struct ClientAccountContent: View {
                     ProgressView()
                         .tint(Theme.danger)
                 } else {
-                    Text("Sign out")
+                    ActionIcon.signOut.label("Sign out")
+                        .labelStyle(ActionLabelStyle())
                         .font(ClientType.label.weight(.semibold))
                 }
             }
@@ -389,7 +392,8 @@ private struct ClientAccountContent: View {
             Button {
                 model.signIn()
             } label: {
-                Text("Sign in")
+                ActionIcon.signIn.label("Sign in")
+                    .labelStyle(ActionLabelStyle())
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
             }
@@ -450,7 +454,8 @@ private struct ClientAccountContent: View {
             Button {
                 showLicenses = true
             } label: {
-                Text("View licenses")
+                ActionIcon.docs.label("View licenses")
+                    .labelStyle(ActionLabelStyle())
                     .font(ClientType.label.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(maxWidth: .infinity)

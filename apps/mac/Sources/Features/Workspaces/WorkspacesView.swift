@@ -114,7 +114,7 @@ struct WorkspacesView: View {
 
             if folder.exists {
                 #if os(macOS)
-                Button("Reveal in Finder") { model.revealInFinder(folder) }
+                Button("Reveal in Finder", .reveal) { model.revealInFinder(folder) }
                     .padding(.top, Theme.Space.s)
                 #endif
             } else {
@@ -335,7 +335,7 @@ struct WorkspaceChangesView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Expand all") {
+            Button("Expand all", .more) {
                 expandedDiffs.formUnion(git.files.map { diffKey($0, in: folder) })
                 Task {
                     for file in git.files {
@@ -344,11 +344,11 @@ struct WorkspaceChangesView: View {
                 }
             }
             .buttonStyle(.borderless)
-            Button("Collapse all") {
+            Button("Collapse all", .collapse) {
                 expandedDiffs.subtract(git.files.map { diffKey($0, in: folder) })
             }
             .buttonStyle(.borderless)
-            Button("Review") {
+            Button("Review", .preview) {
                 model.reviewWorkingTree(in: folder.id)
             }
             // The app's own primary action, not the system blue pill: this
@@ -596,7 +596,7 @@ private struct CommitBox: View {
             Button {
                 Task { await model.commit(folder) }
             } label: {
-                Text(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
+                ActionIcon.commit.label(selectedCount > 0 ? "Commit \(selectedCount)" : "Commit")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(AccentButtonStyle())
@@ -627,7 +627,7 @@ private struct CommitBox: View {
             Button {
                 Task { await runAutoCommit() }
             } label: {
-                Text(autoCommitRunning ? "Running…" : "Auto commit")
+                ActionIcon.run.label(autoCommitRunning ? "Running…" : "Auto commit")
             }
             .buttonStyle(SecondaryButtonStyle())
             .disabled(model.isCommitting || selectedBackend == nil || autoCommitRunning)

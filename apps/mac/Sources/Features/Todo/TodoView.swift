@@ -586,14 +586,14 @@ private struct CardView: View {
                     .lineLimit(1)
             }
             if delegate.isRunning {
-                Button("Stop") { Task { await model.stop(card) } }
+                Button("Stop", .stop) { Task { await model.stop(card) } }
                     .buttonStyle(.borderless)
                     .controlSize(.mini)
             }
             // The result lives on the Automations screen; this is the door to
             // it, so a delegated card is never a dead end that only says
             // "Done" with nowhere to look.
-            Button("View result") {
+            Button("View result", .preview) {
                 onViewRun?(delegate.runId)
             }
             .buttonStyle(.borderless)
@@ -606,19 +606,19 @@ private struct CardView: View {
     private var controls: some View {
         Menu {
             if card.column != "backlog" {
-                Button("Move to To Do") { Task { await model.move(card, to: "backlog") } }
+                Button("Move to To Do", .move) { Task { await model.move(card, to: "backlog") } }
             }
             if card.column != "doing" {
-                Button("Move to Doing") { Task { await model.move(card, to: "doing") } }
+                Button("Move to Doing", .move) { Task { await model.move(card, to: "doing") } }
             }
             if card.column != "done" && card.column != "archive" {
-                Button("Move to Done") { Task { await model.move(card, to: "done") } }
+                Button("Move to Done", .move) { Task { await model.move(card, to: "done") } }
             }
             if card.column == "done" {
-                Button("Archive") { Task { await model.move(card, to: "archive") } }
+                Button("Archive", .archive) { Task { await model.move(card, to: "archive") } }
             }
             if card.column == "archive" {
-                Button("Restore to Done") { Task { await model.move(card, to: "done") } }
+                Button("Restore to Done", .restore) { Task { await model.move(card, to: "done") } }
             }
             Divider()
             if !card.isNote {
@@ -626,7 +626,7 @@ private struct CardView: View {
                     delegating = true
                 }
             }
-            Button("Delete", role: .destructive) { confirmingDelete = true }
+            Button("Delete", .delete, role: .destructive) { confirmingDelete = true }
         } label: {
             Image(systemName: "ellipsis.circle")
                 .foregroundStyle(.secondary)
@@ -792,10 +792,10 @@ private struct NewCardForm: View {
                     }
                 }
                 HStack {
-                    Button("Cancel") { cancel() }
+                    Button("Cancel", .dismiss) { cancel() }
                         .buttonStyle(SecondaryButtonStyle())
                     Spacer()
-                    Button("Save") {
+                    Button("Save", .save) {
                         Task { await save() }
                     }
                     .buttonStyle(AccentButtonStyle())
@@ -932,7 +932,7 @@ struct DelegateSheet: View {
                 working = true
                 Task { await run(inFront: placement == .front) }
             }
-            Button("Cancel") { dismiss() }
+            Button("Cancel", .dismiss) { dismiss() }
                 .buttonStyle(SecondaryButtonStyle())
         }
         .padding(Theme.Space.l)

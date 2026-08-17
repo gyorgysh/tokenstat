@@ -184,7 +184,7 @@ struct TaskRunBar: View {
             selection: placement
         )
         #endif
-        Button(running ? "Starting…" : "Run") {
+        Button(running ? "Starting…" : "Run", .run) {
             #if os(macOS)
             action(placement.wrappedValue)
             #else

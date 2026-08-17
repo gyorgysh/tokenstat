@@ -217,7 +217,7 @@ struct AccountView: View {
                                 Text("Syncing…")
                             }
                         } else {
-                            Label("Sync now", systemImage: "arrow.up.circle")
+                            ActionIcon.refresh.label("Sync now")
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -239,7 +239,7 @@ struct AccountView: View {
                     if model.isSigningOut {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Sign out")
+                        ActionIcon.signOut.label("Sign out")
                     }
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -265,7 +265,7 @@ struct AccountView: View {
                     if model.isSigningOut {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Sign out")
+                        ActionIcon.signOut.label("Sign out")
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -694,7 +694,7 @@ struct AccountView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("View") { showLicenses = true }
+                Button("View", .preview) { showLicenses = true }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .help("Show the licence and notice for every bundled dependency")
             }
@@ -962,7 +962,7 @@ private struct SignInCode: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Cancel", action: onCancel)
+                    Button("Cancel", .dismiss, action: onCancel)
                 }
             }
         }

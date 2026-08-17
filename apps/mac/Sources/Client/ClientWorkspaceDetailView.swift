@@ -255,7 +255,7 @@ struct ClientWorkspaceDetailView: View {
             }
             .contextMenu {
                 if profile.id != "shell" {
-                    Button("Remove from launcher") { pendingHide = profile }
+                    Button("Remove from launcher", .delete) { pendingHide = profile }
                 }
             }
         } else if profile.installed {
@@ -764,7 +764,7 @@ struct ClientBrowserScreen: View {
                     .padding(Theme.Space.s)
                     .background(Color.secondary.opacity(0.12))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
-                Button("Reload") {
+                Button("Reload", .refresh) {
                     loadError = nil
                     // Force WebView identity change via address nudge is
                     // unnecessary; ClientWebView reloads when urlString matches.
@@ -773,7 +773,7 @@ struct ClientBrowserScreen: View {
                     DispatchQueue.main.async { address = current }
                 }
                 .font(ClientType.caption.weight(.semibold))
-                Button("Done", action: onClose)
+                Button("Done", .done, action: onClose)
                     .font(ClientType.caption.weight(.semibold))
             }
             .padding(Theme.Space.m)

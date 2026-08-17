@@ -235,16 +235,17 @@ struct ClientPaywallView: View {
     ) -> some View {
         let appleLive = account?.billing?.isApple == true && account?.billing?.blocksOtherStore == true
         if current == item {
-            actionButton("Your current plan", accent: false, busy: false, enabled: false) {}
-            actionButton("Manage on the App Store", accent: false, busy: false, enabled: true) {
+            actionButton("Your current plan", .currentPlan, accent: false, busy: false, enabled: false) {}
+            actionButton("Manage on the App Store", .appStore, accent: false, busy: false, enabled: true) {
                 store.showManageSheet = true
             }
-            actionButton("Turn off auto-renew", accent: false, busy: false, enabled: true) {
+            actionButton("Turn off auto-renew", .cancelPlan, accent: false, busy: false, enabled: true) {
                 store.showManageSheet = true
             }
         } else if current == nil {
             actionButton(
                 showTrial ? "Start 3-day trial" : "Get \(item.title)",
+                .billing,
                 accent: true,
                 busy: busy,
                 enabled: product != nil && account != nil && !store.isBusy
@@ -255,6 +256,7 @@ struct ClientPaywallView: View {
         } else if let current, item.rank > current.rank {
             actionButton(
                 "Upgrade to \(item.title)",
+                .plans,
                 accent: true,
                 busy: busy,
                 enabled: product != nil && !store.isBusy
@@ -263,10 +265,11 @@ struct ClientPaywallView: View {
                 Task { await store.purchase(product, account: account) }
             }
         } else if queued == item {
-            actionButton("Switches next renewal", accent: false, busy: false, enabled: false) {}
+            actionButton("Switches next renewal", .scheduled, accent: false, busy: false, enabled: false) {}
             if let keep = store.product(for: current ?? item) {
                 actionButton(
                     "Keep \(current?.title ?? "this plan")",
+                    .save,
                     accent: false,
                     busy: store.purchasingProductID == keep.id,
                     enabled: !store.isBusy
@@ -278,6 +281,7 @@ struct ClientPaywallView: View {
         } else if appleLive || current != nil {
             actionButton(
                 "Switch at next renewal",
+                .scheduled,
                 accent: false,
                 busy: busy,
                 enabled: product != nil && !store.isBusy
@@ -290,6 +294,7 @@ struct ClientPaywallView: View {
 
     private func actionButton(
         _ title: String,
+        _ icon: ActionIcon,
         accent: Bool,
         busy: Bool,
         enabled: Bool,
@@ -300,7 +305,8 @@ struct ClientPaywallView: View {
                 if busy {
                     ProgressView()
                 } else {
-                    Text(title)
+                    icon.label(title)
+                        .labelStyle(ActionLabelStyle())
                 }
             }
             .font(ClientType.label.weight(.semibold))
@@ -466,7 +472,8 @@ struct ClientPaywallView: View {
                 if store.isRestoring {
                     ProgressView()
                 } else {
-                    Text("Restore purchases")
+                    ActionIcon.restore.label("Restore purchases")
+                        .labelStyle(ActionLabelStyle())
                 }
             }
             .font(ClientType.label.weight(.semibold))
@@ -480,8 +487,8 @@ struct ClientPaywallView: View {
 
     private var legalRow: some View {
         HStack(spacing: Theme.Space.l) {
-            Button("Privacy") { webURL = ClientWebPages.privacy() }
-            Button("Terms") { webURL = ClientWebPages.terms() }
+            Button("Privacy", .external) { webURL = ClientWebPages.privacy() }
+            Button("Terms", .external) { webURL = ClientWebPages.terms() }
         }
         .font(ClientType.caption.weight(.semibold))
         .foregroundStyle(Theme.accent)

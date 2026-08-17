@@ -261,7 +261,7 @@ private struct ClientAuthRetryView: View {
                         ProgressView()
                             .frame(maxWidth: .infinity)
                     } else {
-                        Text("Try again").frame(maxWidth: .infinity)
+                        ActionIcon.refresh.label("Try again").frame(maxWidth: .infinity)
                     }
                 }
                 .clientProminentStyle()

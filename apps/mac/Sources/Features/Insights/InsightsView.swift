@@ -93,7 +93,7 @@ struct InsightsView: View {
                         Label(day, systemImage: "calendar")
                             .font(.callout)
                         Spacer()
-                        Button("Clear") { model.clearFocusedDay() }
+                        Button("Clear", .dismiss) { model.clearFocusedDay() }
                             .buttonStyle(.plain)
                             .font(.callout.weight(.medium))
                             .foregroundStyle(Theme.accent)
@@ -344,7 +344,7 @@ private struct BreakdownTable: View {
     /// rather than hidden behind a scroll that never ends.
     private var revealMore: some View {
         HStack(spacing: Theme.Space.m) {
-            Button("Show \(min(Self.pageStep, hidden)) more") {
+            Button("Show \(min(Self.pageStep, hidden)) more", .more) {
                 visible += Self.pageStep
             }
             .buttonStyle(.plain)
@@ -357,7 +357,7 @@ private struct BreakdownTable: View {
 
             Spacer()
 
-            Button("Show all") { visible = rows.count }
+            Button("Show all", .more) { visible = rows.count }
                 .buttonStyle(.plain)
                 .font(.caption)
                 .foregroundStyle(.secondary)

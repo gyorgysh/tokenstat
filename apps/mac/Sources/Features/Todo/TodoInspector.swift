@@ -125,10 +125,10 @@ struct TodoInspector: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if delegate.isRunning {
-                        Button("Stop") { Task { await model.stop(card) } }
+                        Button("Stop", .stop) { Task { await model.stop(card) } }
                             .buttonStyle(SecondaryButtonStyle())
                     }
-                    Button("View run transcript") { onViewRun?(delegate.runId) }
+                    Button("View run transcript", .preview) { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
                 }
                 if !card.isNote, card.delegate?.isRunning != true {
@@ -140,7 +140,7 @@ struct TodoInspector: View {
                             Task { await startRun(card, inFront: placement == .front) }
                         }
                     } else {
-                        Button("Run…") { showDelegate = true }
+                        Button("Run…", .run) { showDelegate = true }
                             .buttonStyle(AccentButtonStyle())
                     }
                 }
@@ -263,23 +263,23 @@ struct TodoInspector: View {
     private func moveButtons(_ card: TodoCard) -> some View {
         HStack(spacing: Theme.Space.s) {
             if card.column != "backlog" {
-                Button("Move to To Do") { Task { await model.move(card, to: "backlog") } }
+                Button("Move to To Do", .move) { Task { await model.move(card, to: "backlog") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column != "doing" {
-                Button("Move to Doing") { Task { await model.move(card, to: "doing") } }
+                Button("Move to Doing", .move) { Task { await model.move(card, to: "doing") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column != "done" && card.column != "archive" {
-                Button("Move to Done") { Task { await model.move(card, to: "done") } }
+                Button("Move to Done", .move) { Task { await model.move(card, to: "done") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column == "done" {
-                Button("Archive") { Task { await model.move(card, to: "archive") } }
+                Button("Archive", .archive) { Task { await model.move(card, to: "archive") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
             if card.column == "archive" {
-                Button("Restore to Done") { Task { await model.move(card, to: "done") } }
+                Button("Restore to Done", .restore) { Task { await model.move(card, to: "done") } }
                     .buttonStyle(SecondaryButtonStyle())
             }
         }

@@ -65,7 +65,7 @@ struct AddWorkspaceSheet: View {
             Spacer(minLength: Theme.Space.m)
 
             HStack(spacing: Theme.Space.s) {
-                Button("Not now") { dismiss() }
+                Button("Not now", .dismiss) { dismiss() }
                     .buttonStyle(.borderless)
                 Spacer()
                 Button {
@@ -82,7 +82,7 @@ struct AddWorkspaceSheet: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Label("Choose folder…", systemImage: "folder")
+                        ActionIcon.reveal.label("Choose folder…")
                     }
                 }
                 .buttonStyle(AccentButtonStyle())

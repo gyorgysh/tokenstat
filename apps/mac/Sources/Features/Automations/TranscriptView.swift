@@ -150,7 +150,7 @@ private struct ToolRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 if !snippet.isEmpty {
-                    Button(showSnippet ? hideLabel : showLabel) {
+                    Button(showSnippet ? hideLabel : showLabel, .preview) {
                         showSnippet.toggle()
                     }
                     .buttonStyle(AccentButtonStyle(small: true))

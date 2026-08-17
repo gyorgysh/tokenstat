@@ -89,14 +89,14 @@ struct AutomationsInspector: View {
 
                 HStack(spacing: Theme.Space.s) {
                     if let last = model.lastRun(for: job), last.isRunning {
-                        Button("Stop") { Task { await model.stop(last) } }
+                        Button("Stop", .stop) { Task { await model.stop(last) } }
                             .buttonStyle(AccentButtonStyle())
                             .help("Kill this run now")
                     } else {
-                        Button("Run now") { Task { await model.run(job) } }
+                        Button("Run now", .run) { Task { await model.run(job) } }
                             .buttonStyle(AccentButtonStyle())
                     }
-                    Button("Edit") { editing = true }
+                    Button("Edit", .edit) { editing = true }
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }
@@ -113,12 +113,12 @@ struct AutomationsInspector: View {
                         .font(.system(size: 15, weight: .semibold))
                     Spacer()
                     if run.isRunning {
-                        Button("Stop") { Task { await model.stop(run) } }
+                        Button("Stop", .stop) { Task { await model.stop(run) } }
                             .buttonStyle(SecondaryButtonStyle())
                             .help("Kill this run now")
                     }
                     if model.selectedJob != nil {
-                        Button("Edit job") { editing = true }
+                        Button("Edit job", .edit) { editing = true }
                             .buttonStyle(SecondaryButtonStyle())
                     }
                     StatusPill(status: run.status, text: run.endedLabel)

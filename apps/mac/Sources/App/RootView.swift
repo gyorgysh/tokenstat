@@ -1230,11 +1230,11 @@ struct RootView: View {
                         }
                         .contextMenu {
                             if !folder.isRemote {
-                                Button("Reveal in Finder") { workspaces.revealInFinder(folder) }
+                                Button("Reveal in Finder", .reveal) { workspaces.revealInFinder(folder) }
                             }
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat", role: .destructive) {
+                            Button("Remove from tokenstat", .delete, role: .destructive) {
                                 workspacePendingRemove = folder
                             }
                         }
@@ -1250,7 +1250,7 @@ struct RootView: View {
                         .contextMenu {
                             Divider()
                             // "Remove" and not "Delete": the folder stays.
-                            Button("Remove from tokenstat", role: .destructive) {
+                            Button("Remove from tokenstat", .delete, role: .destructive) {
                                 workspacePendingRemove = folder
                             }
                         }
@@ -1475,20 +1475,20 @@ struct RootView: View {
     @ViewBuilder
     private var accountMenuContent: some View {
         if account.signedIn {
-            Button("Account settings") { destination = .account }
-            Button("Sync now") { Task { await account.sync() } }
+            Button("Account settings", .settings) { destination = .account }
+            Button("Sync now", .refresh) { Task { await account.sync() } }
                 .disabled(account.isSyncing || account.syncCooldownUntil != nil)
             Divider()
             updateItem
             Divider()
-            Button("Sign out") { Task { await account.signOut() } }
+            Button("Sign out", .signOut) { Task { await account.signOut() } }
         } else {
-            Button("Sign in to tokenstat.ai") {
+            Button("Sign in to tokenstat.ai", .signIn) {
                 destination = .account
                 account.signIn()
             }
             Divider()
-            Button("Account") { destination = .account }
+            Button("Account", .account) { destination = .account }
             Divider()
             updateItem
         }
@@ -1501,7 +1501,7 @@ struct RootView: View {
     /// is also invisible, so there is no way to answer "am I on the latest
     /// version" without one of these. The launch check stays exactly as it was.
     private var updateItem: some View {
-        Button(appUpdate.isChecking ? "Checking for updates…" : "Check for updates") {
+        Button(appUpdate.isChecking ? "Checking for updates…" : "Check for updates", .refresh) {
             Task { await appUpdate.checkNow() }
         }
         .disabled(appUpdate.isChecking)

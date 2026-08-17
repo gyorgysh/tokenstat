@@ -925,10 +925,10 @@ private struct LaunchSurface: View {
                     columns: [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Theme.Space.m)],
                     spacing: Theme.Space.m
                 ) {
-                    utilityButton("Browser", symbol: "globe") {
+                    utilityButton("Browser", symbol: ActionIcon.browser.symbol) {
                         _ = workspaces.showBrowser(in: folder.id)
                     }
-                    utilityButton("Files", symbol: "folder") {
+                    utilityButton("Files", symbol: ActionIcon.reveal.symbol) {
                         workspaces.showFiles(in: folder.id)
                     }
                     ForEach(visibleProfiles) { profile in
@@ -1282,7 +1282,7 @@ private struct LaunchTile: View {
         .zIndex(showPath ? 20 : 0)
         .contextMenu {
             if let onHide {
-                Button("Remove from launcher") { onHide() }
+                Button("Remove from launcher", .delete) { onHide() }
             }
         }
     }
@@ -1432,7 +1432,7 @@ private struct RemotePortForm: View {
                 .frame(width: 120)
             HStack {
                 Spacer()
-                Button("Browse") {
+                Button("Browse", .reveal) {
                     if let value = Int(port.trimmingCharacters(in: .whitespaces)),
                        value > 0, value <= 65_535 {
                         Task { await workspaces.openRemotePort(value, in: folder) }

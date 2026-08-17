@@ -123,7 +123,7 @@ struct LocalModelControl: View {
                 Divider()
                 Text("Could not read local models: \(errorMessage)")
             }
-            Button("Refresh") { Task { await load() } }
+            Button("Refresh", .refresh) { Task { await load() } }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")

@@ -54,6 +54,9 @@ struct ClientEmptyState: View {
     var message: String?
     /// Shown only when there is something the person can actually do.
     var actionTitle: String?
+    /// The glyph on that action. Defaults to the forward arrow, because most
+    /// empty states point somewhere rather than redo something.
+    var actionIcon: ActionIcon = .next
     var action: (() -> Void)?
     /// Override the kind's default mark when the empty state is about a
     /// specific surface (devices, workspaces) rather than activity.
@@ -76,7 +79,7 @@ struct ClientEmptyState: View {
                     .multilineTextAlignment(.center)
             }
             if let actionTitle, let action {
-                Button(actionTitle, action: action)
+                Button(actionTitle, actionIcon, action: action)
                     .clientProminentStyle()
                     .tint(Theme.accent)
                     .padding(.top, 4)
@@ -126,13 +129,13 @@ struct ClientErrorCard: View {
             }
             HStack(spacing: Theme.Space.m) {
                 if error.opensPlans {
-                    Button(error.actionTitle ?? "See plans") {
+                    Button(error.actionTitle ?? "See plans", .plans) {
                         NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
                     }
                     .font(ClientType.caption.weight(.semibold))
                     .tint(Theme.accent)
                 } else if let retry, let actionTitle = error.actionTitle {
-                    Button(actionTitle, action: retry)
+                    Button(actionTitle, error.actionIcon, action: retry)
                         .font(ClientType.caption.weight(.semibold))
                         .tint(Theme.accent)
                 }

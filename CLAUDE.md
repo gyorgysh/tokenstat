@@ -156,6 +156,17 @@ replace what is at that path rather than adding a copy beside it.
   UserDefaults across once. Renaming an app moves its preferences domain, and
   losing somebody's workspace list to a rename is not an acceptable cost.
 
+Every button in the app's own content carries a glyph, and the glyph comes from
+one vocabulary: `apps/mac/Sources/Design/ActionIcon.swift`. Write
+`Button("Save", .save) { … }` rather than a `Label` with a symbol name typed
+inline, so the same action cannot end up as `arrow.clockwise` on one screen and
+`clock.arrow.circlepath` on the next. Alerts, confirmation dialogs, toolbars,
+swipe actions and the macOS main menu stay text-only: the platform draws those.
+`scripts/check-action-icons.sh` enforces it, with an explicit allow list for
+buttons whose whole surface is the label (sidebar rows, launch tiles, heatmap
+cells). The case names mirror `shared/web/actionIcons.js` in the website repo —
+add a case here and the key there in the same change.
+
 The Xcode project is generated from `apps/mac/project.yml` and is git ignored,
 so both steps are needed on a fresh checkout. The build script must run first:
 the app links the xcframework it produces.

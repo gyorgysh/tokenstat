@@ -34,6 +34,10 @@ struct FriendlyError {
     /// The button should open plans, not retry. iOS uses the in-app paywall.
     var opensPlans: Bool = false
 
+    /// The glyph on that button, from the shared action vocabulary: a crown
+    /// when it leads to plans, the retry arrow when it retries.
+    var actionIcon: ActionIcon { opensPlans ? .plans : .refresh }
+
     /// Whether this is something the user can fix now, as opposed to something
     /// that has to be waited out.
     var isActionable: Bool { actionTitle != nil }
@@ -245,7 +249,7 @@ struct ErrorBanner: View {
                 }
                 Spacer(minLength: Theme.Space.s)
                 if let retry, let actionTitle = error.actionTitle {
-                    Button(actionTitle, action: retry)
+                    Button(actionTitle, error.actionIcon, action: retry)
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }

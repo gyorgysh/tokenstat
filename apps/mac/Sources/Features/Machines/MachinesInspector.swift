@@ -139,19 +139,19 @@ struct MachinesInspector: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     if peer.trust == .approved {
                         if model.connectedPeerKeys.contains(peer.key) {
-                            Button("Disconnect") { model.disconnect(peer) }
+                            Button("Disconnect", .disconnect) { model.disconnect(peer) }
                                 .buttonStyle(SecondaryButtonStyle())
                         } else {
-                            Button("Connect") { Task { await model.connect(peer) } }
+                            Button("Connect", .connect) { Task { await model.connect(peer) } }
                                 .buttonStyle(AccentButtonStyle())
                         }
-                        Button("Revoke") { confirmRevoke = peer }
+                        Button("Revoke", .revoke) { confirmRevoke = peer }
                             .buttonStyle(SecondaryButtonStyle())
                     } else {
-                        Button("Approve") { Task { await model.approve(peer) } }
+                        Button("Approve", .approve) { Task { await model.approve(peer) } }
                             .buttonStyle(AccentButtonStyle())
                     }
-                    Button("Forget", role: .destructive) { confirmForget = peer }
+                    Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                         .buttonStyle(SecondaryButtonStyle())
                 }
             }
@@ -177,11 +177,11 @@ struct MachinesInspector: View {
                 } else if let peer = model.peer(for: machine) {
                     peerActions(peer, machine: machine)
                 } else if model.canConnect(machine) {
-                    Button("Connect") { Task { await model.connect(machine) } }
+                    Button("Connect", .connect) { Task { await model.connect(machine) } }
                         .buttonStyle(AccentButtonStyle())
                 }
                 if !isSelf {
-                    Button("Remove from account", role: .destructive) {
+                    Button("Remove from account", .delete, role: .destructive) {
                         pendingUnlink = machine
                     }
                     .buttonStyle(SecondaryButtonStyle())
@@ -195,10 +195,10 @@ struct MachinesInspector: View {
     @ViewBuilder
     private func peerActions(_ peer: Peer, machine: Machine) -> some View {
         if model.isConnected(machine) {
-            Button("Disconnect") { model.disconnect(peer) }
+            Button("Disconnect", .disconnect) { model.disconnect(peer) }
                 .buttonStyle(SecondaryButtonStyle())
         } else {
-            Button("Connect") { Task { await model.connect(peer) } }
+            Button("Connect", .connect) { Task { await model.connect(peer) } }
                 .buttonStyle(AccentButtonStyle())
         }
     }

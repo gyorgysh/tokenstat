@@ -258,7 +258,7 @@ struct MachinesView: View {
             subtitle: "Paste the key from the other machine. Everything goes through the tunnel, so it works from any network.",
             mark: "mark_device",
             accessory: AnyView(
-                Button("Add device") { addingDevice = true }
+                Button("Add device", .create) { addingDevice = true }
                     .buttonStyle(AccentButtonStyle(small: true))
             )
         )
@@ -278,7 +278,7 @@ struct MachinesView: View {
                     if model.settingUpHelper {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text("Set up helper")
+                        ActionIcon.settings.label("Set up helper")
                     }
                 }
                 .buttonStyle(AccentButtonStyle())
@@ -526,13 +526,13 @@ struct MachinesView: View {
                     ) {
                         HStack(spacing: Theme.Space.s) {
                             if peer.trust == .approved {
-                                Button("Revoke", role: .destructive) { confirmRevoke = peer }
+                                Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
                                     .buttonStyle(SecondaryButtonStyle())
                             } else {
-                                Button("Approve") { Task { await model.approve(peer) } }
+                                Button("Approve", .approve) { Task { await model.approve(peer) } }
                                     .buttonStyle(SecondaryButtonStyle())
                             }
-                            Button("Forget", role: .destructive) { confirmForget = peer }
+                            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
@@ -687,7 +687,7 @@ struct MachinesView: View {
                         } else {
                             if let peer = model.peer(for: machine) {
                                 if model.isConnected(machine) {
-                                    Button("Disconnect") {
+                                    Button("Disconnect", .disconnect) {
                                         model.disconnect(peer)
                                     }
                                     .buttonStyle(SecondaryButtonStyle(small: true))
@@ -700,7 +700,7 @@ struct MachinesView: View {
                                 // Connect here was a button whose only outcome
                                 // was a failure.
                                 if model.canConnect(machine) {
-                                    Button("Connect") { Task { await model.connect(machine) } }
+                                    Button("Connect", .connect) { Task { await model.connect(machine) } }
                                         .buttonStyle(AccentButtonStyle(small: true))
                                         .help("Connects through the tunnel from anywhere")
                                 }
@@ -759,19 +759,19 @@ struct MachinesView: View {
     private func accountPeerActions(_ peer: Peer, machine: Machine) -> some View {
         switch peer.trust {
         case .pending:
-            Button("Approve") { Task { await model.approve(peer) } }
+            Button("Approve", .approve) { Task { await model.approve(peer) } }
                 .buttonStyle(AccentButtonStyle())
         case .approved:
             if model.canConnect(machine) {
-                Button("Connect") { Task { await model.connect(peer) } }
+                Button("Connect", .connect) { Task { await model.connect(peer) } }
                     .buttonStyle(AccentButtonStyle())
                     .help("Connects through the tunnel from anywhere")
             }
-            Button("Revoke", role: .destructive) { confirmRevoke = peer }
+            Button("Revoke", .revoke, role: .destructive) { confirmRevoke = peer }
                 .buttonStyle(SecondaryButtonStyle())
                 .help("Stops this device from reaching you; workspaces leave the sidebar")
         case .revoked:
-            Button("Approve") { Task { await model.approve(peer) } }
+            Button("Approve", .approve) { Task { await model.approve(peer) } }
                 .buttonStyle(SecondaryButtonStyle())
         }
     }
@@ -959,7 +959,7 @@ private struct MachineNameField: View {
                 .onSubmit { commit() }
                 .frame(maxWidth: 220)
             if identity.labelIsChosen == true {
-                Button("Use the computer's name") {
+                Button("Use the computer's name", .device) {
                     draft = ""
                     commit()
                 }
@@ -1118,7 +1118,7 @@ private struct PairingForm: View {
                             label = ""
                         }
                     } label: {
-                        Label("Connect", systemImage: "link")
+                        Label("Connect", systemImage: ActionIcon.connect.symbol)
                     }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)

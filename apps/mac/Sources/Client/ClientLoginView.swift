@@ -66,7 +66,9 @@ struct ClientLoginView: View {
                     Button {
                         account.signIn()
                     } label: {
-                        Text("Sign in").frame(maxWidth: .infinity)
+                        ActionIcon.signIn.label("Sign in")
+                            .labelStyle(ActionLabelStyle())
+                            .frame(maxWidth: .infinity)
                     }
                     .clientProminentStyle()
                     .controlSize(.large)
@@ -87,7 +89,7 @@ struct ClientLoginView: View {
                 // A way back to the intro, for anyone who skipped it and then
                 // wondered what this is. Cheap, and it means Skip is not a
                 // one-way door.
-                Button("What is tokenstat?") { hasOnboarded = false }
+                Button("What is tokenstat?", .help) { hasOnboarded = false }
                     .font(ClientType.label)
                     .padding(.top, Theme.Space.xs)
 
@@ -156,9 +158,9 @@ struct ClientLoginView: View {
                 .background(Theme.accentSoft, in: .rect(cornerRadius: 10))
                 .accessibilityLabel("Code \(pending.userCode.map(String.init).joined(separator: " "))")
             HStack(spacing: Theme.Space.s) {
-                Button("Open the page") { account.presentSignInPage() }
+                Button("Open the page", .external) { account.presentSignInPage() }
                     .clientGlassStyle()
-                Button("Cancel") { account.cancelSignIn() }
+                Button("Cancel", .dismiss) { account.cancelSignIn() }
                     .clientGlassStyle()
             }
             .padding(.top, 2)

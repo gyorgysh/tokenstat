@@ -27,7 +27,7 @@ struct OfflineCard: View {
                         .lineLimit(2)
                 }
                 Spacer(minLength: Theme.Space.s)
-                Button("Try now") {
+                Button("Try now", .refresh) {
                     Task { await connectivity.checkNow() }
                 }
                 .buttonStyle(.borderless)

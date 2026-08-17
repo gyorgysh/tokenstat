@@ -106,7 +106,7 @@ struct EditorView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Button("Save") {
+            Button("Save", .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }
             .disabled(!document.isDirty)
@@ -145,7 +145,7 @@ struct EditorView: View {
             }
 
             Spacer()
-            Button("Save") {
+            Button("Save", .save) {
                 Task { await model.saveText(path, in: folder.id) }
             }
             .disabled(!document.isDirty)

@@ -155,7 +155,7 @@ struct ClientOnboarding: View {
     private var footer: some View {
         VStack(spacing: Theme.Space.s) {
             if page < Self.pages.count - 1 {
-                Button("Continue") {
+                Button("Continue", .next) {
                     withAnimation(.easeInOut(duration: 0.25)) { page += 1 }
                 }
                 .clientProminentStyle()
@@ -163,7 +163,7 @@ struct ClientOnboarding: View {
                 // Get started only marks the intro done. Sign-in is a separate
                 // choice on the next screen: opening the browser from here made
                 // finishing the welcome feel like an auto-login.
-                Button("Get started") { finish() }
+                Button("Get started", .next) { finish() }
                     .clientProminentStyle()
             }
         }

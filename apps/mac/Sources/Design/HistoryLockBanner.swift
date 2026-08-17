@@ -41,7 +41,7 @@ struct HistoryLockBanner: View {
                 .foregroundStyle(Theme.accent)
                 .underline(false)
             #else
-            Button("See plans") {
+            Button("See plans", .plans) {
                 NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
             }
             .font(.system(size: 12, weight: .semibold))

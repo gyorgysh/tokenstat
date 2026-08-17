@@ -784,9 +784,9 @@ struct FieldSaveBar: View {
             status
             Spacer(minLength: 0)
             if state == .dirty || state == .failed {
-                Button("Cancel", action: onCancel)
+                Button("Cancel", .dismiss, action: onCancel)
                     .buttonStyle(SecondaryButtonStyle())
-                Button(saveTitle, action: onSave)
+                Button(saveTitle, .save, action: onSave)
                     .buttonStyle(AccentButtonStyle())
                     .disabled(!canSave || state == .saving)
             }
@@ -1101,12 +1101,31 @@ struct SegmentedCapsulePicker<Option: Hashable>: View {
 /// Replaces the system blue pill everywhere a primary action sits in content
 /// (forms, cards, empty states). Toolbar items stay system-styled, because a
 /// toolbar is the one place the platform chrome is the design.
+/// Glyph, then title, a fixed gap apart, with the glyph a touch smaller than
+/// the label so it reads as a mark rather than a second word.
+///
+/// Applied by both Theme button styles, so every action capsule in the app
+/// spaces its icon identically — and matches the 8px gap the website's pill
+/// uses at the same optical size.
+struct ActionLabelStyle: LabelStyle {
+    var small = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: small ? 5 : 6) {
+            configuration.icon
+                .font(.system(size: small ? 11 : 12, weight: .semibold))
+            configuration.title
+        }
+    }
+}
+
 struct AccentButtonStyle: ButtonStyle {
     /// Dense variant for rows and card accessories.
     var small = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .labelStyle(ActionLabelStyle(small: small))
             .font(.system(size: small ? 12 : 13, weight: .medium))
             .foregroundStyle(Theme.accent)
             .padding(.horizontal, small ? 10 : 14)
@@ -1140,6 +1159,7 @@ struct SecondaryButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .labelStyle(ActionLabelStyle(small: small))
             .font(.system(size: small ? 12 : 13, weight: .medium))
             .foregroundStyle(.primary)
             .padding(.horizontal, small ? 10 : 14)

@@ -474,11 +474,11 @@ struct ClientTerminalScreen: View {
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.warning)
                 }
-                Button("Close", role: .destructive) {
+                Button("Close", .dismiss, role: .destructive) {
                     confirmClose = true
                 }
                 .font(ClientType.caption.weight(.semibold))
-                Button("Done") {
+                Button("Done", .done) {
                     onClose?()
                     dismiss()
                 }

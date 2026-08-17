@@ -250,12 +250,12 @@ struct ClientWorkspacesView: View {
                         .font(ClientType.caption)
                         .foregroundStyle(.secondary)
                 } else if model.connectedKey == host.peerKey {
-                    Button("Disconnect") {
+                    Button("Disconnect", .disconnect) {
                         model.disconnect()
                     }
                     .font(ClientType.caption.weight(.semibold))
                 } else {
-                    Button(model.isConnecting == host.peerKey ? "Connecting…" : "Connect") {
+                    Button(model.isConnecting == host.peerKey ? "Connecting…" : "Connect", .connect) {
                         Task { await model.connect(host) }
                     }
                     .font(ClientType.caption.weight(.semibold))

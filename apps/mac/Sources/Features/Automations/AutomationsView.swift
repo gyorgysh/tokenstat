@@ -220,7 +220,7 @@ struct AutomationsView: View {
                     }
                     Spacer()
                     if model.queueDirty {
-                        Button(schedulerSaving ? "Saving" : "Save scheduler") {
+                        Button(schedulerSaving ? "Saving" : "Save scheduler", .save) {
                             schedulerSaving = true
                             Task {
                                 await model.saveQueue()
@@ -231,7 +231,7 @@ struct AutomationsView: View {
                         .buttonStyle(AccentButtonStyle())
                         .disabled(schedulerSaving)
                     } else {
-                        Button("Save scheduler") {}
+                        Button("Save scheduler", .save) {}
                             .buttonStyle(SecondaryButtonStyle())
                             .disabled(true)
                     }
@@ -695,17 +695,17 @@ private struct AutomationRow: View {
             }
             Spacer()
             if let last = model.lastRun(for: job), last.isRunning {
-                Button("Stop") { Task { await model.stop(last) } }
+                Button("Stop", .stop) { Task { await model.stop(last) } }
                     .buttonStyle(AccentButtonStyle(small: true))
                     .help("Kill this run now")
             } else {
-                Button("Run now") { Task { await model.run(job) } }
+                Button("Run now", .run) { Task { await model.run(job) } }
                     .buttonStyle(AccentButtonStyle(small: true))
             }
-            Button("History") { showingHistory = true }
+            Button("History", .history) { showingHistory = true }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
-            Button("Edit") { editing = true }
+            Button("Edit", .edit) { editing = true }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
             Button(role: .destructive) { confirmingDelete = true } label: {
@@ -758,7 +758,7 @@ private struct AutomationHistorySheet: View {
                     help: "Close",
                     label: "Close run history"
                 )
-                Button("Done") { dismiss() }
+                Button("Done", .done) { dismiss() }
                     .buttonStyle(.borderless)
             }
             if model.runs(of: job).isEmpty {
@@ -773,7 +773,7 @@ private struct AutomationHistorySheet: View {
                                     .font(.callout)
                                 Spacer()
                                 StatusPill(status: run.status, text: run.endedLabel)
-                                Button("View") {
+                                Button("View", .preview) {
                                     onView(run)
                                     dismiss()
                                 }
@@ -885,12 +885,12 @@ struct NewAutomationSheet: View {
             fields
 
             HStack {
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button("Cancel", .dismiss, role: .cancel) { dismiss() }
                     .buttonStyle(.borderless)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if step > 0 {
-                    Button("Back") { step -= 1 }
+                    Button("Back", .back) { step -= 1 }
                         .buttonStyle(.borderless)
                 }
                 Button {
@@ -905,7 +905,8 @@ struct NewAutomationSheet: View {
                         }
                     }
                 } label: {
-                    Label(step < 2 ? "Continue" : (existing == nil ? "Create" : "Save"), systemImage: step < 2 ? "arrow.right" : "checkmark")
+                    Label(step < 2 ? "Continue" : (existing == nil ? "Create" : "Save"),
+                          systemImage: step < 2 ? ActionIcon.next.symbol : ActionIcon.save.symbol)
                 }
                 .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)
