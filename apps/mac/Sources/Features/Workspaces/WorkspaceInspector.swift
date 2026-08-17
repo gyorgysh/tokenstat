@@ -261,7 +261,16 @@ private struct CommitRow: View {
                 tint: Avatar.tint(for: identity)
             )
             .padding(.top, 1)
-            .help(commit.email ?? commit.author)
+            // The row's own help would hide a tooltip on the mark. A dwell
+            // popover is the card, and it is attached here so only the
+            // picture opens it.
+            .authorHoverCard(
+                url: avatar,
+                name: commit.author,
+                email: commit.email,
+                mine: commit.mine == true,
+                tint: Avatar.tint(for: identity)
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(commit.subject)

@@ -208,6 +208,109 @@ struct Avatar: View {
     }
 }
 
+/// Identity card shown while the pointer is on an author mark.
+///
+/// A row-level `.help` steals the tooltip from the mark inside it, so History
+/// (and any other list of people) needs its own overlay. No network: the
+/// picture is the one the row already had, and anyone else stays a letter.
+struct AuthorHoverCard: View {
+    var url: String?
+    var name: String
+    var email: String?
+    var mine: Bool = false
+    var tint: Color = Theme.accent
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Space.s) {
+            Avatar(url: url, handle: name, size: 36, tint: tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let email, !email.isEmpty {
+                    Text(email)
+                        .font(Theme.mono(11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if mine {
+                    Text("You")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Theme.border)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+}
+
+/// Shows `AuthorHoverCard` after a short dwell on `content`.
+///
+/// The delay is so scrolling a commit list does not flash a card on every row
+/// the pointer crosses. The popover is what escapes a `ScrollView` clip.
+private struct AuthorHover: ViewModifier {
+    var url: String?
+    var name: String
+    var email: String?
+    var mine: Bool
+    var tint: Color
+
+    @State private var hovering = false
+    @State private var visible = false
+    @State private var generation = 0
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { on in
+                hovering = on
+                generation += 1
+                let token = generation
+                if on {
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(350))
+                        guard token == generation, hovering else { return }
+                        visible = true
+                    }
+                } else {
+                    visible = false
+                }
+            }
+            .popover(isPresented: $visible, arrowEdge: .top) {
+                AuthorHoverCard(
+                    url: url,
+                    name: name,
+                    email: email,
+                    mine: mine,
+                    tint: tint
+                )
+                .padding(4)
+            }
+    }
+}
+
+extension View {
+    /// Dwell-hover identity card for a commit author mark.
+    func authorHoverCard(
+        url: String?,
+        name: String,
+        email: String?,
+        mine: Bool,
+        tint: Color
+    ) -> some View {
+        modifier(AuthorHover(url: url, name: name, email: email, mine: mine, tint: tint))
+    }
+}
+
 
 /// The tokenstat mark: three ascending bars on a shared baseline.
 ///
