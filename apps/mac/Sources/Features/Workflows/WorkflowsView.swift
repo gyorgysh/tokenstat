@@ -523,7 +523,7 @@ struct WorkflowOutline: View {
     }
 }
 
-/// Confirm the starting prompt and, for a global graph, the folder.
+/// Confirm the starting prompt and the workspace this run should use.
 struct RunWorkflowSheet: View {
     @Bindable var model: WorkflowsModel
     let graph: WorkflowGraph
@@ -557,12 +557,20 @@ struct RunWorkflowSheet: View {
             TextField("Starting prompt", text: $input, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(3...8)
-            if graph.scope == .global, !folders.isEmpty {
+            if folders.isEmpty {
+                Text("Add a workspace first. Agents run in a folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
                 AppMenuPicker(
-                    title: "Folder",
-                    options: folders.map { (value: $0.id, label: $0.name) },
+                    title: "Workspace",
+                    options: [(value: "", label: "Choose a workspace")]
+                        + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
                 )
+                Text("Agents and commands run in this workspace.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
@@ -571,10 +579,11 @@ struct RunWorkflowSheet: View {
                 Button(working ? "Starting" : "Run", .run) {
                     working = true
                     Task {
-                        let folder = graph.scope == .workspace
-                            ? graph.workspaceID
-                            : (workspaceID.isEmpty ? nil : workspaceID)
-                        await model.run(graph, input: input, workspaceID: folder)
+                        await model.run(
+                            graph,
+                            input: input,
+                            workspaceID: workspaceID.isEmpty ? nil : workspaceID
+                        )
                         working = false
                         if model.errorMessage == nil {
                             dismiss()
@@ -582,7 +591,7 @@ struct RunWorkflowSheet: View {
                     }
                 }
                 .buttonStyle(AccentButtonStyle())
-                .disabled(working || (graph.scope == .global && workspaceID.isEmpty && folders.isEmpty))
+                .disabled(working || workspaceID.isEmpty)
             }
         }
         .padding(Theme.Space.l)

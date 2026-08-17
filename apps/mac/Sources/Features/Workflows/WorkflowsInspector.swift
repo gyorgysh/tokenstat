@@ -244,22 +244,20 @@ struct WorkflowsInspector: View {
                 .padding(.horizontal, Theme.Space.m)
             }
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    TranscriptView(
-                        text: model.transcriptText,
-                        empty: run.isLive ? "Waiting for output…" : "(No readable output)"
-                    )
-                    .padding(Theme.Space.m)
-                    Color.clear
-                        .frame(height: 1)
-                        .id("workflow-transcript-tail")
-                }
-                .background(Theme.background)
-                .onChange(of: model.transcriptText) { _, _ in
-                    guard followLive else { return }
-                    proxy.scrollTo("workflow-transcript-tail", anchor: .bottom)
-                }
+            FollowTranscript(
+                text: model.transcriptText,
+                empty: run.isLive ? "Waiting for output…" : "(No readable output)",
+                follow: followLive,
+                tailID: "workflow-transcript-tail"
+            )
+        }
+        .onChange(of: run.currentNodeID) { _, id in
+            guard followLive, let id else { return }
+            model.selectStep(id)
+        }
+        .onChange(of: followLive) { _, on in
+            if on, let id = run.currentNodeID {
+                model.selectStep(id)
             }
         }
     }
@@ -280,6 +278,42 @@ struct WorkflowsInspector: View {
         if seconds == 0 { return "No limit" }
         let minutes = max(1, seconds / 60)
         return "\(minutes) min"
+    }
+}
+
+/// Transcript that can stay pinned to the newest line.
+private struct FollowTranscript: View {
+    let text: String
+    let empty: String
+    let follow: Bool
+    let tailID: String
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                TranscriptView(text: text, empty: empty)
+                    .padding(Theme.Space.m)
+                Color.clear
+                    .frame(height: 1)
+                    .id(tailID)
+            }
+            .background(Theme.background)
+            .onChange(of: text) { _, _ in
+                guard follow else { return }
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo(tailID, anchor: .bottom)
+                }
+            }
+            .onChange(of: follow) { _, on in
+                guard on else { return }
+                proxy.scrollTo(tailID, anchor: .bottom)
+            }
+            .onAppear {
+                if follow {
+                    proxy.scrollTo(tailID, anchor: .bottom)
+                }
+            }
+        }
     }
 }
 
@@ -339,6 +373,7 @@ private struct WorkflowBudgetField: View {
 /// Fields for the selected node. Pickers write immediately. Text is one undo.
 private struct WorkflowNodeInspector: View {
     @Bindable var model: WorkflowsModel
+    @AppStorage("workflows.followLive") private var followLive = true
 
     @State private var title = ""
     @State private var prompt = ""
@@ -370,18 +405,20 @@ private struct WorkflowNodeInspector: View {
                 HStack {
                     StatusPill(status: step.status, text: step.endedLabel)
                     Spacer(minLength: 0)
+                    BrandToggleChip(title: "Follow", isOn: $followLive)
+                        .help("Keep the newest output in view, and follow the live step")
                 }
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
             }
-            if let node = model.selectedNode,
-               !model.transcriptText.isEmpty,
-               model.selectedStepID == node.id {
+            if let node = model.selectedNode, showsTranscript(for: node) {
                 Divider()
-                ScrollView {
-                    TranscriptView(text: model.transcriptText, empty: "")
-                        .padding(Theme.Space.m)
-                }
+                FollowTranscript(
+                    text: model.transcriptText,
+                    empty: stepIsLive(step(for: node)) ? "Waiting for output…" : "",
+                    follow: followLive,
+                    tailID: "workflow-node-transcript-tail"
+                )
                 .frame(minHeight: 140, maxHeight: 260)
                 .clipped()
             }
@@ -397,11 +434,44 @@ private struct WorkflowNodeInspector: View {
                 .padding(Theme.Space.m)
             }
         }
-        .onAppear { if let node = model.selectedNode { load(node) } }
+        .onAppear {
+            if let node = model.selectedNode { load(node) }
+            followLiveStep()
+        }
         .onChange(of: model.selectedNodeID) { _, _ in
             model.endGroupedEdit()
             if let node = model.selectedNode { load(node) }
         }
+        .onChange(of: liveNodeID) { _, _ in
+            followLiveStep()
+        }
+        .onChange(of: followLive) { _, on in
+            if on { followLiveStep() }
+        }
+    }
+
+    /// The node the live run is on, if this graph has one.
+    private var liveNodeID: String? {
+        guard let working = model.working, let run = model.lastRun(for: working), run.isLive else {
+            return nil
+        }
+        return run.currentNodeID
+    }
+
+    private func followLiveStep() {
+        guard followLive, let id = liveNodeID, id != model.selectedNodeID else { return }
+        model.selectNode(id)
+    }
+
+    private func showsTranscript(for node: WorkflowNode) -> Bool {
+        guard model.selectedStepID == node.id else { return false }
+        if !model.transcriptText.isEmpty { return true }
+        return stepIsLive(step(for: node))
+    }
+
+    private func stepIsLive(_ step: WorkflowStep?) -> Bool {
+        guard let step else { return false }
+        return step.status == "running" || step.status == "waiting"
     }
 
     @ViewBuilder
