@@ -41,6 +41,8 @@ ALLOWED = [
     ("Features/Workspaces/WorkspacesView.swift", 'Button(all ? "Clear all"'),
     ("Features/Workspaces/WorkspacesView.swift", "Button(action: onOpen)"),
     ("Features/Automations/AutomationsView.swift", "Button(action, action: perform)"),
+    ("Features/Workflows/WorkflowsView.swift", "Button(action: onSelect)"),
+    ("Features/Workflows/WorkflowsView.swift", "onSelect?(node.id)"),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),

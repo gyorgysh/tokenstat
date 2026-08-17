@@ -562,6 +562,7 @@ struct AutomationsView: View {
     static func statusTint(_ status: String) -> Color {
         switch status {
         case "running": return Theme.accent
+        case "waiting": return Theme.warning
         case "ok": return Theme.success
         case "stopped": return Theme.warning
         case "error": return Theme.danger

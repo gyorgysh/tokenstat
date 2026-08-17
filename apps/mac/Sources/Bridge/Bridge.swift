@@ -1328,6 +1328,84 @@ extension Bridge {
     }
 }
 
+// MARK: - Workflows
+
+extension Bridge {
+    static func workflows() async throws -> [WorkflowGraph] {
+        try await background("workflow.list", as: [WorkflowGraph].self)
+    }
+
+    static func createWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph {
+        try await background("workflow.create", ["workflow": graph.jsonObject()], as: WorkflowGraph.self)
+    }
+
+    static func updateWorkflow(_ graph: WorkflowGraph) async throws -> WorkflowGraph {
+        try await background("workflow.update", ["workflow": graph.jsonObject()], as: WorkflowGraph.self)
+    }
+
+    static func removeWorkflow(_ id: String) async throws {
+        _ = try await background("workflow.remove", ["id": id], as: Removed.self)
+    }
+
+    static func runWorkflow(id: String, input: String, workspaceID: String?) async throws -> WorkflowRunRecord {
+        var params: [String: Any] = ["id": id, "input": input]
+        if let workspaceID, !workspaceID.isEmpty {
+            params["workspaceId"] = workspaceID
+        }
+        return try await background("workflow.run", params, as: WorkflowRunRecord.self)
+    }
+
+    static func workflowRuns() async throws -> [WorkflowRunRecord] {
+        try await background("workflow.runs", as: [WorkflowRunRecord].self)
+    }
+
+    static func workflowTranscript(runID: String, nodeID: String, offset: UInt64) async throws -> TranscriptChunk {
+        try await background(
+            "workflow.transcript",
+            ["id": runID, "nodeId": nodeID, "offset": offset],
+            as: TranscriptChunk.self
+        )
+    }
+
+    static func workflowKill(runID: String) async throws {
+        _ = try await background("workflow.kill", ["id": runID], as: WorkflowKilled.self)
+    }
+
+    static func workflowContinue(runID: String) async throws -> WorkflowRunRecord {
+        try await background("workflow.continue", ["id": runID], as: WorkflowRunRecord.self)
+    }
+
+    /// Cheap local backend. Does not save or run the draft.
+    static func designWorkflow(prompt: String, workspaceID: String?, backend: String?) async throws -> WorkflowDesignResult {
+        var params: [String: Any] = ["prompt": prompt]
+        if let workspaceID, !workspaceID.isEmpty {
+            params["workspaceId"] = workspaceID
+        }
+        if let backend, !backend.isEmpty {
+            params["backend"] = backend
+        }
+        return try await background(
+            "workflow.design",
+            params,
+            patience: 200,
+            as: WorkflowDesignResult.self
+        )
+    }
+}
+
+private struct WorkflowKilled: Codable, Sendable { let killed: Bool }
+
+private extension Encodable {
+    func jsonObject() throws -> [String: Any] {
+        let data = try JSONEncoder().encode(self)
+        let obj = try JSONSerialization.jsonObject(with: data)
+        guard let dict = obj as? [String: Any] else {
+            throw BridgeError.decoding(method: "encode", underlying: "expected a JSON object")
+        }
+        return dict
+    }
+}
+
 // MARK: - Todo
 
 extension Bridge {

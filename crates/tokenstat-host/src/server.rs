@@ -146,6 +146,7 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         // so the first Shell click hands it over instead of starting one.
         tokenstat_pty::warm_shell_pool();
         crate::automations::start_scheduler();
+        crate::workflows::start_scheduler();
         crate::sync_scheduler::start(Arc::clone(&shared));
     }
 

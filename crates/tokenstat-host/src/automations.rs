@@ -97,7 +97,7 @@ pub struct ScheduleSpec {
 }
 
 impl ScheduleSpec {
-    fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         match self.kind {
             ScheduleKind::Once => Ok(()),
             ScheduleKind::Interval => {
@@ -156,7 +156,7 @@ impl ScheduleSpec {
     }
 
     /// The next time this fires, or None for a once job.
-    fn next_run_ms(&self, from: i64) -> Option<i64> {
+    pub fn next_run_ms(&self, from: i64) -> Option<i64> {
         match self.kind {
             ScheduleKind::Once => None,
             ScheduleKind::Interval => Some(from + self.every_seconds as i64 * 1000),
@@ -978,6 +978,58 @@ impl Store {
             .push(job);
     }
 
+    pub fn get_run(&self, id: &str) -> Option<RunRecord> {
+        self.runs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|run| run.id == id)
+            .cloned()
+    }
+
+    /// Start a stored job without taking a queue slot. A workflow that already
+    /// occupies the cap uses this so an automation node cannot deadlock.
+    pub fn start_now(self: &Arc<Store>, id: &str) -> Result<RunRecord, String> {
+        let snapshot = {
+            let jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+            jobs.iter()
+                .find(|job| job.id == id)
+                .cloned()
+                .ok_or_else(|| format!("no automation with id {id}"))?
+        };
+        let workspace = crate::workspaces::folder(&snapshot.workspace_id)?;
+        let _argv = agent_command(
+            &snapshot.backend,
+            &snapshot.prompt,
+            snapshot.model.as_deref(),
+            snapshot.effort.as_deref(),
+            snapshot.budget_seconds,
+        )?;
+        let run_id = format!("run-{}", now_ms());
+        let transcript_path = self.runs_dir.join(format!("{run_id}.txt"));
+        let pending = Pending {
+            job: snapshot.clone(),
+            run_id: run_id.clone(),
+            transcript_path,
+        };
+        match self.spawn_pending(pending, workspace.id) {
+            Ok((run, budget)) => {
+                let started = run.started_at_ms;
+                let started_id = run.id.clone();
+                let out = self.persist_and_drain(run, budget, |r| self.push_run(r))?;
+                let mut jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+                if let Some(job) = jobs.iter_mut().find(|job| job.id == id) {
+                    job.last_run_at_ms = Some(started);
+                    job.last_run_id = Some(started_id);
+                }
+                drop(jobs);
+                let _ = self.save();
+                Ok(out)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     fn push_run(&self, run: RunRecord) -> Result<(), String> {
         let mut runs = self.runs.lock().unwrap_or_else(PoisonError::into_inner);
         runs.insert(0, run);
@@ -1119,7 +1171,7 @@ impl Store {
         }
     }
 
-    fn try_take_slot(&self) -> bool {
+    pub(crate) fn try_take_slot(&self) -> bool {
         let max = self
             .queue
             .lock()
@@ -1134,7 +1186,7 @@ impl Store {
         }
     }
 
-    fn release_slot(&self) {
+    pub(crate) fn release_slot(&self) {
         let mut active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
         if *active > 0 {
             *active -= 1;

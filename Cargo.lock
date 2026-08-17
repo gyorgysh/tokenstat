@@ -2557,6 +2557,7 @@ dependencies = [
  "directories",
  "getrandom 0.4.3",
  "jiff",
+ "reqwest",
  "serde",
  "serde_json",
  "tokenstat-core",

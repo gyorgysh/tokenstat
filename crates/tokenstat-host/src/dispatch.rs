@@ -367,6 +367,20 @@ struct PtyIdParams {
 #[cfg(feature = "local-host")]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
+struct WorkflowParams {
+    id: Option<String>,
+    workflow: Option<crate::workflows::Workflow>,
+    input: Option<String>,
+    workspace_id: Option<String>,
+    backend: Option<String>,
+    prompt: Option<String>,
+    node_id: Option<String>,
+    offset: Option<u64>,
+}
+
+#[cfg(feature = "local-host")]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct AutomationParams {
     id: Option<String>,
     job: Option<Automation>,
@@ -1371,7 +1385,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
 /// that is a concurrency change rather than a compilation one.
 #[cfg(feature = "local-host")]
 fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
-    if !method.starts_with("automation.") && !method.starts_with("todo.") {
+    if !method.starts_with("automation.")
+        && !method.starts_with("todo.")
+        && !method.starts_with("workflow.")
+    {
         return None;
     }
     Some(local_job_call(method, params))
@@ -1468,6 +1485,78 @@ fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 max_concurrent: p.max_concurrent.unwrap_or(current.max_concurrent),
             };
             serde_json::to_value(crate::automations::shared().apply_queue_config(next)?).envelope()
+        }
+
+        "workflow.list" => serde_json::to_value(crate::workflows::shared().list()).envelope(),
+        "workflow.get" => {
+            let p: WorkflowParams = parse(params)?;
+            serde_json::to_value(
+                crate::workflows::shared().get(&p.id.ok_or("workflow.get needs id")?)?,
+            )
+            .envelope()
+        }
+        "workflow.create" => {
+            let mut p: WorkflowParams = parse(params)?;
+            let mut workflow = p.workflow.take().ok_or("workflow.create needs workflow")?;
+            if workflow.id.is_empty() {
+                workflow.id = format!("wf-{}", now_ms());
+            }
+            serde_json::to_value(crate::workflows::shared().create(workflow)?).envelope()
+        }
+        "workflow.update" => {
+            let p: WorkflowParams = parse(params)?;
+            serde_json::to_value(
+                crate::workflows::shared()
+                    .update(p.workflow.ok_or("workflow.update needs workflow")?)?,
+            )
+            .envelope()
+        }
+        "workflow.remove" => {
+            let p: WorkflowParams = parse(params)?;
+            Ok(json!({
+                "removed": crate::workflows::shared()
+                    .remove(&p.id.ok_or("workflow.remove needs id")?)?
+            }))
+        }
+        "workflow.run" => {
+            let p: WorkflowParams = parse(params)?;
+            serde_json::to_value(crate::workflows::shared().run(
+                &p.id.ok_or("workflow.run needs id")?,
+                p.input,
+                p.workspace_id,
+            )?)
+            .envelope()
+        }
+        "workflow.runs" => serde_json::to_value(crate::workflows::shared().runs()).envelope(),
+        "workflow.transcript" => {
+            let p: WorkflowParams = parse(params)?;
+            let id = p.id.ok_or("workflow.transcript needs a run id")?;
+            let node = p.node_id.ok_or("workflow.transcript needs nodeId")?;
+            let (text, next) =
+                crate::workflows::shared().transcript(&id, &node, p.offset.unwrap_or(0))?;
+            Ok(json!({"text": text, "nextOffset": next}))
+        }
+        "workflow.kill" => {
+            let p: WorkflowParams = parse(params)?;
+            crate::workflows::shared().kill(&p.id.ok_or("workflow.kill needs a run id")?)?;
+            Ok(json!({"killed": true}))
+        }
+        "workflow.continue" => {
+            let p: WorkflowParams = parse(params)?;
+            serde_json::to_value(
+                crate::workflows::shared()
+                    .continue_run(&p.id.ok_or("workflow.continue needs a run id")?)?,
+            )
+            .envelope()
+        }
+        "workflow.design" => {
+            let p: WorkflowParams = parse(params)?;
+            crate::workflows::design(
+                p.prompt.as_deref().ok_or("workflow.design needs prompt")?,
+                p.workspace_id.as_deref(),
+                p.backend.as_deref(),
+            )
+            .map_err(DispatchError::from)
         }
 
         "todo.list" => {
@@ -2898,6 +2987,7 @@ mod tests {
             ("totals", "not json at all"),
             ("report", "{}"),
             ("automation.list", "{}"),
+            ("workflow.list", "{}"),
         ] {
             let out = call(&mut s, method, params);
             let v: Value = serde_json::from_str(&out)

@@ -71,8 +71,10 @@ fn now_ms() -> i64 {
 pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
     match method {
         "workspace.list" | "pty.list" => false,
+        "workflow.list" | "workflow.get" | "workflow.runs" | "workflow.transcript" => false,
         m if m.starts_with("workspace.") => true,
         m if m.starts_with("pty.") => true,
+        m if m.starts_with("workflow.") => true,
         "stream.open" => stream_kind == Some("pty.subscribe"),
         _ => false,
     }

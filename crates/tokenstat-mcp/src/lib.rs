@@ -10,8 +10,9 @@
 //! local kanban board and automations.
 //!
 //! Speaks JSON-RPC 2.0 with MCP Content-Length framing on stdio. Archive
-//! tools stay local. Task and automation tools talk to the host helper over
-//! its unix socket, never the network. Nothing is sent off the machine.
+//! tools stay local. Task, automation and workflow tools talk to the host
+//! helper over its unix socket, never the network. Nothing is sent off the
+//! machine.
 
 #![forbid(unsafe_code)]
 
@@ -284,6 +285,109 @@ fn tools() -> Vec<Value> {
                 }
             }),
         ),
+        tool(
+            "workflow_list",
+            "List host-owned workflow graphs (global and per-workspace).",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "workflow_get",
+            "Read one workflow graph by id.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "workflow_create",
+            "Save a workflow graph. Pass the same workflow object the host accepts.",
+            json!({
+                "type": "object",
+                "properties": { "workflow": { "type": "object" } },
+                "required": ["workflow"]
+            }),
+        ),
+        tool(
+            "workflow_update",
+            "Replace a saved workflow graph.",
+            json!({
+                "type": "object",
+                "properties": { "workflow": { "type": "object" } },
+                "required": ["workflow"]
+            }),
+        ),
+        tool(
+            "workflow_remove",
+            "Delete a saved workflow graph.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "workflow_run",
+            "Start a workflow. Global graphs need workspaceId. input is the starting prompt.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "input": { "type": "string" },
+                    "workspaceId": { "type": "string" }
+                },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "workflow_runs",
+            "List recent workflow runs.",
+            json!({ "type": "object", "properties": {} }),
+        ),
+        tool(
+            "workflow_transcript",
+            "Read one step's transcript from a workflow run, from offset.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "nodeId": { "type": "string" },
+                    "offset": { "type": "integer", "minimum": 0 }
+                },
+                "required": ["id", "nodeId"]
+            }),
+        ),
+        tool(
+            "workflow_kill",
+            "Stop a live workflow run.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "workflow_continue",
+            "Continue a run that is waiting on a gate.",
+            json!({
+                "type": "object",
+                "properties": { "id": { "type": "string" } },
+                "required": ["id"]
+            }),
+        ),
+        tool(
+            "workflow_design",
+            "Ask a cheap local backend for a workflow JSON draft. Does not save or run it.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string" },
+                    "workspaceId": { "type": "string" },
+                    "backend": { "type": "string" }
+                },
+                "required": ["prompt"]
+            }),
+        ),
     ]
 }
 
@@ -412,6 +516,17 @@ fn call_tool(engine: &mut Engine, params: Option<&Value>) -> Result<Value, Strin
         "automation_runs" => host_call(engine, "automation.runs", json!({}))?,
         "automation_queue" => host_call(engine, "automation.queue", json!({}))?,
         "automation_set_queue" => host_call(engine, "automation.setQueue", args)?,
+        "workflow_list" => host_call(engine, "workflow.list", json!({}))?,
+        "workflow_get" => host_call(engine, "workflow.get", args)?,
+        "workflow_create" => host_call(engine, "workflow.create", args)?,
+        "workflow_update" => host_call(engine, "workflow.update", args)?,
+        "workflow_remove" => host_call(engine, "workflow.remove", args)?,
+        "workflow_run" => host_call(engine, "workflow.run", args)?,
+        "workflow_runs" => host_call(engine, "workflow.runs", json!({}))?,
+        "workflow_transcript" => host_call(engine, "workflow.transcript", args)?,
+        "workflow_kill" => host_call(engine, "workflow.kill", args)?,
+        "workflow_continue" => host_call(engine, "workflow.continue", args)?,
+        "workflow_design" => host_call(engine, "workflow.design", args)?,
         other => return Err(format!("unknown tool: {other}")),
     };
 

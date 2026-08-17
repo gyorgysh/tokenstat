@@ -23,6 +23,7 @@ enum Destination: String, CaseIterable, Identifiable {
     case home
     case todo
     case automations
+    case workflows
     case machines
     case insights
     /// Reached by selecting a folder, not by a row of its own.
@@ -36,9 +37,9 @@ enum Destination: String, CaseIterable, Identifiable {
     /// Account is not among them: it is reached from the footer, where people
     /// look for their account. Workspaces is not among them either, for the
     /// reason above. The top group is ordered by label length so the rows read
-    /// as one tidy column: HOME, TASKS, INSIGHTS, MACHINES, AUTOMATIONS.
+    /// as one tidy column: HOME, TASKS, INSIGHTS, DEVICES, WORKFLOWS, AUTOMATIONS.
     static var navigable: [Destination] {
-        [.home, .todo, .insights, .machines, .automations]
+        [.home, .todo, .insights, .machines, .workflows, .automations]
     }
 
     var label: String {
@@ -47,6 +48,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .todo: return "Tasks"
         case .workspaces: return "Workspaces"
         case .automations: return "Automations"
+        case .workflows: return "Workflows"
         case .machines: return "Devices"
         case .insights: return "Insights"
         case .account: return "Account"
@@ -59,6 +61,7 @@ enum Destination: String, CaseIterable, Identifiable {
         case .todo: return "checklist"
         case .workspaces: return "folder.fill"
         case .automations: return "bolt.fill"
+        case .workflows: return "point.3.connected.trianglepath.dotted"
         case .machines: return "laptopcomputer"
         case .insights: return "chart.bar.xaxis"
         case .account: return "person.crop.circle"
@@ -85,6 +88,7 @@ struct RootView: View {
     @State private var workspaces = WorkspacesModel()
     @State private var machines = MachinesModel()
     @State private var automations = AutomationsModel()
+    @State private var workflows = WorkflowsModel()
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
     @State private var connectivity = ConnectivityModel()
@@ -287,6 +291,17 @@ struct RootView: View {
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled else { return }
                 await automations.refreshList()
+            }
+        }
+        .task {
+            await workflows.load()
+            while !Task.isCancelled {
+                let interval: Duration = workflows.runs.contains(where: \.isLive)
+                    ? .seconds(2)
+                    : .seconds(12)
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                await workflows.refreshList()
             }
         }
         // Sidebar footer needs the handle, but not on the first frame. A short
@@ -717,7 +732,7 @@ struct RootView: View {
 
     private var destinationHasInspector: Bool {
         switch destination {
-        case .home, .todo, .automations, .machines, .insights, .workspaces:
+        case .home, .todo, .automations, .workflows, .machines, .insights, .workspaces:
             return true
         case .account:
             return false
@@ -792,6 +807,11 @@ struct RootView: View {
             case .automations:
                 AutomationsInspector(
                     model: automations,
+                    folders: workspaces.folders
+                ) { closeInspector() }
+            case .workflows:
+                WorkflowsInspector(
+                    model: workflows,
                     folders: workspaces.folders
                 ) { closeInspector() }
             case .machines:
@@ -1286,6 +1306,15 @@ struct RootView: View {
                                     openAutomation(jobID: job.id, runID: run?.id)
                                 }
                             }
+                            ForEach(workflows.liveRuns(in: folder.id)) { run in
+                                ActiveWorkflowRow(
+                                    run: run,
+                                    isSelected: destination == .workflows
+                                        && workflows.selectedRunID == run.id
+                                ) {
+                                    openWorkflow(graphID: run.workflowID, runID: run.id)
+                                }
+                            }
                             ForEach(activeSessions) { session in
                                 ActiveSessionRow(
                                     session: session,
@@ -1648,6 +1677,11 @@ struct RootView: View {
                 onNavigate: { destination = $0 },
                 pendingRunID: $pendingRunID
             )
+        case .workflows:
+            WorkflowsView(
+                model: workflows,
+                folders: workspaces.folders
+            )
         case .todo:
             TodoView(
                 model: todo,
@@ -1705,6 +1739,19 @@ struct RootView: View {
         #endif
 
         await automations.load()
+        guard !Task.isCancelled else { return }
+        await workflows.load()
+    }
+
+    /// Open a graph on Workflows, with its run in the inspector when we have one.
+    private func openWorkflow(graphID: String, runID: String?) {
+        selectDestination(.workflows) {
+            workflows.selectGraph(graphID)
+            if let runID, let run = workflows.runs.first(where: { $0.id == runID }) {
+                workflows.selectRun(run)
+            }
+            isInspectorPresented = true
+        }
     }
 
     /// Open a job on Automations, with its run in the inspector when we have one.
@@ -2356,6 +2403,69 @@ private struct WorkspaceRow: View {
         // A hairline between adjacent rows. Without it two selected cards, or
         // a card and the session under it, share an edge and read as one tall
         // shape rather than as two things.
+        .padding(.vertical, 1)
+    }
+}
+
+/// A live workflow run, drawn under the workspace it is bound to.
+private struct ActiveWorkflowRow: View {
+    let run: WorkflowRunRecord
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                FeatureMark(name: "mark_workflow", tint: Theme.accent, size: DisplayFit.dp(RowMetrics.mark))
+                VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
+                    Text(run.name)
+                        .font(.system(
+                            size: DisplayFit.dp(RowMetrics.title),
+                            weight: isSelected ? .semibold : .regular
+                        ))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text("\(run.steps.count) steps")
+                        .font(Theme.numeric(RowMetrics.meta))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    StateBadge(state: run.isWaiting ? .needsAttention : .working)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, Theme.Space.m)
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.vertical, RowMetrics.rowPadding)
+            .background(background)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help("Open this running workflow")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(run.name). \(run.endedLabel)")
+    }
+
+    private var background: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelected
+                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+                )
+            if isSelected {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Theme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 5)
+            }
+        }
+        .padding(.leading, Theme.Space.l)
+        .padding(.trailing, Theme.Space.xs)
         .padding(.vertical, 1)
     }
 }

@@ -1472,6 +1472,428 @@ struct AutomationQueue: Codable, Sendable {
     var maxConcurrent: UInt32
 }
 
+// MARK: - Workflows
+
+/// Host-owned graph. The Mac canvas is a view of this, not the source of truth.
+struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var scope: WorkflowScope
+    var workspaceID: String?
+    var budgetSeconds: UInt64
+    var schedule: AutomationSchedule
+    var enabled: Bool
+    var nodes: [WorkflowNode]
+    var edges: [WorkflowEdge]
+    var lastRunAtMs: Int64?
+    var nextRunAtMs: Int64?
+    var lastRunID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, scope, workspaceID = "workspaceId"
+        case budgetSeconds, schedule, enabled, nodes, edges
+        case lastRunAtMs, nextRunAtMs, lastRunID = "lastRunId"
+    }
+
+    init(
+        id: String = "",
+        name: String,
+        scope: WorkflowScope = .global,
+        workspaceID: String? = nil,
+        budgetSeconds: UInt64 = 10_800,
+        schedule: AutomationSchedule = .default,
+        enabled: Bool = false,
+        nodes: [WorkflowNode] = [],
+        edges: [WorkflowEdge] = [],
+        lastRunAtMs: Int64? = nil,
+        nextRunAtMs: Int64? = nil,
+        lastRunID: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.scope = scope
+        self.workspaceID = workspaceID
+        self.budgetSeconds = budgetSeconds
+        self.schedule = schedule
+        self.enabled = enabled
+        self.nodes = nodes
+        self.edges = edges
+        self.lastRunAtMs = lastRunAtMs
+        self.nextRunAtMs = nextRunAtMs
+        self.lastRunID = lastRunID
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        scope = try c.decodeIfPresent(WorkflowScope.self, forKey: .scope) ?? .global
+        workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID)
+        budgetSeconds = try c.decodeIfPresent(UInt64.self, forKey: .budgetSeconds) ?? 10_800
+        schedule = try c.decodeIfPresent(AutomationSchedule.self, forKey: .schedule) ?? .default
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        nodes = try c.decodeIfPresent([WorkflowNode].self, forKey: .nodes) ?? []
+        edges = try c.decodeIfPresent([WorkflowEdge].self, forKey: .edges) ?? []
+        lastRunAtMs = try c.decodeIfPresent(Int64.self, forKey: .lastRunAtMs)
+        nextRunAtMs = try c.decodeIfPresent(Int64.self, forKey: .nextRunAtMs)
+        lastRunID = try c.decodeIfPresent(String.self, forKey: .lastRunID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(scope, forKey: .scope)
+        try c.encodeIfPresent(workspaceID, forKey: .workspaceID)
+        try c.encode(budgetSeconds, forKey: .budgetSeconds)
+        try c.encode(schedule, forKey: .schedule)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(nodes, forKey: .nodes)
+        try c.encode(edges, forKey: .edges)
+        try c.encodeIfPresent(lastRunAtMs, forKey: .lastRunAtMs)
+        try c.encodeIfPresent(nextRunAtMs, forKey: .nextRunAtMs)
+        try c.encodeIfPresent(lastRunID, forKey: .lastRunID)
+    }
+
+    var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+
+    /// Empty graph with a start node. The person still has to save it.
+    static func blank(name: String = "Untitled", scope: WorkflowScope = .global, workspaceID: String? = nil) -> WorkflowGraph {
+        WorkflowGraph(
+            name: name,
+            scope: scope,
+            workspaceID: workspaceID,
+            nodes: [WorkflowNode(id: "in", kind: .input, title: "Start")]
+        )
+    }
+}
+
+enum WorkflowScope: String, Codable, Sendable, Hashable, CaseIterable {
+    case global
+    case workspace
+
+    var label: String {
+        switch self {
+        case .global: return "Global"
+        case .workspace: return "This workspace"
+        }
+    }
+}
+
+enum WorkflowNodeKind: String, Codable, Sendable, Hashable, CaseIterable {
+    case input
+    case agent
+    case automation
+    case http
+    case command
+    case gate
+    case mcp
+
+    var label: String {
+        switch self {
+        case .input: return "Input"
+        case .agent: return "Agent"
+        case .automation: return "Automation"
+        case .http: return "HTTP"
+        case .command: return "Command"
+        case .gate: return "Gate"
+        case .mcp: return "MCP"
+        }
+    }
+
+    var mark: String {
+        switch self {
+        case .input: return "mark_todo"
+        case .agent: return "mark_workflow"
+        case .automation: return "mark_automation"
+        case .http: return "mark_sync"
+        case .command: return "mark_terminal"
+        case .gate: return "mark_note"
+        case .mcp: return "mark_host"
+        }
+    }
+}
+
+enum WorkflowEdgeWhen: String, Codable, Sendable, Hashable {
+    case ok
+    case error
+    case always
+
+    var label: String {
+        switch self {
+        case .ok: return "on success"
+        case .error: return "on error"
+        case .always: return "always"
+        }
+    }
+}
+
+struct WorkflowNode: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var kind: WorkflowNodeKind
+    var x: Double
+    var y: Double
+    var title: String
+    var backend: String?
+    var model: String?
+    var effort: String?
+    var prompt: String?
+    var wait: String?
+    var waitPattern: String?
+    var automationID: String?
+    var promptOverride: String?
+    var method: String?
+    var url: String?
+    var headers: [String: String]?
+    var body: String?
+    var command: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, x, y, title, backend, model, effort, prompt, wait
+        case waitPattern, automationID = "automationId", promptOverride
+        case method, url, headers, body, command
+    }
+
+    init(
+        id: String,
+        kind: WorkflowNodeKind,
+        x: Double = 0,
+        y: Double = 0,
+        title: String = "",
+        backend: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        prompt: String? = nil,
+        wait: String? = nil,
+        waitPattern: String? = nil,
+        automationID: String? = nil,
+        promptOverride: String? = nil,
+        method: String? = nil,
+        url: String? = nil,
+        headers: [String: String]? = nil,
+        body: String? = nil,
+        command: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.x = x
+        self.y = y
+        self.title = title
+        self.backend = backend
+        self.model = model
+        self.effort = effort
+        self.prompt = prompt
+        self.wait = wait
+        self.waitPattern = waitPattern
+        self.automationID = automationID
+        self.promptOverride = promptOverride
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.body = body
+        self.command = command
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id) ?? ""
+        kind = try c.decodeIfPresent(WorkflowNodeKind.self, forKey: .kind) ?? .input
+        x = try c.decodeIfPresent(Double.self, forKey: .x) ?? 0
+        y = try c.decodeIfPresent(Double.self, forKey: .y) ?? 0
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        backend = try c.decodeIfPresent(String.self, forKey: .backend)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt)
+        wait = try c.decodeIfPresent(String.self, forKey: .wait)
+        waitPattern = try c.decodeIfPresent(String.self, forKey: .waitPattern)
+        automationID = try c.decodeIfPresent(String.self, forKey: .automationID)
+        promptOverride = try c.decodeIfPresent(String.self, forKey: .promptOverride)
+        method = try c.decodeIfPresent(String.self, forKey: .method)
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        headers = try c.decodeIfPresent([String: String].self, forKey: .headers)
+        body = try c.decodeIfPresent(String.self, forKey: .body)
+        command = try c.decodeIfPresent(String.self, forKey: .command)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(x, forKey: .x)
+        try c.encode(y, forKey: .y)
+        try c.encode(title, forKey: .title)
+        try c.encodeIfPresent(backend, forKey: .backend)
+        try c.encodeIfPresent(model, forKey: .model)
+        try c.encodeIfPresent(effort, forKey: .effort)
+        try c.encodeIfPresent(prompt, forKey: .prompt)
+        try c.encodeIfPresent(wait, forKey: .wait)
+        try c.encodeIfPresent(waitPattern, forKey: .waitPattern)
+        try c.encodeIfPresent(automationID, forKey: .automationID)
+        try c.encodeIfPresent(promptOverride, forKey: .promptOverride)
+        try c.encodeIfPresent(method, forKey: .method)
+        try c.encodeIfPresent(url, forKey: .url)
+        try c.encodeIfPresent(headers, forKey: .headers)
+        try c.encodeIfPresent(body, forKey: .body)
+        try c.encodeIfPresent(command, forKey: .command)
+    }
+
+    var displayTitle: String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        return kind.label
+    }
+
+    /// One-line caption for the outline. Never invents a dollar figure.
+    var subtitle: String {
+        switch kind {
+        case .input:
+            return "Starting prompt"
+        case .agent:
+            return [backend, model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        case .automation:
+            return automationID ?? "Run automation"
+        case .http:
+            let verb = (method?.isEmpty == false ? method! : "GET")
+            return [verb, url].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        case .command:
+            return command ?? prompt ?? "Command"
+        case .gate:
+            return "Waits for you"
+        case .mcp:
+            return "Reserved"
+        }
+    }
+}
+
+struct WorkflowEdge: Codable, Sendable, Hashable, Identifiable {
+    var from: String
+    var to: String
+    var when: WorkflowEdgeWhen
+
+    var id: String { "\(from)>\(to):\(when.rawValue)" }
+
+    enum CodingKeys: String, CodingKey {
+        case from, to, when
+    }
+
+    init(from: String, to: String, when: WorkflowEdgeWhen = .ok) {
+        self.from = from
+        self.to = to
+        self.when = when
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        from = try c.decode(String.self, forKey: .from)
+        to = try c.decode(String.self, forKey: .to)
+        when = try c.decodeIfPresent(WorkflowEdgeWhen.self, forKey: .when) ?? .ok
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(from, forKey: .from)
+        try c.encode(to, forKey: .to)
+        try c.encode(when, forKey: .when)
+    }
+}
+
+struct WorkflowStep: Codable, Sendable, Hashable, Identifiable {
+    var nodeID: String
+    var kind: String
+    var title: String
+    var status: String
+    var output: String
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+    var exitCode: Int?
+
+    var id: String { nodeID }
+
+    enum CodingKeys: String, CodingKey {
+        case nodeID = "nodeId", kind, title, status, output
+        case startedAtMs, endedAtMs, exitCode
+    }
+
+    var endedLabel: String {
+        WorkflowRunRecord.label(for: status)
+    }
+}
+
+struct WorkflowRunRecord: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var workflowID: String
+    var name: String
+    var workspaceID: String
+    var input: String
+    var status: String
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+    var currentNodeID: String?
+    var steps: [WorkflowStep]
+    var budgetSeconds: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case id, workflowID = "workflowId", name, workspaceID = "workspaceId"
+        case input, status, startedAtMs, endedAtMs
+        case currentNodeID = "currentNodeId", steps, budgetSeconds
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        workflowID = try c.decodeIfPresent(String.self, forKey: .workflowID) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        workspaceID = try c.decodeIfPresent(String.self, forKey: .workspaceID) ?? ""
+        input = try c.decodeIfPresent(String.self, forKey: .input) ?? ""
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        startedAtMs = try c.decodeIfPresent(Int64.self, forKey: .startedAtMs) ?? 0
+        endedAtMs = try c.decodeIfPresent(Int64.self, forKey: .endedAtMs)
+        currentNodeID = try c.decodeIfPresent(String.self, forKey: .currentNodeID)
+        steps = try c.decodeIfPresent([WorkflowStep].self, forKey: .steps) ?? []
+        budgetSeconds = try c.decodeIfPresent(UInt64.self, forKey: .budgetSeconds) ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(workflowID, forKey: .workflowID)
+        try c.encode(name, forKey: .name)
+        try c.encode(workspaceID, forKey: .workspaceID)
+        try c.encode(input, forKey: .input)
+        try c.encode(status, forKey: .status)
+        try c.encode(startedAtMs, forKey: .startedAtMs)
+        try c.encodeIfPresent(endedAtMs, forKey: .endedAtMs)
+        try c.encodeIfPresent(currentNodeID, forKey: .currentNodeID)
+        try c.encode(steps, forKey: .steps)
+        try c.encode(budgetSeconds, forKey: .budgetSeconds)
+    }
+
+    var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }
+    var isLive: Bool { status == "running" || status == "waiting" }
+    var isWaiting: Bool { status == "waiting" }
+
+    var endedLabel: String { Self.label(for: status) }
+
+    static func label(for status: String) -> String {
+        switch status {
+        case "queued": return "Queued"
+        case "running": return "Working"
+        case "waiting": return "Needs attention"
+        case "ok": return "Done"
+        case "stopped": return "Stopped"
+        case "error": return "Failed"
+        case "interrupted": return "Interrupted by restart"
+        default: return status
+        }
+    }
+}
+
+struct WorkflowDesignResult: Codable, Sendable {
+    var workflow: WorkflowGraph
+    var transcript: String
+}
+
 /// A slice of a run's transcript, asked for by byte offset.
 struct TranscriptChunk: Codable, Sendable {
     var text: String
