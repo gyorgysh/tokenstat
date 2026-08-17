@@ -2,10 +2,9 @@
 //
 // Source-available for review, NOT open source. See LICENSE.
 
-import SwiftUI
 #if os(macOS)
+import SwiftUI
 import AppKit
-#endif
 
 /// Content-space size of a node card. Positions in the IR are the top-left.
 enum WorkflowNodeMetrics {
@@ -416,3 +415,4 @@ struct WorkflowNodeCard: View {
         }
     }
 }
+#endif

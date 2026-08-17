@@ -4,6 +4,7 @@
 
 import SwiftUI
 
+#if os(macOS)
 /// The Blueprint: palette, canvas, and the graph currently being edited.
 ///
 /// The host IR is the source of truth. This view edits a working copy and
@@ -50,7 +51,9 @@ struct WorkflowsEditor: View {
         .sheet(isPresented: $designing) {
             WorkflowDesignSheet(model: model, folders: folders)
         }
+        #if os(macOS)
         .onDeleteCommand { model.deleteSelection() }
+        #endif
     }
 
     private var liveRun: WorkflowRunRecord? {
@@ -337,3 +340,4 @@ struct WorkflowDesignSheet: View {
         }
     }
 }
+#endif
