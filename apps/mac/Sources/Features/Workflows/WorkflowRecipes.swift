@@ -331,7 +331,12 @@ enum WorkflowRecipes {
     }
 }
 
-/// Example chips. Tapping one either fills Design or inserts a local graph.
+/// Example pipelines. Tapping one fills the Design field.
+///
+/// These used to be their own arrow sentence, `Start → Refine Claude haiku low
+/// → Plan Grok grok-4.6 high → …`, which is the shape of the pipeline written
+/// out as text you have to parse. Two of them side by side were a wall. The
+/// name says what it is for and the strip says what it does.
 struct WorkflowRecipeChips: View {
     let recipes: [WorkflowRecipe]
     var onPick: (WorkflowRecipe) -> Void
@@ -339,11 +344,29 @@ struct WorkflowRecipeChips: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             ForEach(recipes) { recipe in
-                Button(recipe.label, .create) { onPick(recipe) }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .multilineTextAlignment(.leading)
+                Button { onPick(recipe) } label: {
+                    HStack(spacing: Theme.Space.m) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(recipe.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                            MiniGraph(nodes: recipe.nodes, edges: recipe.edges, dot: 20)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, Theme.Space.s)
+                    .padding(.vertical, Theme.Space.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Space.s)
+                            .strokeBorder(Theme.border)
+                    )
+                    .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(recipe.label)
+                .accessibilityLabel("\(recipe.name). \(recipe.label)")
             }
         }
     }

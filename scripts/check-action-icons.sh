@@ -46,6 +46,7 @@ ALLOWED = [
     ("Features/Workflows/WorkflowsEditor.swift", "model.addNode(kind:"),
     ("Features/Workflows/WorkflowCanvas.swift", "model.addNode(kind:"),
     ("Features/Workflows/WorkflowCanvas.swift", "onPick()"),
+    ("Features/Workflows/WorkflowRecipes.swift", "onPick(recipe)"),
     ("Features/Automations/AutomationsView.swift", "Text(dayShort[bit])"),
     ("Features/Automations/AutomationsView.swift", "scheduleKind = kind"),
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),

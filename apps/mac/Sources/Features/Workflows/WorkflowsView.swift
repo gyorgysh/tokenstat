@@ -235,6 +235,10 @@ struct WorkflowsView: View {
             mark: "mark_workflow"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
+                // Shape first, then the outline that spells it out. A draft is
+                // reviewed before it is saved, and the shape is what tells you
+                // the model understood the run you described.
+                MiniGraph(nodes: draft.nodes, edges: draft.edges, maxColumns: 7)
                 WorkflowOutline(nodes: draft.nodes, edges: draft.edges)
                 HStack(spacing: Theme.Space.s) {
                     Button("Save", .save) { Task { await model.saveDraft() } }
@@ -313,6 +317,7 @@ struct WorkflowsView: View {
                         WorkflowRow(
                             graph: graph,
                             last: model.lastRun(for: graph),
+                            history: model.runs(of: graph),
                             folder: folders.first { $0.id == graph.workspaceID },
                             isSelected: model.selectedGraphID == graph.id,
                             onSelect: { model.selectGraph(graph.id) },
@@ -356,6 +361,9 @@ struct WorkflowsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
+            // Against the longest run on screen, so the list answers "which of
+            // these was the long one" without anybody doing subtraction.
+            DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
             Text(run.startedAt.formatted(date: .omitted, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -369,16 +377,19 @@ struct WorkflowsView: View {
         .onTapGesture { model.selectRun(run) }
     }
 
+    /// Seconds a run took, or has taken so far.
+    private func seconds(of run: WorkflowRunRecord) -> Double {
+        guard let ended = run.endedAtMs else { return 0 }
+        return max(0, Double(ended - run.startedAtMs) / 1000)
+    }
+
+    /// Scale for the duration bars, from the runs actually on screen.
+    private var longestRunSeconds: Double {
+        model.runs.prefix(6).map { seconds(of: $0) }.max() ?? 0
+    }
+
     static func statusTint(_ status: String) -> Color {
-        switch status {
-        case "running": return Theme.accent
-        case "waiting": return Theme.warning
-        case "ok": return Theme.success
-        case "stopped": return Theme.warning
-        case "error": return Theme.danger
-        case "interrupted": return Theme.warning
-        default: return .secondary
-        }
+        RunOutcome.tint(status)
     }
 }
 
@@ -386,6 +397,8 @@ struct WorkflowsView: View {
 private struct WorkflowRow: View {
     let graph: WorkflowGraph
     let last: WorkflowRunRecord?
+    /// Newest first, as the model keeps them.
+    let history: [WorkflowRunRecord]
     let folder: WorkspaceFolder?
     let isSelected: Bool
     let onSelect: () -> Void
@@ -398,17 +411,28 @@ private struct WorkflowRow: View {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.s) {
                     FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 22)
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(graph.name)
                             .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
-                        Text(caption)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                        // The graph itself, and where a live run has got to.
+                        // The old caption said "7 nodes", which is the one fact
+                        // about a workflow nobody needs.
+                        MiniGraph(
+                            nodes: graph.nodes,
+                            edges: graph.edges,
+                            steps: live?.steps ?? [],
+                            currentNodeID: live?.currentNodeID,
+                            dot: 18
+                        )
                     }
                     Spacer(minLength: 0)
+                    Text(caption)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    RunHistoryStrip(ticks: ticks, height: 12)
                     if let last {
                         StatusPill(status: last.status, text: last.endedLabel)
                     }
@@ -435,16 +459,28 @@ private struct WorkflowRow: View {
         .background(isSelected ? Theme.accentSoft.opacity(0.5) : .clear)
     }
 
+    /// The run whose progress the strip should show, if one is in flight.
+    private var live: WorkflowRunRecord? {
+        guard let last, last.isLive else { return nil }
+        return last
+    }
+
+    /// Where it lives. The outcome is a pill and the shape is a strip, so this
+    /// is down to the one fact neither of those carries.
     private var caption: String {
-        var parts: [String] = ["\(graph.nodes.count) nodes"]
-        parts.append(graph.scope.label)
-        if let folder {
-            parts.append(folder.name)
+        if let folder { return folder.name }
+        return graph.scope.label
+    }
+
+    /// Oldest first, which is the direction the strip reads.
+    private var ticks: [RunHistoryStrip.Tick] {
+        history.reversed().map { run in
+            RunHistoryStrip.Tick(
+                id: run.id,
+                status: run.status,
+                label: "\(run.endedLabel) · \(run.startedAt.formatted(date: .abbreviated, time: .shortened))"
+            )
         }
-        if let last {
-            parts.append(last.endedLabel)
-        }
-        return parts.joined(separator: " · ")
     }
 }
 
