@@ -152,6 +152,8 @@ struct RootView: View {
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
     @State private var collapsedWorkspaces: Set<String> = []
+    /// Workspace id the current drag would land before, or `workspaceDropEnd`.
+    @State private var workspaceDropBeforeID: String?
     #endif
     /// Logo splash until the host answers; then wireframes and data take over.
     @State private var launch = LaunchState()
@@ -1188,6 +1190,9 @@ struct RootView: View {
                 } else {
                     ForEach(workspaces.folders) { folder in
                         #if os(macOS)
+                        if workspaceDropBeforeID == folder.id {
+                            workspaceInsertionLine
+                        }
                         let activeSessions = terminals.sessions(in: folder.id).filter(\.alive)
                         // The open workspace, and whether a terminal inside it
                         // is what the centre pane is actually showing. Only one
@@ -1238,6 +1243,16 @@ struct RootView: View {
                                 workspacePendingRemove = folder
                             }
                         }
+                        .modifier(WorkspaceReorder(id: folder.id, enabled: workspaces.folders.count > 1) {
+                            workspaces.moveWorkspace($0, before: folder.id)
+                            workspaceDropBeforeID = nil
+                        } onTargeted: { on in
+                            if on {
+                                workspaceDropBeforeID = folder.id
+                            } else if workspaceDropBeforeID == folder.id {
+                                workspaceDropBeforeID = nil
+                            }
+                        })
                         #else
                         SidebarRow(
                             label: folder.name,
@@ -1297,6 +1312,11 @@ struct RootView: View {
                         }
                         #endif
                     }
+                    #if os(macOS)
+                    if workspaceDropBeforeID == WorkspaceDrag.end {
+                        workspaceInsertionLine
+                    }
+                    #endif
                 }
 
                 #if os(macOS)
@@ -1325,6 +1345,16 @@ struct RootView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.top, workspaces.folders.isEmpty ? 0 : Theme.Space.xs)
+                .modifier(WorkspaceReorder(id: WorkspaceDrag.end, canDrag: false, enabled: workspaces.folders.count > 1) {
+                    workspaces.moveWorkspace($0, before: nil)
+                    workspaceDropBeforeID = nil
+                } onTargeted: { on in
+                    if on {
+                        workspaceDropBeforeID = WorkspaceDrag.end
+                    } else if workspaceDropBeforeID == WorkspaceDrag.end {
+                        workspaceDropBeforeID = nil
+                    }
+                })
                 #endif
             }
             .padding(.bottom, Theme.Space.m)
@@ -1741,6 +1771,13 @@ struct RootView: View {
         #endif
     }
 
+    private var workspaceInsertionLine: some View {
+        RoundedRectangle(cornerRadius: 1)
+            .fill(Theme.accent)
+            .frame(height: 2)
+            .padding(.horizontal, Theme.Space.m)
+    }
+
     /// Select the folder and destination in one immediate transaction. The
     /// inspector is part of the workspace destination, so allowing SwiftUI to
     /// animate the two state changes separately makes it visibly trail the row.
@@ -2097,6 +2134,57 @@ private struct StateBadge: View {
         pulsing = false
         withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true)) {
             pulsing = true
+        }
+    }
+}
+
+/// Prefix so a Finder path drop cannot be mistaken for a sidebar move.
+private enum WorkspaceDrag {
+    static let prefix = "tokenstat.workspace:"
+    static let end = "__end__"
+
+    static func payload(_ id: String) -> String { prefix + id }
+
+    static func id(from payload: String) -> String? {
+        guard payload.hasPrefix(prefix) else { return nil }
+        return String(payload.dropFirst(prefix.count))
+    }
+}
+
+/// Drag a workspace row, and accept another row dropped onto it.
+private struct WorkspaceReorder: ViewModifier {
+    let id: String
+    var canDrag: Bool = true
+    let enabled: Bool
+    let onDrop: (String) -> Void
+    let onTargeted: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if !enabled {
+            content
+        } else if canDrag {
+            drop(on: content)
+                .draggable(WorkspaceDrag.payload(id)) {
+                    Text((id as NSString).lastPathComponent)
+                        .font(.callout.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 6))
+                }
+        } else {
+            drop(on: content)
+        }
+    }
+
+    private func drop(on content: Content) -> some View {
+        content.dropDestination(for: String.self) { items, _ in
+            guard let payload = items.first,
+                  let dragged = WorkspaceDrag.id(from: payload),
+                  dragged != id else { return false }
+            onDrop(dragged)
+            return true
+        } isTargeted: { on in
+            onTargeted(on)
         }
     }
 }

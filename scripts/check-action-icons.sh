@@ -22,6 +22,7 @@ SKIP_STARTERS = (
     ".alert",
     ".confirmationDialog",
     ".swipeActions",
+    ".contextMenu",
     ".toolbar",
     "ToolbarItem",
     "CommandGroup",

@@ -18,6 +18,8 @@ import AppKit
 enum WorkspacePreference {
     private static let bypassKey = "workspace.bypassPermissions"
     private static let localModelKey = "workspace.localModel"
+    /// Sidebar order for the merged local and remote list.
+    private static let orderKey = "workspace.order"
 
     static func bypassPermissions(for workspaceID: String) -> Bool {
         UserDefaults.standard.bool(forKey: "\(bypassKey).\(workspaceID)")
@@ -39,6 +41,14 @@ enum WorkspacePreference {
         } else {
             defaults.removeObject(forKey: fullKey)
         }
+    }
+
+    static func order() -> [String] {
+        UserDefaults.standard.stringArray(forKey: orderKey) ?? []
+    }
+
+    static func setOrder(_ ids: [String]) {
+        UserDefaults.standard.set(ids, forKey: orderKey)
     }
 }
 
@@ -732,6 +742,42 @@ final class WorkspacesModel {
     /// Consecutive failures before a peer's folders leave the sidebar.
     private static let maxPeerFailures = 2
 
+    /// Move a sidebar folder so it sits before `targetID`, or at the end.
+    ///
+    /// Order is a local overlay. The host list has no rank, and remotes from
+    /// other machines cannot be reordered there, so the merged sidebar keeps
+    /// its own sequence on this Mac.
+    func moveWorkspace(_ id: String, before targetID: String?) {
+        guard folders.count > 1, folders.contains(where: { $0.id == id }) else { return }
+        if id == targetID { return }
+        var ids = folders.map(\.id)
+        ids.removeAll { $0 == id }
+        if let targetID, let to = ids.firstIndex(of: targetID) {
+            ids.insert(id, at: to)
+        } else {
+            ids.append(id)
+        }
+        WorkspacePreference.setOrder(ids)
+        folders = Self.applyOrder(folders, ids)
+    }
+
+    /// Remembered ids first, then anything new in the order it arrived.
+    static func applyOrder(_ folders: [WorkspaceFolder], _ order: [String]) -> [WorkspaceFolder] {
+        guard !order.isEmpty else { return folders }
+        var leftover = Dictionary(uniqueKeysWithValues: folders.map { ($0.id, $0) })
+        var ranked: [WorkspaceFolder] = []
+        ranked.reserveCapacity(folders.count)
+        for id in order {
+            if let folder = leftover.removeValue(forKey: id) {
+                ranked.append(folder)
+            }
+        }
+        for folder in folders where leftover[folder.id] != nil {
+            ranked.append(folder)
+        }
+        return ranked
+    }
+
     /// Drop one peer's workspaces from the sidebar immediately, on an explicit
     /// Disconnect. Without this the folders stay until the sweep has failed
     /// twice, which is seconds to a minute of the machine still looking
@@ -757,7 +803,8 @@ final class WorkspacesModel {
 
     /// Put local and remote folders together and keep the selection valid.
     private func publishFolders() {
-        folders = localFolders + remoteFolders.values.flatMap { $0 }
+        let merged = localFolders + remoteFolders.values.flatMap { $0 }
+        folders = Self.applyOrder(merged, WorkspacePreference.order())
         // A folder removed elsewhere should not leave the detail pane
         // describing something that is no longer in the list.
         if let id = selectedID, !folders.contains(where: { $0.id == id }) {

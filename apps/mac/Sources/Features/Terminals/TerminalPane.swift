@@ -671,6 +671,9 @@ private struct SessionChip: View {
                 .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
         )
         .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Close", .delete) { onClose() }
+        }
     }
 
     private var label: String {
@@ -738,6 +741,9 @@ private struct FileChip: View {
                 .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
         )
         .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Close", .delete) { onClose() }
+        }
     }
 }
 
