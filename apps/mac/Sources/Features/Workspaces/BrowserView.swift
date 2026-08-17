@@ -112,7 +112,7 @@ struct BrowserView: View {
                 .font(Theme.mono(11))
                 .onSubmit { commit(text) }
 
-            Button("Go") { commit(text) }
+            Button("Go", .next) { commit(text) }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .controlSize(.small)

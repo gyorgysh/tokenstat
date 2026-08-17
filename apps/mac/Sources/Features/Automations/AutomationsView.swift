@@ -159,9 +159,7 @@ struct AutomationsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Button { creating = true } label: {
-                Label("Schedule a job", systemImage: "plus")
-            }
+            Button("Schedule a job", .create) { creating = true }
             .buttonStyle(AccentButtonStyle())
         }
     }
@@ -461,11 +459,7 @@ struct AutomationsView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 } else {
-                    Button {
-                        creating = true
-                    } label: {
-                        Label("Schedule a job", systemImage: "plus")
-                    }
+                    Button("Schedule a job", .create) { creating = true }
                     .buttonStyle(AccentButtonStyle())
                 }
             }
@@ -480,9 +474,7 @@ struct AutomationsView: View {
             subtitle: "Owned by the host helper. They run after you quit only if Always-on host is on.",
             mark: "mark_automation",
             accessory: AnyView(
-                Button { creating = true } label: {
-                    Label("New", systemImage: "plus")
-                }
+                Button("New", .create) { creating = true }
                 .buttonStyle(AccentButtonStyle(small: true))
             )
         ) {
@@ -905,8 +897,9 @@ struct NewAutomationSheet: View {
                         }
                     }
                 } label: {
-                    Label(step < 2 ? "Continue" : (existing == nil ? "Create" : "Save"),
-                          systemImage: step < 2 ? ActionIcon.next.symbol : ActionIcon.save.symbol)
+                    let icon: ActionIcon = step < 2 ? .next : (existing == nil ? .create : .save)
+                    let title = step < 2 ? "Continue" : (existing == nil ? "Create" : "Save")
+                    icon.label(title)
                 }
                 .buttonStyle(AccentButtonStyle())
                 .keyboardShortcut(.defaultAction)

@@ -162,10 +162,11 @@ one vocabulary: `apps/mac/Sources/Design/ActionIcon.swift`. Write
 inline, so the same action cannot end up as `arrow.clockwise` on one screen and
 `clock.arrow.circlepath` on the next. Alerts, confirmation dialogs, toolbars,
 swipe actions and the macOS main menu stay text-only: the platform draws those.
-`scripts/check-action-icons.sh` enforces it, with an explicit allow list for
-buttons whose whole surface is the label (sidebar rows, launch tiles, heatmap
-cells). The case names mirror `shared/web/actionIcons.js` in the website repo —
-add a case here and the key there in the same change.
+`scripts/check-action-icons.sh` enforces it, in CI as the `action icons` job,
+with an explicit allow list for buttons whose whole surface is the label
+(sidebar rows, launch tiles, heatmap cells). The case names mirror
+`shared/web/actionIcons.js` in the website repo: add a case here and the key
+there in the same change.
 
 The Xcode project is generated from `apps/mac/project.yml` and is git ignored,
 so both steps are needed on a fresh checkout. The build script must run first:

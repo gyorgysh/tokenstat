@@ -146,10 +146,8 @@ struct WorkspacesView: View {
             .multilineTextAlignment(.center)
             .frame(maxWidth: 360)
             #if os(macOS)
-            Button {
+            Button("Add Workspace", .create) {
                 model.requestAdd()
-            } label: {
-                Label("Add Workspace", systemImage: "plus")
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
@@ -586,7 +584,7 @@ private struct CommitBox: View {
                 Button {
                     Task { await model.push(folder) }
                 } label: {
-                    Label("Push \(folder.git?.ahead ?? 0)", systemImage: "arrow.up")
+                    ActionIcon.upload.label("Push \(folder.git?.ahead ?? 0)")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(SecondaryButtonStyle())
@@ -609,7 +607,7 @@ private struct CommitBox: View {
         Button {
             Task { await model.push(folder) }
         } label: {
-            Label("Push \(folder.git?.ahead ?? 0)", systemImage: "arrow.up")
+            ActionIcon.upload.label("Push \(folder.git?.ahead ?? 0)")
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(SecondaryButtonStyle())

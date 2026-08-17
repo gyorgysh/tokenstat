@@ -322,7 +322,7 @@ struct MachinesView: View {
                                 Button {
                                     model.copyInvite()
                                 } label: {
-                                    Label("Copy", systemImage: "doc.on.doc")
+                                    ActionIcon.copy.label("Copy")
                                 }
                                 .buttonStyle(AccentButtonStyle(small: true))
                                 .help("Paste this in the other machine's Add device box")
@@ -498,9 +498,9 @@ struct MachinesView: View {
                         isSelected: model.selectedKind == .peer(peer.key)
                     ) {
                         HStack(spacing: Theme.Space.s) {
-                            Button("Approve") { Task { await model.approve(peer) } }
+                            Button("Approve", .approve) { Task { await model.approve(peer) } }
                                 .buttonStyle(AccentButtonStyle())
-                            Button("Forget", role: .destructive) { confirmForget = peer }
+                            Button("Forget", .delete, role: .destructive) { confirmForget = peer }
                                 .buttonStyle(SecondaryButtonStyle())
                         }
                     }
@@ -1118,7 +1118,7 @@ private struct PairingForm: View {
                             label = ""
                         }
                     } label: {
-                        Label("Connect", systemImage: ActionIcon.connect.symbol)
+                        ActionIcon.connect.label("Connect")
                     }
                     .buttonStyle(AccentButtonStyle())
                     .disabled(working || link.trimmingCharacters(in: .whitespaces).isEmpty)

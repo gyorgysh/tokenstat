@@ -161,7 +161,7 @@ private struct ClientAccountContent: View {
                 Button {
                     webURL = ClientWebPages.publicProfile(host: account.host, handle: handle)
                 } label: {
-                    Label("View public profile", systemImage: "arrow.up.right.square")
+                    ActionIcon.external.label("View public profile")
                         .font(ClientType.label.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -485,7 +485,7 @@ private struct ClientAccountContent: View {
             Button {
                 openAccountDeletion()
             } label: {
-                Label("Delete on website…", systemImage: "trash")
+                ActionIcon.delete.label("Delete on website…")
                     .font(ClientType.label.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)

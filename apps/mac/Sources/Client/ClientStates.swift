@@ -54,8 +54,8 @@ struct ClientEmptyState: View {
     var message: String?
     /// Shown only when there is something the person can actually do.
     var actionTitle: String?
-    /// The glyph on that action. Defaults to the forward arrow, because most
-    /// empty states point somewhere rather than redo something.
+    /// The glyph on that action. Callers that retry or open plans must pass
+    /// `.refresh` or `.plans`. The default is only for forward navigation.
     var actionIcon: ActionIcon = .next
     var action: (() -> Void)?
     /// Override the kind's default mark when the empty state is about a

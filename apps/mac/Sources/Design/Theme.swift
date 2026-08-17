@@ -1095,18 +1095,7 @@ struct SegmentedCapsulePicker<Option: Hashable>: View {
     }
 }
 
-/// The app's primary action: a soft accent capsule with accent text and a
-/// hairline, the same language as a selected segment in the capsule picker.
-///
-/// Replaces the system blue pill everywhere a primary action sits in content
-/// (forms, cards, empty states). Toolbar items stay system-styled, because a
-/// toolbar is the one place the platform chrome is the design.
-/// Glyph, then title, a fixed gap apart, with the glyph a touch smaller than
-/// the label so it reads as a mark rather than a second word.
-///
-/// Applied by both Theme button styles, so every action capsule in the app
-/// spaces its icon identically — and matches the 8px gap the website's pill
-/// uses at the same optical size.
+/// Glyph then title, a fixed gap, slightly smaller than the label.
 struct ActionLabelStyle: LabelStyle {
     var small = false
 
@@ -1119,6 +1108,8 @@ struct ActionLabelStyle: LabelStyle {
     }
 }
 
+/// Soft accent capsule for a primary action in content. Toolbar items stay
+/// system-styled.
 struct AccentButtonStyle: ButtonStyle {
     /// Dense variant for rows and card accessories.
     var small = false

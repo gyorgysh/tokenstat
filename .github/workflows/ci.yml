@@ -103,6 +103,17 @@ jobs:
       - name: No generated file may be tracked
         run: bash scripts/check-no-artifacts.sh
 
+  # Same job shape as the other source-text gates: a formatting failure must
+  # not hide a bare button, and the red check should name the rule.
+  action-icons:
+    name: action icons
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Every content button carries a vocabulary glyph
+        run: bash scripts/check-action-icons.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

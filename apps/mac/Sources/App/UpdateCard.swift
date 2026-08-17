@@ -125,18 +125,14 @@ struct UpdateCard: View {
                 Spacer(minLength: Theme.Space.s)
             }
             HStack(spacing: Theme.Space.s) {
-                Button {
+                Button("Retry", .refresh) {
                     Task { await update.retry() }
-                } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(AccentButtonStyle(small: true))
                 .help("Try the automatic install again")
 
-                Button {
+                Button("Manual", .download) {
                     if let url = update.downloadURL { openURL(url) }
-                } label: {
-                    Label("Manual", systemImage: "arrow.down.circle")
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .disabled(update.downloadURL == nil)

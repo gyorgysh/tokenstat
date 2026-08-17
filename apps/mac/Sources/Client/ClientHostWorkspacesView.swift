@@ -43,6 +43,7 @@ struct ClientHostWorkspacesView: View {
                             ? "Folders added on that computer show up here."
                             : "It has to be awake, with remote reach turned on.",
                         actionTitle: "Try again",
+                        actionIcon: .refresh,
                         action: { Task { await model.connect(peerKey: peerKey, name: hostName) } }
                     )
                 }

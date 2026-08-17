@@ -59,6 +59,7 @@ struct ClientWorkspacesView: View {
                                 + "from every device on it. Opening folders and terminals on "
                                 + "the computer is a paid feature.",
                             actionTitle: "See plans",
+                            actionIcon: .plans,
                             action: {
                                 store.showPaywall = true
                             }

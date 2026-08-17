@@ -111,6 +111,7 @@ struct ClientInsightsView: View {
                     ? "This updates by itself when the connection is back."
                     : FriendlyError.from(message).message,
                 actionTitle: connectivity.isOffline ? nil : "Try again",
+                actionIcon: .refresh,
                 action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
             )
         }

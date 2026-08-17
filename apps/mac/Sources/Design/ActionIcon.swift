@@ -1,15 +1,13 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
+
 import SwiftUI
 
-/// The action vocabulary: one case per thing a button does, one glyph per case.
-///
-/// The twin of `shared/web/actionIcons.js` on tokenstat.ai. The case names are
-/// deliberately identical to the keys there, so "save" is a checkmark in the
-/// app and on the website, and a reviewer can diff the two lists. Add a case
-/// here and add the key there in the same change.
-///
-/// Symbols rather than the site's Lucide paths: SF Symbols scale with Dynamic
-/// Type, match the optical weight of the surrounding text for free, and stay
-/// native next to the platform chrome. Same meaning, drawn in the local accent.
+/// One glyph per action. Case names match `shared/web/actionIcons.js`.
 enum ActionIcon {
     // Confirm and create
     case save
@@ -49,9 +47,8 @@ enum ActionIcon {
     case revoke
     case device
 
-    // Jobs, runs and cards — app-only, no website twin (there is no scheduler
-    // or board on the site). Kept in the same enum so a run button and a save
-    // button are still picked from one list.
+    // Jobs, runs and cards. App-only cases, same enum so every button
+    // still picks from one list.
     case run
     case stop
     case history
@@ -101,7 +98,7 @@ enum ActionIcon {
         case .copy: return "doc.on.doc"
         case .download: return "arrow.down.circle"
 
-        case .signIn: return "rectangle.portrait.and.arrow.forward"
+        case .signIn: return "person.crop.circle"
         case .signOut: return "rectangle.portrait.and.arrow.right"
         case .account, .profile: return "person.crop.circle"
         case .settings: return "gearshape"
@@ -158,10 +155,7 @@ enum ActionIcon {
         }
     }
 
-    /// Whether the glyph belongs after the title instead of before it.
-    ///
-    /// Only the ones that point somewhere: an arrow that means "onwards" reads
-    /// backwards when it sits to the left of the word it is pushing.
+    /// Arrow actions sit after the title so they point onward.
     var trails: Bool {
         switch self {
         case .next, .external, .more, .collapse: return true
@@ -169,17 +163,12 @@ enum ActionIcon {
         }
     }
 
-    /// The label to put inside a button: glyph, then title (or the reverse for
-    /// the pointing ones).
     func label(_ title: String) -> ActionLabel {
         ActionLabel(title: title, icon: self)
     }
 }
 
-/// A button's contents: one glyph and one title, in the order the action wants.
-///
-/// The leading case stays a real `Label`, so menus and toolbars keep the
-/// platform's own treatment of icon-and-title.
+/// Glyph and title, in the order `trails` asks for.
 struct ActionLabel: View {
     let title: String
     let icon: ActionIcon
@@ -190,6 +179,7 @@ struct ActionLabel: View {
                 Text(title)
                 Image(systemName: icon.symbol)
                     .imageScale(.small)
+                    .accessibilityHidden(true)
             }
         } else {
             Label(title, systemImage: icon.symbol)
@@ -198,16 +188,12 @@ struct ActionLabel: View {
 }
 
 extension Button where Label == ActionLabel {
-    /// `Button("Save", .save) { … }` — the one-line way to give an action its
-    /// glyph. Keeps every call site honest: the icon comes from the vocabulary,
-    /// never from a symbol name typed inline.
+    /// `Button("Save", .save) { … }`
     init(_ title: String, _ icon: ActionIcon, action: @escaping () -> Void) {
         self.init(action: action) { icon.label(title) }
     }
 
-    /// The `role:` variant, for destructive and cancel actions outside alerts.
-    /// Alerts and confirmation dialogs stay text-only on purpose — the platform
-    /// draws those buttons itself, and a glyph on "Don't Save" reads as a trap.
+    /// Destructive and cancel actions outside alerts. Alerts stay text-only.
     init(_ title: String, _ icon: ActionIcon, role: ButtonRole?, action: @escaping () -> Void) {
         self.init(role: role, action: action) { icon.label(title) }
     }

@@ -109,10 +109,8 @@ struct AccountView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
-                Button {
+                Button("Sign in to tokenstat.ai", .signIn) {
                     model.signIn()
-                } label: {
-                    Label("Sign in to tokenstat.ai", systemImage: "person.crop.circle")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
@@ -166,7 +164,7 @@ struct AccountView: View {
                 // The profile is a public page and this is the only place in
                 // the app that knows its address.
                 Link(destination: url) {
-                    Label("View profile", systemImage: "arrow.up.right.square")
+                    ActionIcon.external.label("View profile")
                 }
                 .buttonStyle(.plain)
                 .font(.callout)
@@ -726,7 +724,7 @@ struct AccountView: View {
                 Button {
                     openAccountDeletion()
                 } label: {
-                    Label("Delete on website…", systemImage: "trash")
+                    ActionIcon.delete.label("Delete on website…")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.danger)

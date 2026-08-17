@@ -622,7 +622,7 @@ private struct CardView: View {
             }
             Divider()
             if !card.isNote {
-                Button("Run…", systemImage: "paperplane") {
+                Button("Run…", .run) {
                     delegating = true
                 }
             }

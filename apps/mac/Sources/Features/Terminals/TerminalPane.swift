@@ -1024,7 +1024,7 @@ private struct LaunchSurface: View {
             )
             .foregroundStyle(.secondary)
             Spacer(minLength: Theme.Space.s)
-            Button("Back to session") {
+            Button("Back to session", .back) {
                 workspaces.showTerminal(in: folder.id)
             }
             .controlSize(.small)

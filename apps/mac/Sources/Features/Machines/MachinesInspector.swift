@@ -104,7 +104,7 @@ struct MachinesInspector: View {
                     Button {
                         model.copyInvite()
                     } label: {
-                        Label("Copy invite", systemImage: "doc.on.doc")
+                        ActionIcon.copy.label("Copy invite")
                     }
                     .buttonStyle(AccentButtonStyle())
                     .help("Paste this in the other machine's Add device box")
