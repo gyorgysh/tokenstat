@@ -328,7 +328,7 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "workflow_run",
-            "Start a workflow. Global graphs need workspaceId. input is the starting prompt.",
+            "Start a workflow. workspaceId is the folder to run in. A workspace graph uses its bound folder if you omit it. input is the starting prompt.",
             json!({
                 "type": "object",
                 "properties": {

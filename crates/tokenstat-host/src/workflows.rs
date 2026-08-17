@@ -600,8 +600,7 @@ impl Store {
         };
         if let Err(e) = self.save_runs() {
             if let Ok(mut waiting) = self.get_run(run_id) {
-                waiting.status = "waiting".into();
-                waiting.current_node_id = Some(gate_id);
+                restore_waiting_gate(&mut waiting, &gate_id);
                 let _ = self.upsert_run(waiting);
             }
             automations::shared().release_slot();
@@ -609,14 +608,19 @@ impl Store {
         }
         let me = Arc::clone(self);
         let id = run.id.clone();
+        let spawn_id = id.clone();
         if let Err(e) = std::thread::Builder::new()
             .name(format!("workflow-{id}"))
             .spawn(move || {
-                me.execute(&workflow, &id);
+                me.execute(&workflow, &spawn_id);
                 automations::shared().release_slot();
             })
         {
             automations::shared().release_slot();
+            if let Ok(mut waiting) = self.get_run(&id) {
+                restore_waiting_gate(&mut waiting, &gate_id);
+                let _ = self.upsert_run(waiting);
+            }
             return Err(e.to_string());
         }
         Ok(run)
@@ -667,9 +671,13 @@ impl Store {
                 return;
             }
 
-            let ready = ready_nodes(workflow, &run);
+            let mut ready = ready_nodes(workflow, &run);
             if ready.is_empty() {
+                settle_stuck_loops(workflow, &mut run);
                 skip_unreachable(workflow, &mut run);
+                ready = ready_nodes(workflow, &run);
+            }
+            if ready.is_empty() {
                 if unfinished(workflow, &run).is_empty() {
                     let status = if run.steps.iter().any(|s| s.status == "error") {
                         "error"
@@ -1286,8 +1294,7 @@ fn ready_nodes(workflow: &Workflow, run: &WorkflowRun) -> Vec<String> {
             ready.push(node.id.clone());
             continue;
         }
-        let all_ready = edges.iter().all(|edge| edge_allows(workflow, run, edge));
-        if all_ready {
+        if incoming_ready(workflow, run, &edges) {
             ready.push(node.id.clone());
         }
     }
@@ -1302,6 +1309,70 @@ fn unfinished(workflow: &Workflow, run: &WorkflowRun) -> Vec<String> {
         .filter(|n| !started.contains(n.id.as_str()))
         .map(|n| n.id.clone())
         .collect()
+}
+
+/// Put a gate back to waiting after continue failed to persist or spawn.
+fn restore_waiting_gate(run: &mut WorkflowRun, gate_id: &str) {
+    run.status = "waiting".into();
+    run.current_node_id = Some(gate_id.to_string());
+    if let Some(step) = run.steps.iter_mut().find(|s| s.node_id == gate_id) {
+        step.status = "waiting".into();
+        step.ended_at_ms = None;
+        step.output.clear();
+    }
+}
+
+/// Edges from a skipped predecessor do not count. Edges from the same
+/// predecessor are OR'd so Then and Else can share a join. Distinct
+/// predecessors stay AND-joined.
+fn incoming_ready(workflow: &Workflow, run: &WorkflowRun, edges: &[&Edge]) -> bool {
+    match classify_incoming(workflow, run, edges) {
+        Incoming::Ready => true,
+        Incoming::Pending | Incoming::Dead => false,
+    }
+}
+
+enum Incoming {
+    Ready,
+    Pending,
+    Dead,
+}
+
+fn classify_incoming(workflow: &Workflow, run: &WorkflowRun, edges: &[&Edge]) -> Incoming {
+    let mut by_from: HashMap<&str, Vec<&Edge>> = HashMap::new();
+    for edge in edges {
+        by_from.entry(edge.from.as_str()).or_default().push(*edge);
+    }
+    let mut pending = false;
+    let mut remaining = 0;
+    let mut matching = 0;
+    for (from, group) in by_from {
+        match run.steps.iter().find(|s| s.node_id == from) {
+            Some(step) if step.status == "skipped" => {}
+            Some(_) if group.iter().any(|edge| edge_allows(workflow, run, edge)) => {
+                remaining += 1;
+                matching += 1;
+            }
+            Some(step) if matches!(step.status.as_str(), "ok" | "error" | "stopped") => {
+                remaining += 1;
+            }
+            Some(_) | None => {
+                remaining += 1;
+                pending = true;
+            }
+        }
+    }
+    if remaining == 0 {
+        return Incoming::Dead;
+    }
+    if pending {
+        return Incoming::Pending;
+    }
+    if matching == remaining {
+        Incoming::Ready
+    } else {
+        Incoming::Dead
+    }
 }
 
 fn skip_unreachable(workflow: &Workflow, run: &mut WorkflowRun) {
@@ -1338,24 +1409,56 @@ fn node_can_never_run(workflow: &Workflow, run: &WorkflowRun, id: &str) -> bool 
     if incoming.is_empty() {
         return false;
     }
-    let mut all_settled = true;
-    let mut all_match = true;
-    for edge in incoming {
-        match run.steps.iter().find(|s| s.node_id == edge.from) {
-            Some(step)
-                if matches!(step.status.as_str(), "ok" | "error" | "stopped" | "running") =>
-            {
-                if !edge_allows(workflow, run, edge) {
-                    all_match = false;
-                }
+    matches!(classify_incoming(workflow, run, &incoming), Incoming::Dead)
+}
+
+/// A Loop left `running` with no body to re-enter is stuck. Settle it so
+/// Always/Error ports can follow `edge_allows`.
+fn settle_stuck_loops(workflow: &Workflow, run: &mut WorkflowRun) {
+    let loop_ids: Vec<String> = workflow
+        .nodes
+        .iter()
+        .filter(|n| n.kind == NodeKind::Loop)
+        .map(|n| n.id.clone())
+        .collect();
+    for id in loop_ids {
+        let Some(step) = run.steps.iter().find(|s| s.node_id == id) else {
+            continue;
+        };
+        if step.status != "running" {
+            continue;
+        }
+        let body = body_ids(workflow, &id);
+        if run.steps.iter().any(|s| {
+            body.contains(&s.node_id) && matches!(s.status.as_str(), "running" | "waiting")
+        }) {
+            continue;
+        }
+        let returns: Vec<&Edge> = workflow
+            .edges
+            .iter()
+            .filter(|e| e.to == id && body.contains(&e.from))
+            .collect();
+        if !returns.is_empty() {
+            let all_settled = returns.iter().all(|edge| {
+                run.steps.iter().any(|s| {
+                    s.node_id == edge.from
+                        && matches!(s.status.as_str(), "ok" | "error" | "stopped" | "skipped")
+                })
+            });
+            if !all_settled {
+                continue;
             }
-            Some(step) if step.status == "skipped" => {
-                all_match = false;
+            if returns.iter().any(|edge| edge_allows(workflow, run, edge)) {
+                continue;
             }
-            _ => all_settled = false,
+        }
+        if let Some(step) = run.steps.iter_mut().find(|s| s.node_id == id) {
+            step.status = "error".into();
+            step.output = "loop body did not return".into();
+            step.ended_at_ms = Some(now_ms());
         }
     }
-    all_settled && !all_match
 }
 
 fn edge_matches(when: EdgeWhen, status: &str) -> bool {
@@ -1607,15 +1710,12 @@ fn lookup(
 }
 
 fn bind_workspace(workflow: &Workflow, requested: Option<&str>) -> Result<String, String> {
+    let picked = requested.map(str::to_string).filter(|id| !id.is_empty());
     match workflow.scope {
-        WorkflowScope::Workspace => workflow
-            .workspace_id
-            .clone()
-            .filter(|id| !id.is_empty())
+        WorkflowScope::Workspace => picked
+            .or_else(|| workflow.workspace_id.clone().filter(|id| !id.is_empty()))
             .ok_or_else(|| "a workspace workflow needs a workspace".into()),
-        WorkflowScope::Global => requested
-            .map(str::to_string)
-            .filter(|id| !id.is_empty())
+        WorkflowScope::Global => picked
             .or_else(|| workflow.workspace_id.clone())
             .ok_or_else(|| "choose a workspace to run this workflow".into()),
     }
@@ -2661,5 +2761,163 @@ thanks"#;
             resolve_design_model_effort("claude", Some(""), Some(""), &models, &efforts);
         assert_eq!(model.as_deref(), Some("haiku"));
         assert_eq!(effort.as_deref(), Some("low"));
+    }
+
+    #[test]
+    fn continue_restores_the_gate_when_spawn_fails() {
+        let mut run = test_run(vec![rec("in", "ok", "go"), rec("gate", "ok", "continued")]);
+        run.status = "running".into();
+        run.current_node_id = None;
+        restore_waiting_gate(&mut run, "gate");
+        assert_eq!(run.status, "waiting");
+        assert_eq!(run.current_node_id.as_deref(), Some("gate"));
+        let gate = run.steps.iter().find(|s| s.node_id == "gate").unwrap();
+        assert_eq!(gate.status, "waiting");
+        assert!(gate.ended_at_ms.is_none());
+        assert!(gate.output.is_empty());
+    }
+
+    #[test]
+    fn bind_workspace_honours_the_requested_folder() {
+        let mut wf = graph(vec![node("in", NodeKind::Input)], vec![]);
+        wf.scope = WorkflowScope::Workspace;
+        wf.workspace_id = Some("ws-a".into());
+        assert_eq!(bind_workspace(&wf, Some("ws-b")).unwrap(), "ws-b");
+        assert_eq!(bind_workspace(&wf, None).unwrap(), "ws-a");
+        wf.scope = WorkflowScope::Global;
+        assert_eq!(bind_workspace(&wf, Some("ws-c")).unwrap(), "ws-c");
+    }
+
+    #[test]
+    fn diamond_join_runs_after_then() {
+        let mut cond = node("if1", NodeKind::Condition);
+        cond.pattern = Some("yes".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                cond,
+                node("then", NodeKind::Command),
+                node("els", NodeKind::Command),
+                node("join", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "if1", EdgeWhen::Ok),
+                edge("if1", "then", EdgeWhen::Ok),
+                edge("if1", "els", EdgeWhen::Error),
+                edge("then", "join", EdgeWhen::Ok),
+                edge("els", "join", EdgeWhen::Ok),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "yes"),
+            rec("if1", "ok", "matched"),
+            rec("then", "ok", "ok"),
+        ]);
+        skip_unreachable(&wf, &mut run);
+        assert!(
+            run.steps
+                .iter()
+                .any(|s| s.node_id == "els" && s.status == "skipped"),
+            "{:?}",
+            run.steps
+        );
+        assert_eq!(ready_nodes(&wf, &run), vec!["join".to_string()]);
+        assert!(!run.steps.iter().any(|s| s.status == "error"));
+    }
+
+    #[test]
+    fn condition_then_and_else_into_the_same_join() {
+        let mut cond = node("if1", NodeKind::Condition);
+        cond.pattern = Some("yes".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                cond,
+                node("join", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "if1", EdgeWhen::Ok),
+                edge("if1", "join", EdgeWhen::Ok),
+                edge("if1", "join", EdgeWhen::Error),
+            ],
+        );
+        let run = test_run(vec![rec("in", "ok", "yes"), rec("if1", "ok", "matched")]);
+        assert_eq!(ready_nodes(&wf, &run), vec!["join".to_string()]);
+    }
+
+    #[test]
+    fn loop_body_error_settles_and_takes_the_error_port() {
+        let mut lp = node("lp", NodeKind::Loop);
+        lp.times = Some(3);
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                lp,
+                node("body", NodeKind::Command),
+                node("fail", NodeKind::Command),
+                node("done", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "lp", EdgeWhen::Ok),
+                edge("lp", "body", EdgeWhen::Ok),
+                edge("body", "lp", EdgeWhen::Ok),
+                edge("lp", "fail", EdgeWhen::Error),
+                edge("lp", "done", EdgeWhen::Always),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "start"),
+            rec("lp", "running", "iteration 1 of 3"),
+            rec("body", "error", "boom"),
+        ]);
+        run.loop_counts.insert("lp".into(), 1);
+        settle_stuck_loops(&wf, &mut run);
+        let loop_step = run.steps.iter().find(|s| s.node_id == "lp").unwrap();
+        assert_eq!(loop_step.status, "error", "{:?}", run.steps);
+        skip_unreachable(&wf, &mut run);
+        assert_eq!(ready_nodes(&wf, &run), vec!["fail".to_string()]);
+        assert!(
+            run.steps
+                .iter()
+                .any(|s| s.node_id == "done" && s.status == "skipped"),
+            "{:?}",
+            run.steps
+        );
+    }
+
+    #[test]
+    fn loop_missing_return_settles_error_not_always() {
+        let mut lp = node("lp", NodeKind::Loop);
+        lp.times = Some(2);
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                lp,
+                node("body", NodeKind::Command),
+                node("done", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "lp", EdgeWhen::Ok),
+                edge("lp", "body", EdgeWhen::Ok),
+                edge("lp", "done", EdgeWhen::Always),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "start"),
+            rec("lp", "running", "iteration 1 of 2"),
+            rec("body", "ok", "pass"),
+        ]);
+        run.loop_counts.insert("lp".into(), 1);
+        settle_stuck_loops(&wf, &mut run);
+        let loop_step = run.steps.iter().find(|s| s.node_id == "lp").unwrap();
+        assert_eq!(loop_step.status, "error");
+        skip_unreachable(&wf, &mut run);
+        assert!(
+            run.steps
+                .iter()
+                .any(|s| s.node_id == "done" && s.status == "skipped"),
+            "{:?}",
+            run.steps
+        );
     }
 }
