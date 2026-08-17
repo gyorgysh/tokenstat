@@ -635,11 +635,6 @@ struct MachinesView: View {
     private var accountDevices: some View {
         Card(title: "Account-linked devices", subtitle: "Connect to any computer on this account in one click, over the tunnel. Phones are listed too, and dial you rather than the other way round.", mark: "mark_device") {
             VStack(spacing: 0) {
-                // The screen's whole subject is what can reach what, and it was
-                // answered with a column of identifiers. The diagram answers it
-                // first, the rows carry the detail.
-                DeviceHub(centre: hubCentre, others: hubOthers)
-                    .padding(.bottom, Theme.Space.s)
                 ForEach(model.listedAccountMachines) { machine in
                     // Phones are shown but never dialled: a client reaches a
                     // host, not the reverse (P5). Hiding them made a device
@@ -797,33 +792,6 @@ struct MachinesView: View {
     private func deviceTitle(resolved: String?, machine: Machine) -> String {
         if let resolved, !resolved.isEmpty { return resolved }
         return machine.isHost ? "Unnamed computer" : "Unnamed phone"
-    }
-
-    /// This Mac, at the middle of the diagram.
-    private var hubCentre: DeviceHub.Node {
-        DeviceHub.Node(
-            id: "self",
-            name: model.identity?.label ?? model.status?.label ?? "This Mac",
-            symbol: "laptopcomputer",
-            online: model.status?.tunnelOnline == true,
-            connected: false
-        )
-    }
-
-    /// Everything linked to it, minus this machine itself.
-    private var hubOthers: [DeviceHub.Node] {
-        model.listedAccountMachines.compactMap { machine in
-            let isSelf = machine.machineID == model.account?.thisMachineID
-                || machine.publicIdentity == model.identity?.key
-            guard !isSelf else { return nil }
-            return DeviceHub.Node(
-                id: machine.id,
-                name: deviceTitle(resolved: model.resolvedName(for: machine), machine: machine),
-                symbol: machine.isHost ? "desktopcomputer" : "iphone",
-                online: machine.online,
-                connected: model.isConnected(machine)
-            )
-        }
     }
 
     /// One caption line under a machine's name. The presence light is the
