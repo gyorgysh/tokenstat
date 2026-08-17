@@ -31,6 +31,7 @@ const RUNS_KEPT: usize = 100;
 const OUTPUT_CAP: usize = 64 * 1024;
 const MAX_NODES: usize = 64;
 const MAX_EDGES: usize = 128;
+const MAX_LOOP_TIMES: u32 = 20;
 const TICK: Duration = Duration::from_secs(5);
 const DRAIN_POLL: Duration = Duration::from_millis(40);
 const EXIT_SETTLE: Duration = Duration::from_secs(2);
@@ -54,6 +55,10 @@ pub enum NodeKind {
     Http,
     Command,
     Gate,
+    /// Then / Else on the joined output of finished predecessors.
+    Condition,
+    /// Bounded repeat. Cycles may pass through this node only.
+    Loop,
     /// Reserved. Saving a graph that uses it is refused until the host is
     /// an MCP client.
     Mcp,
@@ -91,6 +96,14 @@ pub struct Node {
     pub headers: Option<HashMap<String, String>>,
     pub body: Option<String>,
     pub command: Option<String>,
+    /// `contains` (default), `equals`, or `matches`. Condition nodes.
+    pub test: Option<String>,
+    pub pattern: Option<String>,
+    /// Loop body passes. 1..=20, default 3.
+    pub times: Option<u32>,
+    /// Optional template. After a body pass, stop when the expanded text
+    /// is found in the body output.
+    pub until: Option<String>,
 }
 
 impl Default for Node {
@@ -114,6 +127,10 @@ impl Default for Node {
             headers: None,
             body: None,
             command: None,
+            test: None,
+            pattern: None,
+            times: None,
+            until: None,
         }
     }
 }
@@ -198,6 +215,9 @@ pub struct WorkflowRun {
     /// gate still stops at the original limit.
     #[serde(default = "default_budget")]
     pub budget_seconds: u64,
+    /// How many body passes each loop has started. Runner-only.
+    #[serde(default)]
+    pub loop_counts: HashMap<String, u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -498,6 +518,7 @@ impl Store {
             steps: Vec::new(),
             live_pty_ids: Vec::new(),
             budget_seconds: workflow.budget_seconds,
+            loop_counts: HashMap::new(),
         };
         if let Err(e) = self.upsert_run(run.clone()) {
             automations::shared().release_slot();
@@ -703,7 +724,7 @@ impl Store {
             ended_at_ms: None,
             exit_code: None,
         };
-        if !matches!(node.kind, NodeKind::Gate | NodeKind::Input) {
+        if !matches!(node.kind, NodeKind::Gate | NodeKind::Input | NodeKind::Loop) {
             if let Some(existing) = run.steps.iter_mut().find(|s| s.node_id == node.id) {
                 *existing = step.clone();
             } else {
@@ -721,6 +742,8 @@ impl Store {
                 return NodeOutcome::Gate;
             }
             NodeKind::Mcp => Err("MCP steps are not available yet".into()),
+            NodeKind::Condition => self.run_condition(run, node, workspace_path, &outputs),
+            NodeKind::Loop => self.run_loop(run, node, workspace_path, &outputs),
             NodeKind::Agent => self.run_agent(run, node, workspace_path, &outputs),
             NodeKind::Command => self.run_command(run, node, workspace_path, &outputs),
             NodeKind::Http => run_http(node, &outputs, workspace_path, &run.input),
@@ -746,6 +769,28 @@ impl Store {
         }
         let _ = self.upsert_run(run.clone());
         NodeOutcome::Done
+    }
+
+    fn run_condition(
+        &self,
+        run: &mut WorkflowRun,
+        node: &Node,
+        workspace_path: &str,
+        outputs: &HashMap<String, StepRecord>,
+    ) -> Result<(String, String, Option<i32>), String> {
+        let workflow = self.get(&run.workflow_id).ok();
+        eval_condition(workflow.as_ref(), run, node, workspace_path, outputs)
+    }
+
+    fn run_loop(
+        &self,
+        run: &mut WorkflowRun,
+        node: &Node,
+        workspace_path: &str,
+        outputs: &HashMap<String, StepRecord>,
+    ) -> Result<(String, String, Option<i32>), String> {
+        let workflow = self.get(&run.workflow_id)?;
+        advance_loop(&workflow, run, node, workspace_path, outputs)
     }
 
     fn run_agent(
@@ -974,6 +1019,7 @@ pub fn design(
         steps: Vec::new(),
         live_pty_ids: Vec::new(),
         budget_seconds: 180,
+        loop_counts: HashMap::new(),
     };
     let node = Node {
         id: "design".into(),
@@ -1023,7 +1069,7 @@ pub fn design(
     }
 }
 
-const DESIGN_PROMPT: &str = "You design a tokenstat workflow. Reply with a single JSON object and nothing else. No markdown. The object must match this shape: {\"name\": string, \"scope\": \"global\" or \"workspace\", \"budgetSeconds\": number, \"nodes\": [{\"id\": string, \"kind\": \"input\"|\"agent\"|\"automation\"|\"http\"|\"command\"|\"gate\", \"x\": number, \"y\": number, \"title\": string, \"backend\": string?, \"model\": string?, \"effort\": string?, \"prompt\": string?, \"wait\": \"exit\"|\"output\", \"automationId\": string?, \"method\": string?, \"url\": string?, \"body\": string?, \"command\": string?}], \"edges\": [{\"from\": string, \"to\": string, \"when\": \"ok\"|\"error\"|\"always\"}]}. Use {{input}} and {{nodeId.output}} in prompts. Do not execute anything. Do not invent MCP nodes.";
+const DESIGN_PROMPT: &str = "You design a tokenstat workflow. Reply with a single JSON object and nothing else. No markdown. The object must match this shape: {\"name\": string, \"scope\": \"global\" or \"workspace\", \"budgetSeconds\": number, \"nodes\": [{\"id\": string, \"kind\": \"input\"|\"agent\"|\"automation\"|\"http\"|\"command\"|\"gate\"|\"condition\"|\"loop\", \"x\": number, \"y\": number, \"title\": string, \"backend\": string?, \"model\": string?, \"effort\": string?, \"prompt\": string?, \"wait\": \"exit\"|\"output\", \"automationId\": string?, \"method\": string?, \"url\": string?, \"body\": string?, \"command\": string?, \"test\": \"contains\"|\"equals\"|\"matches\", \"pattern\": string?, \"times\": number?, \"until\": string?}], \"edges\": [{\"from\": string, \"to\": string, \"when\": \"ok\"|\"error\"|\"always\"}]}. Place nodes top to bottom: x = 80 + sibling * 252, y = 80 + step * 160. A condition reads the previous output: ok is Then, error is Else. A loop's ok edge is the body, always is after the last pass. Cycles may only go through a loop. Use {{input}} and {{nodeId.output}} in prompts. Do not execute anything. Do not invent MCP nodes.";
 
 pub fn parse_workflow_json(text: &str) -> Result<Workflow, String> {
     let start = text
@@ -1080,15 +1126,34 @@ pub fn validate(workflow: &Workflow) -> Result<(), String> {
             return Err("a node cannot connect to itself".into());
         }
     }
-    if has_cycle(workflow) {
+    if has_illegal_cycle(workflow) {
         return Err("a workflow cannot contain a cycle".into());
+    }
+    for node in &workflow.nodes {
+        if node.kind == NodeKind::Loop {
+            let times = node.times.unwrap_or(3);
+            if !(1..=MAX_LOOP_TIMES).contains(&times) {
+                return Err(format!("a loop may repeat at most {MAX_LOOP_TIMES} times"));
+            }
+            if !workflow
+                .edges
+                .iter()
+                .any(|e| e.from == node.id && e.when == EdgeWhen::Ok)
+            {
+                return Err(format!("loop {} needs a body", node.id));
+            }
+        }
     }
     Ok(())
 }
 
 fn validate_node(node: &Node) -> Result<(), String> {
     match node.kind {
-        NodeKind::Input | NodeKind::Gate => Ok(()),
+        NodeKind::Input | NodeKind::Gate | NodeKind::Loop => Ok(()),
+        NodeKind::Condition => match node.test.as_deref().unwrap_or("contains") {
+            "contains" | "equals" | "matches" => Ok(()),
+            other => Err(format!("unknown condition test {other}")),
+        },
         NodeKind::Mcp => Err("MCP steps are not available yet".into()),
         NodeKind::Agent => {
             if node.backend.as_deref().unwrap_or("").is_empty() {
@@ -1130,9 +1195,19 @@ fn validate_node(node: &Node) -> Result<(), String> {
     }
 }
 
-fn has_cycle(workflow: &Workflow) -> bool {
+/// Cycles are allowed only when every cycle passes through a loop node.
+fn has_illegal_cycle(workflow: &Workflow) -> bool {
+    let loops: HashSet<&str> = workflow
+        .nodes
+        .iter()
+        .filter(|n| n.kind == NodeKind::Loop)
+        .map(|n| n.id.as_str())
+        .collect();
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
     for edge in &workflow.edges {
+        if loops.contains(edge.from.as_str()) || loops.contains(edge.to.as_str()) {
+            continue;
+        }
         adj.entry(edge.from.as_str())
             .or_default()
             .push(edge.to.as_str());
@@ -1167,36 +1242,47 @@ fn has_cycle(workflow: &Workflow) -> bool {
 }
 
 fn ready_nodes(workflow: &Workflow, run: &WorkflowRun) -> Vec<String> {
-    let done: HashMap<&str, &StepRecord> = run
-        .steps
-        .iter()
-        .filter(|s| matches!(s.status.as_str(), "ok" | "error" | "stopped"))
-        .map(|s| (s.node_id.as_str(), s))
-        .collect();
-    let started: HashSet<&str> = run.steps.iter().map(|s| s.node_id.as_str()).collect();
+    let by_id: HashMap<&str, &StepRecord> =
+        run.steps.iter().map(|s| (s.node_id.as_str(), s)).collect();
     let mut incoming: HashMap<&str, Vec<&Edge>> = HashMap::new();
     for edge in &workflow.edges {
         incoming.entry(edge.to.as_str()).or_default().push(edge);
     }
     let mut ready = Vec::new();
     for node in &workflow.nodes {
-        if started.contains(node.id.as_str()) {
-            continue;
+        if let Some(step) = by_id.get(node.id.as_str()) {
+            let reenter = node.kind == NodeKind::Loop && step.status == "running";
+            if !reenter {
+                continue;
+            }
         }
-        let Some(edges) = incoming.get(node.id.as_str()) else {
-            ready.push(node.id.clone());
-            continue;
+        let body = if node.kind == NodeKind::Loop {
+            body_ids(workflow, &node.id)
+        } else {
+            HashSet::new()
         };
+        let started = by_id.contains_key(node.id.as_str());
+        let edges: Vec<&Edge> = incoming
+            .get(node.id.as_str())
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|edge| {
+                if node.kind != NodeKind::Loop {
+                    return true;
+                }
+                let from_body = body.contains(&edge.from);
+                if started { from_body } else { !from_body }
+            })
+            .collect();
         if edges.is_empty() {
+            if node.kind == NodeKind::Loop && started {
+                continue;
+            }
             ready.push(node.id.clone());
             continue;
         }
-        let all_ready = edges.iter().all(|edge| {
-            let Some(pred) = done.get(edge.from.as_str()) else {
-                return false;
-            };
-            edge_matches(edge.when, pred.status.as_str())
-        });
+        let all_ready = edges.iter().all(|edge| edge_allows(workflow, run, edge));
         if all_ready {
             ready.push(node.id.clone());
         }
@@ -1252,8 +1338,10 @@ fn node_can_never_run(workflow: &Workflow, run: &WorkflowRun, id: &str) -> bool 
     let mut all_match = true;
     for edge in incoming {
         match run.steps.iter().find(|s| s.node_id == edge.from) {
-            Some(step) if matches!(step.status.as_str(), "ok" | "error" | "stopped") => {
-                if !edge_matches(edge.when, step.status.as_str()) {
+            Some(step)
+                if matches!(step.status.as_str(), "ok" | "error" | "stopped" | "running") =>
+            {
+                if !edge_allows(workflow, run, edge) {
                     all_match = false;
                 }
             }
@@ -1272,6 +1360,191 @@ fn edge_matches(when: EdgeWhen, status: &str) -> bool {
         EdgeWhen::Ok => status == "ok",
         EdgeWhen::Error => status == "error",
     }
+}
+
+fn edge_allows(workflow: &Workflow, run: &WorkflowRun, edge: &Edge) -> bool {
+    let Some(pred) = run.steps.iter().find(|s| s.node_id == edge.from) else {
+        return false;
+    };
+    let from_loop = workflow
+        .nodes
+        .iter()
+        .any(|n| n.id == edge.from && n.kind == NodeKind::Loop);
+    if from_loop {
+        return match edge.when {
+            EdgeWhen::Ok => pred.status == "running",
+            EdgeWhen::Always => pred.status == "ok",
+            EdgeWhen::Error => pred.status == "error",
+        };
+    }
+    edge_matches(edge.when, pred.status.as_str())
+}
+
+fn body_ids(workflow: &Workflow, loop_id: &str) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut stack: Vec<String> = workflow
+        .edges
+        .iter()
+        .filter(|e| e.from == loop_id && e.when == EdgeWhen::Ok)
+        .map(|e| e.to.clone())
+        .collect();
+    while let Some(id) = stack.pop() {
+        if id == loop_id || !out.insert(id.clone()) {
+            continue;
+        }
+        for edge in workflow.edges.iter().filter(|e| e.from == id) {
+            if edge.to != loop_id {
+                stack.push(edge.to.clone());
+            }
+        }
+    }
+    out
+}
+
+fn predecessor_output(workflow: &Workflow, run: &WorkflowRun, node_id: &str) -> String {
+    workflow
+        .edges
+        .iter()
+        .filter(|e| e.to == node_id)
+        .filter_map(|e| {
+            run.steps
+                .iter()
+                .find(|s| s.node_id == e.from)
+                .map(|s| s.output.as_str())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn test_text(test: &str, source: &str, pattern: &str) -> bool {
+    match test {
+        "equals" => source.trim() == pattern.trim(),
+        "matches" => wildcard_match(pattern, source),
+        _ => source.contains(pattern),
+    }
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return text.contains(pattern);
+    }
+    let mut rest = text;
+    if let Some(first) = parts.first() {
+        if !first.is_empty() {
+            if let Some(idx) = rest.find(first) {
+                rest = &rest[idx + first.len()..];
+            } else {
+                return false;
+            }
+        }
+    }
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        if part.is_empty() {
+            continue;
+        }
+        if i == parts.len() - 1 && !pattern.ends_with('*') {
+            return rest.ends_with(part);
+        }
+        if let Some(idx) = rest.find(part) {
+            rest = &rest[idx + part.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+fn eval_condition(
+    workflow: Option<&Workflow>,
+    run: &WorkflowRun,
+    node: &Node,
+    workspace_path: &str,
+    outputs: &HashMap<String, StepRecord>,
+) -> Result<(String, String, Option<i32>), String> {
+    let source = match workflow {
+        Some(wf) => predecessor_output(wf, run, &node.id),
+        None => run
+            .steps
+            .iter()
+            .map(|s| s.output.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    let pattern = expand(
+        node.pattern.as_deref().unwrap_or(""),
+        &run.input,
+        workspace_path,
+        outputs,
+    );
+    let matched = test_text(
+        node.test.as_deref().unwrap_or("contains"),
+        &source,
+        &pattern,
+    );
+    Ok((
+        if matched { "ok".into() } else { "error".into() },
+        if matched {
+            "matched".into()
+        } else {
+            "not matched".into()
+        },
+        None,
+    ))
+}
+
+fn advance_loop(
+    workflow: &Workflow,
+    run: &mut WorkflowRun,
+    node: &Node,
+    workspace_path: &str,
+    outputs: &HashMap<String, StepRecord>,
+) -> Result<(String, String, Option<i32>), String> {
+    let times = node.times.unwrap_or(3).clamp(1, MAX_LOOP_TIMES);
+    let count = run.loop_counts.get(&node.id).copied().unwrap_or(0);
+    if count > 0 && until_matched(node, run, workflow, workspace_path, outputs) {
+        return Ok(("ok".into(), format!("done after {count}"), None));
+    }
+    if count >= times {
+        return Ok(("ok".into(), format!("done after {count}"), None));
+    }
+    let next = count + 1;
+    run.loop_counts.insert(node.id.clone(), next);
+    let body = body_ids(workflow, &node.id);
+    run.steps.retain(|s| !body.contains(&s.node_id));
+    Ok((
+        "running".into(),
+        format!("iteration {next} of {times}"),
+        None,
+    ))
+}
+
+fn until_matched(
+    node: &Node,
+    run: &WorkflowRun,
+    workflow: &Workflow,
+    workspace_path: &str,
+    outputs: &HashMap<String, StepRecord>,
+) -> bool {
+    let Some(until) = node.until.as_deref().filter(|s| !s.trim().is_empty()) else {
+        return false;
+    };
+    let needle = expand(until, &run.input, workspace_path, outputs);
+    if needle.is_empty() {
+        return false;
+    }
+    let body = body_ids(workflow, &node.id);
+    let hay = run
+        .steps
+        .iter()
+        .filter(|s| body.contains(&s.node_id))
+        .map(|s| s.output.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    hay.contains(&needle)
 }
 
 fn outputs_so_far(run: &WorkflowRun) -> HashMap<String, StepRecord> {
@@ -1359,6 +1632,8 @@ fn display_title(node: &Node) -> String {
         }
         NodeKind::Command => "Command".into(),
         NodeKind::Gate => "Gate".into(),
+        NodeKind::Condition => "If".into(),
+        NodeKind::Loop => "Loop".into(),
         NodeKind::Mcp => "MCP".into(),
     }
 }
@@ -1371,6 +1646,8 @@ fn kind_name(kind: NodeKind) -> &'static str {
         NodeKind::Http => "http",
         NodeKind::Command => "command",
         NodeKind::Gate => "gate",
+        NodeKind::Condition => "condition",
+        NodeKind::Loop => "loop",
         NodeKind::Mcp => "mcp",
     }
 }
@@ -1685,6 +1962,37 @@ mod tests {
         }
     }
 
+    fn test_run(steps: Vec<StepRecord>) -> WorkflowRun {
+        WorkflowRun {
+            id: "r".into(),
+            workflow_id: "wf-test".into(),
+            name: "Test".into(),
+            workspace_id: "ws".into(),
+            input: String::new(),
+            status: "running".into(),
+            started_at_ms: 0,
+            ended_at_ms: None,
+            current_node_id: None,
+            steps,
+            live_pty_ids: Vec::new(),
+            budget_seconds: 60,
+            loop_counts: HashMap::new(),
+        }
+    }
+
+    fn rec(id: &str, status: &str, output: &str) -> StepRecord {
+        StepRecord {
+            node_id: id.into(),
+            kind: "command".into(),
+            title: id.into(),
+            status: status.into(),
+            output: output.into(),
+            started_at_ms: 0,
+            ended_at_ms: Some(0),
+            exit_code: None,
+        }
+    }
+
     fn graph(nodes: Vec<Node>, edges: Vec<Edge>) -> Workflow {
         Workflow {
             id: "wf-test".into(),
@@ -1765,6 +2073,7 @@ mod tests {
             }],
             live_pty_ids: Vec::new(),
             budget_seconds: 60,
+            loop_counts: HashMap::new(),
         };
         let first = ready_nodes(&wf, &run);
         assert_eq!(first.len(), 2, "{first:?}");
@@ -1830,6 +2139,7 @@ mod tests {
             }],
             live_pty_ids: Vec::new(),
             budget_seconds: 60,
+            loop_counts: HashMap::new(),
         };
         assert_eq!(ready_nodes(&wf, &run), vec!["err".to_string()]);
     }
@@ -1956,6 +2266,7 @@ thanks"#;
             ],
             live_pty_ids: Vec::new(),
             budget_seconds: 60,
+            loop_counts: HashMap::new(),
         };
         skip_unreachable(&wf, &mut run);
         assert!(
@@ -1984,6 +2295,7 @@ thanks"#;
             steps: Vec::new(),
             live_pty_ids: Vec::new(),
             budget_seconds: 60,
+            loop_counts: HashMap::new(),
         };
         assert_eq!(remaining_budget(&run), 0);
         assert!(budget_spent(&run));
@@ -2035,6 +2347,7 @@ thanks"#;
             }],
             live_pty_ids: Vec::new(),
             budget_seconds: 60,
+            loop_counts: HashMap::new(),
         };
         store.write_step_file(&run.id, "n", "éé");
         let _ = store.upsert_run(run);
@@ -2042,5 +2355,196 @@ thanks"#;
         assert!(text.starts_with('é'), "{text:?}");
         assert_eq!(next, 4);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn loop_cycle_is_allowed() {
+        let mut done = node("done", NodeKind::Command);
+        done.command = Some("echo done".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                {
+                    let mut lp = node("lp", NodeKind::Loop);
+                    lp.times = Some(3);
+                    lp
+                },
+                node("body", NodeKind::Command),
+                done,
+            ],
+            vec![
+                edge("in", "lp", EdgeWhen::Ok),
+                edge("lp", "body", EdgeWhen::Ok),
+                edge("body", "lp", EdgeWhen::Ok),
+                edge("lp", "done", EdgeWhen::Always),
+            ],
+        );
+        validate(&wf).unwrap();
+    }
+
+    #[test]
+    fn cycle_without_a_loop_is_still_rejected() {
+        let wf = graph(
+            vec![node("a", NodeKind::Input), node("b", NodeKind::Command)],
+            vec![edge("a", "b", EdgeWhen::Ok), edge("b", "a", EdgeWhen::Ok)],
+        );
+        let err = validate(&wf).unwrap_err();
+        assert!(err.contains("cycle"), "{err}");
+    }
+
+    #[test]
+    fn loop_times_above_the_cap_is_rejected() {
+        let mut lp = node("lp", NodeKind::Loop);
+        lp.times = Some(21);
+        let wf = graph(
+            vec![lp, node("body", NodeKind::Command)],
+            vec![edge("lp", "body", EdgeWhen::Ok)],
+        );
+        let err = validate(&wf).unwrap_err();
+        assert!(err.contains("20"), "{err}");
+    }
+
+    #[test]
+    fn condition_then_and_else_follow_the_test() {
+        let mut cond = node("if1", NodeKind::Condition);
+        cond.test = Some("contains".into());
+        cond.pattern = Some("FAIL".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                node("cmd", NodeKind::Command),
+                cond,
+                node("then", NodeKind::Command),
+                node("els", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "cmd", EdgeWhen::Ok),
+                edge("cmd", "if1", EdgeWhen::Ok),
+                edge("if1", "then", EdgeWhen::Ok),
+                edge("if1", "els", EdgeWhen::Error),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "go"),
+            rec("cmd", "ok", "tests FAIL here"),
+        ]);
+        let outs = outputs_so_far(&run);
+        let (status, _, _) = eval_condition(Some(&wf), &run, &wf.nodes[2], "", &outs).unwrap();
+        assert_eq!(status, "ok");
+        run.steps.push(rec("if1", "ok", "matched"));
+        assert_eq!(ready_nodes(&wf, &run), vec!["then".to_string()]);
+
+        let mut miss = test_run(vec![rec("in", "ok", "go"), rec("cmd", "ok", "all green")]);
+        let outs = outputs_so_far(&miss);
+        let (status, _, _) = eval_condition(Some(&wf), &miss, &wf.nodes[2], "", &outs).unwrap();
+        assert_eq!(status, "error");
+        miss.steps.push(rec("if1", "error", "not matched"));
+        assert_eq!(ready_nodes(&wf, &miss), vec!["els".to_string()]);
+    }
+
+    #[test]
+    fn leftover_else_branch_is_skipped_after_then() {
+        let mut cond = node("if1", NodeKind::Condition);
+        cond.pattern = Some("yes".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                cond,
+                node("then", NodeKind::Command),
+                node("els", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "if1", EdgeWhen::Ok),
+                edge("if1", "then", EdgeWhen::Ok),
+                edge("if1", "els", EdgeWhen::Error),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "yes"),
+            rec("if1", "ok", "matched"),
+            rec("then", "ok", "ok"),
+        ]);
+        skip_unreachable(&wf, &mut run);
+        assert!(
+            run.steps
+                .iter()
+                .any(|s| s.node_id == "els" && s.status == "skipped"),
+            "{:?}",
+            run.steps
+        );
+    }
+
+    #[test]
+    fn loop_runs_the_body_then_takes_always() {
+        let mut lp = node("lp", NodeKind::Loop);
+        lp.times = Some(2);
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                lp,
+                node("body", NodeKind::Command),
+                node("done", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "lp", EdgeWhen::Ok),
+                edge("lp", "body", EdgeWhen::Ok),
+                edge("body", "lp", EdgeWhen::Ok),
+                edge("lp", "done", EdgeWhen::Always),
+            ],
+        );
+        validate(&wf).unwrap();
+        let mut run = test_run(vec![rec("in", "ok", "start")]);
+        assert_eq!(ready_nodes(&wf, &run), vec!["lp".to_string()]);
+        let outs = outputs_so_far(&run);
+        let (status, _, _) = advance_loop(&wf, &mut run, &wf.nodes[1], "", &outs).unwrap();
+        assert_eq!(status, "running");
+        assert_eq!(run.loop_counts.get("lp").copied(), Some(1));
+        run.steps.push(rec("lp", "running", "iteration 1 of 2"));
+        assert_eq!(ready_nodes(&wf, &run), vec!["body".to_string()]);
+        run.steps.push(rec("body", "ok", "pass 1"));
+        assert_eq!(ready_nodes(&wf, &run), vec!["lp".to_string()]);
+        let outs = outputs_so_far(&run);
+        let (status, _, _) = advance_loop(&wf, &mut run, &wf.nodes[1], "", &outs).unwrap();
+        assert_eq!(status, "running");
+        assert_eq!(run.loop_counts.get("lp").copied(), Some(2));
+        assert!(!run.steps.iter().any(|s| s.node_id == "body"));
+        run.steps.retain(|s| s.node_id != "lp");
+        run.steps.push(rec("lp", "running", "iteration 2 of 2"));
+        run.steps.push(rec("body", "ok", "pass 2"));
+        let outs = outputs_so_far(&run);
+        let (status, out, _) = advance_loop(&wf, &mut run, &wf.nodes[1], "", &outs).unwrap();
+        assert_eq!(status, "ok", "{out}");
+        run.steps.retain(|s| s.node_id != "lp");
+        run.steps.push(rec("lp", "ok", "done after 2"));
+        assert_eq!(ready_nodes(&wf, &run), vec!["done".to_string()]);
+    }
+
+    #[test]
+    fn loop_stops_early_when_until_matches() {
+        let mut lp = node("lp", NodeKind::Loop);
+        lp.times = Some(5);
+        lp.until = Some("green".into());
+        let wf = graph(
+            vec![
+                node("in", NodeKind::Input),
+                lp,
+                node("body", NodeKind::Command),
+            ],
+            vec![
+                edge("in", "lp", EdgeWhen::Ok),
+                edge("lp", "body", EdgeWhen::Ok),
+                edge("body", "lp", EdgeWhen::Ok),
+            ],
+        );
+        let mut run = test_run(vec![
+            rec("in", "ok", "start"),
+            rec("lp", "running", "iteration 1 of 5"),
+            rec("body", "ok", "now green"),
+        ]);
+        run.loop_counts.insert("lp".into(), 1);
+        let outs = outputs_so_far(&run);
+        let (status, out, _) = advance_loop(&wf, &mut run, &wf.nodes[1], "", &outs).unwrap();
+        assert_eq!(status, "ok", "{out}");
+        assert!(out.contains("done after 1"), "{out}");
     }
 }
