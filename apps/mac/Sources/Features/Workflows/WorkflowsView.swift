@@ -22,7 +22,7 @@ struct WorkflowsView: View {
     @State private var designEffort = ""
     @State private var designWorkspaceID = ""
     /// "1", "0", or empty for "nobody has said yet".
-    @AppStorage("workflows.builderExpanded") private var builderExpandedStored = ""
+    @AppStorage("workflows.examplesExpanded") private var examplesExpandedStored = ""
     @State private var running: WorkflowGraph?
     @State private var confirmingDelete: WorkflowGraph?
 
@@ -182,16 +182,15 @@ struct WorkflowsView: View {
         }
     }
 
-    /// Whether the builder is open.
+    /// Whether the examples are open.
     ///
-    /// Remembered, because the two people using this screen want opposite
-    /// things: somebody with no workflows needs the builder open with its
-    /// explanation, and somebody with a library wants their list at the top of
-    /// the window and not a form they use once a month. Until a choice is
-    /// stored, the empty library decides. Same rule as the Automations
-    /// examples, deliberately.
-    private var builderExpanded: Bool {
-        switch builderExpandedStored {
+    /// Only the examples collapse. The builder itself is the point of the
+    /// screen and hiding the field somebody came to type in behind a chevron
+    /// costs a click every time. The examples are the part that is read once
+    /// and then in the way, so they are the part that folds, and the choice is
+    /// remembered. Until one is made, an empty library shows them.
+    private var examplesExpanded: Bool {
+        switch examplesExpandedStored {
         case "1": return true
         case "0": return false
         default: return model.hasLoaded && model.graphs.isEmpty
@@ -199,47 +198,42 @@ struct WorkflowsView: View {
     }
 
     private var builderCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    builderExpandedStored = builderExpanded ? "0" : "1"
-                }
-            } label: {
-                HStack(alignment: .center, spacing: Theme.Space.s) {
-                    FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 22)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Workflow builder")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.primary)
-                        Text("Describe a run and a cheap local agent drafts the steps, or lay them out yourself.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(builderExpanded ? 0 : -90))
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(builderExpanded ? "Collapse the workflow builder" : "Expand the workflow builder")
-            if builderExpanded {
-                builderBody
-                    .padding(.top, Theme.Space.m)
+        Card(
+            title: "Workflow builder",
+            subtitle: "Describe a run and a cheap local agent drafts the steps, or lay them out yourself.",
+            mark: "mark_workflow"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                designCard
+                manualCard
             }
         }
-        .padding(Theme.cardPadding)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
-    private var builderBody: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.m) {
-            designCard
-            manualCard
+    /// The examples, behind a disclosure that remembers itself.
+    @ViewBuilder
+    private var examplesSection: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                examplesExpandedStored = examplesExpanded ? "0" : "1"
+            }
+        } label: {
+            HStack(spacing: Theme.Space.xs) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(examplesExpanded ? 0 : -90))
+                Text("Or start from an example")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(examplesExpanded ? "Hide the examples" : "Show the examples")
+        if examplesExpanded {
+            WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
         }
     }
 
@@ -290,10 +284,7 @@ struct WorkflowsView: View {
                     .focused($designFocused)
                     .disabled(model.isDesigning)
                 if !designRecipes.isEmpty {
-                    Text("Or start from an example")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    WorkflowRecipeChips(recipes: designRecipes) { designPrompt = $0.prompt }
+                    examplesSection
                 }
                 WorkflowDesignPickers(
                     agents: WorkflowRecipes.designAgents(from: model.pickerBackends(keeping: designBackend)),

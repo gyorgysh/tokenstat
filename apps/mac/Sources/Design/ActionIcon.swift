@@ -168,13 +168,38 @@ enum ActionIcon {
     }
 }
 
+private struct CompactActionsKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Buttons under this draw their glyph alone, with the title as the help
+    /// and the accessibility label.
+    ///
+    /// For chrome that has run out of width. A row of buttons in a narrow
+    /// window has three ways to go: wrap the labels, which turns "Library" into
+    /// one letter per line, scroll, which puts Save and Run somewhere off the
+    /// right edge, or shrink. This is shrink, and it is the only one of the
+    /// three that keeps every action both readable and reachable.
+    var compactActions: Bool {
+        get { self[CompactActionsKey.self] }
+        set { self[CompactActionsKey.self] = newValue }
+    }
+}
+
 /// Glyph and title, in the order `trails` asks for.
 struct ActionLabel: View {
     let title: String
     let icon: ActionIcon
 
+    @Environment(\.compactActions) private var compact
+
     var body: some View {
-        if icon.trails {
+        if compact {
+            Image(systemName: icon.symbol)
+                .accessibilityLabel(title)
+                .help(title)
+        } else if icon.trails {
             HStack(spacing: 6) {
                 Text(title)
                 Image(systemName: icon.symbol)

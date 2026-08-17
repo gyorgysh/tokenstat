@@ -41,7 +41,9 @@ struct RunHistoryStrip: View {
 
     /// Oldest first. The view reverses nothing, it just trims the front.
     var ticks: [Tick]
-    var limit: Int = 12
+    /// Same number as `slots`, so every strip is the same width whether the job
+    /// ran twice or two hundred times and the rows either side of it line up.
+    var limit: Int = RunHistoryStrip.slots
     var height: CGFloat = 14
     var width: CGFloat = 4
     var onSelect: ((Tick) -> Void)?
@@ -51,7 +53,7 @@ struct RunHistoryStrip: View {
     /// Two amber ticks on their own are a pause glyph, and next to a Run button
     /// that is exactly how they were read. Empty slots behind them give the
     /// filled ones something to be part of.
-    private static let slots = 8
+    static let slots = 8
 
     private var shown: [Tick] {
         ticks.count > limit ? Array(ticks.suffix(limit)) : ticks

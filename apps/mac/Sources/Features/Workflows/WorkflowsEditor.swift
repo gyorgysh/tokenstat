@@ -29,9 +29,12 @@ struct WorkflowsEditor: View {
 
     var body: some View {
         WidthReader { width in
-            let roomForPalette = width >= Self.paletteFloor
+            // An unmeasured width is not a narrow one: treating the first
+            // frame's zero as "no room" flashed the palette closed every time
+            // the editor opened.
+            let roomForPalette = width == 0 || width >= Self.paletteFloor
             VStack(spacing: 0) {
-                chrome(roomForPalette: roomForPalette)
+                chrome(width: width, roomForPalette: roomForPalette)
                 if let error = model.errorMessage {
                     Banner(text: error, severity: .warning)
                         .padding(.horizontal, Theme.Space.m)
@@ -72,21 +75,33 @@ struct WorkflowsEditor: View {
         return model.lastRun(for: graph)?.isLive == true ? model.lastRun(for: graph) : nil
     }
 
-    private func chrome(roomForPalette: Bool) -> some View {
-        // Horizontally scrollable rather than compressible. In a narrow window
-        // the row used to keep every control and take the width out of their
-        // labels, so "Library" came out as one letter per line and the toolbar
-        // grew taller than the canvas. Nothing here is optional enough to drop,
-        // so it scrolls and every button keeps its own width.
-        ScrollView(.horizontal, showsIndicators: false) {
-            chromeContent(roomForPalette: roomForPalette)
+    /// Width below which the toolbar drops its button labels.
+    ///
+    /// Save and Run are the two things somebody came to this screen to press,
+    /// and both sit at the right end, so a row that overflows takes exactly
+    /// those away. Glyph-only buttons keep every action on screen at a width
+    /// where the labels cannot all fit.
+    private static let labelFloor: CGFloat = 1000
+
+    private func chrome(width: CGFloat, roomForPalette: Bool) -> some View {
+        let compact = width > 0 && width < Self.labelFloor
+        // Shrink first, scroll only as the last resort. The scroll view is what
+        // keeps a 400 point window usable at all, but it is not the answer to
+        // an ordinary narrow window: it would hide the Run button rather than
+        // make room for it. `fixedSize` vertically because a ScrollView is
+        // greedy on both axes, and this one would otherwise take its share of
+        // the pane's height from the canvas.
+        return ScrollView(.horizontal, showsIndicators: false) {
+            chromeContent(compact: compact, roomForPalette: roomForPalette)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, 8)
+                .environment(\.compactActions, compact)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.tabStrip)
     }
 
-    private func chromeContent(roomForPalette: Bool) -> some View {
+    private func chromeContent(compact: Bool, roomForPalette: Bool) -> some View {
         HStack(spacing: Theme.Space.s) {
             Button("Library", .back) { onBack() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
@@ -100,7 +115,7 @@ struct WorkflowsEditor: View {
             }
             TextField("Name", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 220)
+                .frame(width: compact ? 150 : 220)
                 .onChange(of: name) { _, next in
                     guard next != model.working?.name else { return }
                     model.beginGroupedEdit()
@@ -115,7 +130,7 @@ struct WorkflowsEditor: View {
                         set: { model.setWorkingScope($0, workspaceID: graph.workspaceID ?? folders.first?.id) }
                     )
                 )
-                .frame(width: 148)
+                .frame(width: compact ? 118 : 148)
                 if graph.scope == .workspace {
                     AppMenuPicker(
                         title: "",
@@ -125,7 +140,7 @@ struct WorkflowsEditor: View {
                             set: { model.setWorkingScope(.workspace, workspaceID: $0) }
                         )
                     )
-                    .frame(width: 168)
+                    .frame(width: compact ? 128 : 168)
                 }
             }
             if model.isDirty {
