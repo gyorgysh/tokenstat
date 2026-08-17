@@ -43,6 +43,20 @@ enum SessionState: Equatable {
     }
 }
 
+/// Live token and list-rate reading for one session.
+///
+/// Numbers only. The host drops conversation text at the parser boundary,
+/// and this type has nowhere to put it back.
+struct SessionMeter: Equatable, Sendable {
+    var tokens: UInt64
+    var costMicros: Int64?
+    var estimated: Bool
+    var complete: Bool
+    var model: String?
+    var contextUsed: UInt64?
+    var contextWindow: UInt64?
+}
+
 /// Terminal preferences, stored as user defaults and read by the terminal
 /// strip and by the spawn path (which sends the colour choice to the daemon).
 enum TerminalPreferences {
@@ -188,6 +202,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// Resident memory of the session's process subtree, in megabytes.
     private(set) var memoryMb: Double?
 
+    /// Live token and list-rate reading from the host. `nil` until the
+    /// meter has a real log, so a row never invents `$0.00` or a 0% bar.
+    private(set) var meter: SessionMeter?
+
     /// True once the host has answered with a real verdict.
     ///
     /// While this is false the app falls back to its own "did bytes arrive
@@ -327,6 +345,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             memoryMb: info.memoryMb,
             attention: info.attention
         )
+        applyMeter(from: info)
         // Adopted from the host: the process already exists, so the emulator
         // is built now and polling starts immediately.
         _ = view
@@ -385,6 +404,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             memoryMb: info.memoryMb,
             attention: info.attention
         )
+        applyMeter(from: info)
         // Build the emulator now that a process exists. Before this there was
         // nothing to draw.
         _ = view
@@ -765,6 +785,7 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                         memoryMb: info.memoryMb,
                         attention: info.attention
                     )
+                    applyMeter(from: info)
                 }
                 if let code = info.exitCode {
                     exitCode = code
@@ -1206,6 +1227,37 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             return
         }
         if state != next { state = next }
+    }
+
+    /// Take the host's token meter.
+    ///
+    /// Absent fields stay absent: a row that has not seen a log must not
+    /// grow a `$0.00` or a 0% bar. Written only when the numbers change,
+    /// because `pty.info` arrives several times a second.
+    private func applyMeter(from info: PtySessionInfo) {
+        let tokens = info.tokens ?? 0
+        let cost = info.costMicros.flatMap { $0 > 0 ? $0 : nil }
+        let context: (UInt64, UInt64)? = {
+            guard let used = info.contextUsed, used > 0,
+                  let window = info.contextWindow, window > 0
+            else { return nil }
+            return (used, window)
+        }()
+        let next: SessionMeter?
+        if tokens > 0 || cost != nil {
+            next = SessionMeter(
+                tokens: tokens,
+                costMicros: cost,
+                estimated: info.costEstimated ?? false,
+                complete: info.costComplete ?? true,
+                model: info.model,
+                contextUsed: context?.0,
+                contextWindow: context?.1
+            )
+        } else {
+            next = nil
+        }
+        if meter != next { meter = next }
     }
 
     /// Start the working-to-idle timer if one is not already running.

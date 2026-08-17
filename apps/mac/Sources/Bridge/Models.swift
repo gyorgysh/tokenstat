@@ -1679,6 +1679,24 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     /// Why the person should look: `permission`, `gate`, or `error`.
     /// Absent when nothing needs them. Not the same as idle.
     var attention: String?
+    /// Lifetime tokens this session has used, from the live meter.
+    /// Absent when the harness has no usable log yet. Never a fake zero.
+    var tokens: UInt64?
+    /// List-rate equivalent of those tokens, in microdollars. Absent when
+    /// nothing priced. Never a made-up `$0.00`.
+    var costMicros: Int64?
+    /// True when at least one priced event used a catalog estimate.
+    var costEstimated: Bool?
+    /// False when at least one event could not be priced. The figure is then
+    /// a floor.
+    var costComplete: Bool?
+    /// Model id of the last priced turn, for the context-bar denominator.
+    var model: String?
+    /// Prompt-side tokens of the last turn. The context bar numerator.
+    var contextUsed: UInt64?
+    /// Catalog context window for `model`. Both this and `contextUsed` must
+    /// be present before a bar is drawn.
+    var contextWindow: UInt64?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1698,6 +1716,13 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case cpuPercent
         case memoryMb
         case attention
+        case tokens
+        case costMicros
+        case costEstimated
+        case costComplete
+        case model
+        case contextUsed
+        case contextWindow
     }
 }
 

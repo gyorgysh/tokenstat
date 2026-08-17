@@ -2470,20 +2470,34 @@ private struct ActiveSessionRow: View {
         return reported
     }
 
-    /// Line two: which harness this is.
+    /// Line two: what this session is costing.
     ///
-    /// A harness that runs with its own name as the shell title would print
-    /// that name twice, so the first candidate that is not already line one
-    /// wins, and a bare command is the last resort.
-    /// Line two: what this session is costing the machine.
-    ///
-    /// Not the branch. The folder directly above already says which branch
-    /// this is, and a session cannot be on a different one, so repeating it
-    /// spent a line saying nothing. These numbers are the opposite: they are
-    /// true of this session and of nothing else on screen.
-    ///
-    /// `nil` before the host's first reading, so a row never invents a zero.
+    /// List-rate dollars and a short token total when the host meter has
+    /// spoken. CPU · RAM stay as the fallback, and move to the tooltip
+    /// once the meter lands. `nil` before either reading, so a row never
+    /// invents a zero.
     private var stats: String? {
+        if let meter = session.meter {
+            var parts: [String] = []
+            if let micros = meter.costMicros, micros > 0 {
+                parts.append(
+                    Money(
+                        micros: micros,
+                        estimated: meter.estimated,
+                        complete: meter.complete
+                    ).formatted
+                )
+            }
+            if meter.tokens > 0 {
+                parts.append(formatTokens(meter.tokens))
+            }
+            if !parts.isEmpty { return parts.joined(separator: " · ") }
+        }
+        return resourceStats
+    }
+
+    /// CPU and RAM, for the tooltip and as the line-two fallback.
+    private var resourceStats: String? {
         var parts: [String] = []
         if let cpu = session.cpuPercent {
             parts.append("CPU \(Int(cpu.rounded()))%")
@@ -2501,6 +2515,32 @@ private struct ActiveSessionRow: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    private var helpText: String {
+        var lines = [session.cwd]
+        if session.meter != nil, let resources = resourceStats {
+            lines.append(resources)
+        }
+        if session.meter?.costMicros != nil {
+            lines.append("List-rate equivalent, not billed.")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var spokenLabel: String {
+        var parts = [title]
+        if let stats { parts.append(stats) }
+        if let meter = session.meter,
+           let used = meter.contextUsed,
+           let window = meter.contextWindow,
+           window > 0
+        {
+            let pct = Int((Double(used) / Double(window) * 100).rounded())
+            parts.append("context \(pct) percent")
+        }
+        parts.append(session.state.label)
+        return parts.joined(separator: ". ")
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
@@ -2513,6 +2553,11 @@ private struct ActiveSessionRow: View {
                         ))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if let used = session.meter?.contextUsed,
+                       let window = session.meter?.contextWindow
+                    {
+                        SessionContextBar(used: used, window: window)
+                    }
                     // The live numbers, or the harness's own title until the
                     // first reading lands. Never both: this is one line and
                     // the numbers are what change.
@@ -2533,9 +2578,9 @@ private struct ActiveSessionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
-        .help(session.cwd)
+        .help(helpText)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title). \(stats ?? ""). \(session.state.label)")
+        .accessibilityLabel(spokenLabel)
     }
 
     @ViewBuilder
@@ -2579,6 +2624,40 @@ private struct ActiveSessionRow: View {
         .padding(.leading, Theme.Space.l)
         .padding(.trailing, Theme.Space.xs)
         .padding(.vertical, 1)
+    }
+}
+
+/// How full this session's context window is, when we know both sides.
+///
+/// Heat, not green. Near the window the fill turns warning, because that
+/// is the moment a person should start a new session. Missing data draws
+/// nothing: the caller already gated on both numbers.
+private struct SessionContextBar: View {
+    let used: UInt64
+    let window: UInt64
+
+    private var ratio: Double {
+        guard window > 0 else { return 0 }
+        return min(1, Double(used) / Double(window))
+    }
+
+    private var fill: Color {
+        if ratio >= 0.85 { return Theme.warning }
+        let idx = min(Theme.heat.count - 1, max(1, Int((ratio * 4).rounded(.up))))
+        return Theme.heat[idx]
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.border)
+                Capsule()
+                    .fill(fill)
+                    .frame(width: max(2, geo.size.width * ratio))
+            }
+        }
+        .frame(height: 3)
+        .accessibilityHidden(true)
     }
 }
 #endif

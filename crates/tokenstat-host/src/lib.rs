@@ -76,6 +76,8 @@ pub(crate) mod remote_proxy;
 pub(crate) mod remote_stream;
 pub mod server;
 pub mod session;
+#[cfg(feature = "local-host")]
+mod session_meter;
 #[cfg(all(unix, feature = "local-host"))]
 mod sync_scheduler;
 #[cfg(feature = "local-host")]

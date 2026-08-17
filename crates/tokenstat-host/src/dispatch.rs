@@ -249,25 +249,63 @@ fn add_activity(item: &mut Value) {
     // first verdict lands a tick later, which is why an unknown session
     // carries no field instead of a made-up one.
     crate::activity::start();
-    let Some(pid) = item.get("pid").and_then(|v| v.as_u64()) else {
+    if let Some(pid) = item.get("pid").and_then(|v| v.as_u64())
+        && let Some(reading) = crate::activity::reading(pid as u32)
+        && let Some(map) = item.as_object_mut()
+    {
+        map.insert("activity".into(), json!(reading.activity.as_str()));
+        // Rounded to a tenth: this is a smoothed average of a noisy sample and
+        // printing it to six decimals would claim a precision it does not have.
+        map.insert(
+            "cpuPercent".into(),
+            json!((reading.cpu_percent * 10.0).round() / 10.0),
+        );
+        map.insert("memoryMb".into(), json!(reading.memory_mb.round()));
+        if let Some(attention) = reading.attention {
+            map.insert("attention".into(), json!(attention.as_str()));
+        }
+    }
+    add_meter(item);
+}
+
+/// Fold the live token meter onto the same session object.
+///
+/// Independent of the CPU sampler: a session the sampler has not reached
+/// can still have a log, and a session with no log must not grow fake
+/// zeros. Fields are omitted until there is a real reading.
+#[cfg(feature = "local-host")]
+fn add_meter(item: &mut Value) {
+    let command = item
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let cwd = item
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if command.is_empty() || cwd.is_empty() {
         return;
-    };
-    let Some(reading) = crate::activity::reading(pid as u32) else {
+    }
+    let Some(meter) = crate::session_meter::reading(&command, &cwd) else {
         return;
     };
     let Some(map) = item.as_object_mut() else {
         return;
     };
-    map.insert("activity".into(), json!(reading.activity.as_str()));
-    // Rounded to a tenth: this is a smoothed average of a noisy sample and
-    // printing it to six decimals would claim a precision it does not have.
-    map.insert(
-        "cpuPercent".into(),
-        json!((reading.cpu_percent * 10.0).round() / 10.0),
-    );
-    map.insert("memoryMb".into(), json!(reading.memory_mb.round()));
-    if let Some(attention) = reading.attention {
-        map.insert("attention".into(), json!(attention.as_str()));
+    map.insert("tokens".into(), json!(meter.tokens));
+    if let Some(micros) = meter.cost_micros {
+        map.insert("costMicros".into(), json!(micros));
+        map.insert("costEstimated".into(), json!(meter.estimated));
+        map.insert("costComplete".into(), json!(meter.complete));
+    }
+    if !meter.model.is_empty() {
+        map.insert("model".into(), json!(meter.model));
+    }
+    if let (Some(used), Some(window)) = (meter.context_used, meter.context_window) {
+        map.insert("contextUsed".into(), json!(used));
+        map.insert("contextWindow".into(), json!(window));
     }
 }
 
