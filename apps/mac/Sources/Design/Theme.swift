@@ -1002,13 +1002,25 @@ struct SidebarToggleButton: View {
 /// One object so Workspaces (tabs) and Insights (empty leading side) paint the
 /// same opaque sidebar colour. A SwiftUI `.inspector` on a transparent titlebar
 /// otherwise lets liquid glass or the unfocused grey show through the strip.
-struct InspectorChromeBar<Content: View>: View {
+struct InspectorChromeBar<Content: View, Accessory: View>: View {
     var onClose: () -> Void
     @ViewBuilder var content: () -> Content
+    @ViewBuilder var accessory: () -> Accessory
+
+    init(
+        onClose: @escaping () -> Void,
+        @ViewBuilder accessory: @escaping () -> Accessory,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.onClose = onClose
+        self.content = content
+        self.accessory = accessory
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             content()
+            accessory()
             InspectorCloseButton(action: onClose)
                 .padding(.trailing, Theme.Space.s)
         }
@@ -1016,6 +1028,12 @@ struct InspectorChromeBar<Content: View>: View {
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+}
+
+extension InspectorChromeBar where Accessory == EmptyView {
+    init(onClose: @escaping () -> Void, @ViewBuilder content: @escaping () -> Content) {
+        self.init(onClose: onClose, accessory: { EmptyView() }, content: content)
     }
 }
 
@@ -1060,6 +1078,54 @@ struct InspectorCloseButton: View {
         .onHover { isHovering = $0 }
         .help(help)
         .accessibilityLabel(label)
+    }
+}
+
+/// Opens the inspector's bottom console. Same seat as the close mark, so the
+/// two chrome controls read as a pair.
+struct InspectorConsoleToggle: View {
+    @Binding var isOn: Bool
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            Image(systemName: "terminal")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(
+                    isOn
+                        ? Theme.accent
+                        : (isHovering ? Theme.controlGlyphHover : Theme.controlGlyph)
+                )
+                .frame(width: 22, height: 22)
+                .background(
+                    Circle().fill(
+                        isOn
+                            ? Theme.accentSoft
+                            : (isHovering ? Theme.rowHighlight : Theme.controlSeat)
+                    )
+                )
+                .overlay(
+                    Circle().strokeBorder(
+                        isOn
+                            ? Theme.accent.opacity(0.45)
+                            : Theme.border.opacity(isHovering ? 0.9 : 0.55),
+                        lineWidth: 1
+                    )
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(width: 30, height: 30)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
+        .help(isOn
+            ? "Hide the inspector console"
+            : "Show a follow view or a small shell under this inspector")
+        .accessibilityLabel(isOn ? "Hide inspector console" : "Show inspector console")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

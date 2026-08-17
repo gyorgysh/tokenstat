@@ -374,6 +374,14 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// True from the click until the host has spawned the process.
     var isPending = false
 
+    /// A small shell that lives in the inspector console, not the session strip.
+    var isInspectorShell = false
+
+    /// The thin status strip under the emulator has something to say.
+    var showsHostLine: Bool {
+        exitCode != nil || droppedOutput || outputPaused
+    }
+
     /// True while the pane should show a starting state rather than the live
     /// emulator: still pending on the host, or the process is up but has not
     /// painted anything yet (agent CLIs spend seconds in that gap).
@@ -1283,6 +1291,24 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             }
             self?.idleCheckTask = nil
         }
+    }
+
+    /// Last lines of the emulator, for the inspector follow pane.
+    ///
+    /// Does not create a view. Empty until this session has painted. The
+    /// inspector must never remount this emulator: the main stack already owns
+    /// it, and a second parent would SIGWINCH the agent.
+    func followSnapshot(lines: Int = 48) -> String {
+        guard let loaded = terminalViewIfLoaded else { return "" }
+        let terminal = loaded.getTerminal()
+        let dims = terminal.getDims()
+        let top = terminal.getTopVisibleRow()
+        let startRow = max(0, top + dims.rows - max(1, lines))
+        let endRow = top + max(0, dims.rows)
+        let start = Position(col: 0, row: startRow)
+        let end = Position(col: max(0, dims.cols), row: endRow)
+        return terminal.getText(start: start, end: end)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The terminal's visible screen as plain text, for VoiceOver.

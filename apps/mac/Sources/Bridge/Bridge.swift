@@ -1095,7 +1095,8 @@ extension Bridge {
         noColor: Bool = false,
         dark: Bool,
         modelProvider: String? = nil,
-        modelID: String? = nil
+        modelID: String? = nil,
+        hidden: Bool = false
     ) async throws -> PtySessionInfo {
         // Urgent: a person clicked Shell and is watching this round trip. It
         // must not queue behind sessions already polling when the pool is
@@ -1117,6 +1118,10 @@ extension Bridge {
         }
         if let modelID {
             params["modelId"] = modelID
+        }
+        // Inspector consoles and daemon jobs stay off the workspace tab list.
+        if hidden {
+            params["hidden"] = true
         }
         return try await backgroundUrgent("pty.spawn", params, as: PtySessionInfo.self)
     }

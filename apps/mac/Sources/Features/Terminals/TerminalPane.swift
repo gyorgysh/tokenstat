@@ -123,11 +123,32 @@ struct TerminalPane: View {
         terminals.active(in: folder.id)
     }
 
-    /// The session the user can actually see, which is nothing at all while a
-    /// file, a commit or the browser is over the top of it, or while another
+    /// Sessions the user can actually see. A split names two. Nothing while a
+    /// file, a commit or the browser is over the top, or while another
     /// destination is in front of this whole surface.
-    private var focusedSessionID: String? {
-        isSurfaceActive && showsTerminal ? active?.id : nil
+    private var focusedSessionIDs: Set<String> {
+        guard isSurfaceActive, showsTerminal else { return [] }
+        var ids = Set<String>()
+        if let active { ids.insert(active.id) }
+        if terminals.layout(for: folder.id).isSplit,
+           let other = terminals.trailingSession(in: folder.id)
+            ?? terminals.leadingSession(in: folder.id),
+           other.id != active?.id
+        {
+            ids.insert(other.id)
+        }
+        return ids
+    }
+
+    private var splitLayout: TerminalSplitLayout {
+        terminals.layout(for: folder.id)
+    }
+
+    private var splitFraction: Binding<Double> {
+        Binding(
+            get: { terminals.fraction(for: folder.id) },
+            set: { terminals.setFraction($0, for: folder.id) }
+        )
     }
 
     var body: some View {
@@ -136,8 +157,8 @@ struct TerminalPane: View {
                 strip
                 Divider()
                 surface
-                if activeFile == nil, !browserShown, !filesShown, let active {
-                    TerminalHost(session: active)
+                if showsTerminal {
+                    hostLines
                 }
             } else {
                 missingFolder
@@ -147,8 +168,8 @@ struct TerminalPane: View {
         // rest keep draining the host's buffer, just slower, which is the
         // difference between a few round trips a second and a few hundred when
         // several agents are running at once.
-        .onChange(of: focusedSessionID, initial: true) {
-            terminals.focus(focusedSessionID)
+        .onChange(of: focusedSessionIDs, initial: true) {
+            terminals.focus(focusedSessionIDs)
         }
         .onDisappear { terminals.focus(nil) }
         // Asking the login shell for the real PATH (once per launch, off the
@@ -218,19 +239,39 @@ struct TerminalPane: View {
                     sessions: sessions,
                     // Nothing is shown while a file or a commit is open, so the
                     // terminals stay mounted underneath rather than being torn
-                    // down.
-                    active: showsTerminal ? active : nil,
-                    // Do not steal the keyboard while Home (or any other
-                    // destination) is in front of a kept-mounted surface.
-                    claimsFocus: isSurfaceActive && showsTerminal
+                    // down. Positions stay put when focus moves.
+                    leading: showsTerminal
+                        ? (splitLayout.isSplit
+                            ? terminals.leadingSession(in: folder.id)
+                            : active)
+                        : nil,
+                    trailing: showsTerminal && splitLayout.isSplit
+                        ? terminals.trailingSession(in: folder.id)
+                        : nil,
+                    focused: showsTerminal ? active : nil,
+                    splitAxis: showsTerminal ? splitLayout.axis : nil,
+                    fraction: CGFloat(terminals.fraction(for: folder.id)),
+                    claimsFocus: isSurfaceActive && showsTerminal,
+                    onActivate: { terminals.select($0) }
                 )
                 .frame(width: size.width, height: size.height)
+
+                if showsTerminal, splitLayout.isSplit {
+                    TerminalSplitHandle(
+                        axis: splitLayout.axis ?? .horizontal,
+                        fraction: splitFraction
+                    )
+                    .frame(width: size.width, height: size.height)
+                    if terminals.trailingSession(in: folder.id) == nil {
+                        trailingPlaceholder(in: size)
+                    }
+                }
 
                 // Starting state over the stack: pending host spawn, or the
                 // process is up but has not painted yet. Agent CLIs spend
                 // several seconds in that gap; an empty live terminal there
                 // is what read as a 10s hang.
-                if showsTerminal, let active, active.showsStartingState {
+                if showsTerminal, !splitLayout.isSplit, let active, active.showsStartingState {
                     SessionStartingView(command: active.command)
                         .frame(width: size.width, height: size.height)
                 }
@@ -306,6 +347,18 @@ struct TerminalPane: View {
         }
     }
 
+    /// Empty right / bottom half, positioned over the unused split frame.
+    private func trailingPlaceholder(in size: CGSize) -> some View {
+        let fraction = terminals.fraction(for: folder.id)
+        return TerminalSplitPlaceholder()
+            .frame(
+                width: splitLayout == .stacked ? size.width : size.width * (1 - fraction),
+                height: splitLayout == .stacked ? size.height * (1 - fraction) : size.height
+            )
+            .frame(width: size.width, height: size.height, alignment: splitLayout == .stacked ? .bottom : .trailing)
+            .allowsHitTesting(false)
+    }
+
     private var closingUnsaved: Binding<Bool> {
         Binding(
             get: { workspaces.pendingClose != nil },
@@ -342,18 +395,28 @@ struct TerminalPane: View {
             ForEach(sessions) { session in
                 SessionChip(
                     session: session,
-                    isSelected: showsTerminal && session.id == active?.id
+                    isSelected: showsTerminal && session.id == active?.id,
+                    isOtherHalf: showsTerminal
+                        && splitLayout.isSplit
+                        && (session.id == terminals.leadingSession(in: folder.id)?.id
+                            || session.id == terminals.trailingSession(in: folder.id)?.id)
+                        && session.id != active?.id
                 ) {
-                    // Selecting a terminal puts it back in front without
-                    // closing whatever files are open.
                     workspaces.showTerminal(in: folder.id)
-                    terminals.select(session)
+                    if NSEvent.modifierFlags.contains(.option) {
+                        terminals.sendToOtherHalf(session)
+                    } else {
+                        terminals.select(session)
+                    }
                 } onClose: {
                     if session.alive {
                         closingSession = session
                     } else {
                         Task { await terminals.close(session) }
                     }
+                } onSplit: {
+                    workspaces.showTerminal(in: folder.id)
+                    terminals.sendToOtherHalf(session)
                 }
             }
 
@@ -479,6 +542,27 @@ struct TerminalPane: View {
 
             Spacer()
 
+            if !sessions.isEmpty {
+                Menu {
+                    Button("Single", .layout) {
+                        terminals.setLayout(.single, for: folder.id)
+                    }
+                    Button("Side by side", .compare) {
+                        terminals.setLayout(.side, for: folder.id)
+                    }
+                    Button("Stacked", .compare) {
+                        terminals.setLayout(.stacked, for: folder.id)
+                    }
+                } label: {
+                    ActionIcon.compare.label("Split")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Show one session, or two side by side or stacked")
+                .accessibilityLabel("Split terminals")
+            }
+
             // What the next launch will do, on the row that launches it. Both
             // apply to every way of starting a session, including this strip's
             // own menu, so they sit beside it rather than on a surface that
@@ -495,6 +579,20 @@ struct TerminalPane: View {
             RemotePortForm(folder: folder, workspaces: workspaces) {
                 showingPort = false
             }
+        }
+    }
+
+    @ViewBuilder
+    private var hostLines: some View {
+        if splitLayout.isSplit {
+            if let lead = terminals.leadingSession(in: folder.id), lead.showsHostLine {
+                TerminalHost(session: lead)
+            }
+            if let trail = terminals.trailingSession(in: folder.id), trail.showsHostLine {
+                TerminalHost(session: trail)
+            }
+        } else if let active, active.showsHostLine {
+            TerminalHost(session: active)
         }
     }
 
@@ -625,8 +723,10 @@ private struct LaunchChip: View {
 private struct SessionChip: View {
     let session: TerminalSession
     let isSelected: Bool
+    var isOtherHalf: Bool = false
     let onSelect: () -> Void
     let onClose: () -> Void
+    var onSplit: (() -> Void)? = nil
 
     @State private var isHovering = false
 
@@ -665,13 +765,26 @@ private struct SessionChip: View {
         .padding(.leading, Theme.Space.s)
         .padding(.trailing, 3)
         .padding(.vertical, 3)
-        .background(isSelected ? Theme.panel : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background(
+            isSelected
+                ? Theme.panel
+                : (isOtherHalf ? Theme.rowHighlight : .clear),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(isSelected ? Theme.border : .clear, lineWidth: 1)
+                .strokeBorder(
+                    isSelected
+                        ? Theme.border
+                        : (isOtherHalf ? Theme.accent.opacity(0.4) : .clear),
+                    lineWidth: 1
+                )
         )
         .onHover { isHovering = $0 }
         .contextMenu {
+            if let onSplit {
+                Button("Open in split", .compare) { onSplit() }
+            }
             Button("Close", .delete) { onClose() }
         }
     }

@@ -233,6 +233,10 @@ struct PtySpawnParams {
     model_provider: Option<String>,
     #[serde(default)]
     model_id: Option<String>,
+    /// True for inspector consoles and other daemon-owned shells that must
+    /// not appear as a workspace tab. The process still runs in the folder.
+    #[serde(default)]
+    hidden: bool,
 }
 
 /// Fold the activity sampler's verdict into a serialized session.
@@ -1834,6 +1838,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     "dark": p.dark,
                     "modelProvider": p.model_provider,
                     "modelId": p.model_id,
+                    "hidden": p.hidden,
                 });
                 let mut value =
                     crate::remote::call_peer_result(peer, "pty.spawn", &forwarded.to_string())?;
@@ -1865,7 +1870,7 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                     args,
                     cwd: ws.path.clone(),
                     workspace_id: Some(ws.id.clone()),
-                    hidden: false,
+                    hidden: p.hidden,
                     rows: p.rows,
                     cols: p.cols,
                     no_color: p.no_color,

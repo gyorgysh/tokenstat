@@ -10,7 +10,7 @@ import AppKit
 import SwiftTerm
 import SwiftUI
 
-/// Every terminal in a workspace, stacked, with one of them visible.
+/// Every terminal in a workspace, stacked, with one or two of them visible.
 ///
 /// One `NSViewRepresentable` holding all of the session views, rather than one
 /// per session in a SwiftUI stack. Two reasons, both learned the hard way:
@@ -22,26 +22,72 @@ import SwiftUI
 /// - **Switching.** Showing a terminal must not mean adding it to the view
 ///   hierarchy, because that lays it out again, which resizes the pty, which
 ///   raises SIGWINCH, which makes a full screen program repaint from scratch.
-///   Every view stays mounted at the same size and switching is `isHidden`.
+///   Every view stays mounted and switching is `isHidden`. A split shows two
+///   frames. Hidden views keep the last size they had, so bringing one back
+///   to a half it already filled does not SIGWINCH.
 struct TerminalStack: NSViewRepresentable {
     let sessions: [TerminalSession]
-    /// The session to show, or nil to show none, which is what happens while a
-    /// file is open over the top.
-    let active: TerminalSession?
+    /// Left / top session when split, or the only visible session when not.
+    let leading: TerminalSession?
+    /// Right / bottom session when split.
+    var trailing: TerminalSession? = nil
+    /// The half that should own the keyboard.
+    var focused: TerminalSession? = nil
+    /// `nil` is a single pane. Horizontal is side by side, vertical is stacked.
+    var splitAxis: Axis? = nil
+    /// Leading (left / top) share of the column, 0.2...0.8.
+    var fraction: CGFloat = 0.5
     /// Whether this stack may claim first responder. False while the workspace
     /// surface is kept mounted under another destination (Home, Insights, …).
     var claimsFocus: Bool = true
+    /// Which visible half last took a click, so first responder follows it.
+    var onActivate: ((TerminalSession) -> Void)? = nil
 
     func makeNSView(context: Context) -> TerminalStackView {
-        TerminalStackView()
+        let view = TerminalStackView()
+        view.coordinator = context.coordinator
+        return view
     }
 
     func updateNSView(_ nsView: TerminalStackView, context: Context) {
+        context.coordinator.parent = self
         // Only sessions that already have an emulator. Pending ones have no
         // view on purpose: the pane draws a starting state over them instead.
         let loaded = sessions.compactMap(\.terminalViewIfLoaded)
-        let activeView = active.flatMap(\.terminalViewIfLoaded)
-        nsView.sync(views: loaded, active: activeView, claimsFocus: claimsFocus)
+        nsView.sync(
+            views: loaded,
+            leading: leading.flatMap(\.terminalViewIfLoaded),
+            trailing: trailing.flatMap(\.terminalViewIfLoaded),
+            focused: focused.flatMap(\.terminalViewIfLoaded),
+            axis: splitAxis,
+            fraction: fraction,
+            claimsFocus: claimsFocus
+        )
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator {
+        var parent: TerminalStack
+
+        init(_ parent: TerminalStack) {
+            self.parent = parent
+        }
+
+        func activate(view: TerminalView) {
+            // The click monitor is not actor-isolated. Sessions live on the
+            // main actor. A mouse-down is already on the main thread, so this
+            // hop is a hop in name only.
+            Task { @MainActor in
+                if let session = self.parent.sessions.first(where: {
+                    $0.terminalViewIfLoaded === view
+                }) {
+                    self.parent.onActivate?(session)
+                }
+            }
+        }
     }
 }
 
@@ -57,16 +103,34 @@ final class TerminalStackView: NSView {
     /// while the stack still has a zero frame (fresh `makeNSView`); painting
     /// then marks an empty rect and the buffer never appears.
     private var needsFullPaint = false
+    weak var coordinator: TerminalStack.Coordinator?
+    private weak var leadingView: TerminalView?
+    private weak var trailingView: TerminalView?
+    private var splitAxis: Axis?
+    private var fraction: CGFloat = 0.5
+    private var clickMonitor: Any?
 
-    func sync(views: [TerminalView], active: TerminalView?, claimsFocus: Bool) {
+    func sync(
+        views: [TerminalView],
+        leading: TerminalView?,
+        trailing: TerminalView?,
+        focused: TerminalView?,
+        axis: Axis?,
+        fraction: CGFloat,
+        claimsFocus: Bool
+    ) {
+        leadingView = leading
+        trailingView = trailing
+        splitAxis = axis
+        self.fraction = fraction
         // Views just re-parented into this stack need a repaint even when they
         // stay visible: a fresh TerminalStackView after a folder switch hands
         // the same emulator instance into a new hierarchy, and without a
         // display the screen shows only a caret until the process prints.
         var reparented = Set<ObjectIdentifier>()
         for view in views where view.superview !== self {
-            view.frame = bounds
-            view.autoresizingMask = [.width, .height]
+            // No autoresizing: split frames are set in `layout`.
+            view.autoresizingMask = []
             addSubview(view)
             reparented.insert(ObjectIdentifier(view))
         }
@@ -77,22 +141,20 @@ final class TerminalStackView: NSView {
 
         var requestPaint = !reparented.isEmpty
         for view in views {
-            let visible = view === active
-            // isHidden and visible disagree when the view needs to flip.
+            let visible = view === leading || view === trailing
             let needsFlip = view.isHidden == visible
             if needsFlip {
                 view.isHidden = !visible
                 if visible { requestPaint = true }
             }
         }
+        needsLayout = true
+        layoutSubtreeIfNeeded()
         if requestPaint {
             scheduleFullPaint()
         }
 
         if !claimsFocus {
-            // Surface is mounted but not in front. Do not steal first
-            // responder from Home (or any other destination). Clear `shown`
-            // so the next claimsFocus rising edge reclaims the keyboard.
             if lastClaimsFocus {
                 shown = nil
             }
@@ -102,27 +164,17 @@ final class TerminalStackView: NSView {
 
         let focusReturning = !lastClaimsFocus
         lastClaimsFocus = true
+        installClickMonitor()
 
-        if let active, focusReturning || shown !== active {
-            shown = active
-            // Hiding a view makes AppKit drop first responder, so the one now in
-            // front has to take it back or the terminal accepts no keystrokes
-            // until it is clicked.
-            //
-            // Not from here, though. `sync` is called from `updateNSView`, which
-            // SwiftUI runs inside a layout pass, and moving first responder there
-            // re-enters layout on a hierarchy that is already being laid out.
-            // Next turn of the runloop is soon enough for a keystroke.
-            //
-            // Re-check `lastClaimsFocus` when the block runs: the user can leave
-            // for Home in the same turn this was scheduled, and without the
-            // guard the terminal would steal the keyboard from that destination.
-            DispatchQueue.main.async { [weak self, weak active] in
-                guard let self, let active, active.superview === self else { return }
+        let key = focused ?? leading
+        if let key, focusReturning || shown !== key {
+            shown = key
+            DispatchQueue.main.async { [weak self, weak key] in
+                guard let self, let key, key.superview === self else { return }
                 guard self.lastClaimsFocus else { return }
-                self.window?.makeFirstResponder(active)
+                self.window?.makeFirstResponder(key)
             }
-        } else if active == nil {
+        } else if key == nil {
             shown = nil
         }
     }
@@ -144,16 +196,66 @@ final class TerminalStackView: NSView {
 
     override func layout() {
         super.layout()
-        // Every terminal is the full pane, visible or not. Same size for all of
-        // them is what makes switching free: nothing resizes, so nothing repaints.
-        for sub in subviews {
-            if sub.frame != bounds { sub.frame = bounds }
+        let gap: CGFloat = 1
+        if let axis = splitAxis, bounds.width > 1, bounds.height > 1 {
+            let (lead, trail) = splitFrames(axis: axis, fraction: fraction, gap: gap)
+            if let view = leadingView, view.frame != lead { view.frame = lead }
+            if let view = trailingView, view.frame != trail { view.frame = trail }
+            // Hidden views keep the last frame they were shown at. Resizing
+            // them here would SIGWINCH a session nobody can see.
+        } else {
+            for sub in subviews {
+                if sub.frame != bounds { sub.frame = bounds }
+            }
         }
-        // Paint after a real size exists. Re-parent often lands while the
-        // stack is still 0×0; setNeedsDisplay then was a no-op and the buffer
-        // never recovered.
         if needsFullPaint, bounds.width > 1, bounds.height > 1 {
             paintVisibleTerminals()
+        }
+    }
+
+    private func splitFrames(axis: Axis, fraction: CGFloat, gap: CGFloat) -> (CGRect, CGRect) {
+        let clamped = min(0.8, max(0.2, fraction))
+        switch axis {
+        case .horizontal:
+            let leadW = max(1, (bounds.width - gap) * clamped)
+            let trailX = leadW + gap
+            return (
+                CGRect(x: 0, y: 0, width: leadW, height: bounds.height),
+                CGRect(x: trailX, y: 0, width: max(1, bounds.width - trailX), height: bounds.height)
+            )
+        case .vertical:
+            // AppKit y is up. Leading (focused) is the top half in UI terms,
+            // which is the higher y origin.
+            let leadH = max(1, (bounds.height - gap) * clamped)
+            let trailH = max(1, bounds.height - leadH - gap)
+            return (
+                CGRect(x: 0, y: bounds.height - leadH, width: bounds.width, height: leadH),
+                CGRect(x: 0, y: 0, width: bounds.width, height: trailH)
+            )
+        }
+    }
+
+    private func installClickMonitor() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.noteClick(event)
+            return event
+        }
+    }
+
+    private func noteClick(_ event: NSEvent) {
+        guard let window, event.window === window else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        if let leading = leadingView, !leading.isHidden, leading.frame.contains(point) {
+            coordinator?.activate(view: leading)
+        } else if let trailing = trailingView, !trailing.isHidden, trailing.frame.contains(point) {
+            coordinator?.activate(view: trailing)
+        }
+    }
+
+    deinit {
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
         }
     }
 }
