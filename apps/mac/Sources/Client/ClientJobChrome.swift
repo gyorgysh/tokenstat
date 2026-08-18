@@ -31,6 +31,8 @@ struct ClientFactRow: View {
 struct ClientWorkflowActions: View {
     @Bindable var session: ClientWorkflowSession
     var showsPrompt: Bool = true
+    /// When set, only Stop / Continue for that run. Start stays on the graph page.
+    var pinnedRunID: String? = nil
 
     @State private var pending: Pending?
 
@@ -62,7 +64,7 @@ struct ClientWorkflowActions: View {
                     )
             }
             HStack(spacing: Theme.Space.s) {
-                if let run = session.liveRun {
+                if let run = session.liveRun, pinnedRunID == nil || pinnedRunID == run.id {
                     if run.isWaiting {
                         Button(session.working ? "Working" : "Continue", .next) {
                             pending = .continueGate
@@ -73,12 +75,12 @@ struct ClientWorkflowActions: View {
                     Button("Stop", .stop) { pending = .stop }
                         .clientGlassStyle()
                         .disabled(session.working)
-                } else {
+                } else if pinnedRunID == nil {
                     Button(session.working ? "Starting" : "Run", .run) { pending = .run }
                         .clientProminentStyle()
                         .disabled(session.working || session.selectedGraph == nil)
                 }
-                if let graph = session.selectedGraph, graph.schedule.repeats {
+                if pinnedRunID == nil, let graph = session.selectedGraph, graph.schedule.repeats {
                     BrandToggleChip(
                         title: graph.enabled ? "On" : "Off",
                         isOn: Binding(
@@ -132,9 +134,9 @@ struct ClientWorkflowActions: View {
         case .run:
             return ClientJobCopy.run(name, folder: session.folderName, host: session.hostName)
         case .stop:
-            return ClientJobCopy.stop(name, host: session.hostName)
+            return ClientJobCopy.stop(name, folder: session.folderName, host: session.hostName)
         case .continueGate:
-            return ClientJobCopy.continueGate(name, host: session.hostName)
+            return ClientJobCopy.continueGate(name, folder: session.folderName, host: session.hostName)
         case nil:
             return ""
         }
@@ -144,6 +146,8 @@ struct ClientWorkflowActions: View {
 /// Run now / Stop / pause, with the same confirms as workflows.
 struct ClientAutomationActions: View {
     @Bindable var session: ClientAutomationSession
+    /// When set, only Stop for that run. Start stays on the job page.
+    var pinnedRunID: String? = nil
 
     @State private var pending: Pending?
 
@@ -161,16 +165,16 @@ struct ClientAutomationActions: View {
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
-            if session.liveRun != nil {
+            if let run = session.liveRun, pinnedRunID == nil || pinnedRunID == run.id {
                 Button("Stop", .stop) { pending = .stop }
                     .clientGlassStyle()
                     .disabled(session.working)
-            } else {
+            } else if pinnedRunID == nil {
                 Button(session.working ? "Starting" : "Run now", .run) { pending = .run }
                     .clientProminentStyle()
                     .disabled(session.working || session.selectedJob == nil)
             }
-            if let job = session.selectedJob {
+            if pinnedRunID == nil, let job = session.selectedJob, job.schedule.repeats {
                 BrandToggleChip(
                     title: job.enabled ? "On" : "Off",
                     isOn: Binding(
@@ -219,7 +223,7 @@ struct ClientAutomationActions: View {
         case .run:
             return ClientJobCopy.run(name, folder: session.folderName, host: session.hostName)
         case .stop:
-            return ClientJobCopy.stop(name, host: session.hostName)
+            return ClientJobCopy.stop(name, folder: session.folderName, host: session.hostName)
         case nil:
             return ""
         }

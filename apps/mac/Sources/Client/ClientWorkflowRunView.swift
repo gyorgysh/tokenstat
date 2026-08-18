@@ -27,7 +27,7 @@ struct ClientWorkflowRunView: View {
                 }
                 if let run {
                     header(run)
-                    ClientWorkflowActions(session: session, showsPrompt: false)
+                    ClientWorkflowActions(session: session, showsPrompt: false, pinnedRunID: runID)
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardSurface()

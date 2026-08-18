@@ -102,7 +102,9 @@ struct ClientAutomationDetailView: View {
             }
             ClientFactRow(
                 label: "Last",
-                value: ClientJobCopy.lastRunPhrase(session.lastRun(for: job)?.startedAt)
+                value: ClientJobCopy.lastRunWhen(
+                    session.lastRun(for: job)?.startedAt ?? job.lastRun
+                )
             )
         }
         .padding(Theme.Space.m)

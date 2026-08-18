@@ -32,12 +32,12 @@ enum ClientJobCopy {
         "Starts \(name) in \(folder) on \(host)."
     }
 
-    static func stop(_ name: String, host: String) -> String {
-        "Stops the run of \(name) on \(host)."
+    static func stop(_ name: String, folder: String, host: String) -> String {
+        "Stops the run of \(name) in \(folder) on \(host)."
     }
 
-    static func continueGate(_ name: String, host: String) -> String {
-        "Lets \(name) continue on \(host)."
+    static func continueGate(_ name: String, folder: String, host: String) -> String {
+        "Lets \(name) continue in \(folder) on \(host)."
     }
 
     static func budget(_ seconds: UInt64) -> String {
@@ -54,6 +54,13 @@ enum ClientJobCopy {
     static func lastRunPhrase(_ date: Date?) -> String {
         guard let date else { return "Never run" }
         return "Last \(RelativeClock.phrase(for: date, style: .abbreviated))"
+    }
+
+    /// Fact-row value. The label is already "Last", so no prefix.
+    @MainActor
+    static func lastRunWhen(_ date: Date?) -> String {
+        guard let date else { return "Never run" }
+        return RelativeClock.phrase(for: date, style: .abbreviated)
     }
 }
 

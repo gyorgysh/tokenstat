@@ -84,7 +84,9 @@ struct ClientWorkflowWorkspace: View {
                         } label: {
                             ClientJobRow(
                                 title: graph.name,
-                                subtitle: ClientJobCopy.lastRunPhrase(session.lastRun(for: graph)?.startedAt),
+                                subtitle: ClientJobCopy.lastRunPhrase(
+                                    session.lastRun(for: graph)?.startedAt ?? graph.lastRun
+                                ),
                                 isLive: session.runs.contains { $0.workflowID == graph.id && $0.isLive },
                                 isEnabled: graph.enabled,
                                 graph: graph,

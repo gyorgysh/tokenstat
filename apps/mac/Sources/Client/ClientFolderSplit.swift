@@ -140,6 +140,11 @@ struct ClientFolderSplit: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .truncationMode(.middle)
+            if let subtitle = current.subtitle {
+                Text(subtitle)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.accent)
+            }
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)

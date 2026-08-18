@@ -90,7 +90,9 @@ struct ClientWorkflowDetailView: View {
             }
             ClientFactRow(
                 label: "Last",
-                value: ClientJobCopy.lastRunPhrase(session.lastRun(for: graph)?.startedAt)
+                value: ClientJobCopy.lastRunWhen(
+                    session.lastRun(for: graph)?.startedAt ?? graph.lastRun
+                )
             )
         }
         .padding(Theme.Space.m)

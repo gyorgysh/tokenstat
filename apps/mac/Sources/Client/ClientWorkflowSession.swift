@@ -37,21 +37,30 @@ final class ClientWorkflowSession {
     private(set) var transcriptText = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var catchUpTask: Task<Void, Never>?
     private var pollingKey: String?
     private var isVisible = false
     private var visibility = 0
+    /// Set when this session is a detail page for one graph. A missing id
+    /// then stays missing instead of becoming some other graph.
+    private let pinnedGraphID: String?
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String, graphID: String? = nil) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
         self.folderName = folderName
+        self.pinnedGraphID = graphID
         self.selectedGraphID = graphID
     }
 
+    /// When the caller asked for a specific graph, do not fall back to another
+    /// one. The detail screen has to show empty, not a neighbour.
     var selectedGraph: WorkflowGraph? {
-        guard let selectedGraphID else { return graphs.first }
-        return graphs.first { $0.id == selectedGraphID } ?? graphs.first
+        if let selectedGraphID {
+            return graphs.first { $0.id == selectedGraphID }
+        }
+        return graphs.first
     }
 
     var selectedRun: WorkflowRunRecord? {
@@ -102,8 +111,8 @@ final class ClientWorkflowSession {
             graphs = try await all.filter { $0.workspaceID == workspaceID }
             runs = try await history.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
-            if selectedGraphID == nil {
-                selectedGraphID = graphs.first?.id
+            if selectedGraphID == nil || graphs.first(where: { $0.id == selectedGraphID }) == nil {
+                selectedGraphID = pinnedGraphID ?? graphs.first?.id
             }
             if selectedRunID == nil, let graph = selectedGraph {
                 selectedRunID = lastRun(for: graph)?.id
@@ -193,7 +202,9 @@ final class ClientWorkflowSession {
         // The host replaces the whole graph. Re-read first so a stale
         // phone copy cannot wipe a Mac edit.
         await load()
-        guard var graph = selectedGraph, graph.schedule.repeats else { return }
+        // A failed re-read leaves the last copy on screen. Sending that
+        // as workflow.update would wipe a newer Mac edit.
+        guard errorMessage == nil, var graph = selectedGraph, graph.schedule.repeats else { return }
         graph.enabled.toggle()
         do {
             let updated = try await ClientRemote.updateWorkflow(peer: peer, graph: graph)
@@ -216,7 +227,7 @@ final class ClientWorkflowSession {
             startPolling(runID: run.id, nodeID: node, key: key)
         } else {
             stopPolling()
-            Task { await fetchUntilCaughtUp(runID: run.id, nodeID: node) }
+            startCatchUp(runID: run.id, nodeID: node)
         }
     }
 
@@ -247,10 +258,19 @@ final class ClientWorkflowSession {
         }
     }
 
+    private func startCatchUp(runID: String, nodeID: String) {
+        catchUpTask?.cancel()
+        catchUpTask = Task { [weak self] in
+            await self?.fetchUntilCaughtUp(runID: runID, nodeID: nodeID)
+        }
+    }
+
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
         pollingKey = nil
+        catchUpTask?.cancel()
+        catchUpTask = nil
     }
 
     private func refreshRuns() async {
@@ -260,7 +280,7 @@ final class ClientWorkflowSession {
             if let run = selectedRun, !run.isLive {
                 stopPolling()
                 if let node = transcriptNode(in: run) {
-                    await fetchUntilCaughtUp(runID: run.id, nodeID: node)
+                    startCatchUp(runID: run.id, nodeID: node)
                 }
             }
         } catch {
@@ -268,12 +288,19 @@ final class ClientWorkflowSession {
         }
     }
 
+    private func stillWatching(runID: String, nodeID: String) -> Bool {
+        guard selectedRunID == runID, let run = selectedRun else { return false }
+        return transcriptNode(in: run) == nodeID
+    }
+
     private func fetchUntilCaughtUp(runID: String, nodeID: String) async {
         var slices = 0
         while slices < 8 {
+            guard !Task.isCancelled else { return }
             slices += 1
             let before = transcriptOffset
             await fetchTranscript(runID: runID, nodeID: nodeID)
+            if Task.isCancelled || !stillWatching(runID: runID, nodeID: nodeID) { return }
             if transcriptOffset <= before { return }
         }
     }
@@ -286,6 +313,7 @@ final class ClientWorkflowSession {
                 nodeID: nodeID,
                 offset: transcriptOffset
             )
+            if Task.isCancelled || !stillWatching(runID: runID, nodeID: nodeID) { return }
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
@@ -295,6 +323,7 @@ final class ClientWorkflowSession {
                     nodeID: nodeID,
                     offset: 0
                 )
+                if Task.isCancelled || !stillWatching(runID: runID, nodeID: nodeID) { return }
                 transcriptText = ClientTranscript.capped(again.text)
                 transcriptOffset = again.nextOffset
                 return

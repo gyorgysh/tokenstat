@@ -27,7 +27,7 @@ struct ClientAutomationRunView: View {
                 }
                 if let run {
                     header(run)
-                    ClientAutomationActions(session: session)
+                    ClientAutomationActions(session: session, pinnedRunID: runID)
                         .padding(Theme.Space.m)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .cardSurface()

@@ -32,21 +32,30 @@ final class ClientAutomationSession {
     private(set) var transcriptText = ""
     private var transcriptOffset: UInt64 = 0
     private var pollTask: Task<Void, Never>?
+    private var catchUpTask: Task<Void, Never>?
     private var pollingID: String?
     private var isVisible = false
     private var visibility = 0
+    /// Set when this session is a detail page for one job. A missing id
+    /// then stays missing instead of becoming some other job.
+    private let pinnedJobID: String?
 
     init(peer: String, workspaceID: String, hostName: String, folderName: String, jobID: String? = nil) {
         self.peer = peer
         self.workspaceID = workspaceID
         self.hostName = hostName
         self.folderName = folderName
+        self.pinnedJobID = jobID
         self.selectedJobID = jobID
     }
 
+    /// When the caller asked for a specific job, do not fall back to another
+    /// one. The detail screen has to show empty, not a neighbour.
     var selectedJob: Automation? {
-        guard let selectedJobID else { return jobs.first }
-        return jobs.first { $0.id == selectedJobID } ?? jobs.first
+        if let selectedJobID {
+            return jobs.first { $0.id == selectedJobID }
+        }
+        return jobs.first
     }
 
     var selectedRun: RunRecord? {
@@ -97,8 +106,8 @@ final class ClientAutomationSession {
             jobs = try await all.filter { $0.workspaceID == workspaceID }
             runs = try await history.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
-            if selectedJobID == nil {
-                selectedJobID = jobs.first?.id
+            if selectedJobID == nil || jobs.first(where: { $0.id == selectedJobID }) == nil {
+                selectedJobID = pinnedJobID ?? jobs.first?.id
             }
             if selectedRunID == nil, let job = selectedJob {
                 selectedRunID = lastRun(for: job)?.id
@@ -185,7 +194,7 @@ final class ClientAutomationSession {
             startPolling(run.id)
         } else {
             stopPolling()
-            Task { await fetchUntilCaughtUp(id: run.id) }
+            startCatchUp(id: run.id)
         }
     }
 
@@ -207,10 +216,19 @@ final class ClientAutomationSession {
         }
     }
 
+    private func startCatchUp(id: String) {
+        catchUpTask?.cancel()
+        catchUpTask = Task { [weak self] in
+            await self?.fetchUntilCaughtUp(id: id)
+        }
+    }
+
     private func stopPolling() {
         pollTask?.cancel()
         pollTask = nil
         pollingID = nil
+        catchUpTask?.cancel()
+        catchUpTask = nil
     }
 
     private func refreshRuns() async {
@@ -219,19 +237,25 @@ final class ClientAutomationSession {
             runs = latest.filter { $0.workspaceID == workspaceID }
             if let run = selectedRun, !run.isRunning {
                 stopPolling()
-                await fetchUntilCaughtUp(id: run.id)
+                startCatchUp(id: run.id)
             }
         } catch {
             // The next tick tries again.
         }
     }
 
+    private func stillWatching(_ id: String) -> Bool {
+        selectedRunID == id
+    }
+
     private func fetchUntilCaughtUp(id: String) async {
         var slices = 0
         while slices < 8 {
+            guard !Task.isCancelled else { return }
             slices += 1
             let before = transcriptOffset
             await fetchTranscript(id: id)
+            if Task.isCancelled || !stillWatching(id) { return }
             if transcriptOffset <= before { return }
         }
     }
@@ -243,6 +267,7 @@ final class ClientAutomationSession {
                 id: id,
                 offset: transcriptOffset
             )
+            if Task.isCancelled || !stillWatching(id) { return }
             if chunk.nextOffset < transcriptOffset {
                 transcriptText = ""
                 transcriptOffset = 0
@@ -251,6 +276,7 @@ final class ClientAutomationSession {
                     id: id,
                     offset: 0
                 )
+                if Task.isCancelled || !stillWatching(id) { return }
                 transcriptText = ClientTranscript.capped(again.text)
                 transcriptOffset = again.nextOffset
                 return

@@ -7,6 +7,7 @@
 
 #if !os(macOS)
 import SwiftUI
+import UIKit
 
 /// One folder on a connected host, as its sections.
 ///
@@ -52,9 +53,15 @@ struct ClientWorkspaceDetailView: View {
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
+    /// iPad regular width only. A large iPhone in landscape is regular, and
+    /// that is still a phone surface.
+    private var usesWorkspaceLayout: Bool {
+        sizeClass == .regular && UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     var body: some View {
         Group {
-            if sizeClass == .regular {
+            if usesWorkspaceLayout {
                 ClientFolderSplit(peer: peer, hostName: hostName, folder: folder)
             } else {
                 stacked
@@ -574,7 +581,7 @@ struct ClientWorkspaceWorkflowsView: View {
                     ClientJobRow(
                         title: graph.name,
                         subtitle: ClientJobCopy.lastRunPhrase(
-                            runs.first { $0.workflowID == graph.id }?.startedAt
+                            runs.first { $0.workflowID == graph.id }?.startedAt ?? graph.lastRun
                         ),
                         isLive: runs.contains { $0.workflowID == graph.id && $0.isLive },
                         isEnabled: graph.enabled,
