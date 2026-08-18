@@ -2256,8 +2256,9 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     /// Lifetime tokens this session has used, from the live meter.
     /// Absent when the harness has no usable log yet. Never a fake zero.
     var tokens: UInt64?
-    /// List-rate equivalent of those tokens, in microdollars. Absent when
-    /// nothing priced. Never a made-up `$0.00`.
+    /// List-rate equivalent of those tokens, in microdollars. Zero once
+    /// something priced, so the row counts up from `$0.00`. Absent only when
+    /// nothing could be priced at all.
     var costMicros: Int64?
     /// True when at least one priced event used a catalog estimate.
     var costEstimated: Bool?
@@ -2268,9 +2269,15 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
     var model: String?
     /// Prompt-side tokens of the last turn. The context bar numerator.
     var contextUsed: UInt64?
-    /// Catalog context window for `model`. Both this and `contextUsed` must
-    /// be present before a bar is drawn.
+    /// Catalog context window for `model`. Absent for a model no snapshot
+    /// lists, in which case the row shows the used figure without a bar.
     var contextWindow: UInt64?
+    /// True when the window came from sibling models rather than a published
+    /// figure. The percentage is then marked as approximate.
+    var contextEstimated: Bool?
+    /// `metered`, `plan`, or `unknown`. A plan session's money is an
+    /// equivalent, never a charge.
+    var billing: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -2297,6 +2304,8 @@ struct PtySessionInfo: Codable, Sendable, Hashable, Identifiable {
         case model
         case contextUsed
         case contextWindow
+        case contextEstimated
+        case billing
     }
 }
 

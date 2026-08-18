@@ -52,9 +52,16 @@ struct SessionMeter: Equatable, Sendable {
     var costMicros: Int64?
     var estimated: Bool
     var complete: Bool
+    /// `metered`, `plan` or `unknown`, as the host read it. A plan session's
+    /// figure is a list-rate equivalent and is marked as one.
+    var billing: String?
     var model: String?
     var contextUsed: UInt64?
     var contextWindow: UInt64?
+    /// The window is a sibling's, not a published one.
+    var contextEstimated: Bool
+
+    var isPlan: Bool { billing == "plan" }
 }
 
 /// Terminal preferences, stored as user defaults and read by the terminal
@@ -1244,13 +1251,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// because `pty.info` arrives several times a second.
     private func applyMeter(from info: PtySessionInfo) {
         let tokens = info.tokens ?? 0
-        let cost = info.costMicros.flatMap { $0 > 0 ? $0 : nil }
-        let context: (UInt64, UInt64)? = {
-            guard let used = info.contextUsed, used > 0,
-                  let window = info.contextWindow, window > 0
-            else { return nil }
-            return (used, window)
-        }()
+        // Zero is a reading now. The host sends `0` for a harness it can
+        // meter that has not logged a turn yet, so the row starts at $0.00
+        // and counts up instead of appearing at whatever it has reached.
+        let cost = info.costMicros
+        let used = info.contextUsed.flatMap { $0 > 0 ? $0 : nil }
+        let window = info.contextWindow.flatMap { $0 > 0 ? $0 : nil }
         let next: SessionMeter?
         if tokens > 0 || cost != nil {
             next = SessionMeter(
@@ -1258,9 +1264,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 costMicros: cost,
                 estimated: info.costEstimated ?? false,
                 complete: info.costComplete ?? true,
+                billing: info.billing,
                 model: info.model,
-                contextUsed: context?.0,
-                contextWindow: context?.1
+                contextUsed: used,
+                contextWindow: window,
+                contextEstimated: info.contextEstimated ?? false
             )
         } else {
             next = nil
