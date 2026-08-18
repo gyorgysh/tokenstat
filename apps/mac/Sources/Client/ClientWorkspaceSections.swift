@@ -15,9 +15,9 @@ import SwiftUI
 /// tab strip, so a section pushes instead of opening a tab: list, workspace,
 /// section, and a document is the fourth and last level.
 ///
-/// Read-only past Sessions. Starting an agent and watching one are what the
-/// phone is for. Editing a graph on a 390 point screen is not, and pretending
-/// otherwise would be four cramped copies of a desktop screen.
+/// Sessions, workflows and automations can start and stop work on the
+/// machine that owns the folder. Construction stays on the Mac: a phone
+/// can run a graph, it cannot draw one.
 struct ClientWorkspaceDetailView: View {
     let peer: String
     let hostName: String
@@ -51,6 +51,10 @@ struct ClientWorkspaceDetailView: View {
     }
 
     var body: some View {
+        stacked
+    }
+
+    private var stacked: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if let errorMessage {
@@ -147,7 +151,8 @@ struct ClientWorkspaceDetailView: View {
                 ClientWorkspaceWorkflowsView(
                     peer: peer,
                     workspaceID: workspaceID,
-                    hostName: hostName
+                    hostName: hostName,
+                    folderName: current.name
                 )
             } label: {
                 ClientSectionRow(section: .workflows, count: counts.workflows)
@@ -158,7 +163,8 @@ struct ClientWorkspaceDetailView: View {
                 ClientWorkspaceAutomationsView(
                     peer: peer,
                     workspaceID: workspaceID,
-                    hostName: hostName
+                    hostName: hostName,
+                    folderName: current.name
                 )
             } label: {
                 ClientSectionRow(section: .automations, count: counts.automations)
@@ -263,7 +269,7 @@ struct ClientWorkspaceDetailView: View {
 }
 
 /// What the badges say. One value each, filled by one pass.
-private struct WorkspaceSectionCounts {
+struct WorkspaceSectionCounts {
     var sessions = 0
     var changes = 0
     var todo = 0
@@ -276,9 +282,11 @@ private struct WorkspaceSectionCounts {
 /// The same glyph and the same word as the Mac's sidebar row, at the size a
 /// thumb needs. Zero draws nothing, for the reason it draws nothing there: a
 /// zero is not news, and seven grey zeroes is a wall of them.
-private struct ClientSectionRow: View {
+struct ClientSectionRow: View {
     let section: WorkspaceSection
     let count: Int?
+    var isSelected: Bool = false
+    var showsChevron: Bool = true
 
     var body: some View {
         HStack(spacing: Theme.Space.m) {
@@ -295,13 +303,22 @@ private struct ClientSectionRow: View {
                     .font(ClientType.rowFigure)
                     .foregroundStyle(.secondary)
             }
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity)
-        .cardSurface()
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(
+            isSelected ? Theme.rowSelected : Theme.panel,
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(isSelected ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+        }
         .contentShape(.rect)
     }
 }
@@ -519,6 +536,7 @@ struct ClientWorkspaceWorkflowsView: View {
     let peer: String
     let workspaceID: String
     let hostName: String
+    let folderName: String
 
     @State private var graphs: [WorkflowGraph] = []
     @State private var runs: [WorkflowRunRecord] = []
@@ -532,15 +550,31 @@ struct ClientWorkspaceWorkflowsView: View {
             isLoaded: loaded,
             isEmpty: graphs.isEmpty && runs.isEmpty,
             emptyText: "No workflows bound to this folder.",
+            refreshKey: "workspace-workflows-\(workspaceID)",
             reload: { await load() }
         ) {
             ForEach(graphs) { graph in
-                ClientJobRow(
-                    title: graph.name,
-                    subtitle: "\(graph.nodes.count) step\(graph.nodes.count == 1 ? "" : "s")",
-                    isLive: runs.contains { $0.workflowID == graph.id && $0.isLive },
-                    isEnabled: graph.enabled
-                )
+                NavigationLink {
+                    ClientWorkflowDetailView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: folderName,
+                        graphID: graph.id
+                    )
+                } label: {
+                    ClientJobRow(
+                        title: graph.name,
+                        subtitle: ClientJobCopy.lastRunPhrase(
+                            runs.first { $0.workflowID == graph.id }?.startedAt
+                        ),
+                        isLive: runs.contains { $0.workflowID == graph.id && $0.isLive },
+                        isEnabled: graph.enabled,
+                        graph: graph,
+                        liveRun: runs.first { $0.workflowID == graph.id && $0.isLive }
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .task { await load() }
@@ -567,6 +601,7 @@ struct ClientWorkspaceAutomationsView: View {
     let peer: String
     let workspaceID: String
     let hostName: String
+    let folderName: String
 
     @State private var jobs: [Automation] = []
     @State private var runs: [RunRecord] = []
@@ -580,15 +615,28 @@ struct ClientWorkspaceAutomationsView: View {
             isLoaded: loaded,
             isEmpty: jobs.isEmpty,
             emptyText: "No automations set up in this folder.",
+            refreshKey: "workspace-automations-\(workspaceID)",
             reload: { await load() }
         ) {
             ForEach(jobs) { job in
-                ClientJobRow(
-                    title: job.name,
-                    subtitle: job.backend,
-                    isLive: runs.contains { $0.jobId == job.id && $0.isRunning },
-                    isEnabled: job.enabled
-                )
+                NavigationLink {
+                    ClientAutomationDetailView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: folderName,
+                        jobID: job.id
+                    )
+                } label: {
+                    ClientJobRow(
+                        title: job.name,
+                        subtitle: job.schedule.summary,
+                        isLive: runs.contains { $0.jobId == job.id && $0.isRunning },
+                        isEnabled: job.enabled,
+                        cadence: job.schedule
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .task { await load() }
@@ -611,46 +659,88 @@ struct ClientWorkspaceAutomationsView: View {
 // MARK: - Shared section chrome
 
 /// A job or a graph: a name, one quiet line, and whether it is going.
-private struct ClientJobRow: View {
+struct ClientJobRow: View {
     let title: String
     let subtitle: String
     let isLive: Bool
     let isEnabled: Bool
+    var graph: WorkflowGraph? = nil
+    var liveRun: WorkflowRunRecord? = nil
+    var cadence: AutomationSchedule? = nil
+    var showsChevron: Bool = true
+    var isSelected: Bool = false
 
     var body: some View {
-        HStack(spacing: Theme.Space.s) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .top, spacing: Theme.Space.s) {
+            if let cadence {
+                CadenceGlyph(
+                    schedule: cadence,
+                    enabled: isEnabled,
+                    size: 22,
+                    summary: cadence.summary
+                )
+                .padding(.top, 2)
+            }
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(subtitle)
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-            }
-            Spacer()
-            if isLive {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(Theme.stateWorking)
-                        .frame(width: 7, height: 7)
-                    Text("Running")
-                        .font(ClientType.caption)
-                        .foregroundStyle(Theme.stateWorking)
+                if let graph {
+                    MiniGraph(
+                        nodes: graph.nodes,
+                        edges: graph.edges,
+                        steps: liveRun?.steps ?? [],
+                        currentNodeID: liveRun?.currentNodeID,
+                        maxColumns: 5,
+                        dot: 18
+                    )
+                    .accessibilityHidden(true)
                 }
-            } else if !isEnabled {
-                Text("Paused")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 4) {
+                if isLive {
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(Theme.stateWorking)
+                            .frame(width: 7, height: 7)
+                        Text("Running")
+                            .font(ClientType.caption)
+                            .foregroundStyle(Theme.stateWorking)
+                    }
+                } else if !isEnabled {
+                    Text("Paused")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
             }
         }
         .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity)
-        .cardSurface()
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(
+            isSelected ? Theme.rowSelected : Theme.panel,
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(isSelected ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+        }
+        .contentShape(.rect)
+        .opacity(isEnabled || isLive ? 1 : 0.7)
     }
 }
 
-private struct ClientSectionEmpty: View {
+struct ClientSectionEmpty: View {
     let text: String
 
     var body: some View {
@@ -672,6 +762,7 @@ private struct ClientSectionList<Content: View>: View {
     let isLoaded: Bool
     let isEmpty: Bool
     let emptyText: String
+    var refreshKey: String? = nil
     let reload: () async -> Void
     @ViewBuilder var content: Content
 
@@ -702,7 +793,13 @@ private struct ClientSectionList<Content: View>: View {
         .background(Theme.background)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await reload() }
+        .refreshable {
+            if let refreshKey {
+                await ClientRefresh.pull(refreshKey) { await reload() }
+            } else {
+                await reload()
+            }
+        }
     }
 }
 

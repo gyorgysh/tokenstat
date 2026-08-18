@@ -625,31 +625,7 @@ final class AutomationsModel {
     }
 
     func scheduleSummary(_ s: AutomationSchedule) -> String {
-        let time = String(format: "%d:%02d", s.hour, s.minute)
-        switch s.kind {
-        case .once: return "once, when you run it"
-        case .interval:
-            let minutes = Int(s.everySeconds) / 60
-            if minutes >= 60, minutes % 60 == 0 {
-                let hours = minutes / 60
-                return "every \(hours) hour\(hours == 1 ? "" : "s")"
-            }
-            return "every \(minutes) minute\(minutes == 1 ? "" : "s")"
-        case .daily: return "daily at \(time)"
-        case .weekdays: return "weekdays at \(time)"
-        case .weekly:
-            // Prefer the multi-day bitset when present (host accepts both).
-            if s.weekdays & 0b0111_1111 != 0 {
-                return "\(Self.dayList(s.weekdays)) at \(time)"
-            }
-            let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            let day = s.weekday >= 0 && s.weekday < 7 ? names[s.weekday] : "?"
-            return "\(day) at \(time)"
-        case .custom:
-            let days = Self.dayList(s.weekdays)
-            if days.isEmpty { return "custom at \(time)" }
-            return "\(days) at \(time)"
-        }
+        s.summary
     }
 
     private static func capped(_ text: String) -> String {
@@ -665,10 +641,4 @@ final class AutomationsModel {
         return String(decoding: bytes[start...], as: UTF8.self)
     }
 
-    private static func dayList(_ mask: Int) -> String {
-        let short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        return (0..<7).compactMap { bit -> String? in
-            (mask & (1 << bit)) != 0 ? short[bit] : nil
-        }.joined(separator: ", ")
-    }
 }

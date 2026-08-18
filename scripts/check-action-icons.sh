@@ -63,6 +63,7 @@ ALLOWED = [
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
+    ("Client/ClientWorkflowRunView.swift", "session.selectNode"),
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),

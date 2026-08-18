@@ -253,6 +253,83 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "workflow.runs", as: [WorkflowRunRecord].self)
     }
 
+    static func runAutomation(peer: String, id: String) async throws -> Automation {
+        try await Bridge.onPeer(peer, "automation.run", ["id": id], as: Automation.self)
+    }
+
+    static func setAutomation(peer: String, id: String, enabled: Bool) async throws -> Automation {
+        try await Bridge.onPeer(
+            peer,
+            enabled ? "automation.enable" : "automation.disable",
+            ["id": id],
+            as: Automation.self
+        )
+    }
+
+    static func killAutomation(peer: String, runID: String) async throws {
+        struct Ack: Codable, Sendable { let killed: Bool? }
+        _ = try await Bridge.onPeer(peer, "automation.kill", ["id": runID], as: Ack.self)
+    }
+
+    static func automationTranscript(
+        peer: String,
+        id: String,
+        offset: UInt64
+    ) async throws -> TranscriptChunk {
+        try await Bridge.onPeer(
+            peer,
+            "automation.transcript",
+            ["id": id, "offset": offset],
+            as: TranscriptChunk.self
+        )
+    }
+
+    static func runWorkflow(
+        peer: String,
+        id: String,
+        input: String,
+        workspaceID: String
+    ) async throws -> WorkflowRunRecord {
+        try await Bridge.onPeer(
+            peer,
+            "workflow.run",
+            ["id": id, "input": input, "workspaceId": workspaceID],
+            as: WorkflowRunRecord.self
+        )
+    }
+
+    static func updateWorkflow(peer: String, graph: WorkflowGraph) async throws -> WorkflowGraph {
+        try await Bridge.onPeer(
+            peer,
+            "workflow.update",
+            ["workflow": try ClientJSON.object(graph)],
+            as: WorkflowGraph.self
+        )
+    }
+
+    static func killWorkflow(peer: String, runID: String) async throws {
+        struct Ack: Codable, Sendable { let killed: Bool? }
+        _ = try await Bridge.onPeer(peer, "workflow.kill", ["id": runID], as: Ack.self)
+    }
+
+    static func continueWorkflow(peer: String, runID: String) async throws -> WorkflowRunRecord {
+        try await Bridge.onPeer(peer, "workflow.continue", ["id": runID], as: WorkflowRunRecord.self)
+    }
+
+    static func workflowTranscript(
+        peer: String,
+        runID: String,
+        nodeID: String,
+        offset: UInt64
+    ) async throws -> TranscriptChunk {
+        try await Bridge.onPeer(
+            peer,
+            "workflow.transcript",
+            ["id": runID, "nodeId": nodeID, "offset": offset],
+            as: TranscriptChunk.self
+        )
+    }
+
     static func writeFile(
         peer: String,
         workspace: String,

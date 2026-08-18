@@ -1440,6 +1440,44 @@ struct AutomationSchedule: Codable, Sendable, Hashable {
     static let `default` = AutomationSchedule(kind: .once, everySeconds: 3600, hour: 9, minute: 0, weekday: 0)
     /// Monday through Friday bits, matching the host.
     static let weekdaysMask = 0b0001_1111
+
+    /// One phrasing for Mac, iPhone and iPad, so a job cannot say two things.
+    var summary: String {
+        let time = String(format: "%d:%02d", hour, minute)
+        switch kind {
+        case .once: return "once, when you run it"
+        case .interval:
+            let minutes = Int(everySeconds) / 60
+            if minutes >= 60, minutes % 60 == 0 {
+                let hours = minutes / 60
+                return "every \(hours) hour\(hours == 1 ? "" : "s")"
+            }
+            return "every \(minutes) minute\(minutes == 1 ? "" : "s")"
+        case .daily: return "daily at \(time)"
+        case .weekdays: return "weekdays at \(time)"
+        case .weekly:
+            if weekdays & 0b0111_1111 != 0 {
+                return "\(Self.dayList(weekdays)) at \(time)"
+            }
+            let names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            let day = weekday >= 0 && weekday < 7 ? names[weekday] : "?"
+            return "\(day) at \(time)"
+        case .custom:
+            let days = Self.dayList(weekdays)
+            if days.isEmpty { return "custom at \(time)" }
+            return "\(days) at \(time)"
+        }
+    }
+
+    /// A repeating schedule can be paused. Once is only ever a button.
+    var repeats: Bool { kind != .once }
+
+    private static func dayList(_ mask: Int) -> String {
+        let short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        return (0..<7).compactMap { bit -> String? in
+            (mask & (1 << bit)) != 0 ? short[bit] : nil
+        }.joined(separator: ", ")
+    }
 }
 
 enum ScheduleKind: String, Codable, Sendable, Hashable, CaseIterable {
@@ -1585,6 +1623,7 @@ struct WorkflowGraph: Codable, Sendable, Hashable, Identifiable {
     }
 
     var lastRun: Date? { lastRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
+    var nextRun: Date? { nextRunAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) } }
 
     /// Empty graph with a start node. The person still has to save it.
     static func blank(name: String = "Untitled", scope: WorkflowScope = .global, workspaceID: String? = nil) -> WorkflowGraph {
