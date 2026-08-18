@@ -167,6 +167,9 @@ struct ClientRootView: View {
             // The bar shrinks out of the way while reading and returns on
             // scroll up. iOS 26 only. It never hides completely.
             .modifier(TabBarMinimizeIfAvailable())
+            // And on iPad it is the same floating bar rather than a pill in
+            // the top bar. See `CompactTabBarOnPad`.
+            .clientCompactTabBarOnPad()
         } else {
             TabView(selection: $selection) {
                 ForEach(ClientTab.allCases) { tab in
