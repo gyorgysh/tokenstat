@@ -102,6 +102,7 @@ struct ClientRootView: View {
             // sits there after a successful approval, on top of a screen that
             // has already signed in behind it.
             account.signInDismisser = { ClientWebAuth.shared.cancel() }
+            store.currentAccount = { account.account }
             store.onAccountChange = { updated in
                 account.account = updated
                 NotificationCenter.default.post(name: .tokenstatEntitlementDidChange, object: nil)
@@ -113,6 +114,13 @@ struct ClientRootView: View {
             // See `ClientDeviceName`.
             await ClientDeviceName.publish()
             await account.load()
+            if let signed = account.account {
+                await store.finishPendingIntent(with: signed)
+            }
+        }
+        .onChange(of: account.signedIn) { _, signedIn in
+            guard signedIn, let signed = account.account else { return }
+            Task { await store.finishPendingIntent(with: signed) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             // Cold start offline leaves authNeedsRetry. Signed-in screens also

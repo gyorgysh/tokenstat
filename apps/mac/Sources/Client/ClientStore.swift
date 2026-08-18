@@ -119,8 +119,14 @@ final class ClientStore {
     /// Written by the root so a successful purchase updates the same account
     /// model the rest of the app is already reading.
     @ObservationIgnored var onAccountChange: ((Account) -> Void)?
+    /// Current signed-in account, if any. A product-page tap has to attach
+    /// this account's `appAccountToken` or the receipt has no owner.
+    @ObservationIgnored var currentAccount: (() -> Account?)?
 
     private var updatesTask: Task<Void, Never>?
+    private var intentsTask: Task<Void, Never>?
+    /// Product-page tap waiting on sign-in. One at a time.
+    private var pendingIntent: PurchaseIntent?
 
     var isBusy: Bool { isLoading || purchasingProductID != nil || isRestoring }
 
@@ -135,12 +141,21 @@ final class ClientStore {
                 await self?.handle(result)
             }
         }
+        // App Store Connect will not turn Streamlined Purchasing off until
+        // the latest approved binary listens on `PurchaseIntent.intents`.
+        intentsTask = Task { [weak self] in
+            for await intent in PurchaseIntent.intents {
+                await self?.handle(intent)
+            }
+        }
         Task { await loadProducts() }
     }
 
     func stop() {
         updatesTask?.cancel()
         updatesTask = nil
+        intentsTask?.cancel()
+        intentsTask = nil
     }
 
     func loadProducts() async {
@@ -157,18 +172,48 @@ final class ClientStore {
         }
     }
 
-    func purchase(_ product: Product, account: Account) async {
+    /// A tap from the App Store product page. Completes now if someone is
+    /// signed in, otherwise waits for `finishPendingIntent`.
+    func handle(_ intent: PurchaseIntent) async {
+        guard ClientStoreProduct(rawValue: intent.product.id) != nil else { return }
+        pendingIntent = intent
+        if let account = currentAccount?() {
+            await finishPendingIntent(with: account)
+        }
+    }
+
+    func finishPendingIntent(with account: Account) async {
+        guard let intent = pendingIntent, purchasingProductID == nil else { return }
+        pendingIntent = nil
+        var offer: Product.SubscriptionOffer?
+        if #available(iOS 18.0, *) {
+            offer = intent.offer
+        }
+        await purchase(intent.product, account: account, offer: offer)
+    }
+
+    func purchase(
+        _ product: Product,
+        account: Account,
+        offer: Product.SubscriptionOffer? = nil
+    ) async {
         guard purchasingProductID == nil else { return }
         guard let raw = account.billing?.appAccountToken,
               let token = UUID(uuidString: raw) else {
             errorMessage = "Could not start this purchase. Sign out and sign in again."
             return
         }
+        if pendingIntent?.id == product.id {
+            pendingIntent = nil
+        }
         purchasingProductID = product.id
         errorMessage = nil
         defer { purchasingProductID = nil }
         do {
-            let options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
+            var options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
+            if #available(iOS 18.0, *), let offer, offer.type == .winBack {
+                options.insert(.winBackOffer(offer))
+            }
             let result = try await product.purchase(options: options)
             switch result {
             case .success(let verification):
