@@ -31,6 +31,18 @@ struct TodoView: View {
     /// column's trigger and its form drive the same flag.
     @State private var addingIn: String?
 
+    /// The folder this board is scoped to, named on the chrome bar.
+    private var scopeChip: ScopeChip? {
+        guard let id = model.scope else { return nil }
+        guard let folder = folders.first(where: { $0.id == id }) else { return nil }
+        return ScopeChip(
+            label: folder.isRemote
+                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                : folder.name,
+            symbol: folder.isRemote ? "network" : "folder.fill"
+        )
+    }
+
     /// How much of the window an empty board takes.
     ///
     /// Three columns stretched to the full height of a large window is a lot of
@@ -41,7 +53,7 @@ struct TodoView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DetailChromeBar {
+            DetailChromeBar(scope: scopeChip) {
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: "Add a card to To Do"

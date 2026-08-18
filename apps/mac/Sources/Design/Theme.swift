@@ -454,6 +454,35 @@ struct SectionLabel: View {
     }
 }
 
+/// Names the folder a scoped screen is showing.
+///
+/// Accent-soft rather than grey. It is not chrome, it is the answer to "whose
+/// cards are these", and the same accent already marks the folder in the
+/// sidebar, so the two read as the same fact stated twice rather than as two
+/// facts.
+struct ScopeChip: View {
+    let label: String
+    var symbol: String = "folder.fill"
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .semibold))
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, Theme.Space.s)
+        .padding(.vertical, 3)
+        .background(Theme.accentSoft, in: Capsule())
+        .help("Showing \(label)")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Showing \(label)")
+    }
+}
+
 /// Sidebar / inspector marks for the shared detail chrome bar.
 ///
 /// Injected by `RootView` so every destination gets the same leading controls
@@ -497,11 +526,19 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
     /// Extra leading items after the shared toggles (back, etc.).
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var trailing: () -> Trailing
+    /// Which folder this screen is showing, when it is showing one.
+    ///
+    /// Lives on the bar rather than on each screen so every scoped screen says
+    /// so in the same place and the same way. With the sidebar collapsed it is
+    /// the only thing on screen that names the folder.
+    var scope: ScopeChip?
 
     init(
+        scope: ScopeChip? = nil,
         @ViewBuilder leading: @escaping () -> Leading = { EmptyView() },
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
+        self.scope = scope
         self.leading = leading
         self.trailing = trailing
     }
@@ -519,6 +556,9 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
                 // back from it is still the first control in the row.
                 leading()
                 toggles?.leftSidebar
+                if let scope {
+                    scope
+                }
             }
             Spacer(minLength: 0)
             HStack(spacing: Theme.Space.s) {

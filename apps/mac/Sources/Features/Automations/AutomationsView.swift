@@ -35,7 +35,7 @@ struct AutomationsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DetailChromeBar {
+            DetailChromeBar(scope: scopeChip) {
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: "Schedule a job"
@@ -140,6 +140,18 @@ struct AutomationsView: View {
             guard loaded, examplesExpandedStored.isEmpty else { return }
             examplesExpandedStored = model.scoped.isEmpty ? "1" : "0"
         }
+    }
+
+    /// The folder this board is scoped to, named on the chrome bar.
+    private var scopeChip: ScopeChip? {
+        guard let id = model.scope else { return nil }
+        guard let folder = folders.first(where: { $0.id == id }) else { return nil }
+        return ScopeChip(
+            label: folder.isRemote
+                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                : folder.name,
+            symbol: folder.isRemote ? "network" : "folder.fill"
+        )
     }
 
     /// Waiting on the first read of the daemon's job list.

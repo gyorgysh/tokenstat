@@ -85,7 +85,7 @@ struct WorkflowsView: View {
 
     private var library: some View {
         VStack(spacing: 0) {
-            DetailChromeBar {
+            DetailChromeBar(scope: scopeChip) {
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: "Start a blank draft"
@@ -163,6 +163,18 @@ struct WorkflowsView: View {
 
     private var defaultWorkspaceID: String? {
         model.scope ?? (folders.count == 1 ? folders.first?.id : nil)
+    }
+
+    /// The folder this board is scoped to, named on the chrome bar.
+    private var scopeChip: ScopeChip? {
+        guard let id = model.scope else { return nil }
+        guard let folder = folders.first(where: { $0.id == id }) else { return nil }
+        return ScopeChip(
+            label: folder.isRemote
+                ? "\(folder.machineLabel ?? "Remote") / \(folder.name)"
+                : folder.name,
+            symbol: folder.isRemote ? "network" : "folder.fill"
+        )
     }
 
     private var intro: some View {
