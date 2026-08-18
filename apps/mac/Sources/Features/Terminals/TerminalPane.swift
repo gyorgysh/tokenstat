@@ -270,6 +270,8 @@ struct TerminalPane: View {
                     Group {
                         if let detail = workspaces.commit(id, in: folder.id) {
                             CommitView(detail: detail)
+                        } else if let message = workspaces.commitError(id, in: folder.id) {
+                            failedRead(message)
                         } else {
                             reading("commit")
                         }
@@ -357,6 +359,20 @@ struct TerminalPane: View {
             Text("Reading \(what)…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+    }
+
+    private func failedRead(_ message: String) -> some View {
+        VStack {
+            Spacer()
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(Theme.danger)
+                .multilineTextAlignment(.center)
+                .padding(Theme.Space.m)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

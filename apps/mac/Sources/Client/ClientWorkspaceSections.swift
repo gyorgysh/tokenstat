@@ -108,9 +108,8 @@ struct ClientWorkspaceDetailView: View {
         .cardSurface()
     }
 
-    /// The seven, in the Mac's order. Files and Browser are a sheet and a
-    /// cover rather than a push: one is the host's disk and the other is a web
-    /// page, and neither is a level of this folder to come back up from.
+    /// The seven, in the Mac's order. Files, Changes and the rest push.
+    /// Browser is a cover: it is a web page, not a level of this folder.
     @ViewBuilder
     private var sections: some View {
         VStack(spacing: Theme.Space.s) {
@@ -134,21 +133,33 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
-                ClientWorkspaceTasksView(peer: peer, workspaceID: workspaceID, folder: folder)
+                ClientWorkspaceTasksView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName
+                )
             } label: {
                 ClientSectionRow(section: .todo, count: counts.todo)
             }
             .buttonStyle(.plain)
 
             NavigationLink {
-                ClientWorkspaceWorkflowsView(peer: peer, workspaceID: workspaceID, folder: folder)
+                ClientWorkspaceWorkflowsView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName
+                )
             } label: {
                 ClientSectionRow(section: .workflows, count: counts.workflows)
             }
             .buttonStyle(.plain)
 
             NavigationLink {
-                ClientWorkspaceAutomationsView(peer: peer, workspaceID: workspaceID, folder: folder)
+                ClientWorkspaceAutomationsView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName
+                )
             } label: {
                 ClientSectionRow(section: .automations, count: counts.automations)
             }
@@ -299,9 +310,8 @@ private struct ClientSectionRow: View {
 
 /// What is uncommitted in this folder, as the host last reported it.
 ///
-/// No diff and no commit button. The counts come with the folder, so this
-/// screen costs nothing to open, and a phone is where you check whether the
-/// agent has been busy rather than where you review a patch.
+/// The list is cheap to open. Tapping a file pushes its diff. No staging
+/// and no commit: those stay on the Mac.
 struct ClientWorkspaceChangesView: View {
     let peer: String
     let workspaceID: String
@@ -442,7 +452,7 @@ private struct ClientChangedFileRow: View {
 struct ClientWorkspaceTasksView: View {
     let peer: String
     let workspaceID: String
-    let folder: WorkspaceFolder
+    let hostName: String
 
     @State private var cards: [TodoCard] = []
     @State private var errorMessage: String?
@@ -496,7 +506,7 @@ struct ClientWorkspaceTasksView: View {
                 .filter { $0.workspaceID == workspaceID && $0.column != "archive" }
             errorMessage = nil
         } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: folder.name)
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
     }
@@ -508,7 +518,7 @@ struct ClientWorkspaceTasksView: View {
 struct ClientWorkspaceWorkflowsView: View {
     let peer: String
     let workspaceID: String
-    let folder: WorkspaceFolder
+    let hostName: String
 
     @State private var graphs: [WorkflowGraph] = []
     @State private var runs: [WorkflowRunRecord] = []
@@ -544,7 +554,7 @@ struct ClientWorkspaceWorkflowsView: View {
             runs = try await history.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
         } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: folder.name)
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
     }
@@ -556,7 +566,7 @@ struct ClientWorkspaceWorkflowsView: View {
 struct ClientWorkspaceAutomationsView: View {
     let peer: String
     let workspaceID: String
-    let folder: WorkspaceFolder
+    let hostName: String
 
     @State private var jobs: [Automation] = []
     @State private var runs: [RunRecord] = []
@@ -592,7 +602,7 @@ struct ClientWorkspaceAutomationsView: View {
             runs = try await history.filter { $0.workspaceID == workspaceID }
             errorMessage = nil
         } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: folder.name)
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
     }

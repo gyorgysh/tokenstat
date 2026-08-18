@@ -130,12 +130,9 @@ final class WorkflowsModel {
         runs.filter { $0.workflowID == graph.id }
     }
 
-    /// Live runs bound to this folder. The sidebar lists these.
-    /// The graphs of the current scope.
-    ///
-    /// A workspace shows the graphs bound to it. The global board shows the
-    /// ones bound to nothing, because a workspace graph already has a home and
-    /// listing it twice makes the library look longer than it is.
+    /// The graphs of the current scope. The sidebar lists live runs bound
+    /// to the folder. A workspace shows graphs bound to it. The global board
+    /// shows unbound graphs only.
     var scoped: [WorkflowGraph] {
         guard let scope else { return graphs.filter { $0.scope == .global } }
         return graphs.filter { $0.scope == .workspace && $0.workspaceID == scope }
@@ -144,7 +141,14 @@ final class WorkflowsModel {
     /// The runs of the current scope, for the same reason `scoped` exists:
     /// Recent runs sits under a scoped library and has to agree with it.
     var scopedRuns: [WorkflowRunRecord] {
-        guard let scope else { return runs }
+        guard let scope else {
+            return runs.filter { run in
+                if let graph = graphs.first(where: { $0.id == run.workflowID }) {
+                    return graph.scope == .global
+                }
+                return run.workspaceID.isEmpty
+            }
+        }
         return runs.filter { $0.workspaceID == scope }
     }
 
@@ -170,6 +174,32 @@ final class WorkflowsModel {
     var selectedRun: WorkflowRunRecord? {
         guard let selectedRunID else { return nil }
         return runs.first { $0.id == selectedRunID }
+    }
+
+    /// Drop a graph, run or draft the new scope would hide.
+    func dropOutOfScopeSelection() {
+        if let draft, !graphIsInScope(draft) {
+            discardDraft()
+        }
+        if let id = selectedGraphID, let graph = graphs.first(where: { $0.id == id }),
+           !graphIsInScope(graph)
+        {
+            selectedGraphID = nil
+            if selectedFocus == .graph { selectedFocus = .none }
+        }
+        if let id = selectedRunID, let run = runs.first(where: { $0.id == id }),
+           !scopedRuns.contains(where: { $0.id == run.id })
+        {
+            selectedRunID = nil
+            if selectedFocus == .run { selectedFocus = .none }
+        }
+    }
+
+    private func graphIsInScope(_ graph: WorkflowGraph) -> Bool {
+        if let scope {
+            return graph.scope == .workspace && graph.workspaceID == scope
+        }
+        return graph.scope == .global
     }
 
     var selectedStep: WorkflowStep? {

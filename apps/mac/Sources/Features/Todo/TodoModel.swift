@@ -139,14 +139,22 @@ final class TodoModel {
 
     /// Cards still to do in a folder: the sidebar count.
     ///
-    /// Done and archived are not work left, and a note is not a task, so
-    /// neither is counted. A badge that only ever goes up is not a badge.
+    /// Done, archived and notes are not work left. A badge that only ever
+    /// goes up is not a badge.
     func openCount(in workspaceID: String) -> Int {
         cards.filter {
             $0.workspaceID == workspaceID
+                && $0.kind != .note
                 && $0.column != "done"
                 && $0.column != "archive"
         }.count
+    }
+
+    /// Drop a selection that the new scope would hide.
+    func dropOutOfScopeSelection() {
+        if let selected = selectedCard, !inScope(selected) {
+            selectedCardID = nil
+        }
     }
 
     var selectedCard: TodoCard? {

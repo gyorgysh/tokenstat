@@ -218,14 +218,15 @@ struct RootView: View {
             // up with a pane over it that they never asked for.
             isOverlayVisible = false
             overlayHeldByPress = false
-            // Scope follows the route, in one place. A screen cannot then be
-            // showing one folder's cards under another folder's row.
-            todo.scope = next.workspaceID
-            automations.scope = next.workspaceID
-            workflows.scope = next.workspaceID
+            applyScope(from: next)
             guard next.isGlobal(.home) else { return }
             Task { await home.refreshIfStale() }
         }
+        #if os(macOS)
+        .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
+            syncRouteToFront(front)
+        }
+        #endif
         // After the heatmap is up, warm secondary surfaces so Machines /
         // remote workspaces / agent tiles are a cache hit on first click.
         // Never starts before archive ready, so Home keeps the host first.
@@ -1494,17 +1495,17 @@ struct RootView: View {
         guard account.signedIn else {
             return [
                 NativeMenuItem("Sign in to tokenstat.ai") {
-                    route = .global(.account)
+                    navigate(to: .global(.account))
                     account.signIn()
                 },
                 .separator,
-                NativeMenuItem("Account") { route = .global(.account) },
+                NativeMenuItem("Account") { navigate(to: .global(.account)) },
                 .separator,
                 checkUpdates,
             ]
         }
         return [
-            NativeMenuItem("Account settings") { route = .global(.account) },
+            NativeMenuItem("Account settings") { navigate(to: .global(.account)) },
             NativeMenuItem(
                 "Sync now",
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
@@ -1521,7 +1522,7 @@ struct RootView: View {
     @ViewBuilder
     private var accountMenuContent: some View {
         if account.signedIn {
-            Button("Account settings", .settings) { route = .global(.account) }
+            Button("Account settings", .settings) { navigate(to: .global(.account)) }
             Button("Sync now", .refresh) { Task { await account.sync() } }
                 .disabled(account.isSyncing || account.syncCooldownUntil != nil)
             Divider()
@@ -1530,11 +1531,11 @@ struct RootView: View {
             Button("Sign out", .signOut) { Task { await account.signOut() } }
         } else {
             Button("Sign in to tokenstat.ai", .signIn) {
-                route = .global(.account)
+                navigate(to: .global(.account))
                 account.signIn()
             }
             Divider()
-            Button("Account", .account) { route = .global(.account) }
+            Button("Account", .account) { navigate(to: .global(.account)) }
             Divider()
             updateItem
         }
@@ -1883,8 +1884,8 @@ struct RootView: View {
     /// Open one of a folder's sections, and put the centre pane on it.
     ///
     /// The scoped screens (Tasks, Workflows, Automations) need nothing here:
-    /// their scope follows the route, set once in `onChange(of: route)`, so a
-    /// screen cannot be showing one folder's cards under another folder's row.
+    /// their scope is set in `navigate(to:)` with the route, so a screen
+    /// cannot be showing one folder's cards under another folder's row.
     private func openSection(
         _ section: WorkspaceSection,
         in folderID: String,
@@ -1960,7 +1961,38 @@ struct RootView: View {
         transaction.animation = nil
         withTransaction(transaction) {
             route = next
+            applyScope(from: next)
             update?()
+        }
+    }
+
+    /// Scope follows the route in the same transaction, not on the next
+    /// paint. `onChange(of: route)` runs after the first frame.
+    private func applyScope(from next: Route) {
+        let previous = todo.scope
+        let nextID = next.workspaceID
+        todo.scope = nextID
+        automations.scope = nextID
+        workflows.scope = nextID
+        if previous != nextID {
+            todo.dropOutOfScopeSelection()
+            automations.dropOutOfScopeSelection()
+            workflows.dropOutOfScopeSelection()
+        }
+    }
+
+    /// Closing a Files, Changes or Browser chip puts sessions in front. The
+    /// route has to follow or the sidebar stays on the section just closed.
+    private func syncRouteToFront(_ front: WorkspaceSurface) {
+        guard let id = route.workspaceID, let section = route.workspaceSection else { return }
+        switch section {
+        case .files, .changes, .browser:
+            if front == .sessions || front == .launcher {
+                lastSection[id] = .sessions
+                navigate(to: .workspace(id: id, section: .sessions))
+            }
+        default:
+            break
         }
     }
 
@@ -1971,7 +2003,14 @@ struct RootView: View {
             navigate(to: .global(section))
         case .workspaces:
             guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
-            selectWorkspace(id)
+            openSection(.sessions, in: id)
+        case .launcher:
+            guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
+            openSection(.sessions, in: id) {
+                #if os(macOS)
+                workspaces.showLauncher(in: id)
+                #endif
+            }
         }
     }
 }

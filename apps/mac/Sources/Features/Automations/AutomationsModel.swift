@@ -222,6 +222,24 @@ final class AutomationsModel {
         return runs.first { $0.id == selectedRunID }
     }
 
+    /// Drop a job or run the new scope would hide.
+    func dropOutOfScopeSelection() {
+        if let scope, let id = selectedJobID,
+           let job = jobs.first(where: { $0.id == id }),
+           job.workspaceID != scope
+        {
+            selectedJobID = nil
+            if selectedFocus == .job { selectedFocus = .none }
+        }
+        if let scope, let id = selectedRunID,
+           let run = runs.first(where: { $0.id == id }),
+           run.workspaceID != scope
+        {
+            selectedRunID = nil
+            if selectedFocus == .run { selectedFocus = .none }
+        }
+    }
+
     var selectedJob: Automation? {
         guard let selectedJobID else { return nil }
         return jobs.first { $0.id == selectedJobID }

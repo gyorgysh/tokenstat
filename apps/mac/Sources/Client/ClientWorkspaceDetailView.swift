@@ -467,7 +467,6 @@ struct ClientFilesView: View {
     let workspace: String
     let folderName: String
 
-    @Environment(\.dismiss) private var dismiss
     @State private var pathStack: [String] = [""]
     @State private var children: [TreeEntry] = []
     @State private var errorMessage: String?
@@ -503,9 +502,6 @@ struct ClientFilesView: View {
         .navigationTitle(currentPath.isEmpty ? folderName : (currentPath as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Close") { dismiss() }
-            }
             ToolbarItem(placement: .topBarLeading) {
                 if pathStack.count > 1 {
                     Button("Up") {

@@ -1776,7 +1776,12 @@ fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> Work
         tasks: live
             .cards
             .iter()
-            .filter(|c| c.workspace_id == ws.id && c.column != "done")
+            .filter(|c| {
+                c.workspace_id == ws.id
+                    && c.kind != crate::todo::CardKind::Note
+                    && c.column != "done"
+                    && c.column != "archive"
+            })
             .count(),
         workflows: live
             .workflows

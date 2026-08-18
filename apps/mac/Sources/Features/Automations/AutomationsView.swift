@@ -1006,8 +1006,8 @@ struct NewAutomationSheet: View {
             if backendID.isEmpty, let first = model.pickerBackends(keeping: existing?.backend).first {
                 backendID = first.id
             }
-            if workspaceID.isEmpty, let first = folders.first {
-                workspaceID = first.id
+            if workspaceID.isEmpty {
+                workspaceID = model.scope ?? folders.first?.id ?? ""
             }
             if existing == nil && template == nil {
                 applyBudget(
@@ -1057,7 +1057,7 @@ struct NewAutomationSheet: View {
                 } else if model.pickerBackends(keeping: backendID).isEmpty {
                     setupHint("Every installed agent is hidden on Workspaces. Show one there to pick it here.", action: "Go to Workspaces") {
                         dismiss()
-                        onNavigate?(.workspaces)
+                        onNavigate?(.launcher)
                     }
                 } else if folders.isEmpty {
                     setupHint("Add a workspace before choosing where this task should run.", action: "Go to Workspaces") {

@@ -72,13 +72,6 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     static var standalone: [GlobalSection] { [.home, .insights, .machines] }
     static var everywhere: [GlobalSection] { [.todo, .workflows, .automations] }
 
-    /// The flat top group, as it is drawn today. Ordered by label length so the
-    /// rows read as one tidy column. Split into the two groups above once the
-    /// workspace sections exist to be the other half of the sidebar.
-    static var navigable: [GlobalSection] {
-        [.home, .todo, .insights, .machines, .workflows, .automations]
-    }
-
     var label: String {
         switch self {
         case .home: return "Home"
@@ -154,4 +147,7 @@ enum NavigationRequest: Hashable {
     case global(GlobalSection)
     /// The workspace surface, whichever folder is current.
     case workspaces
+    /// That folder's launch grid. A setup hint uses this when the next
+    /// step is to unhide an agent, not to reopen last week's Tasks board.
+    case launcher
 }

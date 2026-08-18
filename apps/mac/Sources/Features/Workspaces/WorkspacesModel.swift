@@ -96,14 +96,8 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
 
 /// One thing the centre pane can show.
 ///
-/// This replaced eight pieces of state that between them meant "what is this
-/// pane showing", each with its own rule for beating the others. That is why a
-/// commit opened while the launcher was up loaded into a pane nobody could
-/// see, and clicking a row in History simply did nothing. Now there is one
-/// value in front and one ordered strip behind it, and a surface cannot be put
-/// in front without also being in the strip.
-///
-/// See `docs/workspace-navigation.md`.
+/// One value in front, one ordered strip behind it. A surface cannot be put
+/// in front without also being in the strip. Chips are for documents only.
 enum WorkspaceSurface: Hashable, Identifiable, Sendable {
     /// The terminal stack. Which session is `TerminalsModel`'s business.
     case sessions
@@ -293,6 +287,8 @@ final class WorkspacesModel {
     private(set) var commits: [String: CommitDetail] = [:]
     /// The commit whose read is in flight, per workspace.
     private(set) var loadingCommit: [String: String] = [:]
+    /// Why a commit failed to load, keyed the same way as `commits`.
+    private(set) var commitErrors: [String: String] = [:]
 
     /// This workspace's strip, in the order the tabs were opened.
     func tabs(in workspaceID: String) -> [WorkspaceSurface] { tabs[workspaceID] ?? [] }
@@ -357,6 +353,7 @@ final class WorkspacesModel {
             documents[key] = nil
         case let .commit(commit):
             commits[Self.treeKey(workspaceID, commit)] = nil
+            commitErrors[Self.treeKey(workspaceID, commit)] = nil
             if loadingCommit[workspaceID] == commit { loadingCommit[workspaceID] = nil }
         case let .browser(browser):
             forgetBrowser(browser, in: workspaceID)
@@ -382,17 +379,25 @@ final class WorkspacesModel {
         commits[Self.treeKey(workspaceID, id)]
     }
 
+    func commitError(_ id: String, in workspaceID: String) -> String? {
+        commitErrors[Self.treeKey(workspaceID, id)]
+    }
+
     /// Read a commit and show it. The tab appears at once and fills in.
     func showCommit(_ id: String, in workspaceID: String) async {
         show(.commit(id), in: workspaceID)
         guard commit(id, in: workspaceID) == nil else { return }
+        let key = Self.treeKey(workspaceID, id)
         loadingCommit[workspaceID] = id
+        commitErrors[key] = nil
         do {
             let detail = try await Bridge.workspaceShow(id: workspaceID, commit: id)
-            commits[Self.treeKey(workspaceID, id)] = detail
+            guard loadingCommit[workspaceID] == id else { return }
+            commits[key] = detail
             errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
+            guard loadingCommit[workspaceID] == id else { return }
+            commitErrors[key] = error.localizedDescription
         }
         if loadingCommit[workspaceID] == id { loadingCommit[workspaceID] = nil }
     }

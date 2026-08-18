@@ -76,9 +76,10 @@ struct WorkflowsView: View {
             if designBackend.isEmpty {
                 designBackend = WorkflowRecipes.defaultBackend(from: model.pickerBackends())
             }
-            if designWorkspaceID.isEmpty {
-                designWorkspaceID = folders.first?.id ?? ""
-            }
+            syncDesignWorkspace()
+        }
+        .onChange(of: model.scope) { _, _ in
+            syncDesignWorkspace()
         }
         .onDisappear { model.disappeared() }
     }
@@ -163,6 +164,12 @@ struct WorkflowsView: View {
 
     private var defaultWorkspaceID: String? {
         model.scope ?? (folders.count == 1 ? folders.first?.id : nil)
+    }
+
+    /// Design binds to the folder whose board this is, not the first
+    /// registered folder. Empty until a folder exists.
+    private func syncDesignWorkspace() {
+        designWorkspaceID = model.scope ?? folders.first?.id ?? ""
     }
 
     /// The folder this board is scoped to, named on the chrome bar.
