@@ -204,6 +204,31 @@ enum ClientRemote {
         )
     }
 
+    // MARK: - A folder's work, on the machine that owns it
+
+    /// The peer's whole board, list and all. Filtering to one folder happens
+    /// on this side: the host answers the same `todo.list` it answers locally,
+    /// so the phone cannot see a card the Mac would not.
+    static func todoCards(peer: String) async throws -> [TodoCard] {
+        try await Bridge.onPeer(peer, "todo.list", ["includeArchived": true], as: [TodoCard].self)
+    }
+
+    static func automations(peer: String) async throws -> [Automation] {
+        try await Bridge.onPeer(peer, "automation.list", as: [Automation].self)
+    }
+
+    static func automationRuns(peer: String) async throws -> [RunRecord] {
+        try await Bridge.onPeer(peer, "automation.runs", as: [RunRecord].self)
+    }
+
+    static func workflows(peer: String) async throws -> [WorkflowGraph] {
+        try await Bridge.onPeer(peer, "workflow.list", as: [WorkflowGraph].self)
+    }
+
+    static func workflowRuns(peer: String) async throws -> [WorkflowRunRecord] {
+        try await Bridge.onPeer(peer, "workflow.runs", as: [WorkflowRunRecord].self)
+    }
+
     static func writeFile(
         peer: String,
         workspace: String,

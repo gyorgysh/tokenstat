@@ -10,8 +10,13 @@ import SwiftUI
 import UIKit
 import WebKit
 
-/// One remote folder on a connected host: sessions, launch, files, ports.
-struct ClientWorkspaceDetailView: View {
+/// A folder's sessions on a connected host, and the launcher that starts one.
+///
+/// Pushed from `ClientWorkspaceDetailView`, which is the folder's section
+/// list. Launch lives here rather than a level up because starting an agent
+/// and watching one are the same job, and the Mac puts them in the same
+/// surface for the same reason.
+struct ClientWorkspaceSessionsView: View {
     let peer: String
     let hostName: String
     let folder: WorkspaceFolder
@@ -26,12 +31,8 @@ struct ClientWorkspaceDetailView: View {
     @State private var showingCatalog = false
     @State private var pendingInstall: RemoteLaunchProfile?
     @State private var pendingHide: RemoteLaunchProfile?
-    @State private var showFiles = false
-    @State private var showPort = false
-    @State private var portText = "5173"
     @State private var browserURL: String?
     @State private var forwardedPort: Int?
-    @State private var isLoading = false
     @State private var pendingClose: PtySessionInfo?
     @Environment(\.scenePhase) private var scenePhase
 
@@ -68,17 +69,15 @@ struct ClientWorkspaceDetailView: View {
                     }
                 }
 
-                headerCard
                 launchCard
                 sessionsCard
-                toolsCard
             }
             .padding(.horizontal, Theme.Space.m)
             .padding(.top, Theme.Space.s)
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(folder.name)
+        .navigationTitle("Sessions")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
@@ -152,14 +151,6 @@ struct ClientWorkspaceDetailView: View {
         } message: {
             Text("The tool stays on \(hostName). You can add it again from +.")
         }
-        .sheet(isPresented: $showFiles) {
-            NavigationStack {
-                ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
-            }
-        }
-        .sheet(isPresented: $showPort) {
-            portSheet
-        }
         .fullScreenCover(item: Binding(
             get: { browserURL.map { BrowserURL(url: $0) } },
             set: { browserURL = $0?.url }
@@ -172,27 +163,6 @@ struct ClientWorkspaceDetailView: View {
                 }
             }
         }
-    }
-
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(hostName)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-            Text(folder.path)
-                .font(ClientType.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .truncationMode(.middle)
-            if let subtitle = folder.subtitle {
-                Text(subtitle)
-                    .font(ClientType.caption)
-                    .foregroundStyle(Theme.accent)
-            }
-        }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardSurface()
     }
 
     private var launchCard: some View {
@@ -333,76 +303,6 @@ struct ClientWorkspaceDetailView: View {
                 .frame(minHeight: CGFloat(sessions.count) * 78)
             }
         }
-    }
-
-    private var toolsCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            Text("Tools")
-                .font(ClientType.sectionTitle)
-            Button {
-                showFiles = true
-            } label: {
-                toolRow(symbol: "folder", title: "Files", subtitle: "Browse and edit on the host")
-            }
-            .buttonStyle(.plain)
-
-            Button {
-                showPort = true
-            } label: {
-                toolRow(symbol: "globe", title: "Browse a port", subtitle: "Local service on the host via tunnel")
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private func toolRow(symbol: String, title: String, subtitle: String) -> some View {
-        HStack(spacing: Theme.Space.m) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(Theme.accent)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(ClientType.label.weight(.medium))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(Theme.Space.m)
-        .cardSurface()
-    }
-
-    private var portSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Port", text: $portText)
-                        .keyboardType(.numberPad)
-                } footer: {
-                    Text("Opens a loopback bridge to that port on \(hostName) and shows it in the in-app browser.")
-                }
-            }
-            .navigationTitle("Browse port")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showPort = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Open") {
-                        Task { await openPort() }
-                    }
-                    .disabled(isLoading || UInt16(portText) == nil)
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 
     private func reload() async {
@@ -549,27 +449,9 @@ struct ClientWorkspaceDetailView: View {
         }
         return false
     }
-
-    private func openPort() async {
-        guard let port = UInt16(portText.trimmingCharacters(in: .whitespaces)) else { return }
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let result = try await Bridge.proxyListen(peer: peer, host: "127.0.0.1", port: Int(port))
-            showPort = false
-            forwardedPort = Int(port)
-            if let proxy = URL(string: result.url) {
-                _ = await Self.waitForPage(proxy)
-            }
-            browserURL = result.url
-        } catch {
-            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
-            showPort = false
-        }
-    }
 }
 
-private struct BrowserURL: Identifiable {
+struct BrowserURL: Identifiable {
     var id: String { url }
     var url: String
 }
