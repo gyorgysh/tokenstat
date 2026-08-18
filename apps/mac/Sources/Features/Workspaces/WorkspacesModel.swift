@@ -20,6 +20,8 @@ enum WorkspacePreference {
     private static let localModelKey = "workspace.localModel"
     /// Sidebar order for the merged local and remote list.
     private static let orderKey = "workspace.order"
+    /// The centre pane's open tabs, per workspace.
+    private static let tabsKey = "workspace.tabs"
 
     static func bypassPermissions(for workspaceID: String) -> Bool {
         UserDefaults.standard.bool(forKey: "\(bypassKey).\(workspaceID)")
@@ -49,6 +51,24 @@ enum WorkspacePreference {
 
     static func setOrder(_ ids: [String]) {
         UserDefaults.standard.set(ids, forKey: orderKey)
+    }
+
+    /// The tabs a workspace was left with, as `WorkspaceSurface` ids.
+    ///
+    /// Furniture, so it lives here rather than in the daemon: which tab a
+    /// window is showing is that window's business and not something another
+    /// machine should learn on sync.
+    static func tabs(for workspaceID: String) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "\(tabsKey).\(workspaceID)") ?? []
+    }
+
+    static func setTabs(_ ids: [String], for workspaceID: String) {
+        let key = "\(tabsKey).\(workspaceID)"
+        if ids.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(ids, forKey: key)
+        }
     }
 }
 
@@ -104,6 +124,28 @@ enum WorkspaceSurface: Hashable, Identifiable, Sendable {
         case let .file(path): return "file:\(path)"
         case let .commit(commit): return "commit:\(commit)"
         case let .browser(browser): return "browser:\(browser)"
+        }
+    }
+
+    /// Rebuild a surface from its `id`. Unknown text is not a surface, which
+    /// is how a tab written by a later version is skipped rather than crashed
+    /// on.
+    init?(id: String) {
+        switch id {
+        case "sessions": self = .sessions
+        case "launcher": self = .launcher
+        case "files": self = .files
+        case "changes": self = .changes
+        default:
+            guard let split = id.firstIndex(of: ":") else { return nil }
+            let value = String(id[id.index(after: split)...])
+            guard !value.isEmpty else { return nil }
+            switch id[..<split] {
+            case "file": self = .file(value)
+            case "commit": self = .commit(value)
+            case "browser": self = .browser(value)
+            default: return nil
+            }
         }
     }
 
@@ -254,6 +296,31 @@ final class WorkspacesModel {
         front(in: workspaceID) == surface
     }
 
+    /// Read back the tabs this workspace was left with.
+    ///
+    /// Chips only. Nothing is fetched here: a restored file, commit or page
+    /// loads when it is brought forward, so reopening the app does not read a
+    /// dozen files somebody may not look at.
+    func restoreTabs(in workspaceID: String) {
+        guard tabs[workspaceID] == nil else { return }
+        tabs[workspaceID] = WorkspacePreference.tabs(for: workspaceID)
+            .compactMap(WorkspaceSurface.init(id:))
+            .filter(\.isTab)
+    }
+
+    /// Write the strip back, minus the browser.
+    ///
+    /// A page opened here is a local server a session started, and the port it
+    /// was on is not listening after a quit. Restoring that chip would restore
+    /// a failed load, so a browser tab is the one thing the strip forgets.
+    private func persistTabs(in workspaceID: String) {
+        let ids = tabs(in: workspaceID).compactMap { surface -> String? in
+            if case .browser = surface { return nil }
+            return surface.id
+        }
+        WorkspacePreference.setTabs(ids, for: workspaceID)
+    }
+
     /// Put a surface in front, adding it to the strip when it belongs there.
     ///
     /// The one way the pane changes. Every navigation goes through here, so a
@@ -262,6 +329,7 @@ final class WorkspacesModel {
     func show(_ surface: WorkspaceSurface, in workspaceID: String) {
         if surface.isTab, !(tabs[workspaceID] ?? []).contains(surface) {
             tabs[workspaceID, default: []].append(surface)
+            persistTabs(in: workspaceID)
         }
         front[workspaceID] = surface
     }
@@ -272,6 +340,7 @@ final class WorkspacesModel {
     /// tab: the terminal is what this pane is mainly for.
     func close(_ surface: WorkspaceSurface, in workspaceID: String) {
         tabs[workspaceID]?.removeAll { $0 == surface }
+        persistTabs(in: workspaceID)
         if isFront(surface, in: workspaceID) { front[workspaceID] = .sessions }
         switch surface {
         case let .file(path):
@@ -860,6 +929,10 @@ final class WorkspacesModel {
     private func publishFolders() {
         let merged = localFolders + remoteFolders.values.flatMap { $0 }
         folders = Self.applyOrder(merged, WorkspacePreference.order())
+        // Chips a folder was left with, put back the first time it is listed.
+        // Cheap: `restoreTabs` reads a string array and returns at once for a
+        // folder it has already restored.
+        for folder in folders { restoreTabs(in: folder.id) }
         // A folder removed elsewhere should not leave the detail pane
         // describing something that is no longer in the list.
         if let id = selectedID, !folders.contains(where: { $0.id == id }) {
@@ -1116,10 +1189,22 @@ final class WorkspacesModel {
         do {
             try await Bridge.removeWorkspace(id: folder.id)
             if selectedID == folder.id { selectedID = nil }
+            forgetTabs(in: folder.id)
             await load()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Drop everything a folder had open. Called when it leaves the sidebar,
+    /// so a folder added back does not arrive carrying last month's tabs, and
+    /// the other folders' tabs are untouched.
+    func forgetTabs(in workspaceID: String) {
+        for tab in tabs(in: workspaceID) { close(tab, in: workspaceID) }
+        tabs[workspaceID] = nil
+        front[workspaceID] = nil
+        browserTabs[workspaceID] = nil
+        WorkspacePreference.setTabs([], for: workspaceID)
     }
 
     func rename(_ folder: WorkspaceFolder, to name: String) async {
