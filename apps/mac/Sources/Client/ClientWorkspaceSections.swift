@@ -668,7 +668,7 @@ struct ClientTaskComposer: View {
     let onSaved: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var kind: TodoKind = .note
+    @State private var kind: TodoKind = .task
     @State private var title = ""
     @State private var body_ = ""
     @State private var saving = false

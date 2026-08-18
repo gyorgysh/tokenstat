@@ -799,6 +799,8 @@ struct RootView: View {
                 ) { closeInspector() }
             case .global(.todo):
                 todoInspector
+            case .global(.notes):
+                EmptyView()
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
             case .global(.insights):
@@ -1711,6 +1713,8 @@ struct RootView: View {
                     launchTaskInFront(launch)
                 }
             )
+        case .global(.notes):
+            NotesView(model: todo, folders: workspaces.folders)
         case .global(.machines):
             MachinesView(model: machines)
         case .global(.account):

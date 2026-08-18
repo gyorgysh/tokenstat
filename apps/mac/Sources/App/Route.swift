@@ -56,6 +56,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     case insights
     case machines
     case todo
+    case notes
     case workflows
     case automations
     /// Reached from the footer, not from a row.
@@ -70,12 +71,13 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
     /// that are usually asked about one folder at a time, so they sit under a
     /// GLOBAL heading rather than pretending to be the only view of themselves.
     static var standalone: [GlobalSection] { [.home, .insights, .machines] }
-    static var everywhere: [GlobalSection] { [.todo, .workflows, .automations] }
+    static var everywhere: [GlobalSection] { [.todo, .notes, .workflows, .automations] }
 
     var label: String {
         switch self {
         case .home: return "Home"
         case .todo: return "Tasks"
+        case .notes: return "Notes"
         case .automations: return "Automations"
         case .workflows: return "Workflows"
         case .machines: return "Devices"
@@ -88,6 +90,7 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: return "square.grid.3x3.fill"
         case .todo: return "checklist"
+        case .notes: return "note.text"
         case .automations: return "bolt.fill"
         case .workflows: return "point.3.connected.trianglepath.dotted"
         case .machines: return "laptopcomputer"

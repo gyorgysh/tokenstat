@@ -129,7 +129,6 @@ struct TodoView: View {
                 Banner(text: error, severity: .warning)
                     .padding(Theme.Space.m)
             }
-            notesStrip
             GeometryReader { proxy in
                 let available = proxy.size.height - Theme.Space.m * 2
                 let gap = Theme.Space.m
@@ -180,51 +179,6 @@ struct TodoView: View {
         }
         // The model outlives this view, and its poll loop must not.
         .onDisappear { model.disappeared() }
-    }
-
-    /// The notes for this scope, across the top of the board.
-    ///
-    /// One strip rather than a fourth column: a note is something to remember,
-    /// not a stage of work, and it never moves left to right. Hidden entirely
-    /// when there are none, so a board of pure tasks looks like one.
-    @ViewBuilder
-    private var notesStrip: some View {
-        let notes = model.notes
-        if !notes.isEmpty {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                HStack(spacing: Theme.Space.s) {
-                    FeatureMark(name: "mark_note", tint: Theme.secondary)
-                    Text("Notes")
-                        .font(.system(size: DisplayFit.dp(13), weight: .semibold))
-                    Text("\(notes.count)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: Theme.Space.s) {
-                        ForEach(notes) { note in
-                            CardView(
-                                model: model,
-                                card: note,
-                                folders: folders,
-                                isSelected: model.selectedCardID == note.id,
-                                onSelect: { model.selectCard(note.id) },
-                                onViewRun: onViewRun,
-                                onRunInFront: onRunInFront,
-                                onDropBefore: { _ in },
-                                onTargeted: { _ in }
-                            )
-                            .frame(width: DisplayFit.box(240))
-                        }
-                    }
-                    .padding(.bottom, 2)
-                }
-                .scrollIndicators(.hidden)
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.top, Theme.Space.s)
-        }
     }
 
     /// Waiting on the first read of the board.
@@ -811,7 +765,6 @@ private struct NewCardForm: View {
     /// for the daemon, which stores the raw number.
     @State private var budgetMinutes = "180"
     @State private var noTimeLimit = false
-    @State private var kind: TodoKind = .task
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -825,20 +778,13 @@ private struct NewCardForm: View {
                 }
 
             if expanded {
-                SegmentedCapsulePicker(
-                    options: [
-                        (TodoKind.task, "Task", "checkmark.square"),
-                        (TodoKind.note, "Note", "note.text"),
-                    ],
-                    selection: $kind
-                )
-                TextField(kind == .note ? "What do you want to remember?" : "Task title", text: $title)
+                TextField("Task title", text: $title)
                 // A task's notes are what the agent gets. For the Shell
                 // backend that is a command, not a prompt, so the field says
                 // so and its placeholder answers the only question a shell
                 // has: what do I run?
                 TextField(
-                    kind == .note ? "Note" : (isShellBackend ? "Command" : "Prompt"),
+                    isShellBackend ? "Command" : "Prompt",
                     text: $notes,
                     prompt: Text(
                         isShellBackend
@@ -848,10 +794,9 @@ private struct NewCardForm: View {
                     axis: .vertical
                 )
                 .lineLimit(2...4)
-                // Where this is going, said before Save rather than found out
-                // afterwards. Notes get it too: a note used to be forced to
-                // Inbox, which is a place you can only reach from another
-                // screen, so it read as not saved at all.
+                // Where this is going, said before Save rather than found
+                // out afterwards, which is how two notes were once written
+                // into a place the board that wrote them could not show.
                 AppMenuPicker(
                     title: "Saving to",
                     options: [(value: "", label: "Uncategorized (no folder)")]
@@ -859,15 +804,13 @@ private struct NewCardForm: View {
                     selection: $workspaceID
                 )
                 .frame(maxWidth: 260)
-                if kind == .task {
-                    HStack(spacing: Theme.Space.s) {
-                        AppMenuPicker(
-                            title: "Agent",
-                            options: [(value: "", label: "Choose later")]
-                                + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
-                            selection: $backendID
-                        )
-                    }
+                AppMenuPicker(
+                    title: "Agent",
+                    options: [(value: "", label: "Choose later")]
+                        + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
+                    selection: $backendID
+                )
+                .frame(maxWidth: 260)
                     // Model and effort exist only for backends that advertise
                     // them, so the pair appears for Claude and never for
                     // Shell. Both start on the backend's default.
@@ -907,7 +850,6 @@ private struct NewCardForm: View {
                         BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                         Spacer()
                     }
-                }
                 HStack {
                     Button("Cancel", .dismiss) { cancel() }
                         .buttonStyle(SecondaryButtonStyle())
@@ -955,7 +897,7 @@ private struct NewCardForm: View {
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
         await model.create(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            kind: kind,
+            kind: .task,
             notes: notes,
             backend: backendID,
             // The folder this board is, or the one the picker says. A note
@@ -963,7 +905,7 @@ private struct NewCardForm: View {
             // Inbox, where the board it came from could not show it.
             workspaceID: workspaceID,
             budgetSeconds: budget,
-            column: kind == .note ? "backlog" : column,
+            column: column,
             model: {
                 let cleaned = TodoCard.cleanModelID(modelChoice)
                 return cleaned.isEmpty ? nil : cleaned
@@ -982,7 +924,6 @@ private struct NewCardForm: View {
         noTimeLimit = false
         backendID = ""
         expanded = false
-        kind = .task
     }
 }
 

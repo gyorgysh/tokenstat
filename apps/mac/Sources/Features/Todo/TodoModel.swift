@@ -104,18 +104,71 @@ final class TodoModel {
     /// been asked to show.
     var filter: TodoScope = .all
 
-    /// Notes in the current scope, newest first.
+    /// Every note, newest first, ignoring the board's own scope.
     ///
-    /// A note is not work in a column. Mixed into To Do it reads as a task
-    /// nobody has started, which is why the counts have to exclude notes in
-    /// three places. The board gives them one strip instead.
+    /// A note is not work in a stage and not work in a folder either: it is
+    /// something somebody wanted to keep. It has its own screen, so it is not
+    /// filtered by whatever the kanban board happens to be showing.
     var notes: [TodoCard] {
         cards
-            .filter {
-                $0.kind == .note && inScope($0)
-                    && ($0.column == "archive") == showingArchive
-            }
+            .filter { $0.kind == .note && $0.column != "archive" }
             .sorted { $0.createdAtMs > $1.createdAtMs }
+    }
+
+    /// Notes that have been put away. Kept readable, never deleted for you.
+    var archivedNotes: [TodoCard] {
+        cards
+            .filter { $0.kind == .note && $0.column == "archive" }
+            .sorted { $0.updatedAtMs > $1.updatedAtMs }
+    }
+
+    /// Capture a note. Title only, because that is the whole point: the cost
+    /// of writing one down has to be lower than the cost of losing it.
+    func addNote(_ text: String) async {
+        let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        do {
+            _ = try await Bridge.todoCreate(
+                title: title, kind: .note, notes: "", column: "backlog",
+                backend: "", workspaceID: "", budgetSeconds: 0
+            )
+            errorMessage = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Put a note away, or take it back out.
+    func archiveNote(_ card: TodoCard, archived: Bool) async {
+        do {
+            _ = try await Bridge.todoUpdate(id: card.id, column: archived ? "archive" : "backlog")
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Turn a note into a card on the board.
+    ///
+    /// The one bridge between the two, and the reason capture can be cheap:
+    /// nothing has to be decided while writing the thing down. The note's own
+    /// text becomes the prompt, which is what `todo.rs` hands an agent anyway
+    /// when a card has no separate body.
+    func convertToTask(_ card: TodoCard, workspaceID: String) async {
+        do {
+            _ = try await Bridge.todoUpdate(
+                id: card.id,
+                column: "backlog",
+                kind: .task,
+                notes: card.notes.isEmpty ? card.title : card.notes,
+                workspaceID: workspaceID
+            )
+            showNotice("Moved to Tasks.")
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     /// Cards for a column, in the active sort, inside the current scope.

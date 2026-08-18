@@ -42,14 +42,23 @@ struct ClientTasksOverview: View {
         cards.filter { ($0.column == "archive") == showingArchive }
     }
 
+    /// Notes, wherever they were written. A note is not work in a folder, so
+    /// grouping it under one reads as a task nobody started. Same rule the Mac
+    /// now follows by giving them their own screen.
+    private var notes: [TodoCard] {
+        visible.filter { $0.kind == .note }.sorted { $0.createdAtMs > $1.createdAtMs }
+    }
+
     private var unfiled: [TodoCard] {
-        visible.filter { $0.workspaceID.isEmpty }.sorted { $0.createdAtMs > $1.createdAtMs }
+        visible
+            .filter { $0.workspaceID.isEmpty && $0.kind != .note }
+            .sorted { $0.createdAtMs > $1.createdAtMs }
     }
 
     /// Cards by folder, folders in the order the sidebar shows them, and any
     /// folder this machine no longer lists kept under the path it carries.
     private var byFolder: [(id: String, name: String, cards: [TodoCard])] {
-        let filed = visible.filter { !$0.workspaceID.isEmpty }
+        let filed = visible.filter { !$0.workspaceID.isEmpty && $0.kind != .note }
         let groups = Dictionary(grouping: filed, by: \.workspaceID)
         return groups
             .map { id, cards in
@@ -81,6 +90,12 @@ struct ClientTasksOverview: View {
                 heading(group.name, count: group.cards.count)
                 ForEach(group.cards) { card in
                     row(card, folder: group.name)
+                }
+            }
+            if !notes.isEmpty {
+                heading("Notes", count: notes.count)
+                ForEach(notes) { note in
+                    row(note, folder: nil)
                 }
             }
         }
