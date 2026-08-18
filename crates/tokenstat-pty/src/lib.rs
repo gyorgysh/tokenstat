@@ -85,6 +85,13 @@ pub struct SessionInfo {
     /// The child's process id, which is the root of the subtree an activity
     /// detector measures. `None` once the process is gone.
     pub pid: Option<u32>,
+    /// When this process was spawned, epoch milliseconds.
+    ///
+    /// The live meter needs it. A folder's transcript is the folder's whole
+    /// history, and without a line to start counting from a session one
+    /// second old reported everything the last one spent.
+    #[serde(default)]
+    pub started_at_ms: u64,
 }
 
 /// Output that was waiting.
@@ -466,6 +473,7 @@ impl Manager {
             exit_code: None,
             total_bytes: 0,
             last_activity_at_ms: None,
+            started_at_ms: now_ms(),
         };
 
         let session = Arc::new(Session {

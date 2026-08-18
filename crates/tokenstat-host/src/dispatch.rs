@@ -289,10 +289,14 @@ fn add_meter(item: &mut Value) {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    if command.is_empty() || cwd.is_empty() {
+    let started_at_ms = item
+        .get("startedAtMs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if command.is_empty() || cwd.is_empty() || started_at_ms == 0 {
         return;
     }
-    let Some(meter) = crate::session_meter::reading(&command, &cwd) else {
+    let Some(meter) = crate::session_meter::reading(&command, &cwd, started_at_ms) else {
         return;
     };
     let Some(map) = item.as_object_mut() else {

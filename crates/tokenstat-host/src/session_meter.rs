@@ -16,6 +16,12 @@
 //! Conversation text is dropped at the parser boundary. The reading carries
 //! counters, a model id, and a context fraction. Nothing else.
 //!
+//! **The reading starts when the process did.** A folder's transcript is the
+//! folder's whole history, so folding all of it in reported the last session's
+//! spend, or this month's, against a shell that opened a second ago. Every
+//! event before the spawn is dropped, and a session that has not produced one
+//! yet has no reading rather than an inherited one.
+//!
 //! First cut is Claude and Grok only. Other harnesses stay on CPU · RAM
 //! until they grow a live path. Two sessions of the same harness in one
 //! folder share the newest log: that is a known limitation, not a guess
@@ -45,7 +51,10 @@ pub(crate) struct MeterReading {
 }
 
 /// Fold a live session's usage into a sidebar reading, when we can find it.
-pub(crate) fn reading(command: &str, cwd: &str) -> Option<MeterReading> {
+///
+/// `started_at_ms` is when the process was spawned. Nothing older than that
+/// belongs to it, and a session with nothing newer gets no reading at all.
+pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<MeterReading> {
     if cwd.is_empty() {
         return None;
     }
@@ -54,7 +63,26 @@ pub(crate) fn reading(command: &str, cwd: &str) -> Option<MeterReading> {
         "grok" => grok_events(cwd)?,
         _ => return None,
     };
-    fold_events(&events, &current_prices())
+    let mine = since(&events, started_at_ms);
+    if mine.is_empty() {
+        return None;
+    }
+    fold_events(&mine, &current_prices())
+}
+
+/// Events this session could have produced.
+///
+/// A small grace before the spawn, because the two clocks are not the same
+/// one: the harness stamps the turn, the daemon stamps the spawn, and a first
+/// turn written a moment "before" launch is still this session's.
+fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<UsageEvent> {
+    const GRACE_MS: i64 = 2_000;
+    let floor = started_at_ms as i64 - GRACE_MS;
+    events
+        .iter()
+        .filter(|e| e.ts.utc_ms >= floor)
+        .cloned()
+        .collect()
 }
 
 /// Sum events into the wire shape. Pure, so tests do not need a home directory.
@@ -376,9 +404,39 @@ mod tests {
         }
     }
 
+    fn stamped(ms: i64) -> UsageEvent {
+        let mut e = event("claude-opus-4-1", 100, 0, 10);
+        e.ts = Timestamp::from_ms(ms);
+        e
+    }
+
     #[test]
     fn empty_events_are_not_a_reading() {
         assert!(fold_events(&[], &prices()).is_none());
+    }
+
+    #[test]
+    fn a_new_session_does_not_inherit_the_folder_history() {
+        let events = [stamped(1_000), stamped(2_000)];
+        assert!(
+            since(&events, 60_000).is_empty(),
+            "a session spawned after both turns owns neither"
+        );
+    }
+
+    #[test]
+    fn only_turns_after_the_spawn_are_counted() {
+        let events = [stamped(1_000), stamped(90_000), stamped(95_000)];
+        assert_eq!(since(&events, 60_000).len(), 2);
+    }
+
+    #[test]
+    fn a_first_turn_just_before_the_spawn_still_counts() {
+        // The harness stamps the turn and the daemon stamps the spawn. They
+        // are not the same clock, and a turn a moment "before" launch is
+        // still this session's.
+        let events = [stamped(59_500)];
+        assert_eq!(since(&events, 60_000).len(), 1);
     }
 
     #[test]
