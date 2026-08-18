@@ -209,6 +209,16 @@ final class TodoModel {
         }
     }
 
+    /// Re-read the cards for the sidebar's counts, and nothing else.
+    ///
+    /// No backends, no queue config, and no error banner: this runs on a timer
+    /// nobody asked for, so a host that blinks during it must not put a red
+    /// message on a board the person is not even looking at.
+    func refreshCounts() async {
+        guard let fresh = try? await Bridge.todoCards(includeArchived: true) else { return }
+        if cards != fresh { cards = fresh }
+    }
+
     func create(
         title: String, kind: TodoKind, notes: String, backend: String,
         workspaceID: String, budgetSeconds: UInt64, column: String = "backlog",

@@ -258,16 +258,20 @@ struct RootView: View {
                 await workflows.refreshList()
             }
         }
-        // The board's own counts, loaded whether or not anyone has opened it.
-        // The sidebar shows a folder's open cards and the unfiled Inbox count,
-        // and a count that only appears after a visit to the screen it counts
-        // is not a count anybody can rely on.
+        // The board's counts, loaded whether or not anyone has opened it: a
+        // count that only appears after a visit to the screen it counts is not
+        // a count anybody can rely on.
+        //
+        // Cards only, and silent. The full load also fetches backends and the
+        // queue config, which the sidebar has no use for, and it reports its
+        // failures into the board's own error banner, where a background tick
+        // has no business writing.
         .task {
             await todo.load()
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(12))
+                try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { return }
-                await todo.load()
+                await todo.refreshCounts()
             }
         }
         // Sidebar footer needs the handle, but not on the first frame. A short
@@ -1173,7 +1177,10 @@ struct RootView: View {
                         // picker on the Tasks board, which meant a note could
                         // be written, saved, and never seen again. Unfiled is
                         // a place now, with its count on it.
-                        if item == .todo, todo.inboxCount > 0 {
+                        // Still there while it is what the board is showing:
+                        // filing the last unfiled card used to take the row
+                        // away and leave the board on a filter with no row.
+                        if item == .todo, todo.inboxCount > 0 || todo.filter == .inbox {
                             SidebarRow(
                                 label: "Inbox",
                                 symbol: "tray",
