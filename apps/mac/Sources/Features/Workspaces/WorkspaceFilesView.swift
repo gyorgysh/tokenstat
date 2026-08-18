@@ -75,7 +75,7 @@ struct WorkspaceFilesView: View {
                                     entry: row.entry,
                                     depth: row.depth,
                                     isExpanded: model.isExpanded(row.entry.path, in: folder.id),
-                                    isOpen: model.activeFile[folder.id] == row.entry.path
+                                    isOpen: model.isFront(.file(row.entry.path), in: folder.id)
                                 ) {
                                     Task {
                                         if row.entry.isDir {

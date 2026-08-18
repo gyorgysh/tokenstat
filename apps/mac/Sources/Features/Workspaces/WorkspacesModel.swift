@@ -74,6 +74,52 @@ enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
+/// One thing the centre pane can show.
+///
+/// This replaced eight pieces of state that between them meant "what is this
+/// pane showing", each with its own rule for beating the others. That is why a
+/// commit opened while the launcher was up loaded into a pane nobody could
+/// see, and clicking a row in History simply did nothing. Now there is one
+/// value in front and one ordered strip behind it, and a surface cannot be put
+/// in front without also being in the strip.
+///
+/// See `docs/workspace-navigation.md`.
+enum WorkspaceSurface: Hashable, Identifiable, Sendable {
+    /// The terminal stack. Which session is `TerminalsModel`'s business.
+    case sessions
+    /// The launch grid, over the sessions rather than beside them.
+    case launcher
+    case files
+    case file(String)
+    case commit(String)
+    case changes
+    case browser(String)
+
+    var id: String {
+        switch self {
+        case .sessions: return "sessions"
+        case .launcher: return "launcher"
+        case .files: return "files"
+        case .changes: return "changes"
+        case let .file(path): return "file:\(path)"
+        case let .commit(commit): return "commit:\(commit)"
+        case let .browser(browser): return "browser:\(browser)"
+        }
+    }
+
+    /// Whether this surface carries a chip in the tab strip.
+    ///
+    /// Sessions and the launcher do not. The strip is where the sessions
+    /// already are, and the launcher is a mode over them rather than a
+    /// document beside them.
+    var isTab: Bool {
+        switch self {
+        case .sessions, .launcher: return false
+        default: return true
+        }
+    }
+}
+
 /// A browser tab kept with its workspace, not with the window.
 struct WorkspaceBrowserTab: Identifiable, Hashable, Sendable {
     let id: String
@@ -165,20 +211,18 @@ final class WorkspacesModel {
     var gitOutcome: GitOutcome?
     var isCommitting = false
 
-    /// Files open in the centre pane, per workspace, in the order opened.
+    /// What each workspace has open beside its terminals, in the order opened.
     ///
-    /// The centre pane holds terminals and files side by side, so opening a
-    /// diff does not close the session you were watching. A terminal is where
-    /// the work happens and must not be something you lose by looking at a file.
-    private(set) var openFiles: [String: [String]] = [:]
-    /// The open file being shown, or nil when the pane is showing a terminal.
-    private(set) var activeFile: [String: String] = [:]
+    /// The centre pane holds terminals and documents side by side, so opening
+    /// a diff does not close the session you were watching. A terminal is
+    /// where the work happens and must not be something you lose by looking at
+    /// a file.
+    private(set) var tabs: [String: [WorkspaceSurface]] = [:]
+    /// What is actually on screen per workspace. Absent means `.sessions`.
+    private(set) var front: [String: WorkspaceSurface] = [:]
+    /// Payload for `.browser` surfaces: the url, and the forwarded peer port
+    /// when the page lives on another machine.
     private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
-    private(set) var activeBrowserID: [String: String] = [:]
-    /// Folders whose centre pane is showing the launch surface, even though
-    /// sessions may already be running underneath it.
-    private(set) var showingLauncher: Set<String> = []
-    private(set) var filesShown: Set<String> = []
     private(set) var diffs: [String: FileDiff] = [:]
     /// One document per open file, keyed the same way as the diffs.
     ///
@@ -195,30 +239,75 @@ final class WorkspacesModel {
 
     // MARK: - The centre pane
 
-    /// The commit open in the centre pane, per workspace.
-    ///
-    /// A commit takes the pane the same way a file does, but is not in
-    /// `openFiles`: there is only ever one, and it is opened by clicking a row
-    /// in History rather than accumulated as tabs.
-    private(set) var openCommit: [String: CommitDetail] = [:]
+    /// Loaded commits, keyed workspace and commit, for the `.commit` surface.
+    private(set) var commits: [String: CommitDetail] = [:]
+    /// The commit whose read is in flight, per workspace.
     private(set) var loadingCommit: [String: String] = [:]
-    private(set) var reviewingWorkingTree: Set<String> = []
 
-    /// Read a commit and show it. Replaces whatever the pane was showing.
+    /// This workspace's strip, in the order the tabs were opened.
+    func tabs(in workspaceID: String) -> [WorkspaceSurface] { tabs[workspaceID] ?? [] }
+
+    /// What this workspace's centre pane is showing.
+    func front(in workspaceID: String) -> WorkspaceSurface { front[workspaceID] ?? .sessions }
+
+    func isFront(_ surface: WorkspaceSurface, in workspaceID: String) -> Bool {
+        front(in: workspaceID) == surface
+    }
+
+    /// Put a surface in front, adding it to the strip when it belongs there.
+    ///
+    /// The one way the pane changes. Every navigation goes through here, so a
+    /// surface cannot be shown without a chip to close it by, and no flag can
+    /// survive a navigation that put something else in front of it.
+    func show(_ surface: WorkspaceSurface, in workspaceID: String) {
+        if surface.isTab, !(tabs[workspaceID] ?? []).contains(surface) {
+            tabs[workspaceID, default: []].append(surface)
+        }
+        front[workspaceID] = surface
+    }
+
+    /// Close a tab and drop what it was holding.
+    ///
+    /// What comes forward is the sessions surface rather than the neighbouring
+    /// tab: the terminal is what this pane is mainly for.
+    func close(_ surface: WorkspaceSurface, in workspaceID: String) {
+        tabs[workspaceID]?.removeAll { $0 == surface }
+        if isFront(surface, in: workspaceID) { front[workspaceID] = .sessions }
+        switch surface {
+        case let .file(path):
+            let key = Self.treeKey(workspaceID, path)
+            diffs[key] = nil
+            documents[key] = nil
+        case let .commit(commit):
+            commits[Self.treeKey(workspaceID, commit)] = nil
+            if loadingCommit[workspaceID] == commit { loadingCommit[workspaceID] = nil }
+        case let .browser(browser):
+            forgetBrowser(browser, in: workspaceID)
+        default:
+            break
+        }
+    }
+
+    /// The paths this workspace has open, in strip order.
+    func openFiles(in workspaceID: String) -> [String] {
+        tabs(in: workspaceID).compactMap {
+            if case let .file(path) = $0 { return path }
+            return nil
+        }
+    }
+
+    func commit(_ id: String, in workspaceID: String) -> CommitDetail? {
+        commits[Self.treeKey(workspaceID, id)]
+    }
+
+    /// Read a commit and show it. The tab appears at once and fills in.
     func showCommit(_ id: String, in workspaceID: String) async {
-        // The launcher sits above every other surface in the centre pane, so a
-        // commit opened while it was up loaded into a pane nobody could see:
-        // clicking a row in History simply did nothing. Same first line as
-        // `openFile`, which is this method's sibling.
-        exitLauncher(in: workspaceID)
+        show(.commit(id), in: workspaceID)
+        guard commit(id, in: workspaceID) == nil else { return }
         loadingCommit[workspaceID] = id
-        activeFile[workspaceID] = nil
-        reviewingWorkingTree.remove(workspaceID)
         do {
             let detail = try await Bridge.workspaceShow(id: workspaceID, commit: id)
-            // The user may have clicked another commit while this was in flight.
-            guard loadingCommit[workspaceID] == id else { return }
-            openCommit[workspaceID] = detail
+            commits[Self.treeKey(workspaceID, id)] = detail
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -226,37 +315,24 @@ final class WorkspacesModel {
         if loadingCommit[workspaceID] == id { loadingCommit[workspaceID] = nil }
     }
 
+    /// Close whichever commit this workspace has open.
     func closeCommit(in workspaceID: String) {
-        openCommit[workspaceID] = nil
-        loadingCommit[workspaceID] = nil
+        for tab in tabs(in: workspaceID) {
+            if case .commit = tab { close(tab, in: workspaceID) }
+        }
     }
 
     func reviewWorkingTree(in workspaceID: String) {
-        exitLauncher(in: workspaceID)
-        activeFile[workspaceID] = nil
-        activeBrowserID[workspaceID] = nil
-        filesShown.remove(workspaceID)
-        closeCommit(in: workspaceID)
-        reviewingWorkingTree.insert(workspaceID)
+        show(.changes, in: workspaceID)
     }
 
     func closeWorkingTreeReview(in workspaceID: String) {
-        reviewingWorkingTree.remove(workspaceID)
+        close(.changes, in: workspaceID)
     }
 
     /// Show a file in the centre pane, opening it if it is not already there.
     func openFile(_ path: String, in workspaceID: String) async {
-        // A file and a commit are both "what the pane is showing", so opening
-        // one puts the other away.
-        exitLauncher(in: workspaceID)
-        closeCommit(in: workspaceID)
-        reviewingWorkingTree.remove(workspaceID)
-        var files = openFiles[workspaceID] ?? []
-        if !files.contains(path) {
-            files.append(path)
-            openFiles[workspaceID] = files
-        }
-        activeFile[workspaceID] = path
+        show(.file(path), in: workspaceID)
         await loadText(path, in: workspaceID)
     }
 
@@ -300,27 +376,12 @@ final class WorkspacesModel {
     }
 
     func closeFile(_ path: String, in workspaceID: String) {
-        var files = openFiles[workspaceID] ?? []
-        files.removeAll { $0 == path }
-        openFiles[workspaceID] = files
-        if activeFile[workspaceID] == path {
-            // Back to the terminal rather than to another file: the terminal is
-            // what this pane is mainly for.
-            activeFile[workspaceID] = nil
-        }
-        let key = Self.treeKey(workspaceID, path)
-        diffs[key] = nil
-        documents[key] = nil
+        close(.file(path), in: workspaceID)
     }
 
-    /// Put the terminal back in front without closing any open file.
+    /// Put the terminal back in front without closing any open tab.
     func showTerminal(in workspaceID: String) {
-        exitLauncher(in: workspaceID)
-        activeFile[workspaceID] = nil
-        activeBrowserID[workspaceID] = nil
-        filesShown.remove(workspaceID)
-        closeCommit(in: workspaceID)
-        reviewingWorkingTree.remove(workspaceID)
+        show(.sessions, in: workspaceID)
     }
 
     func browserTabs(in workspaceID: String) -> [WorkspaceBrowserTab] {
@@ -330,33 +391,32 @@ final class WorkspacesModel {
     /// Open a new browser tab, or select an existing one when an id is given.
     @discardableResult
     func showBrowser(in workspaceID: String, id: String? = nil) -> WorkspaceBrowserTab {
-        exitLauncher(in: workspaceID)
-        activeFile[workspaceID] = nil
-        filesShown.remove(workspaceID)
-        closeCommit(in: workspaceID)
-        reviewingWorkingTree.remove(workspaceID)
         if let id, let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) {
-            activeBrowserID[workspaceID] = id
+            show(.browser(id), in: workspaceID)
             return tab
         }
-        let tabs = browserTabs[workspaceID] ?? []
+        let pages = browserTabs[workspaceID] ?? []
         let tab = WorkspaceBrowserTab(
             id: UUID().uuidString,
             url: "",
-            number: tabs.count + 1
+            number: pages.count + 1
         )
-        browserTabs[workspaceID] = tabs + [tab]
-        activeBrowserID[workspaceID] = tab.id
+        browserTabs[workspaceID] = pages + [tab]
+        show(.browser(tab.id), in: workspaceID)
         return tab
     }
 
     func closeBrowser(_ tab: WorkspaceBrowserTab, in workspaceID: String) {
+        close(.browser(tab.id), in: workspaceID)
+    }
+
+    /// Drop a browser tab's payload, and the port forward it was holding open.
+    private func forgetBrowser(_ id: String, in workspaceID: String) {
+        guard let tab = browserTabs[workspaceID]?.first(where: { $0.id == id }) else { return }
         if let peer = tab.peer, let port = tab.port {
             Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
         }
-        browserTabs[workspaceID]?.removeAll { $0.id == tab.id }
-        guard activeBrowserID[workspaceID] == tab.id else { return }
-        activeBrowserID[workspaceID] = browserTabs[workspaceID]?.last?.id
+        browserTabs[workspaceID]?.removeAll { $0.id == id }
     }
 
     func setBrowserURL(_ url: String, in workspaceID: String, tabID: String) {
@@ -453,22 +513,17 @@ final class WorkspacesModel {
     }
 
     func showFiles(in workspaceID: String) {
-        exitLauncher(in: workspaceID)
-        activeFile[workspaceID] = nil
-        activeBrowserID[workspaceID] = nil
-        filesShown.insert(workspaceID)
-        closeCommit(in: workspaceID)
+        show(.files, in: workspaceID)
     }
 
     func closeFiles(in workspaceID: String) {
-        filesShown.remove(workspaceID)
+        close(.files, in: workspaceID)
     }
 
-    /// Leave the launch surface. Called by every surface switch; kept separate
-    /// so the flag cannot silently survive a navigation that put something
-    /// else in front of it.
+    /// Leave the launch surface, if it is what is up.
     func exitLauncher(in workspaceID: String) {
-        showingLauncher.remove(workspaceID)
+        guard isShowingLauncher(in: workspaceID) else { return }
+        show(.sessions, in: workspaceID)
     }
 
     /// Put the launch grid in front. Sessions stay mounted underneath.
@@ -477,28 +532,27 @@ final class WorkspacesModel {
     /// already there is a no-op, the same way clicking the selected session
     /// does not hide it.
     func showLauncher(in workspaceID: String) {
-        showingLauncher.insert(workspaceID)
+        show(.launcher, in: workspaceID)
     }
 
     /// Second click on a folder: swap between the running surface and the
     /// launcher, so a new agent can be started without hiding the sessions
     /// that are already there.
     func toggleLauncher(in workspaceID: String) {
-        if showingLauncher.contains(workspaceID) {
+        if isShowingLauncher(in: workspaceID) {
             showTerminal(in: workspaceID)
         } else {
-            showingLauncher.insert(workspaceID)
+            showLauncher(in: workspaceID)
         }
     }
 
-    /// True when the pane is showing a terminal rather than a file or a commit.
+    func isShowingLauncher(in workspaceID: String) -> Bool {
+        isFront(.launcher, in: workspaceID)
+    }
+
+    /// True when the pane is showing a terminal rather than a document.
     func isShowingTerminal(in workspaceID: String) -> Bool {
-        activeFile[workspaceID] == nil
-            && activeBrowserID[workspaceID] == nil
-            && !filesShown.contains(workspaceID)
-            && openCommit[workspaceID] == nil
-            && loadingCommit[workspaceID] == nil
-            && !reviewingWorkingTree.contains(workspaceID)
+        isFront(.sessions, in: workspaceID)
     }
 
     func diff(for path: String, in workspaceID: String) -> FileDiff? {
@@ -583,8 +637,9 @@ final class WorkspacesModel {
     /// Re-read the diffs of files that are open. Called after the working tree
     /// changed, so a diff on screen is never stale.
     func refreshOpenDiffs() async {
-        for (workspaceID, paths) in openFiles {
-            for path in paths where diffs[Self.treeKey(workspaceID, path)] != nil {
+        for workspaceID in tabs.keys {
+            for path in openFiles(in: workspaceID)
+            where diffs[Self.treeKey(workspaceID, path)] != nil {
                 await loadDiff(path, in: workspaceID)
             }
         }

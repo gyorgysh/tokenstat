@@ -378,7 +378,7 @@ struct WorkspaceChangesView: View {
                     ChangeRow(
                         file: file,
                         isStaged: model.isStaged(file.path, in: folder.id),
-                        isOpen: model.activeFile[folder.id] == file.path,
+                        isOpen: model.isFront(.file(file.path), in: folder.id),
                         isExpanded: expandedDiffs.contains(key),
                         onToggle: { model.toggleStaged(file.path, in: folder.id) },
                         onToggleDiff: {

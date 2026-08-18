@@ -216,7 +216,7 @@ struct WorkspaceHistoryView: View {
                                     // colleague's address off this machine on
                                     // every history load.
                                     avatar: commit.mine == true ? account?.avatar : nil,
-                                    isOpen: model.openCommit[folder.id]?.id == commit.id
+                                    isOpen: model.isFront(.commit(commit.id), in: folder.id)
                                 ) {
                                     Task { await model.showCommit(commit.id, in: folder.id) }
                                 }

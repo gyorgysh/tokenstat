@@ -1151,13 +1151,11 @@ struct RootView: View {
                         // looking at the folder, the session when you are
                         // looking at a shell.
                         let isCurrent = route.workspaceID == folder.id
-                        // The launcher lives inside the terminal column, so
-                        // `isShowingTerminal` is true while it is up. Without
-                        // this the session row stayed lit on a screen that is
-                        // not that session, and nothing marked the launcher.
+                        // The launcher is its own surface, so a folder sitting
+                        // on the launch grid is not showing a terminal and no
+                        // session row may claim to be what you are looking at.
                         let showingTerminal = isCurrent
                             && workspaces.isShowingTerminal(in: folder.id)
-                            && !workspaces.showingLauncher.contains(folder.id)
                             && terminals.active(in: folder.id) != nil
                         HStack(spacing: 0) {
                             Button {

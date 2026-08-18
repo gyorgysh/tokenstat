@@ -27,46 +27,19 @@ struct TerminalPane: View {
         terminals.sessions(in: folder.id)
     }
 
-    /// Files open in this pane beside the terminals.
-    private var openFiles: [String] {
-        workspaces.openFiles[folder.id] ?? []
+    /// What this pane is showing. One value, so no two surfaces can both
+    /// think they are in front.
+    private var front: WorkspaceSurface {
+        workspaces.front(in: folder.id)
     }
 
-    /// The file on screen, or nil when a terminal is.
-    private var activeFile: String? {
-        workspaces.activeFile[folder.id]
+    /// The strip beside the sessions, in the order the tabs were opened.
+    private var tabs: [WorkspaceSurface] {
+        workspaces.tabs(in: folder.id)
     }
 
-    /// The commit on screen, if History opened one.
-    private var openCommit: CommitDetail? {
-        workspaces.openCommit[folder.id]
-    }
-
-    private var reviewingWorkingTree: Bool {
-        workspaces.reviewingWorkingTree.contains(folder.id)
-    }
-
-    private var browserShown: Bool {
-        workspaces.activeBrowserID[folder.id] != nil
-    }
-
-    private var activeBrowser: WorkspaceBrowserTab? {
-        guard let id = workspaces.activeBrowserID[folder.id] else { return nil }
-        return workspaces.browserTabs(in: folder.id).first { $0.id == id }
-    }
-
-    private var filesShown: Bool {
-        workspaces.filesShown.contains(folder.id)
-    }
-
-    private var loadingCommit: String? {
-        workspaces.loadingCommit[folder.id]
-    }
-
-    /// True when the pane is showing a terminal rather than a file or a commit.
-    private var showsTerminal: Bool {
-        activeFile == nil && !browserShown && !filesShown && openCommit == nil && loadingCommit == nil && !reviewingWorkingTree
-    }
+    /// True when the pane is showing a terminal rather than a document.
+    private var showsTerminal: Bool { front == .sessions }
 
     /// Which harnesses this Mac can launch. Shared, and resolved off the main
     /// actor: see `LaunchCatalog` for the crash that reading it inline caused.
@@ -280,7 +253,7 @@ struct TerminalPane: View {
                 // that is its whole point, to put a new launch in front even
                 // while sessions are running underneath. Any real navigation
                 // (opening a file, browser, terminal) clears the flag.
-                if workspaces.showingLauncher.contains(folder.id) {
+                if front == .launcher {
                     LaunchSurface(
                         folder: folder,
                         terminals: terminals,
@@ -290,23 +263,27 @@ struct TerminalPane: View {
                         modelPeer: peer
                     )
                         .frame(width: size.width, height: size.height)
-                } else if reviewingWorkingTree {
+                } else if front == .changes {
                     WorkingTreeReviewView(folder: folder, model: workspaces)
                         .frame(width: size.width, height: size.height)
-                } else if let commit = openCommit {
-                    CommitView(detail: commit)
-                        .frame(width: size.width, height: size.height)
-                        .id(commit.id)
-                } else if loadingCommit != nil {
-                    reading("commit")
-                        .frame(width: size.width, height: size.height)
-                } else if let path = activeFile {
+                } else if case let .commit(id) = front {
+                    Group {
+                        if let detail = workspaces.commit(id, in: folder.id) {
+                            CommitView(detail: detail)
+                        } else {
+                            reading("commit")
+                        }
+                    }
+                    .frame(width: size.width, height: size.height)
+                    .id(id)
+                } else if case let .file(path) = front {
                     fileSurface(path)
                     .frame(width: size.width, height: size.height)
-                } else if filesShown {
+                } else if front == .files {
                     WorkspaceFilesView(model: workspaces, folder: folder, surface: .content)
                         .frame(width: size.width, height: size.height)
-                } else if let browser = activeBrowser {
+                } else if case let .browser(id) = front,
+                          let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
                     BrowserView(
                         url: browser.url,
                         onURLChange: { workspaces.setBrowserURL($0, in: folder.id, tabID: browser.id) }
@@ -331,7 +308,7 @@ struct TerminalPane: View {
             // tty blinking before it settled.
             .animation(
                 .easeOut(duration: 0.15),
-                value: workspaces.showingLauncher.contains(folder.id)
+                value: front == .launcher
             )
             // Also the size a new session is spawned at, so it never opens at
             // 24x80 and jumps.
@@ -420,75 +397,12 @@ struct TerminalPane: View {
                 }
             }
 
-            ForEach(openFiles, id: \.self) { path in
-                FileChip(
-                    path: path,
-                    symbol: "doc.text",
-                    label: String(path.split(separator: "/").last ?? ""),
-                    isSelected: openCommit == nil && activeFile == path,
-                    isDirty: workspaces.isEditorDirty(path, in: folder.id)
-                ) {
-                    Task { await workspaces.openFile(path, in: folder.id) }
-                } onClose: {
-                    // Asks first when the file has unsaved changes. A tab close
-                    // is one click from a tab select.
-                    workspaces.requestClose(path, in: folder.id)
-                }
-            }
-
-            ForEach(workspaces.browserTabs(in: folder.id)) { browser in
-                FileChip(
-                    path: browser.url.isEmpty ? browser.title : browser.url,
-                    symbol: "globe",
-                    label: browser.title,
-                    isSelected: browser.id == workspaces.activeBrowserID[folder.id]
-                ) {
-                    _ = workspaces.showBrowser(in: folder.id, id: browser.id)
-                } onClose: {
-                    workspaces.closeBrowser(browser, in: folder.id)
-                }
-            }
-
-            if filesShown || !openFiles.isEmpty {
-                FileChip(
-                    path: folder.path,
-                    symbol: "folder",
-                    label: "Files",
-                    isSelected: filesShown && activeFile == nil,
-                    isDirty: false
-                ) {
-                    workspaces.showFiles(in: folder.id)
-                } onClose: {
-                    workspaces.closeFiles(in: folder.id)
-                }
-            }
-
-            // A commit gets a tab too, so it is as closeable as anything else
-            // and it is obvious the pane is showing history rather than work.
-            if let commit = openCommit {
-                FileChip(
-                    path: commit.subject,
-                    symbol: "arrow.triangle.branch",
-                    label: commit.shortID,
-                    isSelected: true
-                ) {} onClose: {
-                    workspaces.closeCommit(in: folder.id)
-                }
-            }
-
-            // The working tree opens in the same pane as a commit and reads
-            // the same way, so it gets the same tab rather than a "Back to
-            // terminal" button of its own. Two surfaces that behave alike
-            // should be closed alike.
-            if reviewingWorkingTree {
-                FileChip(
-                    path: "Uncommitted changes in \(folder.name)",
-                    symbol: "plusminus",
-                    label: "Changes",
-                    isSelected: true
-                ) {} onClose: {
-                    workspaces.closeWorkingTreeReview(in: folder.id)
-                }
+            // Every open surface is a chip, drawn from one list in the order
+            // it was opened. A commit and the working tree are as closeable as
+            // a file, and none of them can claim to be selected while another
+            // is the one on screen.
+            ForEach(tabs) { tab in
+                chip(for: tab)
             }
 
             Menu {
@@ -599,8 +513,87 @@ struct TerminalPane: View {
     /// The Launch tab is the workspace home: selected while the grid is up,
     /// including the empty-folder case where the grid shows without the flag.
     private var isLaunchSelected: Bool {
-        workspaces.showingLauncher.contains(folder.id)
-            || (sessions.isEmpty && workspaces.isShowingTerminal(in: folder.id))
+        front == .launcher || (sessions.isEmpty && front == .sessions)
+    }
+
+    /// One chip, drawn from the surface it stands for.
+    ///
+    /// The strip used to build each kind of chip at its own call site with its
+    /// own selection rule, and the commit and the working tree both hardcoded
+    /// `isSelected: true`, so two tabs could look selected at once. Selection
+    /// is one comparison against one value now.
+    @ViewBuilder
+    private func chip(for tab: WorkspaceSurface) -> some View {
+        let selected = front == tab
+        switch tab {
+        case let .file(path):
+            FileChip(
+                path: path,
+                symbol: "doc.text",
+                label: String(path.split(separator: "/").last ?? ""),
+                isSelected: selected,
+                isDirty: workspaces.isEditorDirty(path, in: folder.id)
+            ) {
+                Task { await workspaces.openFile(path, in: folder.id) }
+            } onClose: {
+                // Asks first when the file has unsaved changes. A tab close
+                // is one click from a tab select.
+                workspaces.requestClose(path, in: folder.id)
+            }
+        case let .browser(id):
+            if let browser = workspaces.browserTabs(in: folder.id).first(where: { $0.id == id }) {
+                FileChip(
+                    path: browser.url.isEmpty ? browser.title : browser.url,
+                    symbol: "globe",
+                    label: browser.title,
+                    isSelected: selected
+                ) {
+                    _ = workspaces.showBrowser(in: folder.id, id: id)
+                } onClose: {
+                    workspaces.closeBrowser(browser, in: folder.id)
+                }
+            }
+        case .files:
+            FileChip(
+                path: folder.path,
+                symbol: "folder",
+                label: "Files",
+                isSelected: selected
+            ) {
+                workspaces.showFiles(in: folder.id)
+            } onClose: {
+                workspaces.closeFiles(in: folder.id)
+            }
+        case let .commit(id):
+            FileChip(
+                path: workspaces.commit(id, in: folder.id)?.subject ?? id,
+                symbol: "arrow.triangle.branch",
+                label: workspaces.commit(id, in: folder.id)?.shortID ?? String(id.prefix(7)),
+                isSelected: selected
+            ) {
+                Task { await workspaces.showCommit(id, in: folder.id) }
+            } onClose: {
+                workspaces.close(tab, in: folder.id)
+            }
+        case .changes:
+            // The working tree opens in the same pane as a commit and reads
+            // the same way, so it gets the same tab rather than a "Back to
+            // terminal" button of its own. Two surfaces that behave alike
+            // should be closed alike.
+            FileChip(
+                path: "Uncommitted changes in \(folder.name)",
+                symbol: "plusminus",
+                label: "Changes",
+                isSelected: selected
+            ) {
+                workspaces.reviewWorkingTree(in: folder.id)
+            } onClose: {
+                workspaces.closeWorkingTreeReview(in: folder.id)
+            }
+        case .sessions, .launcher:
+            // Not tabs. `WorkspaceSurface.isTab` keeps them out of the strip.
+            EmptyView()
+        }
     }
 
     private func start(_ profile: LaunchProfile) {
