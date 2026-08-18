@@ -204,6 +204,15 @@ enum ClientRemote {
         )
     }
 
+    /// Re-read one folder's git state on the machine that owns it.
+    ///
+    /// The peer answers with its own local id, which is not the id this side
+    /// uses for a remote folder, so only the parts that go stale are taken and
+    /// the caller keeps the identity it already had.
+    static func status(peer: String, workspace: String) async throws -> WorkspaceFolder {
+        try await Bridge.onPeer(peer, "workspace.status", ["id": workspace], as: WorkspaceFolder.self)
+    }
+
     // MARK: - A folder's work, on the machine that owns it
 
     /// The peer's whole board, list and all. Filtering to one folder happens

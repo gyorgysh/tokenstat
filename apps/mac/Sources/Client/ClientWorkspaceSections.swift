@@ -21,8 +21,14 @@ import SwiftUI
 struct ClientWorkspaceDetailView: View {
     let peer: String
     let hostName: String
+    /// What the list this was pushed from knew when it was tapped. A seed, not
+    /// the truth: an agent writing files changes it a second later.
     let folder: WorkspaceFolder
 
+    /// The folder as the owning machine last described it. Only the parts that
+    /// go stale are taken, because the peer answers with its own local id and
+    /// this side addresses a remote folder as `remote:<peer>:<id>`.
+    @State private var live: WorkspaceFolder?
     @State private var counts = WorkspaceSectionCounts()
     @State private var errorMessage: String?
     @State private var showPort = false
@@ -33,6 +39,15 @@ struct ClientWorkspaceDetailView: View {
 
     private var workspaceID: String {
         ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
+    }
+
+    /// The folder to draw: the fresh read when there is one.
+    private var current: WorkspaceFolder {
+        guard var merged = live else { return folder }
+        merged.id = folder.id
+        merged.machineID = folder.machineID
+        merged.machineLabel = folder.machineLabel
+        return merged
     }
 
     var body: some View {
@@ -51,7 +66,7 @@ struct ClientWorkspaceDetailView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(folder.name)
+        .navigationTitle(current.name)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
@@ -77,12 +92,12 @@ struct ClientWorkspaceDetailView: View {
             Text(hostName)
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
-            Text(folder.path)
+            Text(current.path)
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .truncationMode(.middle)
-            if let subtitle = folder.subtitle {
+            if let subtitle = current.subtitle {
                 Text(subtitle)
                     .font(ClientType.caption)
                     .foregroundStyle(Theme.accent)
@@ -107,7 +122,12 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
-                ClientWorkspaceChangesView(folder: folder, hostName: hostName)
+                ClientWorkspaceChangesView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    folder: current,
+                    hostName: hostName
+                )
             } label: {
                 ClientSectionRow(section: .changes, count: counts.changes)
             }
@@ -179,16 +199,23 @@ struct ClientWorkspaceDetailView: View {
     /// badge at a time. A host that cannot answer one of them leaves that
     /// badge blank instead of failing the screen.
     private func reload() async {
-        counts.changes = folder.git?.files.count ?? 0
+        // Git first, and re-read rather than trusting what was captured when
+        // the row was tapped. A folder an agent is working in changes while
+        // this screen is open, and a badge that cannot move is a badge that
+        // lies.
+        async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
         async let sessions = try? ClientRemote.ptyList(peer: peer)
         async let cards = try? ClientRemote.todoCards(peer: peer)
         async let jobs = try? ClientRemote.automations(peer: peer)
         async let graphs = try? ClientRemote.workflows(peer: peer)
         async let runs = try? ClientRemote.workflowRuns(peer: peer)
 
+        if let fresh = await status { live = fresh }
+        counts.changes = current.git?.files.count ?? 0
+        let path = current.path
         let mine = (await sessions ?? []).filter { session in
             if let ws = session.workspaceID, !ws.isEmpty { return ws == workspaceID }
-            return session.cwd == folder.path || session.cwd.hasPrefix(folder.path + "/")
+            return session.cwd == path || session.cwd.hasPrefix(path + "/")
         }
         counts.sessions = mine.count
         counts.todo = (await cards ?? []).filter {
@@ -270,15 +297,29 @@ private struct ClientSectionRow: View {
 /// screen costs nothing to open, and a phone is where you check whether the
 /// agent has been busy rather than where you review a patch.
 struct ClientWorkspaceChangesView: View {
+    let peer: String
+    let workspaceID: String
+    /// What the section list had. Replaced by this screen's own read, so a
+    /// file written while it is open shows up here rather than on the next
+    /// visit.
     let folder: WorkspaceFolder
     let hostName: String
 
-    private var files: [FileChange] { folder.git?.files ?? [] }
+    @State private var live: WorkspaceFolder?
+    @State private var errorMessage: String?
+
+    private var current: WorkspaceFolder { live ?? folder }
+    private var files: [FileChange] { current.git?.files ?? [] }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                if let git = folder.git, git.isRepo {
+                if let errorMessage {
+                    ClientErrorCard(message: errorMessage) {
+                        Task { await load() }
+                    }
+                }
+                if let git = current.git, git.isRepo {
                     branchCard(git)
                 }
                 if files.isEmpty {
@@ -324,6 +365,17 @@ struct ClientWorkspaceChangesView: View {
         .background(Theme.background)
         .navigationTitle("Changes")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await ClientRefresh.pull("workspace-changes-\(workspaceID)") { await load() } }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            live = try await ClientRemote.status(peer: peer, workspace: workspaceID)
+            errorMessage = nil
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
     }
 
     private func branchCard(_ git: GitStatus) -> some View {
