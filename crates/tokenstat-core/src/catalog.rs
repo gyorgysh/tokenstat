@@ -203,6 +203,13 @@ pub struct Catalog {
     pub effective_from: String,
     models: Vec<CatalogModel>,
     by_key: HashMap<String, Resolved>,
+    /// Every published window, against the folded ids that carry it, with the
+    /// model each entry came from so aliases cannot vote twice.
+    ///
+    /// Built once at load because `sibling_context_window` runs on the live
+    /// meter's poll path, where folding three thousand ids and their aliases
+    /// on every call was thousands of throwaway allocations a second.
+    windows_by_key: Vec<(String, u64, usize)>,
 }
 
 impl Catalog {
@@ -254,10 +261,24 @@ impl Catalog {
                 register(alias);
             }
         }
+        let mut windows_by_key: Vec<(String, u64, usize)> = Vec::new();
+        for (index, model) in raw.models.iter().enumerate() {
+            let Some(window) = model.context_window() else {
+                continue;
+            };
+            let leaf = model.id.rsplit('/').next().unwrap_or(&model.id);
+            for key in std::iter::once(leaf).chain(model.aliases.iter().map(String::as_str)) {
+                let folded = fold(key.rsplit('/').next().unwrap_or(key));
+                if !folded.is_empty() {
+                    windows_by_key.push((folded, window, index));
+                }
+            }
+        }
         Some(Catalog {
             effective_from: raw.effective_from,
             models: raw.models,
             by_key,
+            windows_by_key,
         })
     }
 
@@ -312,19 +333,15 @@ impl Catalog {
             return None;
         }
         let mut counts: HashMap<u64, usize> = HashMap::new();
-        for candidate in &self.models {
-            let Some(window) = candidate.context_window() else {
+        // A model's own entries are consecutive, so remembering the last one
+        // counted is enough to stop three aliases casting three votes.
+        let mut last_counted: Option<usize> = None;
+        for (key, window, model) in &self.windows_by_key {
+            if !key.starts_with(&stem) || last_counted == Some(*model) {
                 continue;
-            };
-            let shares_stem = std::iter::once(&candidate.id)
-                .chain(candidate.aliases.iter())
-                .any(|id| {
-                    let folded = fold(id.rsplit('/').next().unwrap_or(id));
-                    folded.starts_with(&stem)
-                });
-            if shares_stem {
-                *counts.entry(window).or_default() += 1;
             }
+            last_counted = Some(*model);
+            *counts.entry(*window).or_default() += 1;
         }
         counts
             .into_iter()
