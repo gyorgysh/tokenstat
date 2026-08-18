@@ -101,6 +101,9 @@ struct RootView: View {
     /// The section each folder was last left on, so returning to a folder
     /// returns to what you were doing in it.
     @State private var lastSection: [String: WorkspaceSection] = [:]
+    /// The every-folder group. Shut by default, and remembered: it answers a
+    /// question people ask about once a week.
+    @AppStorage("sidebar.globalGroupExpanded") private var isGlobalGroupExpanded = false
     /// Workspace id the current drag would land before, or `workspaceDropEnd`.
     @State private var workspaceDropBeforeID: String?
     #endif
@@ -1111,10 +1114,10 @@ struct RootView: View {
                     .padding(.top, Theme.Space.m)
                     .padding(.bottom, Theme.Space.m)
 
-                // No heading over these. They are the app's four screens and
-                // they are labelled with their own names, so a word above them
-                // was a word that had to be picked and then not read.
-                ForEach(GlobalSection.navigable) { item in
+                // No heading over these three. They are the whole machine,
+                // they are labelled with their own names, and a word above
+                // them was a word that had to be picked and then not read.
+                ForEach(GlobalSection.standalone) { item in
                     SidebarRow(
                         label: item.label,
                         symbol: item.symbol,
@@ -1122,13 +1125,34 @@ struct RootView: View {
                     ) { navigate(to: .global(item)) }
                 }
 
+                // Tasks, workflows and automations belong to a folder, and the
+                // rows for them here are the every-folder view. That is the
+                // weekly question rather than the daily one, so it is one
+                // collapsed group instead of three rows competing with the
+                // folders below.
+                SidebarGroupHeader(
+                    title: "Global",
+                    isExpanded: isGlobalGroupExpanded
+                ) { isGlobalGroupExpanded.toggle() }
+                if isGlobalGroupExpanded {
+                    ForEach(GlobalSection.everywhere) { item in
+                        SidebarRow(
+                            label: item.label,
+                            symbol: item.symbol,
+                            isSelected: route.isGlobal(item)
+                        ) { navigate(to: .global(item)) }
+                    }
+                }
+
                 // Folders the user chose. Nothing to do with the archive:
                 // its `project` is a lossy label recovered from a slug and
                 // cannot name a directory, and a folder an agent touched once
                 // is not somewhere anyone wants a terminal.
-                HStack {
-                    SectionLabel(text: "Workspaces", count: workspaces.folders.count)
-                    Spacer()
+                SidebarGroupHeader(
+                    title: "Workspaces",
+                    count: workspaces.folders.count,
+                    isExpanded: nil
+                ) {} trailing: {
                     #if os(macOS)
                     Button {
                         workspaces.requestAdd()
@@ -1147,9 +1171,6 @@ struct RootView: View {
                     .accessibilityLabel("Add a project folder")
                     #endif
                 }
-                .padding(.horizontal, Theme.Space.m)
-                .padding(.top, Theme.Space.l)
-                .padding(.bottom, Theme.Space.xs)
 
                 if workspaces.folders.isEmpty {
                     Text("No folders yet.")
@@ -2473,6 +2494,65 @@ private struct WorkspaceRow: View {
         // a card and the session under it, share an edge and read as one tall
         // shape rather than as two things.
         .padding(.vertical, 1)
+    }
+}
+
+/// A sidebar group heading, with an optional disclosure and trailing control.
+///
+/// One component for both headings, because they are the same object: a
+/// tertiary uppercase label at the sidebar's own rhythm. Two hand-rolled
+/// `HStack`s is how the second one ends up 2pt off the first.
+private struct SidebarGroupHeader<Trailing: View>: View {
+    let title: String
+    var count: Int?
+    /// Nil for a heading that does not fold. The chevron is then absent
+    /// rather than drawn and inert.
+    let isExpanded: Bool?
+    let toggle: () -> Void
+    @ViewBuilder var trailing: Trailing
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            Group {
+                if let isExpanded {
+                    Button(action: toggle) {
+                        header(chevron: isExpanded ? "chevron.down" : "chevron.right")
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { isHovering = $0 }
+                    .help(isExpanded ? "Collapse \(title)" : "Expand \(title)")
+                } else {
+                    header(chevron: nil)
+                }
+            }
+            trailing
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.top, Theme.Space.l)
+        .padding(.bottom, Theme.Space.xs)
+    }
+
+    private func header(chevron: String?) -> some View {
+        HStack(spacing: Theme.Space.xs) {
+            if let chevron {
+                Image(systemName: chevron)
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(isHovering ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(.tertiary))
+                    .frame(width: 8)
+            }
+            SectionLabel(text: title, count: count)
+        }
+        .contentShape(.rect)
+    }
+}
+
+extension SidebarGroupHeader where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, isExpanded: Bool?, toggle: @escaping () -> Void) {
+        self.init(title: title, count: count, isExpanded: isExpanded, toggle: toggle) {
+            EmptyView()
+        }
     }
 }
 
