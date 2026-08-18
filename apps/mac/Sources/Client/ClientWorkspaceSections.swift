@@ -512,7 +512,7 @@ struct ClientWorkspaceTasksView: View {
     }
 
     var body: some View {
-        ClientSectionList(
+        ClientCardList(
             title: "Tasks",
             errorMessage: errorMessage,
             isLoaded: loaded,
@@ -578,6 +578,7 @@ struct ClientWorkspaceTasksView: View {
             .foregroundStyle(.tertiary)
             .padding(.top, Theme.Space.xs)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .clientCardRow()
     }
 
     /// One card, with the moves a phone can make on it.
@@ -617,6 +618,7 @@ struct ClientWorkspaceTasksView: View {
                 }
             }
         }
+        .clientCardRow()
     }
 
     private func move(_ card: TodoCard, to column: String) async {
@@ -994,8 +996,94 @@ struct ClientSectionEmpty: View {
 /// The shell every pushed section shares: one scroll view, one error card, one
 /// empty state, and pull to refresh. Written once so a folder's five sections
 /// cannot each arrive at their own idea of what a loading screen looks like.
-/// Shared by every section screen, and by the tasks overview, which is the
-/// same shape one level up.
+/// The same screen as `ClientSectionList`, built on a `List`.
+///
+/// **`swipeActions` only exists inside a `List`.** Attached to a row in a
+/// `ScrollView` it compiles, renders and does nothing, which is how the first
+/// cut of the phone's task board shipped gestures that could not be performed.
+/// Any screen whose rows can be swiped has to be here rather than there.
+///
+/// The loading, empty and error states are the same ones, drawn as rows so a
+/// screen does not change shape when its data lands.
+struct ClientCardList<Content: View>: View {
+    let title: String
+    let errorMessage: String?
+    let isLoaded: Bool
+    let isEmpty: Bool
+    let emptyText: String
+    var refreshKey: String? = nil
+    let reload: () async -> Void
+    @ViewBuilder var content: Content
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var waitedTooLong = false
+
+    var body: some View {
+        List {
+            if let errorMessage {
+                ClientErrorCard(message: errorMessage) {
+                    Task { await reload() }
+                }
+                .clientCardRow()
+            }
+            if !isLoaded {
+                ClientWireframe.Rows(count: 4)
+                    .clientCardRow()
+                if waitedTooLong {
+                    ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil))
+                        .clientCardRow()
+                }
+            } else if isEmpty {
+                ClientSectionEmpty(text: emptyText)
+                    .clientCardRow()
+                    .transition(.smoothIn(reduceMotion: reduceMotion))
+            } else {
+                content
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        .animation(.easeInOut(duration: 0.22), value: isLoaded)
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        // Keyed on `isLoaded` so the timer restarts when it changes. A plain
+        // `.task` closure captures the value it started with, which for a
+        // `let` means it never sees the load finish.
+        .task(id: isLoaded) {
+            guard !isLoaded else {
+                waitedTooLong = false
+                return
+            }
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else { return }
+            waitedTooLong = true
+        }
+        .refreshable {
+            if let refreshKey {
+                await ClientRefresh.pull(refreshKey) { await reload() }
+            } else {
+                await reload()
+            }
+        }
+    }
+}
+
+extension View {
+    /// A card as a list row: our spacing, no separator, no system fill.
+    func clientCardRow() -> some View {
+        listRowInsets(EdgeInsets(
+            top: 0,
+            leading: Theme.Space.m,
+            bottom: Theme.Space.s,
+            trailing: Theme.Space.m
+        ))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+}
+
+/// Shared by every section screen that only scrolls.
 struct ClientSectionList<Content: View>: View {
     let title: String
     let errorMessage: String?
@@ -1042,9 +1130,17 @@ struct ClientSectionList<Content: View>: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .task {
+        // Keyed on `isLoaded`: a plain `.task` closure keeps the value it
+        // started with, so the guard would fire on every screen whether or not
+        // the load had already finished.
+        .task(id: isLoaded) {
+            guard !isLoaded else {
+                waitedTooLong = false
+                return
+            }
             try? await Task.sleep(for: .seconds(10))
-            if !isLoaded { waitedTooLong = true }
+            guard !Task.isCancelled else { return }
+            waitedTooLong = true
         }
         .animation(.easeInOut(duration: 0.22), value: isLoaded)
         .navigationTitle(title)

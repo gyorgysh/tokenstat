@@ -60,7 +60,7 @@ struct ClientTasksOverview: View {
     }
 
     var body: some View {
-        ClientSectionList(
+        ClientCardList(
             title: "Tasks",
             errorMessage: errorMessage,
             isLoaded: loaded,
@@ -124,6 +124,7 @@ struct ClientTasksOverview: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.top, Theme.Space.xs)
+        .clientCardRow()
     }
 
     private func row(_ card: TodoCard, folder: String?) -> some View {
@@ -167,6 +168,7 @@ struct ClientTasksOverview: View {
                 Button("Done") { Task { await move(card, to: "done") } }
             }
         }
+        .clientCardRow()
     }
 
     private func move(_ card: TodoCard, to column: String) async {
