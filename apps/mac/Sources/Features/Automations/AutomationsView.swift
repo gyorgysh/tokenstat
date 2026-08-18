@@ -20,7 +20,7 @@ struct AutomationsView: View {
     /// The registered folders, shared with the workspaces screen. Passed in so
     /// this screen never runs a second `workspace.list`.
     var folders: [WorkspaceFolder]
-    var onNavigate: ((Destination) -> Void)? = nil
+    var onNavigate: ((NavigationRequest) -> Void)? = nil
     /// A run to open on arrival, requested from Tasks. Cleared once opened.
     @Binding var pendingRunID: String?
 
@@ -869,7 +869,7 @@ struct AutomationTemplate: Identifiable {
 struct NewAutomationSheet: View {
     @Bindable var model: AutomationsModel
     var folders: [WorkspaceFolder]
-    var onNavigate: ((Destination) -> Void)?
+    var onNavigate: ((NavigationRequest) -> Void)?
     var existing: Automation? = nil
     /// Pre-fills the form when the sheet was opened from a suggestion.
     var template: AutomationTemplate? = nil
@@ -1036,7 +1036,7 @@ struct NewAutomationSheet: View {
                 if !Bridge.isHosted {
                     setupHint("Background helper is not running. Set it up from Machines before scheduling this task.", action: "Open Devices") {
                         dismiss()
-                        onNavigate?(.machines)
+                        onNavigate?(.global(.machines))
                     }
                 } else if model.backends.isEmpty {
                     setupHint("No supported agent CLI is installed yet. Install one, then reload this screen.", action: "Refresh agents") {

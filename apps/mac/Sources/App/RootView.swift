@@ -7,81 +7,20 @@
 
 import SwiftUI
 
-/// The top level destinations.
-///
-/// Home opens first. It answers "what do I have left before I start", which is
-/// the question people have when they open the app, and it is not the question
-/// Insights answers. Insights sits last, because accounting for the work comes
-/// after the work.
-///
-/// There is deliberately **no Workspaces row**. The folder list below these is
-/// that navigation, and a row whose only effect is to select the first folder
-/// repeats the list beneath it. The app used to have a `WORKSPACE` heading over
-/// the destinations, a `Workspaces` destination, and a `WORKSPACES` folder
-/// section: three headings for two ideas.
-enum Destination: String, CaseIterable, Identifiable {
-    case home
-    case todo
-    case automations
-    case workflows
-    case machines
-    case insights
-    /// Reached by selecting a folder, not by a row of its own.
-    case workspaces
-    case account
-
-    var id: String { rawValue }
-
-    /// The rows in the sidebar's top group.
-    ///
-    /// Account is not among them: it is reached from the footer, where people
-    /// look for their account. Workspaces is not among them either, for the
-    /// reason above. The top group is ordered by label length so the rows read
-    /// as one tidy column: HOME, TASKS, INSIGHTS, DEVICES, WORKFLOWS, AUTOMATIONS.
-    static var navigable: [Destination] {
-        [.home, .todo, .insights, .machines, .workflows, .automations]
-    }
-
-    var label: String {
-        switch self {
-        case .home: return "Home"
-        case .todo: return "Tasks"
-        case .workspaces: return "Workspaces"
-        case .automations: return "Automations"
-        case .workflows: return "Workflows"
-        case .machines: return "Devices"
-        case .insights: return "Insights"
-        case .account: return "Account"
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .home: return "square.grid.3x3.fill"
-        case .todo: return "checklist"
-        case .workspaces: return "folder.fill"
-        case .automations: return "bolt.fill"
-        case .workflows: return "point.3.connected.trianglepath.dotted"
-        case .machines: return "laptopcomputer"
-        case .insights: return "chart.bar.xaxis"
-        case .account: return "person.crop.circle"
-        }
-    }
-}
-
 // Everything below is the desktop shell: a resizable window with two sidebars,
 // an inspector, a terminal stack and a menu bar. None of it is a phone, and a
 // phone-sized copy of it would be the wrong app rather than a smaller one, so
 // the client gets its own root in `ClientRootView`. See `docs/ios-client-ui.md`.
 //
-// `Destination` stays outside this guard: `AutomationsView` navigates by it and
-// compiles for both platforms.
+// `Route` and its sections live in `Route.swift`, outside this guard:
+// `AutomationsView` navigates by `NavigationRequest` and compiles for both
+// platforms.
 #if os(macOS)
 
 struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var destination: Destination = .home
+    @State private var route: Route = .global(.home)
     @State private var model = InsightsModel()
     @State private var home = HomeModel()
     @State private var account = AccountModel()
@@ -258,19 +197,19 @@ struct RootView: View {
         // Insights is not the first screen. Loading it at launch used to fire
         // eight archive queries that all take the session lock and queue
         // behind (and in front of) Home's own work. Load on first visit.
-        .task(id: destination) {
-            guard destination == .insights else { return }
+        .task(id: route) {
+            guard route.isGlobal(.insights) else { return }
             await model.load()
         }
         // Returning to Home after work elsewhere: quiet re-read if the last
         // load is older than the stale window (see HomeModel.refreshIfStale).
-        .onChange(of: destination) { _, next in
+        .onChange(of: route) { _, next in
             // A float belongs to the screen it was opened over. Carrying one
             // across a navigation is how somebody who clicked a workspace ends
             // up with a pane over it that they never asked for.
             isOverlayVisible = false
             overlayHeldByPress = false
-            guard next == .home else { return }
+            guard next.isGlobal(.home) else { return }
             Task { await home.refreshIfStale() }
         }
         // After the heatmap is up, warm secondary surfaces so Machines /
@@ -379,7 +318,7 @@ struct RootView: View {
             toggleLeftSidebar()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
-            guard launch.hostReady, destinationHasInspector else { return }
+            guard launch.hostReady, route.hasInspector else { return }
             toggleRightSidebar()
         }
         .onChange(of: todo.selectionGeneration) { _, _ in
@@ -442,7 +381,7 @@ struct RootView: View {
     private var detailChromeToggles: DetailChromeToggles {
         DetailChromeToggles(
             leftSidebar: AnyView(leftSidebarToolbarButton),
-            rightInspector: destinationHasInspector
+            rightInspector: route.hasInspector
                 ? AnyView(rightInspectorToolbarButton)
                 : nil
         )
@@ -490,7 +429,7 @@ struct RootView: View {
     /// Whether the inspector is on screen, as a column, a docked float or a
     /// peek. What the toolbar mark lights up for.
     private var isRightSidebarOpen: Bool {
-        guard destinationHasInspector else { return false }
+        guard route.hasInspector else { return false }
         if !inspectorFits {
             return isOverlayPinned || isOverlayVisible
         }
@@ -539,7 +478,7 @@ struct RootView: View {
     /// user's: a column where there is room, a float that stays where there is
     /// not.
     private func toggleRightSidebar() {
-        guard destinationHasInspector else { return }
+        guard route.hasInspector else { return }
         if isInspectorPresented {
             closeInspector()
             return
@@ -719,24 +658,15 @@ struct RootView: View {
     /// user's choice.
     private var showsInspector: Binding<Bool> {
         Binding(
-            get: { isInspectorPresented && destinationHasInspector && inspectorFits },
+            get: { isInspectorPresented && route.hasInspector && inspectorFits },
             // A resize must not be recorded as a decision. Only a press of the
             // toolbar button changes what the user asked for, so widening the
             // window brings the pane back exactly as they left it.
             set: { open in
-                guard destinationHasInspector, inspectorFits else { return }
+                guard route.hasInspector, inspectorFits else { return }
                 isInspectorPresented = open
             }
         )
-    }
-
-    private var destinationHasInspector: Bool {
-        switch destination {
-        case .home, .todo, .automations, .workflows, .machines, .insights, .workspaces:
-            return true
-        case .account:
-            return false
-        }
     }
 
     /// Height of the titlebar band the detail column is lifted into.
@@ -782,41 +712,8 @@ struct RootView: View {
     @ViewBuilder
     private var inspectorContent: some View {
         Group {
-            switch destination {
-            case .home:
-                HomeInspector(
-                    model: home,
-                    onOpenInsights: { day in
-                        model.focusOn(day: day)
-                        selectDestination(.insights)
-                    }
-                ) { closeInspector() }
-            case .todo:
-                TodoInspector(
-                    model: todo,
-                    folders: workspaces.folders,
-                    onViewRun: { runID in
-                        selectDestination(.automations)
-                        pendingRunID = runID
-                        isInspectorPresented = true
-                    },
-                    onRunInFront: { launch in
-                        launchTaskInFront(launch)
-                    }
-                ) { closeInspector() }
-            case .automations:
-                AutomationsInspector(
-                    model: automations,
-                    folders: workspaces.folders
-                ) { closeInspector() }
-            case .workflows:
-                WorkflowsInspector(
-                    model: workflows,
-                    folders: workspaces.folders
-                ) { closeInspector() }
-            case .machines:
-                MachinesInspector(model: machines) { closeInspector() }
-            case .workspaces:
+            switch route {
+            case .workspace:
                 #if os(macOS)
                 WorkspaceInspector(
                     model: workspaces,
@@ -834,9 +731,42 @@ struct RootView: View {
                     account: account.account
                 ) { closeInspector() }
                 #endif
-            case .insights:
+            case .global(.home):
+                HomeInspector(
+                    model: home,
+                    onOpenInsights: { day in
+                        model.focusOn(day: day)
+                        navigate(to: .global(.insights))
+                    }
+                ) { closeInspector() }
+            case .global(.todo):
+                TodoInspector(
+                    model: todo,
+                    folders: workspaces.folders,
+                    onViewRun: { runID in
+                        navigate(to: .global(.automations))
+                        pendingRunID = runID
+                        isInspectorPresented = true
+                    },
+                    onRunInFront: { launch in
+                        launchTaskInFront(launch)
+                    }
+                ) { closeInspector() }
+            case .global(.automations):
+                AutomationsInspector(
+                    model: automations,
+                    folders: workspaces.folders
+                ) { closeInspector() }
+            case .global(.workflows):
+                WorkflowsInspector(
+                    model: workflows,
+                    folders: workspaces.folders
+                ) { closeInspector() }
+            case .global(.machines):
+                MachinesInspector(model: machines) { closeInspector() }
+            case .global(.insights):
                 InspectorView(model: model) { closeInspector() }
-            case .account:
+            case .global(.account):
                 EmptyView()
             }
         }
@@ -847,7 +777,7 @@ struct RootView: View {
     /// column and the pane becomes a peek that opens on hover instead of a
     /// door that stays shut.
     private var usesOverlayInspector: Bool {
-        destinationHasInspector && (!isInspectorPresented || !inspectorFits)
+        route.hasInspector && (!isInspectorPresented || !inspectorFits)
     }
 
     /// Whether the floating inspector stays put without the pointer.
@@ -1165,12 +1095,12 @@ struct RootView: View {
                 // No heading over these. They are the app's four screens and
                 // they are labelled with their own names, so a word above them
                 // was a word that had to be picked and then not read.
-                ForEach(Destination.navigable) { item in
+                ForEach(GlobalSection.navigable) { item in
                     SidebarRow(
                         label: item.label,
                         symbol: item.symbol,
-                        isSelected: destination == item
-                    ) { selectDestination(item) }
+                        isSelected: route.isGlobal(item)
+                    ) { navigate(to: .global(item)) }
                 }
 
                 // Folders the user chose. Nothing to do with the archive:
@@ -1220,8 +1150,7 @@ struct RootView: View {
                         // of the two rows lights up: the folder when you are
                         // looking at the folder, the session when you are
                         // looking at a shell.
-                        let isCurrent = destination == .workspaces
-                            && workspaces.selectedID == folder.id
+                        let isCurrent = route.workspaceID == folder.id
                         // The launcher lives inside the terminal column, so
                         // `isShowingTerminal` is true while it is up. Without
                         // this the session row stayed lit on a screen that is
@@ -1279,8 +1208,7 @@ struct RootView: View {
                             label: folder.name,
                             symbol: folder.exists ? "folder" : "questionmark.folder",
                             trailing: folder.diffStat,
-                            isSelected: destination == .workspaces
-                                && workspaces.selectedID == folder.id
+                            isSelected: route.workspaceID == folder.id
                         ) { selectWorkspace(folder.id) }
                         .help(folder.path)
                         .contextMenu {
@@ -1300,7 +1228,7 @@ struct RootView: View {
                                     job: job,
                                     backendLabel: automations.backends.first { $0.id == job.backend }?.label
                                         ?? job.backend,
-                                    isSelected: destination == .automations
+                                    isSelected: route.isGlobal(.automations)
                                         && automations.selectedJobID == job.id
                                 ) {
                                     openAutomation(jobID: job.id, runID: run?.id)
@@ -1309,7 +1237,7 @@ struct RootView: View {
                             ForEach(workflows.liveRuns(in: folder.id)) { run in
                                 ActiveWorkflowRow(
                                     run: run,
-                                    isSelected: destination == .workflows
+                                    isSelected: route.isGlobal(.workflows)
                                         && workflows.selectedRunID == run.id
                                 ) {
                                     openWorkflow(graphID: run.workflowID, runID: run.id)
@@ -1331,7 +1259,7 @@ struct RootView: View {
                                     var transaction = Transaction()
                                     transaction.animation = nil
                                     withTransaction(transaction) {
-                                        destination = .workspaces
+                                        route = .workspace(id: folder.id, section: .sessions)
                                         workspaces.selectedID = folder.id
                                         workspaces.showTerminal(in: folder.id)
                                         terminals.select(session)
@@ -1508,17 +1436,17 @@ struct RootView: View {
         guard account.signedIn else {
             return [
                 NativeMenuItem("Sign in to tokenstat.ai") {
-                    destination = .account
+                    route = .global(.account)
                     account.signIn()
                 },
                 .separator,
-                NativeMenuItem("Account") { destination = .account },
+                NativeMenuItem("Account") { route = .global(.account) },
                 .separator,
                 checkUpdates,
             ]
         }
         return [
-            NativeMenuItem("Account settings") { destination = .account },
+            NativeMenuItem("Account settings") { route = .global(.account) },
             NativeMenuItem(
                 "Sync now",
                 isEnabled: !account.isSyncing && account.syncCooldownUntil == nil
@@ -1535,7 +1463,7 @@ struct RootView: View {
     @ViewBuilder
     private var accountMenuContent: some View {
         if account.signedIn {
-            Button("Account settings", .settings) { destination = .account }
+            Button("Account settings", .settings) { route = .global(.account) }
             Button("Sync now", .refresh) { Task { await account.sync() } }
                 .disabled(account.isSyncing || account.syncCooldownUntil != nil)
             Divider()
@@ -1544,11 +1472,11 @@ struct RootView: View {
             Button("Sign out", .signOut) { Task { await account.signOut() } }
         } else {
             Button("Sign in to tokenstat.ai", .signIn) {
-                destination = .account
+                route = .global(.account)
                 account.signIn()
             }
             Divider()
-            Button("Account", .account) { destination = .account }
+            Button("Account", .account) { route = .global(.account) }
             Divider()
             updateItem
         }
@@ -1636,20 +1564,20 @@ struct RootView: View {
             WorkspacesView(
                 model: workspaces,
                 terminals: terminals,
-                isActive: destination == .workspaces
+                isActive: route.isWorkspace
             )
-            .opacity(destination == .workspaces ? 1 : 0)
-            .allowsHitTesting(destination == .workspaces)
-            .accessibilityHidden(destination != .workspaces)
-            .zIndex(destination == .workspaces ? 1 : 0)
+            .opacity(route.isWorkspace ? 1 : 0)
+            .allowsHitTesting(route.isWorkspace)
+            .accessibilityHidden(!route.isWorkspace)
+            .zIndex(route.isWorkspace ? 1 : 0)
 
-            if destination != .workspaces {
+            if !route.isWorkspace {
                 nonWorkspaceDetail
                     .zIndex(1)
             }
         }
         #else
-        if destination == .workspaces {
+        if route.isWorkspace {
             WorkspacesView(model: workspaces)
         } else {
             nonWorkspaceDetail
@@ -1661,33 +1589,33 @@ struct RootView: View {
     /// surface is kept mounted separately so its terminals are not destroyed.
     @ViewBuilder
     private var nonWorkspaceDetail: some View {
-        switch destination {
-        case .workspaces:
+        switch route {
+        case .workspace:
             EmptyView()
-        case .home:
+        case .global(.home):
             HomeView(
                 model: home,
                 account: account,
-                onShowAccount: { selectDestination(.account) }
+                onShowAccount: { navigate(to: .global(.account)) }
             )
-        case .automations:
+        case .global(.automations):
             AutomationsView(
                 model: automations,
                 folders: workspaces.folders,
-                onNavigate: { destination = $0 },
+                onNavigate: { handle($0) },
                 pendingRunID: $pendingRunID
             )
-        case .workflows:
+        case .global(.workflows):
             WorkflowsView(
                 model: workflows,
                 folders: workspaces.folders
             )
-        case .todo:
+        case .global(.todo):
             TodoView(
                 model: todo,
                 folders: workspaces.folders,
                 onViewRun: { runID in
-                    selectDestination(.automations)
+                    navigate(to: .global(.automations))
                     pendingRunID = runID
                     isInspectorPresented = true
                 },
@@ -1695,17 +1623,17 @@ struct RootView: View {
                     launchTaskInFront(launch)
                 }
             )
-        case .machines:
+        case .global(.machines):
             MachinesView(model: machines)
-        case .account:
+        case .global(.account):
             AccountView(model: account)
-        case .insights:
+        case .global(.insights):
             InsightsView(model: model) {
                 // The back arrow exists only for a day that came from Home, so
                 // the round trip has to end there too: clear the day filter
                 // and put Home back in front.
                 model.clearFocusedDay()
-                selectDestination(.home)
+                navigate(to: .global(.home))
             }
         }
     }
@@ -1745,7 +1673,7 @@ struct RootView: View {
 
     /// Open a graph on Workflows, with its run in the inspector when we have one.
     private func openWorkflow(graphID: String, runID: String?) {
-        selectDestination(.workflows) {
+        navigate(to: .global(.workflows)) {
             workflows.selectGraph(graphID)
             if let runID, let run = workflows.runs.first(where: { $0.id == runID }) {
                 workflows.selectRun(run)
@@ -1756,7 +1684,7 @@ struct RootView: View {
 
     /// Open a job on Automations, with its run in the inspector when we have one.
     private func openAutomation(jobID: String, runID: String?) {
-        selectDestination(.automations) {
+        navigate(to: .global(.automations)) {
             automations.selectJob(jobID)
             if let runID, let run = automations.runs.first(where: { $0.id == runID }) {
                 automations.selectRun(run)
@@ -1786,7 +1714,7 @@ struct RootView: View {
                     todo.errorMessage = "The agent command was empty."
                     return
                 }
-                selectDestination(.workspaces) {
+                navigate(to: .workspace(id: folder.id, section: .sessions)) {
                     workspaces.selectedID = folder.id
                     workspaces.showTerminal(in: folder.id)
                     isInspectorPresented = true
@@ -1829,8 +1757,8 @@ struct RootView: View {
     /// Select the folder and destination in one immediate transaction. The
     /// inspector is part of the workspace destination, so allowing SwiftUI to
     /// animate the two state changes separately makes it visibly trail the row.
-    private func selectWorkspace(_ id: String) {
-        selectDestination(.workspaces) {
+    private func selectWorkspace(_ id: String, section: WorkspaceSection = .sessions) {
+        navigate(to: .workspace(id: id, section: section)) {
             if workspaces.selectedID == id {
                 // Second click on the same folder: swap between the running
                 // surface and the launcher, so a new agent can be started
@@ -1846,12 +1774,29 @@ struct RootView: View {
         }
     }
 
-    private func selectDestination(_ next: Destination, update: (() -> Void)? = nil) {
+    /// Go somewhere, and apply the state that arrival needs, in one
+    /// un-animated transaction.
+    ///
+    /// Two state changes SwiftUI is free to animate separately are two things
+    /// the user sees move at different times: the inspector visibly trailed
+    /// the row it belongs to.
+    private func navigate(to next: Route, update: (() -> Void)? = nil) {
         var transaction = Transaction()
         transaction.animation = nil
         withTransaction(transaction) {
-            destination = next
+            route = next
             update?()
+        }
+    }
+
+    /// Answer a `NavigationRequest` from a screen that does not know the shell.
+    private func handle(_ request: NavigationRequest) {
+        switch request {
+        case let .global(section):
+            navigate(to: .global(section))
+        case .workspaces:
+            guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
+            selectWorkspace(id)
         }
     }
 }
