@@ -364,6 +364,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         view.terminalDelegate = delegate
         // Soft keyboard: TerminalView is a UIKeyInput scroll view.
         view.isUserInteractionEnabled = true
+        // SwiftTerm's own accessory has no Shift and no back-tab, which is the
+        // one chord an agent session needs. `ClientTerminalKeys` replaces it,
+        // and two bars stacked would be worse than the gap it fills.
+        view.inputAccessoryView = nil
         return view
     }
 
@@ -399,6 +403,15 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
 
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+
+    /// Type raw bytes, for the key bar above the keyboard.
+    ///
+    /// The same queue typing uses, so a tapped key and a typed one cannot
+    /// arrive out of order.
+    func sendBytes(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        eventStream.continuation.yield(.write(bytes))
+    }
 
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
@@ -510,6 +523,11 @@ struct ClientTerminalScreen: View {
 
             ClientTerminalRepresentable(session: session)
                 .ignoresSafeArea(.container, edges: .bottom)
+                // Above the keyboard when it is up, above the home indicator
+                // when it is not. Either way it is where a thumb already is.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    ClientTerminalKeys { session.sendBytes($0) }
+                }
         }
         .background(Color.black)
         .navigationBarHidden(true)
