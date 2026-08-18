@@ -236,12 +236,29 @@ fn billing_mode(events: &[&UsageEvent]) -> BillingMode {
     BillingMode::Unknown
 }
 
-/// Whether this command is one the meter knows how to read at all.
+/// Whether this command is one the meter can read **on this machine**.
 ///
 /// Separate from `reading`, which answers only once a turn has been logged.
-/// The difference is what lets a fresh session start at zero.
+/// The difference is what lets a fresh session start at zero and count up.
+///
+/// The store has to exist for that to be honest. A harness that has never
+/// written a log here will never produce a reading, and a row that sits at
+/// `$0.00` forever is the made-up zero this module refuses everywhere else.
 pub(crate) fn can_meter(command: &str) -> bool {
-    harness_name(command).is_some()
+    let Some(harness) = harness_name(command) else {
+        return false;
+    };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    match harness {
+        "claude" => claude_code::discover(&home).is_some(),
+        "grok" => grok::discover(&home).is_some(),
+        "codex" => codex::discover(&home).is_some(),
+        "opencode" => opencode::discover(&home).is_some(),
+        "antigravity" => antigravity_cli::discover(&home).is_some(),
+        _ => false,
+    }
 }
 
 fn harness_name(command: &str) -> Option<&'static str> {
@@ -262,27 +279,118 @@ fn harness_name(command: &str) -> Option<&'static str> {
 ///
 /// A rollout says which directory it was recorded in, so the match is the
 /// folder itself rather than a label. Newest first, and only the head of each
-/// file is read to ask: a long rollout is megabytes and the answer is on its
-/// first records.
+/// candidate is read: the answer is on a rollout's first records and the file
+/// itself can be tens of megabytes.
+///
+/// The scan is memoised. This runs from `pty.info`, which a focused session
+/// polls four times a second, and answering it by reading every rollout each
+/// time would be hundreds of megabytes a second on a machine with a year of
+/// them. See `resolve_log`.
 fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let sessions = codex::discover(&home)?;
-    let mut rollouts: Vec<(SystemTime, PathBuf)> = codex::shards(&sessions)
+    let path = resolve_log("codex", cwd, || {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        let sessions = codex::discover(&home)?;
+        newest_first(codex::shards(&sessions))
+            .into_iter()
+            .take(SCAN_LIMIT)
+            .find(|path| {
+                read_head(path)
+                    .and_then(|head| codex::session_cwd(&head))
+                    .is_some_and(|dir| dir == cwd)
+            })
+    })?;
+    cached_events(&path, |contents| codex::parse_file(&path, contents).events)
+}
+
+/// How many logs a locator will look at before giving up.
+///
+/// The list is newest first, so a session's own log is at the front in every
+/// realistic case. The cap is what stops a folder with no log at all from
+/// paying for the whole history on the way to saying so.
+const SCAN_LIMIT: usize = 40;
+
+/// How long a resolved (or absent) log stays trusted.
+///
+/// Long enough that a 4Hz poll scans at most once per interval, short enough
+/// that a session whose first turn has just been written starts reporting
+/// within a few seconds of it.
+const RESOLVE_TTL: Duration = Duration::from_secs(5);
+
+struct ResolvedLog {
+    at: Instant,
+    path: Option<PathBuf>,
+}
+
+fn resolve_cache() -> &'static Mutex<HashMap<(&'static str, String), ResolvedLog>> {
+    static CACHE: OnceLock<Mutex<HashMap<(&'static str, String), ResolvedLog>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Which log belongs to this folder, scanned at most once per `RESOLVE_TTL`.
+///
+/// A miss is cached too, and deliberately: a folder the harness has never been
+/// used in is the case that would otherwise scan everything on every poll and
+/// find nothing every time.
+fn resolve_log(
+    harness: &'static str,
+    cwd: &str,
+    scan: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    let key = (harness, cwd.to_string());
+    if let Ok(guard) = resolve_cache().lock()
+        && let Some(hit) = guard.get(&key)
+        && hit.at.elapsed() < RESOLVE_TTL
+    {
+        return hit.path.clone();
+    }
+    let found = scan();
+    // A path that has since been deleted is not an answer. Cheaper to check
+    // here than to let a stale hit send the parser at a missing file.
+    let found = found.filter(|path| path.exists());
+    if let Ok(mut guard) = resolve_cache().lock() {
+        guard.insert(
+            key,
+            ResolvedLog {
+                at: Instant::now(),
+                path: found.clone(),
+            },
+        );
+    }
+    found
+}
+
+/// Paths sorted by modification time, newest first. Unreadable entries drop.
+fn newest_first(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut stamped: Vec<(SystemTime, PathBuf)> = paths
         .into_iter()
         .filter_map(|path| {
             let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
             Some((modified, path))
         })
         .collect();
-    rollouts.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    let mine = rollouts.into_iter().take(40).find(|(_, path)| {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| codex::session_cwd(&text))
-            .is_some_and(|dir| dir == cwd)
-    })?;
-    let path = mine.1;
-    cached_events(&path, |contents| codex::parse_file(&path, contents).events)
+    stamped.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    stamped.into_iter().map(|(_, path)| path).collect()
+}
+
+/// The first part of a file, as text.
+///
+/// Enough for the records that name a session's folder, and bounded so that
+/// asking a 40 MB rollout which directory it belongs to costs 64 KB. Cut at
+/// the last newline so the caller never sees half a JSON object.
+fn read_head(path: &Path) -> Option<String> {
+    use std::io::Read;
+    const HEAD_BYTES: usize = 64 * 1024;
+    let mut buffer = Vec::with_capacity(HEAD_BYTES);
+    std::fs::File::open(path)
+        .ok()?
+        .take(HEAD_BYTES as u64)
+        .read_to_end(&mut buffer)
+        .ok()?;
+    let text = String::from_utf8_lossy(&buffer).into_owned();
+    match text.rfind('\n') {
+        Some(cut) => Some(text[..cut].to_string()),
+        None => Some(text),
+    }
 }
 
 /// OpenCode's database, read for one session directory only.
@@ -302,23 +410,18 @@ fn opencode_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
 ///
 /// One database per conversation, each naming its workspace as a `file://`
 /// URI. Newest first, because a folder can have several and the live one is
-/// the one being written.
+/// the one being written. Memoised like the Codex scan: opening forty SQLite
+/// databases four times a second to answer one question is not a poll, it is
+/// a load test.
 fn antigravity_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let root = antigravity_cli::discover(&home)?;
-    let mut dbs: Vec<(SystemTime, PathBuf)> = antigravity_cli::shards(&root)
-        .into_iter()
-        .filter_map(|path| {
-            let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
-            Some((modified, path))
-        })
-        .collect();
-    dbs.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    let mine = dbs
-        .into_iter()
-        .take(40)
-        .find(|(_, path)| antigravity_cli::workspace_path(path).is_some_and(|dir| dir == cwd))?;
-    let path = mine.1;
+    let path = resolve_log("antigravity", cwd, || {
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
+        let root = antigravity_cli::discover(&home)?;
+        newest_first(antigravity_cli::shards(&root))
+            .into_iter()
+            .take(SCAN_LIMIT)
+            .find(|path| antigravity_cli::workspace_path(path).is_some_and(|dir| dir == cwd))
+    })?;
     cached_db_events(&path, "", |path| antigravity_cli::parse_db(path).events)
 }
 
@@ -846,6 +949,42 @@ mod tests {
         // The launcher's second OpenCode tile is the same reader.
         assert_eq!(harness_name("opencode2"), Some("opencode"));
         assert_eq!(harness_name("agy"), Some("antigravity"));
+    }
+
+    #[test]
+    fn a_head_read_stops_at_a_line_boundary() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-head-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("rollout.jsonl");
+        let mut file = std::fs::File::create(&path).expect("create");
+        // Two short lines, then far more than the head budget, so a reader
+        // that took the whole file would be obvious in the result.
+        writeln!(file, "{{\"a\":1}}").expect("write");
+        writeln!(file, "{{\"b\":2}}").expect("write");
+        writeln!(file, "{}", "x".repeat(200_000)).expect("write");
+        drop(file);
+        let head = read_head(&path).expect("head");
+        assert!(head.len() < 100_000, "reads a bounded head, not the file");
+        assert!(head.starts_with("{\"a\":1}"));
+        assert!(!head.ends_with('x'), "cut at a line boundary");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_resolved_log_is_not_rescanned_on_the_next_poll() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SCANS: AtomicUsize = AtomicUsize::new(0);
+        let cwd = format!("/tmp/resolve-test-{}", std::process::id());
+        let scan = || {
+            SCANS.fetch_add(1, Ordering::Relaxed);
+            None
+        };
+        // A miss is cached too: a folder the harness was never used in is
+        // exactly the case that would otherwise scan everything every poll.
+        assert_eq!(resolve_log("codex", &cwd, scan), None);
+        assert_eq!(resolve_log("codex", &cwd, scan), None);
+        assert_eq!(resolve_log("codex", &cwd, scan), None);
+        assert_eq!(SCANS.load(Ordering::Relaxed), 1);
     }
 
     #[test]
