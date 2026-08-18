@@ -29,13 +29,13 @@ use crate::PROTOCOL_VERSION;
 use crate::account_activity::FailureReason;
 #[cfg(feature = "local-host")]
 use crate::automations::Automation;
-#[cfg(feature = "local-host")]
-use crate::dto::WorkspaceDto;
 use crate::dto::{
     AccountBillingDto, AccountDto, AccountReportDto, BlockDto, BucketDto, CalendarDto,
     DayDetailDto, DayPartDto, DeviceLoginDto, DevicePollDto, GroupByDto, InfoDto, MachineDto,
     MachineUsageDto, QueryDto, ScanReportDto, SplitBucketDto, SyncResultDto, TotalsDto,
 };
+#[cfg(feature = "local-host")]
+use crate::dto::{WorkspaceDto, WorkspaceSummaryDto};
 use crate::error::DispatchError;
 use crate::session::{OpenParams, Session};
 
@@ -179,6 +179,15 @@ fn default_machine_days() -> u16 {
 #[serde(rename_all = "camelCase")]
 struct WorkspacePathParams {
     path: String,
+}
+
+/// `workspace.summary` takes an optional id: one folder, or every folder.
+#[cfg(feature = "local-host")]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceSummaryParams {
+    #[serde(default)]
+    id: Option<String>,
 }
 
 #[cfg(feature = "local-host")]
@@ -1704,12 +1713,62 @@ fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
 fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
         "workspace.list" | "workspace.add" | "workspace.remove" | "workspace.rename"
-        | "workspace.status" | "workspace.log" | "workspace.tree" | "workspace.show"
-        | "workspace.diff" | "workspace.read" | "workspace.stage" | "workspace.unstage"
-        | "workspace.commit" | "workspace.write" | "workspace.push" | "pty.spawn" => {}
+        | "workspace.status" | "workspace.summary" | "workspace.log" | "workspace.tree"
+        | "workspace.show" | "workspace.diff" | "workspace.read" | "workspace.stage"
+        | "workspace.unstage" | "workspace.commit" | "workspace.write" | "workspace.push"
+        | "pty.spawn" => {}
         _ => return None,
     }
     Some(folder_call(method, params))
+}
+
+/// Count what one folder is holding.
+///
+/// A session is matched by its workspace id, falling back to its working
+/// directory for a pty the host spawned without one. Hidden ptys are daemon
+/// jobs and are not sessions a person opened, so they are not counted as any.
+#[cfg(feature = "local-host")]
+fn summarize(ws: &tokenstat_workspace::Workspace) -> WorkspaceSummaryDto {
+    let described = describe(ws);
+    let path = ws.path.display().to_string();
+    let sessions = tokenstat_pty::manager()
+        .list()
+        .into_iter()
+        .filter(|s| s.alive && !s.hidden)
+        .filter(|s| match s.workspace_id.as_deref() {
+            Some(id) if !id.is_empty() => id == ws.id,
+            _ => s.cwd == path || s.cwd.starts_with(&format!("{path}/")),
+        })
+        .count();
+    let tasks = crate::todo::shared()
+        .list_with(false)
+        .into_iter()
+        .filter(|c| c.workspace_id == ws.id && c.column != "done")
+        .count();
+    let workflows = crate::workflows::shared().list();
+    let runs = crate::workflows::shared().runs();
+    WorkspaceSummaryDto {
+        id: ws.id.clone(),
+        sessions,
+        changed: described.git.as_ref().map(|g| g.files.len()),
+        tasks,
+        workflows: workflows
+            .iter()
+            .filter(|w| {
+                w.scope == crate::workflows::WorkflowScope::Workspace
+                    && w.workspace_id.as_deref() == Some(ws.id.as_str())
+            })
+            .count(),
+        workflows_running: runs
+            .iter()
+            .filter(|r| r.workspace_id == ws.id && (r.status == "running" || r.status == "waiting"))
+            .count(),
+        automations: crate::automations::shared()
+            .list()
+            .into_iter()
+            .filter(|j| j.workspace_id == ws.id)
+            .count(),
+    }
 }
 
 /// The bodies, split out so they can use `?` on a `Result`.
@@ -1806,6 +1865,25 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             invalidate_workspace_status(Some(&p.id));
             let ws = crate::workspaces::get(&p.id)?;
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
+        }
+
+        // Counts for a folder's badges, or every folder's. One call because a
+        // front end drawing six folders' badges was making five list calls per
+        // folder and counting them itself, which is thirty round trips from a
+        // phone for a screen that is mostly numbers, and it put the definition
+        // of "what a folder has in it" in two clients at once.
+        //
+        // Cheap by construction: git comes from the same cached `describe` the
+        // folder list uses, and the other four are in-memory registry reads.
+        // Nothing here touches the archive.
+        "workspace.summary" => {
+            let p: WorkspaceSummaryParams = serde_json::from_str(params.trim()).unwrap_or_default();
+            let folders: Vec<tokenstat_workspace::Workspace> = match p.id {
+                Some(id) => vec![crate::workspaces::get(&id)?],
+                None => crate::workspaces::read().workspaces.clone(),
+            };
+            let summaries: Vec<WorkspaceSummaryDto> = folders.iter().map(summarize).collect();
+            serde_json::to_value(summaries).map_err(|e| e.to_string())
         }
 
         // Recent commits. Separate from `workspace.status` because status runs
@@ -3735,6 +3813,32 @@ mod tests {
         let out = call(
             &mut s,
             "workspace.status",
+            &json!({"id": "nope"}).to_string(),
+        );
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["ok"], false);
+        assert!(v["error"]["message"].as_str().unwrap().contains("nope"));
+    }
+
+    #[test]
+    fn a_summary_needs_no_params_and_answers_every_folder() {
+        // No id is the whole list. A front end drawing a sidebar asks once
+        // rather than once per folder.
+        let parsed: WorkspaceSummaryParams = serde_json::from_str("{}").unwrap();
+        assert!(parsed.id.is_none());
+        let mut s = session();
+        let out = call(&mut s, "workspace.summary", "{}");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["ok"], true, "{out}");
+        assert!(v["result"].is_array(), "{out}");
+    }
+
+    #[test]
+    fn a_summary_for_an_unknown_workspace_says_so() {
+        let mut s = session();
+        let out = call(
+            &mut s,
+            "workspace.summary",
             &json!({"id": "nope"}).to_string(),
         );
         let v: Value = serde_json::from_str(&out).unwrap();

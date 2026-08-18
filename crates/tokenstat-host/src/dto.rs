@@ -455,6 +455,32 @@ pub struct WorkspaceDto {
     pub git: Option<tokenstat_workspace::GitStatus>,
 }
 
+/// What a folder has in it right now, as counts and nothing else.
+///
+/// Exists to save round trips rather than to say anything new. A front end
+/// drawing badges for six folders was reading five full lists per folder and
+/// counting them itself, which is five tunnel hops per folder from a phone and
+/// two definitions of "what a folder has in it" between the two clients.
+#[cfg(feature = "local-host")]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSummaryDto {
+    pub id: String,
+    /// Live ptys in this folder, hidden daemon jobs excluded: the front end
+    /// does not draw those as sessions either.
+    pub sessions: usize,
+    /// Files git reports as changed. Absent rather than zero when the folder
+    /// is missing, so "we did not look" is not drawn as "nothing changed".
+    pub changed: Option<usize>,
+    /// Cards that are neither done nor archived. Work left, not work logged.
+    pub tasks: usize,
+    /// Graphs bound to this folder, and how many are in flight right now.
+    pub workflows: usize,
+    pub workflows_running: usize,
+    /// Jobs set up here, enabled or not.
+    pub automations: usize,
+}
+
 /// The activity calendar, flattened for a front end that draws its own grid.
 ///
 /// The rows are sent as they are computed, seven of them, Monday first, with

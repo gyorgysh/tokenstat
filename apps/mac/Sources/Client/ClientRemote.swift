@@ -213,6 +213,11 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "workspace.status", ["id": workspace], as: WorkspaceFolder.self)
     }
 
+    /// Every badge on the folder screen, in one call instead of five lists.
+    static func summaries(peer: String) async throws -> [WorkspaceSummary] {
+        try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)
+    }
+
     // MARK: - A folder's work, on the machine that owns it
 
     /// The peer's whole board, list and all. Filtering to one folder happens

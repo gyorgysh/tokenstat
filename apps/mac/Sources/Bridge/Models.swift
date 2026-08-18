@@ -1286,6 +1286,23 @@ struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
     var isMerge: Bool { parents.count > 1 }
 }
 
+/// What a folder is holding, as counts and nothing else.
+///
+/// Answered by `workspace.summary` in one call. It exists to save round trips:
+/// a phone drawing one folder's badges was reading five full lists over the
+/// tunnel and counting them itself.
+struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var sessions: Int
+    /// Nil when the folder is missing, so "we did not look" is not drawn as
+    /// "nothing changed".
+    var changed: Int?
+    var tasks: Int
+    var workflows: Int
+    var workflowsRunning: Int
+    var automations: Int
+}
+
 /// A folder the user registered.
 struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
     var id: String

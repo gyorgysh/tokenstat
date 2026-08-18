@@ -1856,13 +1856,24 @@ struct RootView: View {
     /// What a section's badge says. Nil draws nothing: a zero is not news, and
     /// seven greyed zeroes under every folder is a wall of them.
     private func count(of section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
+        // Cards, graphs and jobs on another machine are not in this app's
+        // models, so a remote folder used to draw no badge for any of them.
+        // Its owner counts them and says so in one call. Local folders keep
+        // the in-memory count: it is instant, it is free, and it moves the
+        // moment somebody adds a card rather than on the next poll.
+        let remote = folder.isRemote ? workspaces.summary(for: folder.id) : nil
         let value: Int
         switch section {
         case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
         case .changes: value = folder.git?.files.count ?? 0
-        case .todo: value = todo.openCount(in: folder.id)
-        case .workflows: value = workflows.count(in: folder.id)
-        case .automations: value = automations.count(in: folder.id)
+        case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
+        case .workflows:
+            if let remote {
+                value = remote.workflowsRunning > 0 ? remote.workflowsRunning : remote.workflows
+            } else {
+                value = workflows.count(in: folder.id)
+            }
+        case .automations: value = remote?.automations ?? automations.count(in: folder.id)
         case .files: return nil
         case .browser: value = workspaces.browserTabs(in: folder.id).count
         }

@@ -893,6 +893,22 @@ extension Bridge {
         }
     }
 
+    /// Counts for every registered folder, in one call.
+    static func workspaceSummaries() async throws -> [WorkspaceSummary] {
+        try await background("workspace.summary", as: [WorkspaceSummary].self)
+    }
+
+    /// The same, on another machine. Ids come back as that machine's own, so
+    /// the caller re-prefixes them the way `remoteWorkspaces` does.
+    static func remoteWorkspaceSummaries(peer: Peer) async throws -> [WorkspaceSummary] {
+        let summaries = try await onPeer(peer.key, "workspace.summary", as: [WorkspaceSummary].self)
+        return summaries.map { summary in
+            var summary = summary
+            summary.id = "remote:\(peer.key):\(summary.id)"
+            return summary
+        }
+    }
+
     static func addWorkspace(path: String) async throws -> WorkspaceFolder {
         try await background("workspace.add", ["path": path], as: WorkspaceFolder.self)
     }

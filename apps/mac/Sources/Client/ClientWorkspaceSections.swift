@@ -198,34 +198,32 @@ struct ClientWorkspaceDetailView: View {
     /// Every count in one pass, so the screen fills in together rather than a
     /// badge at a time. A host that cannot answer one of them leaves that
     /// badge blank instead of failing the screen.
+    /// Two calls, not six.
+    ///
+    /// `workspace.summary` answers every badge at once, and `workspace.status`
+    /// re-reads the git state the header and the Changes row need. This used
+    /// to read five whole lists over the tunnel and count them on the phone,
+    /// which is five round trips for a screen that is mostly numbers and a
+    /// second opinion about what a folder contains.
     private func reload() async {
-        // Git first, and re-read rather than trusting what was captured when
-        // the row was tapped. A folder an agent is working in changes while
-        // this screen is open, and a badge that cannot move is a badge that
-        // lies.
         async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
-        async let sessions = try? ClientRemote.ptyList(peer: peer)
-        async let cards = try? ClientRemote.todoCards(peer: peer)
-        async let jobs = try? ClientRemote.automations(peer: peer)
-        async let graphs = try? ClientRemote.workflows(peer: peer)
-        async let runs = try? ClientRemote.workflowRuns(peer: peer)
+        async let summaries = try? ClientRemote.summaries(peer: peer)
 
         if let fresh = await status { live = fresh }
-        counts.changes = current.git?.files.count ?? 0
-        let path = current.path
-        let mine = (await sessions ?? []).filter { session in
-            if let ws = session.workspaceID, !ws.isEmpty { return ws == workspaceID }
-            return session.cwd == path || session.cwd.hasPrefix(path + "/")
+        guard let summary = (await summaries ?? []).first(where: { $0.id == workspaceID }) else {
+            // A host too old to answer, or a folder it no longer has. Badges
+            // stay as they were rather than all dropping to zero, which would
+            // read as "nothing here" instead of "we could not ask".
+            counts.changes = current.git?.files.count ?? counts.changes
+            return
         }
-        counts.sessions = mine.count
-        counts.todo = (await cards ?? []).filter {
-            $0.workspaceID == workspaceID && $0.column != "done" && $0.column != "archive"
-        }.count
-        counts.automations = (await jobs ?? []).filter { $0.workspaceID == workspaceID }.count
-        let live = (await runs ?? []).filter { $0.workspaceID == workspaceID && $0.isLive }.count
-        counts.workflows = live > 0
-            ? live
-            : (await graphs ?? []).filter { $0.workspaceID == workspaceID }.count
+        counts = WorkspaceSectionCounts(
+            sessions: summary.sessions,
+            changes: summary.changed ?? current.git?.files.count ?? 0,
+            todo: summary.tasks,
+            automations: summary.automations,
+            workflows: summary.workflowsRunning > 0 ? summary.workflowsRunning : summary.workflows
+        )
         errorMessage = nil
     }
 

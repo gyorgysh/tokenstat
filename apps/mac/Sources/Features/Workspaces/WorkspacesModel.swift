@@ -265,6 +265,14 @@ final class WorkspacesModel {
     /// Payload for `.browser` surfaces: the url, and the forwarded peer port
     /// when the page lives on another machine.
     private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
+    /// What another machine says its folders are holding, keyed by the
+    /// prefixed id this side uses.
+    ///
+    /// Only remote folders are in here. A local folder's counts come from the
+    /// models this app is already polling, which are instant and free; a
+    /// remote folder's are not knowable without asking, which is why the
+    /// sidebar drew no task, workflow or automation badge on one at all.
+    private(set) var summaries: [String: WorkspaceSummary] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
     /// One document per open file, keyed the same way as the diffs.
     ///
@@ -363,6 +371,11 @@ final class WorkspacesModel {
             if case let .file(path) = $0 { return path }
             return nil
         }
+    }
+
+    /// What another machine reports this folder is holding, if it has said.
+    func summary(for workspaceID: String) -> WorkspaceSummary? {
+        summaries[workspaceID]
     }
 
     func commit(_ id: String, in workspaceID: String) -> CommitDetail? {
@@ -807,6 +820,7 @@ final class WorkspacesModel {
             for key in remoteFolders.keys where !liveKeys.contains(key) {
                 remoteFolders.removeValue(forKey: key)
                 remotePeerFailures.removeValue(forKey: key)
+                summaries = summaries.filter { !$0.key.hasPrefix("remote:\(key):") }
             }
             for peer in peers {
                 if suppressedPeers.contains(peer.key) {
@@ -815,6 +829,12 @@ final class WorkspacesModel {
                 if let nextDial = remotePeerNextDial[peer.key], Date() < nextDial { continue }
                 do {
                     remoteFolders[peer.key] = try await Bridge.remoteWorkspaces(peer: peer)
+                    // One call for every badge on every folder that machine
+                    // has. Best effort: a host too old to answer leaves the
+                    // badges off, which is what they were before this existed.
+                    if let counts = try? await Bridge.remoteWorkspaceSummaries(peer: peer) {
+                        for summary in counts { summaries[summary.id] = summary }
+                    }
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                     remotePeerFailures[peer.key] = 0
                     NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
