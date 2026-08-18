@@ -1171,26 +1171,8 @@ struct RootView: View {
                         SidebarRow(
                             label: item.label,
                             symbol: item.symbol,
-                            isSelected: route.isGlobal(item) && !(item == .todo && todo.filter == .inbox)
+                            isSelected: route.isGlobal(item)
                         ) { navigate(to: .global(item)) }
-                        // A card with no folder used to live only inside a
-                        // picker on the Tasks board, which meant a note could
-                        // be written, saved, and never seen again. Unfiled is
-                        // a place now, with its count on it.
-                        // Still there while it is what the board is showing:
-                        // filing the last unfiled card used to take the row
-                        // away and leave the board on a filter with no row.
-                        if item == .todo, todo.inboxCount > 0 || todo.filter == .inbox {
-                            SidebarRow(
-                                label: "Inbox",
-                                symbol: "tray",
-                                trailing: "\(todo.inboxCount)",
-                                isSelected: route.isGlobal(.todo) && todo.filter == .inbox
-                            ) {
-                                todo.filter = .inbox
-                                navigate(to: .global(.todo))
-                            }
-                        }
                     }
                 }
 
@@ -2235,7 +2217,9 @@ private struct SidebarRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)
-                if let trailing {
+                // Zero is not news. `ClientSectionRow` on the phone has always
+                // said so; this one drew whatever it was handed.
+                if let trailing, trailing != "0" {
                     Text(trailing)
                         .font(Theme.numeric(11))
                         .foregroundStyle(.tertiary)

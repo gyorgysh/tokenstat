@@ -15,9 +15,9 @@ import SwiftUI
 /// phone is actually good for: reading the list on the way somewhere, and
 /// writing down the thing you just thought of before it is gone.
 ///
-/// **Inbox is first, and it is a heading rather than a filter.** A card with no
-/// folder is the easiest kind to lose, which is exactly what happened on the
-/// Mac, where unfiled cards lived behind a picker on a screen nobody was on.
+/// **Uncategorized comes first, as a heading rather than a filter.** A card with
+/// no folder is the easiest kind to lose, and on a list this short it costs
+/// nothing to show it rather than hide it behind a selector.
 struct ClientTasksOverview: View {
     let peer: String
     let hostName: String
@@ -72,7 +72,7 @@ struct ClientTasksOverview: View {
             reload: { await load() }
         ) {
             if !unfiled.isEmpty {
-                heading("Inbox", count: unfiled.count)
+                heading("Uncategorized", count: unfiled.count)
                 ForEach(unfiled) { card in
                     row(card, folder: nil)
                 }
@@ -103,7 +103,7 @@ struct ClientTasksOverview: View {
             ClientTaskComposer(
                 peer: peer,
                 workspaceID: "",
-                folderName: "Inbox",
+                folderName: "Uncategorized",
                 hostName: hostName,
                 folders: folders
             ) {

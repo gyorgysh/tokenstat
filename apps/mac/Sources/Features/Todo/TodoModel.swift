@@ -150,10 +150,9 @@ final class TodoModel {
         return nil
     }
 
-    /// Cards nobody has assigned yet. The global board's Inbox, and the only
-    /// place they live: a note does not need a folder, and `todo.rs` has
-    /// always allowed one without.
-    var inboxCount: Int {
+    /// Cards nobody filed. Not an inbox anybody works out of: the absence of
+    /// a folder, which `todo.rs` has always allowed.
+    var unfiledCount: Int {
         cards.filter {
             $0.workspaceID.isEmpty && $0.column != "done" && $0.column != "archive"
         }.count

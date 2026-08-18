@@ -698,7 +698,7 @@ struct ClientTaskComposer: View {
                     .lineLimit(2...5)
                     if !folders.isEmpty {
                         Picker("Saving to", selection: destinationBinding) {
-                            Text("Inbox (no folder)").tag("")
+                            Text("Uncategorized (no folder)").tag("")
                             ForEach(folders) { folder in
                                 Text(folder.name)
                                     .tag(ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)
@@ -741,7 +741,7 @@ struct ClientTaskComposer: View {
     /// What the footer calls where this is going.
     private var placeName: String {
         let chosen = destination ?? workspaceID
-        if chosen.isEmpty { return "Inbox" }
+        if chosen.isEmpty { return "Uncategorized" }
         if let match = folders.first(where: {
             (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == chosen
         }) {

@@ -33,12 +33,12 @@ struct TodoView: View {
 
     /// A value the menu can hold. Not a folder id anyone could own: ids are
     /// paths or `remote:…`, and neither starts with two underscores.
-    private static let inboxValue = "__inbox__"
+    private static let unfiledValue = "__unfiled__"
 
     private static func value(of scope: TodoScope) -> String {
         switch scope {
         case .all: return ""
-        case .inbox: return inboxValue
+        case .inbox: return unfiledValue
         case let .workspace(id): return id
         }
     }
@@ -46,7 +46,7 @@ struct TodoView: View {
     private static func filter(from value: String) -> TodoScope {
         switch value {
         case "": return .all
-        case inboxValue: return .inbox
+        case unfiledValue: return .inbox
         default: return .workspace(value)
         }
     }
@@ -81,7 +81,11 @@ struct TodoView: View {
                     AppMenuPicker(
                         options: [
                             (value: "", label: "All workspaces"),
-                            (value: Self.inboxValue, label: "Inbox\(model.inboxCount > 0 ? " (\(model.inboxCount))" : "")"),
+                            (
+                                value: Self.unfiledValue,
+                                label: "Uncategorized"
+                                    + (model.unfiledCount > 0 ? " (\(model.unfiledCount))" : "")
+                            ),
                         ] + folders.map { (value: $0.id, label: $0.name) },
                         selection: Binding(
                             get: { Self.value(of: model.filter) },
@@ -850,7 +854,7 @@ private struct NewCardForm: View {
                 // screen, so it read as not saved at all.
                 AppMenuPicker(
                     title: "Saving to",
-                    options: [(value: "", label: "Inbox (no folder)")]
+                    options: [(value: "", label: "Uncategorized (no folder)")]
                         + folders.map { (value: $0.id, label: $0.name) },
                     selection: $workspaceID
                 )
@@ -942,7 +946,7 @@ private struct NewCardForm: View {
 
     /// What the toast calls the place this card is going.
     private var destinationName: String {
-        if workspaceID.isEmpty { return "Inbox" }
+        if workspaceID.isEmpty { return "Uncategorized" }
         return folders.first { $0.id == workspaceID }?.name ?? "another folder"
     }
 
