@@ -108,7 +108,12 @@ struct ClientFolderSplit: View {
                 hostName: hostName
             )
         case .todo:
-            ClientWorkspaceTasksView(peer: peer, workspaceID: workspaceID, hostName: hostName)
+            ClientWorkspaceTasksView(
+                peer: peer,
+                workspaceID: workspaceID,
+                hostName: hostName,
+                folderName: current.name
+            )
         case .workflows:
             ClientWorkflowWorkspace(
                 peer: peer,

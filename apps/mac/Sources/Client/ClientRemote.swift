@@ -36,6 +36,9 @@ enum ClientTunnelCopy {
     }
 }
 
+/// `todo.remove`'s answer. `Bridge`'s own is private to that file.
+private struct TodoRemoved: Codable, Sendable { let removed: Bool }
+
 enum ClientRemote {
     /// Split a folder id from `Bridge.remoteWorkspaces` (`remote:<peer>:<id>`).
     static func parts(of folder: WorkspaceFolder) -> (peer: String, workspace: String)? {
@@ -235,6 +238,48 @@ enum ClientRemote {
     /// so the phone cannot see a card the Mac would not.
     static func todoCards(peer: String) async throws -> [TodoCard] {
         try await Bridge.onPeer(peer, "todo.list", ["includeArchived": true], as: [TodoCard].self)
+    }
+
+    /// Add a card or a note to the peer's board.
+    ///
+    /// The same `todo.create` the Mac calls. A note carries a folder like a
+    /// task does: unfiled is a choice made in the sheet, never a side effect
+    /// of writing it somewhere.
+    static func todoCreate(
+        peer: String,
+        title: String,
+        kind: TodoKind,
+        notes: String,
+        workspaceID: String
+    ) async throws -> TodoCard {
+        try await Bridge.onPeer(
+            peer,
+            "todo.create",
+            [
+                "title": title,
+                "kind": kind.rawValue,
+                "notes": notes,
+                "column": "backlog",
+                "backend": "",
+                "workspaceId": workspaceID,
+                "budgetSeconds": 0,
+            ],
+            as: TodoCard.self
+        )
+    }
+
+    /// Move a card between columns, including into the archive.
+    static func todoMove(peer: String, id: String, column: String) async throws -> TodoCard {
+        try await Bridge.onPeer(
+            peer,
+            "todo.update",
+            ["id": id, "column": column],
+            as: TodoCard.self
+        )
+    }
+
+    static func todoRemove(peer: String, id: String) async throws {
+        _ = try await Bridge.onPeer(peer, "todo.remove", ["id": id], as: TodoRemoved.self)
     }
 
     static func automations(peer: String) async throws -> [Automation] {
