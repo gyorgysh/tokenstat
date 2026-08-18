@@ -50,8 +50,16 @@ struct ClientWorkspaceDetailView: View {
         return merged
     }
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     var body: some View {
-        stacked
+        Group {
+            if sizeClass == .regular {
+                ClientFolderSplit(peer: peer, hostName: hostName, folder: folder)
+            } else {
+                stacked
+            }
+        }
     }
 
     private var stacked: some View {

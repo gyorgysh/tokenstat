@@ -63,6 +63,11 @@ ALLOWED = [
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
+    ("Client/ClientFolderSplit.swift", "section = item"),
+    ("Client/ClientWorkflowWorkspace.swift", "session.selectGraph"),
+    ("Client/ClientWorkflowWorkspace.swift", "session.selectRun"),
+    ("Client/ClientAutomationWorkspace.swift", "session.selectJob"),
+    ("Client/ClientAutomationWorkspace.swift", "session.selectRun"),
     ("Client/ClientWorkflowRunView.swift", "session.selectNode"),
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
