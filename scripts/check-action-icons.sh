@@ -60,8 +60,10 @@ ALLOWED = [
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),
-    ("Client/ClientWorkspaceDetailView.swift", "showFiles = true"),
-    ("Client/ClientWorkspaceDetailView.swift", "showPort = true"),
+    # A whole row is the target: the section list on the phone, and the
+    # sidebar group heading on the Mac, where the label is the button.
+    ("Client/ClientWorkspaceSections.swift", "showPort = true"),
+    ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
