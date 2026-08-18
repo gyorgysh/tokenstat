@@ -22,9 +22,10 @@ import UIKit
 /// the other machine's Machines screen. Two devices showing the same pair of
 /// words are talking to each other and to nobody in between.
 ///
-/// The wording follows the privacy rule in `CLAUDE.md`: the guarantee is the
-/// boundary. Nothing here says tokenstat "cannot see" something it never
-/// receives in the first place.
+/// The wording follows the project's privacy rule: **the guarantee is the
+/// boundary, not the read.** Nothing here says tokenstat "cannot see"
+/// something it never receives in the first place, because a claim that
+/// overstates is a claim somebody can catch out.
 struct ClientSecurityCard: View {
     /// The far end, when there is one. Nil shows this device alone.
     var peerKey: String?

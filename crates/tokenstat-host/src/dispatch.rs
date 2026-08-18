@@ -1722,50 +1722,78 @@ fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(folder_call(method, params))
 }
 
+/// Everything a batch of summaries counts, read once.
+///
+/// Hoisted out of `summarize` because none of it is per-folder. Reading it
+/// inside the loop meant a summary of eight folders did eight of each read,
+/// and `Board::list_with` is not a getter: it reconciles delegate statuses
+/// against the run list and writes the board when one moved, so the call that
+/// exists to save work was doing eight times the work it replaced.
+#[cfg(feature = "local-host")]
+struct FolderContents {
+    sessions: Vec<tokenstat_pty::SessionInfo>,
+    cards: Vec<crate::todo::Card>,
+    automations: Vec<Automation>,
+    workflows: Vec<crate::workflows::Workflow>,
+    runs: Vec<crate::workflows::WorkflowRun>,
+}
+
+#[cfg(feature = "local-host")]
+impl FolderContents {
+    fn read() -> Self {
+        Self {
+            sessions: tokenstat_pty::manager().list(),
+            cards: crate::todo::shared().list_with(false),
+            automations: crate::automations::shared().list(),
+            workflows: crate::workflows::shared().list(),
+            runs: crate::workflows::shared().runs(),
+        }
+    }
+}
+
 /// Count what one folder is holding.
 ///
 /// A session is matched by its workspace id, falling back to its working
 /// directory for a pty the host spawned without one. Hidden ptys are daemon
 /// jobs and are not sessions a person opened, so they are not counted as any.
 #[cfg(feature = "local-host")]
-fn summarize(ws: &tokenstat_workspace::Workspace) -> WorkspaceSummaryDto {
+fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> WorkspaceSummaryDto {
     let described = describe(ws);
     let path = ws.path.display().to_string();
-    let sessions = tokenstat_pty::manager()
-        .list()
-        .into_iter()
-        .filter(|s| s.alive && !s.hidden)
-        .filter(|s| match s.workspace_id.as_deref() {
-            Some(id) if !id.is_empty() => id == ws.id,
-            _ => s.cwd == path || s.cwd.starts_with(&format!("{path}/")),
-        })
-        .count();
-    let tasks = crate::todo::shared()
-        .list_with(false)
-        .into_iter()
-        .filter(|c| c.workspace_id == ws.id && c.column != "done")
-        .count();
-    let workflows = crate::workflows::shared().list();
-    let runs = crate::workflows::shared().runs();
+    let inside = format!("{path}/");
     WorkspaceSummaryDto {
         id: ws.id.clone(),
-        sessions,
+        sessions: live
+            .sessions
+            .iter()
+            .filter(|s| s.alive && !s.hidden)
+            .filter(|s| match s.workspace_id.as_deref() {
+                Some(id) if !id.is_empty() => id == ws.id,
+                _ => s.cwd == path || s.cwd.starts_with(&inside),
+            })
+            .count(),
         changed: described.git.as_ref().map(|g| g.files.len()),
-        tasks,
-        workflows: workflows
+        tasks: live
+            .cards
+            .iter()
+            .filter(|c| c.workspace_id == ws.id && c.column != "done")
+            .count(),
+        workflows: live
+            .workflows
             .iter()
             .filter(|w| {
                 w.scope == crate::workflows::WorkflowScope::Workspace
                     && w.workspace_id.as_deref() == Some(ws.id.as_str())
             })
             .count(),
-        workflows_running: runs
+        workflows_running: live
+            .runs
             .iter()
             .filter(|r| r.workspace_id == ws.id && (r.status == "running" || r.status == "waiting"))
             .count(),
-        automations: crate::automations::shared()
-            .list()
-            .into_iter()
+        automations: live
+            .automations
+            .iter()
             .filter(|j| j.workspace_id == ws.id)
             .count(),
     }
@@ -1882,7 +1910,9 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
                 Some(id) => vec![crate::workspaces::get(&id)?],
                 None => crate::workspaces::read().workspaces.clone(),
             };
-            let summaries: Vec<WorkspaceSummaryDto> = folders.iter().map(summarize).collect();
+            let live = FolderContents::read();
+            let summaries: Vec<WorkspaceSummaryDto> =
+                folders.iter().map(|ws| summarize(ws, &live)).collect();
             serde_json::to_value(summaries).map_err(|e| e.to_string())
         }
 

@@ -195,9 +195,6 @@ struct ClientWorkspaceDetailView: View {
         .presentationDetents([.medium])
     }
 
-    /// Every count in one pass, so the screen fills in together rather than a
-    /// badge at a time. A host that cannot answer one of them leaves that
-    /// badge blank instead of failing the screen.
     /// Two calls, not six.
     ///
     /// `workspace.summary` answers every badge at once, and `workspace.status`
@@ -207,13 +204,24 @@ struct ClientWorkspaceDetailView: View {
     /// second opinion about what a folder contains.
     private func reload() async {
         async let status = try? ClientRemote.status(peer: peer, workspace: workspaceID)
-        async let summaries = try? ClientRemote.summaries(peer: peer)
+        async let counted = ClientRemote.summaries(peer: peer)
 
         if let fresh = await status { live = fresh }
-        guard let summary = (await summaries ?? []).first(where: { $0.id == workspaceID }) else {
-            // A host too old to answer, or a folder it no longer has. Badges
-            // stay as they were rather than all dropping to zero, which would
-            // read as "nothing here" instead of "we could not ask".
+        let summaries: [WorkspaceSummary]
+        do {
+            summaries = try await counted
+        } catch {
+            // Say so. Every badge comes from this one call now, so a failure
+            // leaves all of them stale rather than one of them blank, and a
+            // screen of ten-minute-old numbers presented as current is worse
+            // than a screen that admits it could not ask.
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+            return
+        }
+        guard let summary = summaries.first(where: { $0.id == workspaceID }) else {
+            // The host answered but does not have this folder, or is too old
+            // to know the method. Badges stay as they were: "we could not ask"
+            // is not the same as "nothing here".
             counts.changes = current.git?.files.count ?? counts.changes
             return
         }

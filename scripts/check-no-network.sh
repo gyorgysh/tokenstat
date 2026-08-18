@@ -5,8 +5,8 @@
 # This is the mechanism behind the product's central claim: the code that reads
 # your session logs has no way to send them anywhere. That is a structural
 # guarantee rather than a promise about behaviour, and it is only structural if
-# something checks. Until this script existed, CLAUDE.md said CI enforced the
-# rule and CI did not.
+# something checks. Until this script existed, the rule was written down as a
+# thing CI enforced, and CI did not.
 #
 # Checks the whole dependency tree, not just direct dependencies, because a
 # transitive HTTP client is exactly as capable as a direct one.
