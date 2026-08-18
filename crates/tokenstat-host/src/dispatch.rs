@@ -306,12 +306,23 @@ fn add_meter(item: &mut Value) {
         return;
     }
     let Some(meter) = crate::session_meter::reading(&command, &cwd, started_at_ms) else {
+        // A harness we can meter but which has not written a turn yet starts
+        // at zero rather than at nothing. The row then counts up from $0.00
+        // instead of showing the command and later jumping to a figure.
+        if crate::session_meter::can_meter(&command) {
+            if let Some(map) = item.as_object_mut() {
+                map.insert("tokens".into(), json!(0));
+                map.insert("costMicros".into(), json!(0));
+                map.insert("costComplete".into(), json!(true));
+            }
+        }
         return;
     };
     let Some(map) = item.as_object_mut() else {
         return;
     };
     map.insert("tokens".into(), json!(meter.tokens));
+    map.insert("billing".into(), json!(meter.billing.as_str()));
     if let Some(micros) = meter.cost_micros {
         map.insert("costMicros".into(), json!(micros));
         map.insert("costEstimated".into(), json!(meter.estimated));
@@ -320,9 +331,15 @@ fn add_meter(item: &mut Value) {
     if !meter.model.is_empty() {
         map.insert("model".into(), json!(meter.model));
     }
-    if let (Some(used), Some(window)) = (meter.context_used, meter.context_window) {
+    // The used figure ships on its own. Without a window there is no bar, but
+    // "142K of context" is still worth saying, and dropping both was what left
+    // a Grok row with nothing but a lifetime total.
+    if let Some(used) = meter.context_used {
         map.insert("contextUsed".into(), json!(used));
+    }
+    if let Some(window) = meter.context_window {
         map.insert("contextWindow".into(), json!(window));
+        map.insert("contextEstimated".into(), json!(meter.context_estimated));
     }
 }
 

@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use tokenstat_core::model::BillingMode;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{claude_code, grok};
 use tokenstat_core::{Catalog, UsageEvent};
@@ -40,14 +41,19 @@ use tokenstat_core::{Catalog, UsageEvent};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MeterReading {
     pub tokens: u64,
-    /// Absent when nothing priced. Never a made-up zero.
+    /// Absent when nothing priced. Zero once something did: see `fold`.
     pub cost_micros: Option<i64>,
     pub estimated: bool,
     pub complete: bool,
+    /// Whether this session is metered or covered by a subscription. A plan
+    /// figure is an equivalent, and the front end must say so.
+    pub billing: BillingMode,
     pub model: String,
     /// Last turn's prompt-side tokens. The context bar, not the lifetime sum.
     pub context_used: Option<u64>,
     pub context_window: Option<u64>,
+    /// The window came from sibling models, not from a published figure.
+    pub context_estimated: bool,
 }
 
 /// Fold a live session's usage into a sidebar reading, when we can find it.
@@ -58,7 +64,8 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
     if cwd.is_empty() {
         return None;
     }
-    let events = match harness_name(command)? {
+    let harness = harness_name(command)?;
+    let events = match harness {
         "claude" => claude_events(cwd)?,
         "grok" => grok_events(cwd)?,
         _ => return None,
@@ -67,7 +74,43 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
     if mine.is_empty() {
         return None;
     }
-    fold(&mine, &current_prices())
+    let mut reading = fold(&mine, &current_prices())?;
+    // Grok's own log says nothing about how the session is paid for, but the
+    // login it runs under does: an OIDC login is a SuperGrok subscription, an
+    // API key is metered. Read, never written, and no token leaves this call.
+    if harness == "grok" && reading.billing == BillingMode::Unknown {
+        reading.billing = grok_billing();
+    }
+    Some(reading)
+}
+
+/// Whether the Grok CLI on this machine is signed in to a subscription.
+///
+/// `auth.json` holds one record per issuer with an `auth_mode`. `oidc` is the
+/// SuperGrok sign-in; anything else is a key the person pasted, which bills.
+/// An unreadable or absent file is `Unknown`, not a guess in either direction.
+fn grok_billing() -> BillingMode {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return BillingMode::Unknown;
+    };
+    let Ok(text) = std::fs::read_to_string(home.join(".grok").join("auth.json")) else {
+        return BillingMode::Unknown;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return BillingMode::Unknown;
+    };
+    let Some(records) = value.as_object() else {
+        return BillingMode::Unknown;
+    };
+    let mut seen = BillingMode::Unknown;
+    for record in records.values() {
+        match record.get("auth_mode").and_then(|m| m.as_str()) {
+            Some("oidc") => return BillingMode::Plan,
+            Some(_) => seen = BillingMode::Metered,
+            None => {}
+        }
+    }
+    seen
 }
 
 /// Events this session could have produced.
@@ -138,24 +181,60 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         .map(|e| e.counters.input_total())
         .find(|&n| n > 0);
     let lookup = display_usage_model_id(&model);
-    let context_window = prices
+    let published = prices
         .catalog()
         .and_then(|c| c.get(&lookup))
         .and_then(|m| m.context_window());
-    let (context_used, context_window) = match (context_used, context_window) {
-        (Some(used), Some(window)) => (Some(used), Some(window)),
-        _ => (None, None),
-    };
+    // A model the snapshot has not caught up with used to cost the bar
+    // outright: `context_used` was thrown away whenever the window was
+    // missing, so a Grok 4.6 session showed a lifetime token count and
+    // nothing else. The used figure stands on its own, and a sibling window
+    // is a marked estimate rather than a silent one.
+    let context_window = published.or_else(|| {
+        prices
+            .catalog()
+            .and_then(|c| c.sibling_context_window(&lookup))
+    });
+    let context_estimated = published.is_none() && context_window.is_some();
 
+    // Zero is an answer once something priced: a session that has run a turn
+    // costs what it costs, and $0.00 counting up reads as a meter where an
+    // absent figure that later appears at $7.98 reads as a surprise. Nothing
+    // priced at all is still nothing, never a made-up zero.
+    let billing = billing_mode(events);
     Some(MeterReading {
         tokens,
-        cost_micros: (priced > 0 && cost > 0).then_some(cost),
+        cost_micros: (priced > 0).then_some(cost),
         estimated,
         complete,
+        billing,
         model,
         context_used,
         context_window,
+        context_estimated,
     })
+}
+
+/// How this session is paid for, from the events themselves.
+///
+/// Metered wins over plan: a session that billed one request per token is not
+/// covered, whatever the rest of it says.
+fn billing_mode(events: &[&UsageEvent]) -> BillingMode {
+    if events.iter().any(|e| e.billing == BillingMode::Metered) {
+        return BillingMode::Metered;
+    }
+    if events.iter().any(|e| e.billing == BillingMode::Plan) {
+        return BillingMode::Plan;
+    }
+    BillingMode::Unknown
+}
+
+/// Whether this command is one the meter knows how to read at all.
+///
+/// Separate from `reading`, which answers only once a turn has been logged.
+/// The difference is what lets a fresh session start at zero.
+pub(crate) fn can_meter(command: &str) -> bool {
+    harness_name(command).is_some()
 }
 
 fn harness_name(command: &str) -> Option<&'static str> {
@@ -477,11 +556,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_catalog_window_hides_the_bar() {
+    fn missing_catalog_window_keeps_the_used_figure() {
         let bare = PriceTable::parse(BOOK).expect("book");
         let reading = fold_events(&[event("claude-opus-4-5", 100, 0, 10)], &bare).expect("reading");
-        assert_eq!(reading.context_used, None);
+        // No catalog at all: no window to draw a bar against, but what the
+        // last turn sent is still known and still worth saying.
+        assert_eq!(reading.context_used, Some(100));
         assert_eq!(reading.context_window, None);
+        assert!(!reading.context_estimated);
         assert!(reading.cost_micros.is_some(), "price book still works");
     }
 
@@ -496,7 +578,7 @@ mod tests {
     }
 
     #[test]
-    fn a_zero_cost_is_omitted_rather_than_shown() {
+    fn a_priced_session_reports_zero_rather_than_nothing() {
         let free = PriceTable::parse(
             r#"{"effective_from":"2026-08-01","models":[
                  {"match":"free","input":0,"output":0,"cache_read":0,"cache_write_5m":0,"cache_write_1h":0}
@@ -505,7 +587,58 @@ mod tests {
         .expect("book");
         let reading = fold_events(&[event("free", 100, 0, 10)], &free).expect("reading");
         assert_eq!(reading.tokens, 110);
-        assert_eq!(reading.cost_micros, None);
+        // Priced at zero is a figure. An absent one that later appears at
+        // several dollars reads as a surprise rather than as a meter.
+        assert_eq!(reading.cost_micros, Some(0));
+    }
+
+    #[test]
+    fn a_model_the_catalog_missed_borrows_its_siblings_window() {
+        // The case this exists for: the price book knew grok-4.6 while the
+        // catalog snapshot had no row for it, so the bar vanished.
+        let table = PriceTable::parse(BOOK)
+            .expect("book")
+            .with_catalog(Arc::new(
+                Catalog::parse(
+                    r#"{"effective_from":"2026-08-01","models":[
+                     {"id":"xai/grok-4.5","aliases":["grok-4.5"],"ctx":1000000},
+                     {"id":"xai/grok-4.3","aliases":["grok-4.3"],"ctx":1000000},
+                     {"id":"xai/grok-4","aliases":["grok-4"],"ctx":256000}
+                   ]}"#,
+                )
+                .expect("catalog"),
+            ));
+        let reading = fold_events(&[event("grok-4.6", 5_000, 0, 100)], &table).expect("reading");
+        assert_eq!(reading.context_used, Some(5_000));
+        assert_eq!(reading.context_window, Some(1_000_000), "the family's mode");
+        assert!(reading.context_estimated, "and it says so");
+    }
+
+    #[test]
+    fn a_published_window_is_never_marked_as_an_estimate() {
+        let reading =
+            fold_events(&[event("claude-opus-4-5", 1_000, 0, 10)], &prices()).expect("reading");
+        assert_eq!(reading.context_window, Some(200_000));
+        assert!(!reading.context_estimated);
+    }
+
+    #[test]
+    fn one_metered_event_makes_the_session_metered() {
+        let mut plan = event("claude-opus-4-5", 100, 0, 10);
+        plan.billing = BillingMode::Plan;
+        let mut metered = event("claude-opus-4-5", 200, 0, 20);
+        metered.billing = BillingMode::Metered;
+        let reading = fold_events(&[plan.clone(), metered], &prices()).expect("reading");
+        assert_eq!(reading.billing, BillingMode::Metered);
+        let plan_only = fold_events(&[plan], &prices()).expect("reading");
+        assert_eq!(plan_only.billing, BillingMode::Plan);
+    }
+
+    #[test]
+    fn an_unpriceable_session_still_has_no_cost() {
+        let reading =
+            fold_events(&[event("mystery-model", 400, 0, 20)], &prices()).expect("reading");
+        assert_eq!(reading.cost_micros, None, "never a made-up zero");
     }
 
     #[test]

@@ -290,6 +290,48 @@ impl Catalog {
         None
     }
 
+    /// A context window for a model the snapshot has never heard of, taken
+    /// from the models it has that share the id's stem.
+    ///
+    /// A new model ships before any feed lists it, and today that costs the
+    /// live session meter its context bar entirely: `grok-4.6` was priced
+    /// correctly by the price book while the catalog had no row for it, so the
+    /// window was unknown and the bar disappeared. Siblings are a better answer
+    /// than nothing, and a far better one than a constant compiled in here that
+    /// nobody would revisit.
+    ///
+    /// The mode, not the maximum: one sibling with an unusual window should not
+    /// decide the answer for the family. Ties go to the larger window, which
+    /// under-reports the percentage rather than over-reporting it.
+    ///
+    /// **Always an estimate.** The caller must mark it, never present it as the
+    /// model's published window.
+    pub fn sibling_context_window(&self, model: &str) -> Option<u64> {
+        let stem = fold(&id_stem(model));
+        if stem.len() < 4 {
+            return None;
+        }
+        let mut counts: HashMap<u64, usize> = HashMap::new();
+        for candidate in &self.models {
+            let Some(window) = candidate.context_window() else {
+                continue;
+            };
+            let shares_stem = std::iter::once(&candidate.id)
+                .chain(candidate.aliases.iter())
+                .any(|id| {
+                    let folded = fold(id.rsplit('/').next().unwrap_or(id));
+                    folded.starts_with(&stem)
+                });
+            if shares_stem {
+                *counts.entry(window).or_default() += 1;
+            }
+        }
+        counts
+            .into_iter()
+            .max_by_key(|&(window, count)| (count, window))
+            .map(|(window, _)| window)
+    }
+
     /// Canonical offer rates for a model, for use as a marked estimate.
     ///
     /// Never a list rate. The caller must render these with the same `~`
@@ -406,6 +448,26 @@ fn data_dir() -> Result<PathBuf, CoreError> {
     let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
         .ok_or(CoreError::NoDataDir)?;
     Ok(dirs.data_dir().to_path_buf())
+}
+
+/// The family stem of a model id: the leaf, minus its last version step.
+///
+/// `xai/grok-4.6` → `grok-4`, `claude-opus-4-6` → `claude-opus-4`. Enough to
+/// find siblings, short enough that a point release lands among them.
+fn id_stem(model: &str) -> String {
+    let leaf = model.rsplit('/').next().unwrap_or(model);
+    let cut = leaf
+        .char_indices()
+        .rfind(|(i, c)| {
+            (*c == '.' || *c == '-')
+                && *i > 0
+                && leaf[i + 1..].starts_with(|c: char| c.is_ascii_digit())
+        })
+        .map(|(i, _)| i);
+    match cut {
+        Some(i) => leaf[..i].to_string(),
+        None => leaf.to_string(),
+    }
 }
 
 /// Fold a model id to a match key: lowercase, separators removed.
