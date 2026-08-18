@@ -31,6 +31,26 @@ struct TodoView: View {
     /// column's trigger and its form drive the same flag.
     @State private var addingIn: String?
 
+    /// A value the menu can hold. Not a folder id anyone could own: ids are
+    /// paths or `remote:…`, and neither starts with two underscores.
+    private static let inboxValue = "__inbox__"
+
+    private static func value(of scope: TodoScope) -> String {
+        switch scope {
+        case .all: return ""
+        case .inbox: return inboxValue
+        case let .workspace(id): return id
+        }
+    }
+
+    private static func filter(from value: String) -> TodoScope {
+        switch value {
+        case "": return .all
+        case inboxValue: return .inbox
+        default: return .workspace(value)
+        }
+    }
+
     /// The folder this board is scoped to, named on the chrome bar.
     private var scopeChip: ScopeChip? {
         guard let id = model.scope else { return nil }
@@ -54,6 +74,22 @@ struct TodoView: View {
     var body: some View {
         VStack(spacing: 0) {
             DetailChromeBar(scope: scopeChip) {
+                if model.scope == nil {
+                    // Only the global board gets a selector. A folder's board
+                    // is that folder's, and a filter on top of it would be two
+                    // answers to one question.
+                    AppMenuPicker(
+                        options: [
+                            (value: "", label: "All workspaces"),
+                            (value: Self.inboxValue, label: "Inbox\(model.inboxCount > 0 ? " (\(model.inboxCount))" : "")"),
+                        ] + folders.map { (value: $0.id, label: $0.name) },
+                        selection: Binding(
+                            get: { Self.value(of: model.filter) },
+                            set: { model.filter = Self.filter(from: $0) }
+                        )
+                    )
+                    .frame(maxWidth: 200)
+                }
                 ToolbarIconButton(
                     systemImage: "plus",
                     help: "Add a card to To Do"
@@ -727,8 +763,8 @@ private struct NewCardForm: View {
                 // picker stays, because a card can be moved, but it is a
                 // correction rather than a decision every time.
                 .onChange(of: expanded, initial: true) { _, open in
-                    guard open, let scope = model.scope else { return }
-                    workspaceID = scope
+                    guard open, let folder = model.defaultWorkspaceID else { return }
+                    workspaceID = folder
                 }
 
             if expanded {

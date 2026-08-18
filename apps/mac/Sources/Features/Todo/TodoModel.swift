@@ -5,6 +5,17 @@
 import Foundation
 import Observation
 
+/// What the global board is showing.
+///
+/// Inbox is not a fourth column, it is a filter: a card with no folder is an
+/// ordinary card that has not been assigned, and giving it a column of its own
+/// would mean moving a card twice to get it into a folder's To Do.
+enum TodoScope: Hashable, Sendable {
+    case all
+    case inbox
+    case workspace(String)
+}
+
 /// The kanban board. Cards live in the daemon, and delegating one starts an
 /// agent run whose transcript lands in the automations history.
 @MainActor
@@ -72,13 +83,23 @@ final class TodoModel {
         return column
     }
 
-    /// Which workspace the board is showing. Nil is every workspace, which is
-    /// what the global board is for.
+    /// Which workspace the board is showing, set by the route. Nil is the
+    /// global board.
     ///
     /// Scope lives on the model rather than in the view because the counts in
     /// the sidebar ask the same question, and two places deciding what belongs
     /// to a folder is two places to get it wrong.
     var scope: String?
+
+    /// The global board's own selector. Ignored while `scope` is set: a
+    /// folder's board is that folder's, and a filter on top of it would be
+    /// two answers to one question.
+    ///
+    /// Separate from `scope` because they are different things. Scope is
+    /// where you are, filter is what you asked to see, and folding them
+    /// together made the global board look locked to a folder it had merely
+    /// been asked to show.
+    var filter: TodoScope = .all
 
     /// Cards for a column, in the active sort, inside the current scope.
     func cards(in column: String) -> [TodoCard] {
@@ -91,8 +112,29 @@ final class TodoModel {
     }
 
     private func inScope(_ card: TodoCard) -> Bool {
-        guard let scope else { return true }
-        return card.workspaceID == scope
+        if let scope { return card.workspaceID == scope }
+        switch filter {
+        case .all: return true
+        case .inbox: return card.workspaceID.isEmpty
+        case let .workspace(id): return card.workspaceID == id
+        }
+    }
+
+    /// Where a new card should land: the folder whose board this is, or the
+    /// one the global board has been filtered to. Nothing, on All and Inbox.
+    var defaultWorkspaceID: String? {
+        if let scope { return scope }
+        if case let .workspace(id) = filter { return id }
+        return nil
+    }
+
+    /// Cards nobody has assigned yet. The global board's Inbox, and the only
+    /// place they live: a note does not need a folder, and `todo.rs` has
+    /// always allowed one without.
+    var inboxCount: Int {
+        cards.filter {
+            $0.workspaceID.isEmpty && $0.column != "done" && $0.column != "archive"
+        }.count
     }
 
     /// Cards still to do in a folder: the sidebar count.
