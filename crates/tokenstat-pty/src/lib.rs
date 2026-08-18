@@ -583,6 +583,11 @@ impl Manager {
                 info.hidden = req.hidden;
                 info.rows = size.rows;
                 info.cols = size.cols;
+                // This session starts now. The process is older, but the
+                // session handed to the caller is not, and a meter counting
+                // from the pool's build time would count somebody else's
+                // turns.
+                info.started_at_ms = now_ms();
                 // The handoff itself counts as activity: the shell has just
                 // answered and is about to print its prompt.
                 *shell

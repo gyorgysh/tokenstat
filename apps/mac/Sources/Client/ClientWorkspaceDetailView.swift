@@ -80,7 +80,11 @@ struct ClientWorkspaceSessionsView: View {
         .navigationTitle("Sessions")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
+            // Its own key. The section list this was pushed from pulls on
+            // "workspace-<id>", and `ClientRefresh` throttles by key, so
+            // sharing one meant a pull here right after a pull there was
+            // swallowed while the spinner said otherwise.
+            await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
         }
         .task { await reload() }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in

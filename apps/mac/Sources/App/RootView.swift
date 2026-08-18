@@ -335,6 +335,21 @@ struct RootView: View {
             guard launch.hostReady, route.hasInspector else { return }
             toggleRightSidebar()
         }
+        // A folder can leave the list from anywhere: Remove in this window,
+        // a peer going away, another machine dropping off the tunnel. The
+        // route must not keep naming it, or the sidebar lights no row while
+        // the pane shows a different folder, and a scoped board keeps a scope
+        // no `onChange(of: route)` will ever clear.
+        .onChange(of: workspaces.folders.map(\.id)) { _, ids in
+            guard let id = route.workspaceID, !ids.contains(id) else { return }
+            lastSection[id] = nil
+            expandedWorkspaces.remove(id)
+            if let next = workspaces.selectedID, ids.contains(next) {
+                selectWorkspace(next)
+            } else {
+                navigate(to: .global(.home))
+            }
+        }
         .onChange(of: todo.selectionGeneration) { _, _ in
             guard todo.selectedCardID != nil else { return }
             isInspectorPresented = true
@@ -1894,9 +1909,6 @@ struct RootView: View {
         }
     }
 
-    /// Select the folder and destination in one immediate transaction. The
-    /// inspector is part of the workspace destination, so allowing SwiftUI to
-    /// animate the two state changes separately makes it visibly trail the row.
     /// Click the folder card: open it on whatever section it was left on, and
     /// show its sections.
     ///
@@ -1905,16 +1917,23 @@ struct RootView: View {
     /// without hunting for the + menu.
     private func selectWorkspace(_ id: String) {
         let section = lastSection[id] ?? .sessions
-        let wasCurrent = route.workspaceID == id
+        // Decided here rather than inside the transaction, because
+        // `openSection` puts the sessions surface back on the way in. Asking
+        // `toggleLauncher` afterwards asked what the navigation had just set
+        // rather than what was on screen when the click happened, so every
+        // click opened the launcher and none of them closed it.
+        let wantsLauncher = route.workspaceID == id
+            && section == .sessions
+            && !workspaces.isShowingLauncher(in: id)
         openSection(section, in: id) {
             #if os(macOS)
-            guard wasCurrent, section == .sessions else {
+            if wantsLauncher {
+                workspaces.showLauncher(in: id)
+            } else {
                 // A first selection shows the folder as it was, not the
                 // launcher it might have been left on.
                 workspaces.exitLauncher(in: id)
-                return
             }
-            workspaces.toggleLauncher(in: id)
             #endif
         }
     }

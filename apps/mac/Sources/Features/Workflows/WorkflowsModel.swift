@@ -141,6 +141,13 @@ final class WorkflowsModel {
         return graphs.filter { $0.scope == .workspace && $0.workspaceID == scope }
     }
 
+    /// The runs of the current scope, for the same reason `scoped` exists:
+    /// Recent runs sits under a scoped library and has to agree with it.
+    var scopedRuns: [WorkflowRunRecord] {
+        guard let scope else { return runs }
+        return runs.filter { $0.workspaceID == scope }
+    }
+
     /// What the sidebar counts: runs in flight, or the graphs waiting to run.
     func count(in workspaceID: String) -> Int {
         let live = liveRuns(in: workspaceID).count

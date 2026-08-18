@@ -67,26 +67,36 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
     if mine.is_empty() {
         return None;
     }
-    fold_events(&mine, &current_prices())
+    fold(&mine, &current_prices())
 }
 
 /// Events this session could have produced.
 ///
+/// Borrowed, not cloned. This runs for every live session on every `pty.list`
+/// poll, and a long transcript is thousands of events each holding several
+/// strings: copying them all every two seconds to read them once is a lot of
+/// allocator traffic for nothing.
+///
 /// A small grace before the spawn, because the two clocks are not the same
 /// one: the harness stamps the turn, the daemon stamps the spawn, and a first
 /// turn written a moment "before" launch is still this session's.
-fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<UsageEvent> {
+fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<&UsageEvent> {
     const GRACE_MS: i64 = 2_000;
     let floor = started_at_ms as i64 - GRACE_MS;
-    events
-        .iter()
-        .filter(|e| e.ts.utc_ms >= floor)
-        .cloned()
-        .collect()
+    events.iter().filter(|e| e.ts.utc_ms >= floor).collect()
 }
 
 /// Sum events into the wire shape. Pure, so tests do not need a home directory.
+///
+/// Owned slice for the tests, which build their events inline. The live path
+/// goes through `fold`, which borrows.
+#[cfg(test)]
 pub(crate) fn fold_events(events: &[UsageEvent], prices: &PriceTable) -> Option<MeterReading> {
+    fold(&events.iter().collect::<Vec<_>>(), prices)
+}
+
+/// Sum events into the wire shape. Pure, so tests do not need a home directory.
+pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterReading> {
     if events.is_empty() {
         return None;
     }

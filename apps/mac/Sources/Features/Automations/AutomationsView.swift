@@ -90,7 +90,7 @@ struct AutomationsView: View {
                         taskSection("Active", jobs: filteredJobs.filter(\.enabled))
                         taskSection("Paused", jobs: filteredJobs.filter { !$0.enabled })
                     }
-                    if !model.runs.isEmpty {
+                    if !model.scopedRuns.isEmpty {
                         recentRuns
                     }
                     examples
@@ -467,9 +467,9 @@ struct AutomationsView: View {
             mark: "mark_automation"
         ) {
             VStack(spacing: 0) {
-                ForEach(Array(model.runs.prefix(5))) { run in
+                ForEach(Array(model.scopedRuns.prefix(5))) { run in
                     runRow(run)
-                    if run.id != model.runs.prefix(5).last?.id { Divider() }
+                    if run.id != model.scopedRuns.prefix(5).last?.id { Divider() }
                 }
             }
         }

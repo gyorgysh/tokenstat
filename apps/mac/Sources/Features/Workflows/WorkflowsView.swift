@@ -137,7 +137,7 @@ struct WorkflowsView: View {
                     } else {
                         librarySections
                     }
-                    if !model.runs.isEmpty {
+                    if !model.scopedRuns.isEmpty {
                         recentRuns
                     }
                 }
@@ -451,9 +451,9 @@ struct WorkflowsView: View {
             mark: "mark_workflow"
         ) {
             VStack(spacing: 0) {
-                ForEach(Array(model.runs.prefix(6))) { run in
+                ForEach(Array(model.scopedRuns.prefix(6))) { run in
                     runRow(run)
-                    if run.id != model.runs.prefix(6).last?.id { Divider() }
+                    if run.id != model.scopedRuns.prefix(6).last?.id { Divider() }
                 }
             }
         }

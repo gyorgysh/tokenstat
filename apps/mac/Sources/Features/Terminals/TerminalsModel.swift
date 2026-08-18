@@ -234,14 +234,14 @@ final class TerminalsModel {
     func select(_ session: TerminalSession) {
         let workspaceID = session.workspaceID
         if !workspaceID.isEmpty, layout(for: workspaceID).isSplit {
-            let lead = splitLeadingID[workspaceID]
-            let trail = splitTrailingID[workspaceID]
-            // What the leading half is actually showing. It falls back to the
-            // workspace's active session when nothing has been pinned there,
-            // so a nil `splitLeadingID` is not an empty pane.
-            let showingLead = lead ?? active(in: workspaceID)?.id
-            if session.id != lead, session.id != trail {
-                if trail == nil, let showingLead, showingLead != session.id {
+            // The halves as they are actually drawn, not as they are pinned.
+            // A pin whose session has exited is an empty pane: `load()` drops
+            // a session that ended on its own without clearing the pin, and a
+            // nil leading pin still draws the workspace's active session.
+            let showingLead = leadingSession(in: workspaceID)?.id
+            let showingTrail = trailingSession(in: workspaceID)?.id
+            if session.id != showingLead, session.id != showingTrail {
+                if showingTrail == nil, let showingLead {
                     // The split opened a second pane and has been showing
                     // "Another session" ever since. This is that session.
                     // Filling the empty half is what the placeholder asked
@@ -252,7 +252,7 @@ final class TerminalsModel {
                 } else {
                     // Both halves are taken: the tab replaces the focused one.
                     let previous = selectedByWorkspace[workspaceID] ?? selectedID
-                    if previous == trail {
+                    if previous == showingTrail {
                         splitTrailingID[workspaceID] = session.id
                     } else {
                         splitLeadingID[workspaceID] = session.id

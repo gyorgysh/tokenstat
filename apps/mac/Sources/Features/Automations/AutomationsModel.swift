@@ -162,6 +162,17 @@ final class AutomationsModel {
         return jobs.filter { $0.workspaceID == scope }
     }
 
+    /// The runs of the current scope.
+    ///
+    /// Recent runs sits under a scoped list of jobs, so it has to answer the
+    /// same question they do. Unscoped it listed every folder's runs under a
+    /// chip naming one folder, and the rows carry no folder of their own to
+    /// correct the impression.
+    var scopedRuns: [RunRecord] {
+        guard let scope else { return runs }
+        return runs.filter { $0.workspaceID == scope }
+    }
+
     /// Jobs set up in a folder, running or not: the sidebar count.
     func count(in workspaceID: String) -> Int {
         jobs.filter { $0.workspaceID == workspaceID }.count
