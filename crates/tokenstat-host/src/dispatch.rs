@@ -3850,6 +3850,11 @@ mod tests {
         assert!(v["error"]["message"].as_str().unwrap().contains("nope"));
     }
 
+    // Both of these are about a method that only exists with `local-host`.
+    // A build without the feature has no folders to summarise and no params
+    // type to parse, so the whole pair is gated rather than asserting on an
+    // answer that would be "unknown method" there.
+    #[cfg(feature = "local-host")]
     #[test]
     fn a_summary_needs_no_params_and_answers_every_folder() {
         // No id is the whole list. A front end drawing a sidebar asks once
@@ -3863,6 +3868,7 @@ mod tests {
         assert!(v["result"].is_array(), "{out}");
     }
 
+    #[cfg(feature = "local-host")]
     #[test]
     fn a_summary_for_an_unknown_workspace_says_so() {
         let mut s = session();
