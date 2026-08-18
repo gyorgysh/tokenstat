@@ -236,13 +236,27 @@ final class TerminalsModel {
         if !workspaceID.isEmpty, layout(for: workspaceID).isSplit {
             let lead = splitLeadingID[workspaceID]
             let trail = splitTrailingID[workspaceID]
+            // What the leading half is actually showing. It falls back to the
+            // workspace's active session when nothing has been pinned there,
+            // so a nil `splitLeadingID` is not an empty pane.
+            let showingLead = lead ?? active(in: workspaceID)?.id
             if session.id != lead, session.id != trail {
-                // A tab that is not in either half replaces the focused one.
-                let previous = selectedByWorkspace[workspaceID] ?? selectedID
-                if previous == trail {
+                if trail == nil, let showingLead, showingLead != session.id {
+                    // The split opened a second pane and has been showing
+                    // "Another session" ever since. This is that session.
+                    // Filling the empty half is what the placeholder asked
+                    // for, and replacing the half already in front of the
+                    // user meant the split had to be redone by hand.
+                    splitLeadingID[workspaceID] = showingLead
                     splitTrailingID[workspaceID] = session.id
                 } else {
-                    splitLeadingID[workspaceID] = session.id
+                    // Both halves are taken: the tab replaces the focused one.
+                    let previous = selectedByWorkspace[workspaceID] ?? selectedID
+                    if previous == trail {
+                        splitTrailingID[workspaceID] = session.id
+                    } else {
+                        splitLeadingID[workspaceID] = session.id
+                    }
                 }
             }
         }
