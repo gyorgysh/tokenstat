@@ -22,10 +22,14 @@
 //! event before the spawn is dropped, and a session that has not produced one
 //! yet has no reading rather than an inherited one.
 //!
-//! First cut is Claude and Grok only. Other harnesses stay on CPU · RAM
-//! until they grow a live path. Two sessions of the same harness in one
-//! folder share the newest log: that is a known limitation, not a guess
-//! dressed up as identity.
+//! Every harness that writes a local log naming its folder is metered:
+//! Claude, Grok, Codex, OpenCode and Antigravity. Each supplies a locator
+//! that answers "which log is this folder's", and they share one `fold`.
+//! A harness whose log cannot say which folder it belongs to keeps CPU · RAM
+//! rather than being given somebody else's numbers.
+//!
+//! Two sessions of the same harness in one folder share the newest log: that
+//! is a known limitation, not a guess dressed up as identity.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,7 +38,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokenstat_core::model::BillingMode;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
-use tokenstat_core::sources::{claude_code, grok};
+use tokenstat_core::sources::{antigravity_cli, claude_code, codex, grok, opencode};
 use tokenstat_core::{Catalog, UsageEvent};
 
 /// What a front end can draw for one live session.
@@ -68,6 +72,9 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
     let events = match harness {
         "claude" => claude_events(cwd)?,
         "grok" => grok_events(cwd)?,
+        "codex" => codex_events(cwd)?,
+        "opencode" => opencode_events(cwd)?,
+        "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
     let mine = since(&events, started_at_ms);
@@ -242,8 +249,77 @@ fn harness_name(command: &str) -> Option<&'static str> {
     match name {
         "claude" => Some("claude"),
         "grok" => Some("grok"),
+        "codex" => Some("codex"),
+        // The launcher ships a second OpenCode tile for a side-by-side
+        // install. Same logs, same database, so the same reader.
+        "opencode" | "opencode2" => Some("opencode"),
+        "agy" => Some("antigravity"),
         _ => None,
     }
+}
+
+/// The Codex rollout for this folder, if one has been written.
+///
+/// A rollout says which directory it was recorded in, so the match is the
+/// folder itself rather than a label. Newest first, and only the head of each
+/// file is read to ask: a long rollout is megabytes and the answer is on its
+/// first records.
+fn codex_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let sessions = codex::discover(&home)?;
+    let mut rollouts: Vec<(SystemTime, PathBuf)> = codex::shards(&sessions)
+        .into_iter()
+        .filter_map(|path| {
+            let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    rollouts.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let mine = rollouts.into_iter().take(40).find(|(_, path)| {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| codex::session_cwd(&text))
+            .is_some_and(|dir| dir == cwd)
+    })?;
+    let path = mine.1;
+    cached_events(&path, |contents| codex::parse_file(&path, contents).events)
+}
+
+/// OpenCode's database, read for one session directory only.
+///
+/// The filter is SQL rather than a pass over every message: one database holds
+/// every folder this machine has ever opened, and this runs on every poll.
+fn opencode_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let db = opencode::discover(&home)?;
+    let events = cached_db_events(&db, cwd, |path| {
+        opencode::parse_db_in(path, Some(cwd)).events
+    })?;
+    (!events.is_empty()).then_some(events)
+}
+
+/// The Antigravity conversation whose workspace is this folder.
+///
+/// One database per conversation, each naming its workspace as a `file://`
+/// URI. Newest first, because a folder can have several and the live one is
+/// the one being written.
+fn antigravity_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let root = antigravity_cli::discover(&home)?;
+    let mut dbs: Vec<(SystemTime, PathBuf)> = antigravity_cli::shards(&root)
+        .into_iter()
+        .filter_map(|path| {
+            let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    dbs.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let mine = dbs
+        .into_iter()
+        .take(40)
+        .find(|(_, path)| antigravity_cli::workspace_path(path).is_some_and(|dir| dir == cwd))?;
+    let path = mine.1;
+    cached_db_events(&path, "", |path| antigravity_cli::parse_db(path).events)
 }
 
 fn claude_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
@@ -390,6 +466,44 @@ fn cached_events(
     if let Ok(mut guard) = parse_cache().lock() {
         guard.insert(
             path.to_path_buf(),
+            CachedParse {
+                mtime,
+                events: Arc::clone(&events),
+            },
+        );
+    }
+    Some(events)
+}
+
+/// The same cache, for a source that is read by path rather than as text.
+///
+/// A SQLite database cannot be handed to a parser as a string, and OpenCode's
+/// holds every folder this machine has opened, so the key carries the
+/// directory the rows were filtered to as well as the file.
+fn cached_db_events(
+    path: &Path,
+    scope: &str,
+    parse: impl FnOnce(&Path) -> Vec<UsageEvent>,
+) -> Option<Arc<Vec<UsageEvent>>> {
+    let mtime = path.metadata().ok()?.modified().ok()?;
+    let key = if scope.is_empty() {
+        path.to_path_buf()
+    } else {
+        path.with_file_name(format!(
+            "{}#{scope}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ))
+    };
+    if let Ok(guard) = parse_cache().lock()
+        && let Some(hit) = guard.get(&key)
+        && hit.mtime == mtime
+    {
+        return Some(Arc::clone(&hit.events));
+    }
+    let events = Arc::new(parse(path));
+    if let Ok(mut guard) = parse_cache().lock() {
+        guard.insert(
+            key,
             CachedParse {
                 mtime,
                 events: Arc::clone(&events),
@@ -720,9 +834,33 @@ mod tests {
     #[test]
     fn unsupported_harnesses_have_no_reading() {
         assert_eq!(harness_name("zsh"), None);
-        assert_eq!(harness_name("codex"), None);
+        assert_eq!(harness_name("cline"), None);
         assert_eq!(harness_name("/opt/homebrew/bin/claude"), Some("claude"));
         assert_eq!(harness_name("grok"), Some("grok"));
+    }
+
+    #[test]
+    fn every_harness_with_a_local_log_is_metered() {
+        assert_eq!(harness_name("codex"), Some("codex"));
+        assert_eq!(harness_name("/usr/local/bin/opencode"), Some("opencode"));
+        // The launcher's second OpenCode tile is the same reader.
+        assert_eq!(harness_name("opencode2"), Some("opencode"));
+        assert_eq!(harness_name("agy"), Some("antigravity"));
+    }
+
+    #[test]
+    fn a_codex_rollout_names_the_folder_it_was_recorded_in() {
+        let rollout = concat!(
+            r#"{"type":"session_meta","timestamp":"2026-08-01T00:00:00Z","payload":{"type":"session_meta","id":"s1","cwd":"/Users/me/git/tokenstat"}}"#,
+            "\n",
+            r#"{"type":"event_msg","timestamp":"2026-08-01T00:00:01Z","payload":{"type":"token_count","info":{}}}"#,
+        );
+        assert_eq!(
+            codex::session_cwd(rollout).as_deref(),
+            Some("/Users/me/git/tokenstat")
+        );
+        // A rollout with no session_meta cannot claim a folder.
+        assert_eq!(codex::session_cwd("{\"type\":\"event_msg\"}"), None);
     }
 
     #[test]

@@ -126,6 +126,25 @@ pub struct ParseOutput {
 }
 
 /// Parse one rollout file.
+/// The working directory a rollout was recorded in, from its `session_meta`.
+///
+/// The live session meter needs to know which rollout belongs to a folder, and
+/// the rollout says so itself on its first records. Reads the head of the file
+/// only: a long rollout is megabytes and the answer is in the first few lines.
+pub fn session_cwd(contents: &str) -> Option<String> {
+    for line in contents.lines().take(20) {
+        let Ok(row) = serde_json::from_str::<Row>(line) else {
+            continue;
+        };
+        if let Some(cwd) = row.payload.and_then(|p| p.cwd) {
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     let mut out = ParseOutput::default();
 

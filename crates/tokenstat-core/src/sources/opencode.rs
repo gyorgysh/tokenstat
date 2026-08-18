@@ -69,6 +69,15 @@ struct MessageTime {
 
 /// Read every message that carries token counters.
 pub fn parse_db(path: &Path) -> ParseOutput {
+    parse_db_in(path, None)
+}
+
+/// Read the database, optionally keeping only one session directory.
+///
+/// The live meter asks about one folder, and the archive asks about all of
+/// them. The filter is the session's own `directory`, matched whole: a label
+/// is a basename and two folders can share one.
+pub fn parse_db_in(path: &Path, directory: Option<&str>) -> ParseOutput {
     let mut out = ParseOutput::default();
     let conn = match rusqlite::Connection::open_with_flags(
         path,
@@ -84,12 +93,25 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         }
     };
 
-    let sql = r#"
+    let sql = match directory {
+        Some(_) => {
+            r#"
         SELECT m.id, m.session_id, m.time_created, m.data,
                COALESCE(s.directory, s.path, '')
         FROM message m
         LEFT JOIN session s ON s.id = m.session_id
-    "#;
+        WHERE COALESCE(s.directory, s.path, '') = ?1
+    "#
+        }
+        None => {
+            r#"
+        SELECT m.id, m.session_id, m.time_created, m.data,
+               COALESCE(s.directory, s.path, '')
+        FROM message m
+        LEFT JOIN session s ON s.id = m.session_id
+    "#
+        }
+    };
     let mut stmt = match conn.prepare(sql) {
         Ok(s) => s,
         Err(e) => {
@@ -101,7 +123,12 @@ pub fn parse_db(path: &Path) -> ParseOutput {
         }
     };
 
-    let rows = match stmt.query_map([], |r| {
+    let filter = directory.unwrap_or_default().to_string();
+    let params: Vec<&dyn rusqlite::ToSql> = match directory {
+        Some(_) => vec![&filter],
+        None => Vec::new(),
+    };
+    let rows = match stmt.query_map(params.as_slice(), |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
@@ -223,6 +250,21 @@ mod tests {
             .unwrap();
         }
         path
+    }
+
+    #[test]
+    fn a_directory_filter_keeps_only_that_folders_messages() {
+        let data = r#"{"role":"assistant","modelID":"opencode/big","tokens":{"input":10,"output":5},"cost":0}"#;
+        let path = temp_db(&[
+            ("msg1", "ses1", 1, data, "/Users/me/git/tokenstat"),
+            ("msg2", "ses2", 2, data, "/Users/me/git/other"),
+        ]);
+        assert_eq!(parse_db(&path).events.len(), 2, "unfiltered reads both");
+        let mine = parse_db_in(&path, Some("/Users/me/git/tokenstat"));
+        assert_eq!(mine.events.len(), 1);
+        assert_eq!(mine.events[0].project, "tokenstat");
+        // Whole path, not a label: a basename cannot tell two checkouts apart.
+        assert!(parse_db_in(&path, Some("tokenstat")).events.is_empty());
     }
 
     #[test]

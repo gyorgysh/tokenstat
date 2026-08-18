@@ -64,6 +64,28 @@ pub struct ParseOutput {
     pub rows_seen: u64,
 }
 
+/// The workspace folder a conversation belongs to, as a full path.
+///
+/// The archive only needs a label, but the live meter has to know which
+/// conversation is this folder's, and a basename cannot answer that: two
+/// checkouts of the same repository share one.
+pub fn workspace_path(path: &Path) -> Option<String> {
+    let conn = rusqlite::Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    let blob: Vec<u8> = conn
+        .query_row(
+            "SELECT data FROM trajectory_metadata_blob LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok()?;
+    let uri = message_field(&blob, 1).and_then(|folder| string_field(folder, 1))?;
+    file_uri_to_path(uri)
+}
+
 /// Read every generation that carries token counters from one conversation DB.
 pub fn parse_db(path: &Path) -> ParseOutput {
     let mut out = ParseOutput::default();
