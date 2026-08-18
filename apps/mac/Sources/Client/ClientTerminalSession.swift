@@ -404,6 +404,24 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
 
+    /// Whether a drag scrolls the buffer instead of reaching the program.
+    ///
+    /// An agent that asks for mouse reporting gets every drag as an event,
+    /// which pins the view to the bottom of a 4,000 line scrollback. Turning
+    /// reporting off hands panning back to the terminal. Starts off, because
+    /// typing is what a keyboard is for and a scroll is the deliberate act.
+    var scrolls: Bool = false {
+        didSet {
+            guard scrolls != oldValue else { return }
+            terminalView?.allowMouseReporting = !scrolls
+        }
+    }
+
+    /// Put the keyboard away without ending the session.
+    func dismissKeyboard() {
+        _ = terminalView?.resignFirstResponder()
+    }
+
     /// Type raw bytes, for the key bar above the keyboard.
     ///
     /// The same queue typing uses, so a tapped key and a typed one cannot
@@ -450,10 +468,10 @@ struct ClientTerminalRepresentable: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: TerminalView, context: Context) {
-        // Keep focus when reappearing.
-        if !uiView.isFirstResponder {
-            _ = uiView.becomeFirstResponder()
-        }
+        // Focus is taken once, on appear. Taking it back on every update
+        // would make Hide keyboard last until the next redraw, which on a
+        // live terminal is immediately.
+        uiView.allowMouseReporting = !session.scrolls
     }
 }
 
@@ -526,7 +544,14 @@ struct ClientTerminalScreen: View {
                 // Above the keyboard when it is up, above the home indicator
                 // when it is not. Either way it is where a thumb already is.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    ClientTerminalKeys { session.sendBytes($0) }
+                    ClientTerminalKeys(
+                        send: { session.sendBytes($0) },
+                        dismissKeyboard: { session.dismissKeyboard() },
+                        scrolls: Binding(
+                            get: { session.scrolls },
+                            set: { session.scrolls = $0 }
+                        )
+                    )
                 }
         }
         .background(Color.black)

@@ -25,6 +25,10 @@ import UIKit
 struct ClientTerminalKeys: View {
     /// Send raw bytes to the pty.
     let send: ([UInt8]) -> Void
+    /// Put the keyboard away, so the screen is all output.
+    let dismissKeyboard: () -> Void
+    /// Whether a drag scrolls the buffer instead of reaching the program.
+    @Binding var scrolls: Bool
 
     /// Armed for the next key only, like a real modifier tapped once. Sticky
     /// on purpose: a phone cannot hold one key while pressing another.
@@ -45,6 +49,17 @@ struct ClientTerminalKeys: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
+                // Reading is half of what a phone does with a terminal, and
+                // the keyboard covers half the screen. This is the way out of
+                // it; tapping the terminal brings the keyboard back.
+                iconKey("keyboard.chevron.compact.down", label: "Hide keyboard") {
+                    dismissKeyboard()
+                }
+                // An agent holds mouse reporting on, which turns a drag into
+                // an event for the program rather than a scroll, so the view
+                // is pinned to the bottom. This is the toggle SwiftTerm's own
+                // bar carried and ours dropped.
+                modifier("scroll", isOn: scrolls) { scrolls.toggle() }
                 modifier("esc", isOn: false) { fire(Key.escape) }
                 modifier("ctrl", isOn: control) { control.toggle() }
                 modifier("shift", isOn: shift) { shift.toggle() }
@@ -91,6 +106,23 @@ struct ClientTerminalKeys: View {
         case 0x20: return 0  // space is NUL
         default: return nil
         }
+    }
+
+    /// A key whose face is a symbol rather than what it types.
+    private func iconKey(
+        _ symbol: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .frame(minWidth: 44, minHeight: 34)
+                .background(Theme.panel, in: .rect(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
+        .accessibilityLabel(label)
     }
 
     private func key(_ label: String, action: @escaping () -> Void) -> some View {
