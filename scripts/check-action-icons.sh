@@ -60,6 +60,12 @@ ALLOWED = [
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),
+    # Keycaps on the terminal accessory bar: the label is the key, and a
+    # glyph beside "esc" or "⇧⇥" would be a second symbol for one keystroke.
+    ("Client/ClientTerminalKeys.swift", "Button(action: action) {"),
+    # A toast's inline way to the thing it just named. Same class as an
+    # alert action: the platform's own convention is text.
+    ("Design/Theme.swift", "Button(actionLabel) {"),
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
