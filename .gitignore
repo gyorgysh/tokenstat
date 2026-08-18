@@ -20,10 +20,9 @@ credentials.json
 /crates/tokenstat-core/pricing/
 
 # Internal working notes. Research, design rationale, and session handover.
-# Not published: these reference local paths and machine specifics.
 /roadmap.md
 /WORKLOG.md
-# Task tracking with local machine details. Same rule as WORKLOG.md: internal.
+/CLAUDE.md
 /TODO.md
 /docs/
 
