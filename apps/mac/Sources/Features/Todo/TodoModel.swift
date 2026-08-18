@@ -37,6 +37,9 @@ final class TodoModel {
     /// the inspector can reopen.
     private(set) var selectionGeneration = 0
     var noticeMessage: String?
+    /// Where the notice's subject went, when that is somewhere this board is
+    /// not showing. The toast offers it as Show; the view applies it.
+    var noticeScope: TodoScope?
     private var pollTask: Task<Void, Never>?
     private var noticeGeneration = 0
 
@@ -101,14 +104,33 @@ final class TodoModel {
     /// been asked to show.
     var filter: TodoScope = .all
 
+    /// Notes in the current scope, newest first.
+    ///
+    /// A note is not work in a column. Mixed into To Do it reads as a task
+    /// nobody has started, which is why the counts have to exclude notes in
+    /// three places. The board gives them one strip instead.
+    var notes: [TodoCard] {
+        cards
+            .filter {
+                $0.kind == .note && inScope($0)
+                    && ($0.column == "archive") == showingArchive
+            }
+            .sorted { $0.createdAtMs > $1.createdAtMs }
+    }
+
     /// Cards for a column, in the active sort, inside the current scope.
     func cards(in column: String) -> [TodoCard] {
         let target = storageColumn(column)
-        let list = cards.filter { $0.column == target && inScope($0) }
+        let list = cards.filter { $0.column == target && $0.kind != .note && inScope($0) }
         if sortNewestFirst {
             return list.sorted { $0.createdAtMs > $1.createdAtMs }
         }
         return list.sorted { $0.order < $1.order }
+    }
+
+    /// The filter that would show this card on the global board.
+    private func destinationScope(of card: TodoCard) -> TodoScope {
+        card.workspaceID.isEmpty ? .inbox : .workspace(card.workspaceID)
     }
 
     private func inScope(_ card: TodoCard) -> Bool {
@@ -190,15 +212,30 @@ final class TodoModel {
     func create(
         title: String, kind: TodoKind, notes: String, backend: String,
         workspaceID: String, budgetSeconds: UInt64, column: String = "backlog",
-        model: String? = nil, effort: String? = nil
+        model: String? = nil, effort: String? = nil,
+        destinationName: String = ""
     ) async {
         do {
-            _ = try await Bridge.todoCreate(
+            let created = try await Bridge.todoCreate(
                 title: title, kind: kind, notes: notes, column: column,
                 backend: backend, workspaceID: workspaceID, budgetSeconds: budgetSeconds,
                 model: model, effort: effort
             )
-            showNotice(kind == .note ? "Note added." : "Card added.")
+            // A card that lands where this board cannot show it says where it
+            // went, and offers the way there. Silence here is what lost two
+            // notes: they were written, saved, and then invisible.
+            let noun = kind == .note ? "Note" : "Card"
+            if inScope(created) {
+                showNotice("\(noun) added.")
+            } else {
+                let place = destinationName.isEmpty ? "another board" : destinationName
+                // Only the global board can follow: a folder's board is fixed
+                // by the route, so there it names the place and stops.
+                showNotice(
+                    "\(noun) added to \(place).",
+                    scope: scope == nil ? destinationScope(of: created) : nil
+                )
+            }
             errorMessage = nil
             await load()
         } catch {
@@ -301,14 +338,16 @@ final class TodoModel {
         showNotice("Opened \"\(title)\" in a terminal.")
     }
 
-    private func showNotice(_ message: String) {
+    private func showNotice(_ message: String, scope: TodoScope? = nil) {
         noticeGeneration += 1
         let generation = noticeGeneration
         noticeMessage = message
+        noticeScope = scope
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(5))
             guard let self, self.noticeGeneration == generation else { return }
             self.noticeMessage = nil
+            self.noticeScope = nil
         }
     }
 

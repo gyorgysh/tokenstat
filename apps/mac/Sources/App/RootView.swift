@@ -258,6 +258,18 @@ struct RootView: View {
                 await workflows.refreshList()
             }
         }
+        // The board's own counts, loaded whether or not anyone has opened it.
+        // The sidebar shows a folder's open cards and the unfiled Inbox count,
+        // and a count that only appears after a visit to the screen it counts
+        // is not a count anybody can rely on.
+        .task {
+            await todo.load()
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(12))
+                guard !Task.isCancelled else { return }
+                await todo.load()
+            }
+        }
         // Sidebar footer needs the handle, but not on the first frame. A short
         // yield lets Home's archive calls claim the host first.
         .task {
@@ -1155,8 +1167,23 @@ struct RootView: View {
                         SidebarRow(
                             label: item.label,
                             symbol: item.symbol,
-                            isSelected: route.isGlobal(item)
+                            isSelected: route.isGlobal(item) && !(item == .todo && todo.filter == .inbox)
                         ) { navigate(to: .global(item)) }
+                        // A card with no folder used to live only inside a
+                        // picker on the Tasks board, which meant a note could
+                        // be written, saved, and never seen again. Unfiled is
+                        // a place now, with its count on it.
+                        if item == .todo, todo.inboxCount > 0 {
+                            SidebarRow(
+                                label: "Inbox",
+                                symbol: "tray",
+                                trailing: "\(todo.inboxCount)",
+                                isSelected: route.isGlobal(.todo) && todo.filter == .inbox
+                            ) {
+                                todo.filter = .inbox
+                                navigate(to: .global(.todo))
+                            }
+                        }
                     }
                 }
 
@@ -2885,7 +2912,11 @@ private struct ActiveSessionRow: View {
     private var stats: String? {
         if let meter = session.meter {
             var parts: [String] = []
-            if let micros = meter.costMicros, micros > 0 {
+            // Context leads. On a subscription it is the number that means
+            // something, and the money beside it is a list-rate equivalent
+            // that nobody is charged.
+            if let context = contextText { parts.append(context) }
+            if let micros = meter.costMicros {
                 parts.append(
                     Money(
                         micros: micros,
@@ -2900,6 +2931,17 @@ private struct ActiveSessionRow: View {
             if !parts.isEmpty { return parts.joined(separator: " · ") }
         }
         return resourceStats
+    }
+
+    /// The context reading: a percentage when a window is known, otherwise
+    /// what the last turn sent. `~` when the window came from siblings.
+    private var contextText: String? {
+        guard let meter = session.meter, let used = meter.contextUsed else { return nil }
+        guard let window = meter.contextWindow, window > 0 else {
+            return "\(formatTokens(used)) ctx"
+        }
+        let pct = Int((Double(used) / Double(window) * 100).rounded())
+        return "\(meter.contextEstimated ? "~" : "")\(pct)% ctx"
     }
 
     /// CPU and RAM, for the tooltip and as the line-two fallback.
@@ -2927,7 +2969,14 @@ private struct ActiveSessionRow: View {
             lines.append(resources)
         }
         if session.meter?.costMicros != nil {
-            lines.append("List-rate equivalent, not billed.")
+            lines.append(
+                session.meter?.isPlan == true
+                    ? "Covered by your plan. List-rate equivalent, not billed."
+                    : "List-rate equivalent, not billed."
+            )
+        }
+        if session.meter?.contextEstimated == true {
+            lines.append("Context window estimated from related models.")
         }
         return lines.joined(separator: "\n")
     }

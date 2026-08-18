@@ -866,10 +866,27 @@ struct FieldSaveBar: View {
 struct TransientToast: View {
     @Binding var message: String?
     var severity: Banner.Severity = .success
+    /// Optional way to the thing the message is about.
+    ///
+    /// A toast that says where something landed has to be able to take you
+    /// there, or it is a notification that the app knows something you do not.
+    var actionLabel: String?
+    var action: (() -> Void)?
 
     var body: some View {
         if let message {
-            Label(message, systemImage: severity.symbol)
+            HStack(spacing: Theme.Space.s) {
+                Label(message, systemImage: severity.symbol)
+                if let actionLabel, let action {
+                    Button(actionLabel) {
+                        action()
+                        self.message = nil
+                    }
+                    .buttonStyle(.plain)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                }
+            }
                 .font(.callout.weight(.medium))
                 .foregroundStyle(severity.tint)
                 .padding(.horizontal, Theme.Space.m)

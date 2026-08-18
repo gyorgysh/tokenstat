@@ -125,6 +125,7 @@ struct TodoView: View {
                 Banner(text: error, severity: .warning)
                     .padding(Theme.Space.m)
             }
+            notesStrip
             GeometryReader { proxy in
                 let available = proxy.size.height - Theme.Space.m * 2
                 let gap = Theme.Space.m
@@ -156,8 +157,15 @@ struct TodoView: View {
         .background(Theme.background)
         .navigationTitle("Tasks")
         .overlay(alignment: .bottomTrailing) {
-            TransientToast(message: $model.noticeMessage, severity: .success)
-                .padding(Theme.Space.l)
+            TransientToast(
+                message: $model.noticeMessage,
+                severity: .success,
+                actionLabel: model.noticeScope == nil ? nil : "Show",
+                action: model.noticeScope.map { scope in
+                    { model.filter = scope }
+                }
+            )
+            .padding(Theme.Space.l)
         }
         .task {
             model.sortNewestFirst = newestFirst
@@ -168,6 +176,51 @@ struct TodoView: View {
         }
         // The model outlives this view, and its poll loop must not.
         .onDisappear { model.disappeared() }
+    }
+
+    /// The notes for this scope, across the top of the board.
+    ///
+    /// One strip rather than a fourth column: a note is something to remember,
+    /// not a stage of work, and it never moves left to right. Hidden entirely
+    /// when there are none, so a board of pure tasks looks like one.
+    @ViewBuilder
+    private var notesStrip: some View {
+        let notes = model.notes
+        if !notes.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                HStack(spacing: Theme.Space.s) {
+                    FeatureMark(name: "mark_note", tint: Theme.secondary)
+                    Text("Notes")
+                        .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                    Text("\(notes.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: Theme.Space.s) {
+                        ForEach(notes) { note in
+                            CardView(
+                                model: model,
+                                card: note,
+                                folders: folders,
+                                isSelected: model.selectedCardID == note.id,
+                                onSelect: { model.selectCard(note.id) },
+                                onViewRun: onViewRun,
+                                onRunInFront: onRunInFront,
+                                onDropBefore: { _ in },
+                                onTargeted: { _ in }
+                            )
+                            .frame(width: DisplayFit.box(240))
+                        }
+                    }
+                    .padding(.bottom, 2)
+                }
+                .scrollIndicators(.hidden)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.top, Theme.Space.s)
+        }
     }
 
     /// Waiting on the first read of the board.
@@ -791,6 +844,17 @@ private struct NewCardForm: View {
                     axis: .vertical
                 )
                 .lineLimit(2...4)
+                // Where this is going, said before Save rather than found out
+                // afterwards. Notes get it too: a note used to be forced to
+                // Inbox, which is a place you can only reach from another
+                // screen, so it read as not saved at all.
+                AppMenuPicker(
+                    title: "Saving to",
+                    options: [(value: "", label: "Inbox (no folder)")]
+                        + folders.map { (value: $0.id, label: $0.name) },
+                    selection: $workspaceID
+                )
+                .frame(maxWidth: 260)
                 if kind == .task {
                     HStack(spacing: Theme.Space.s) {
                         AppMenuPicker(
@@ -798,12 +862,6 @@ private struct NewCardForm: View {
                             options: [(value: "", label: "Choose later")]
                                 + model.pickerBackends(keeping: backendID).map { (value: $0.id, label: $0.label) },
                             selection: $backendID
-                        )
-                        AppMenuPicker(
-                            title: "Workspace",
-                            options: [(value: "", label: "Choose later")]
-                                + folders.map { (value: $0.id, label: $0.name) },
-                            selection: $workspaceID
                         )
                     }
                     // Model and effort exist only for backends that advertise
@@ -882,6 +940,12 @@ private struct NewCardForm: View {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// What the toast calls the place this card is going.
+    private var destinationName: String {
+        if workspaceID.isEmpty { return "Inbox" }
+        return folders.first { $0.id == workspaceID }?.name ?? "another folder"
+    }
+
     private func save() async {
         let minutes = UInt64(budgetMinutes) ?? 180
         let budget: UInt64 = noTimeLimit ? 0 : minutes * 60
@@ -890,14 +954,18 @@ private struct NewCardForm: View {
             kind: kind,
             notes: notes,
             backend: backendID,
-            workspaceID: kind == .note ? "" : workspaceID,
+            // The folder this board is, or the one the picker says. A note
+            // used to be forced out of the folder it was written in and into
+            // Inbox, where the board it came from could not show it.
+            workspaceID: workspaceID,
             budgetSeconds: budget,
             column: kind == .note ? "backlog" : column,
             model: {
                 let cleaned = TodoCard.cleanModelID(modelChoice)
                 return cleaned.isEmpty ? nil : cleaned
             }(),
-            effort: effortChoice.isEmpty ? nil : effortChoice
+            effort: effortChoice.isEmpty ? nil : effortChoice,
+            destinationName: destinationName
         )
         if model.errorMessage == nil { cancel() }
     }
