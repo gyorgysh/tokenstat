@@ -72,14 +72,39 @@ final class TodoModel {
         return column
     }
 
-    /// Cards for a column, in the active sort.
+    /// Which workspace the board is showing. Nil is every workspace, which is
+    /// what the global board is for.
+    ///
+    /// Scope lives on the model rather than in the view because the counts in
+    /// the sidebar ask the same question, and two places deciding what belongs
+    /// to a folder is two places to get it wrong.
+    var scope: String?
+
+    /// Cards for a column, in the active sort, inside the current scope.
     func cards(in column: String) -> [TodoCard] {
         let target = storageColumn(column)
-        let list = cards.filter { $0.column == target }
+        let list = cards.filter { $0.column == target && inScope($0) }
         if sortNewestFirst {
             return list.sorted { $0.createdAtMs > $1.createdAtMs }
         }
         return list.sorted { $0.order < $1.order }
+    }
+
+    private func inScope(_ card: TodoCard) -> Bool {
+        guard let scope else { return true }
+        return card.workspaceID == scope
+    }
+
+    /// Cards still to do in a folder: the sidebar count.
+    ///
+    /// Done and archived are not work left, and a note is not a task, so
+    /// neither is counted. A badge that only ever goes up is not a badge.
+    func openCount(in workspaceID: String) -> Int {
+        cards.filter {
+            $0.workspaceID == workspaceID
+                && $0.column != "done"
+                && $0.column != "archive"
+        }.count
     }
 
     var selectedCard: TodoCard? {

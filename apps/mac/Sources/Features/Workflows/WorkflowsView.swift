@@ -154,12 +154,15 @@ struct WorkflowsView: View {
         !model.hasLoaded && model.errorMessage == nil
     }
 
+    /// A new graph belongs where you are standing. Inside a folder that is
+    /// this folder, and with one folder registered there is nowhere else it
+    /// could sensibly go.
     private var defaultScope: WorkflowScope {
-        folders.count == 1 ? .workspace : .global
+        defaultWorkspaceID == nil ? .global : .workspace
     }
 
     private var defaultWorkspaceID: String? {
-        folders.count == 1 ? folders.first?.id : nil
+        model.scope ?? (folders.count == 1 ? folders.first?.id : nil)
     }
 
     private var intro: some View {
@@ -193,7 +196,7 @@ struct WorkflowsView: View {
         switch examplesExpandedStored {
         case "1": return true
         case "0": return false
-        default: return model.hasLoaded && model.graphs.isEmpty
+        default: return model.hasLoaded && model.scoped.isEmpty
         }
     }
 
@@ -368,8 +371,8 @@ struct WorkflowsView: View {
 
     private var filtered: [WorkflowGraph] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.graphs }
-        return model.graphs.filter { graph in
+        guard !query.isEmpty else { return model.scoped }
+        return model.scoped.filter { graph in
             graph.name.localizedCaseInsensitiveContains(query)
                 || graph.nodes.contains {
                     $0.displayTitle.localizedCaseInsensitiveContains(query)

@@ -94,7 +94,13 @@ struct RootView: View {
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
-    @State private var collapsedWorkspaces: Set<String> = []
+    /// Folders whose sections are showing. Collapsed is the default: a
+    /// sidebar of six folders each listing seven sections is a wall, and the
+    /// question it should answer first is which folder, not which section.
+    @State private var expandedWorkspaces: Set<String> = []
+    /// The section each folder was last left on, so returning to a folder
+    /// returns to what you were doing in it.
+    @State private var lastSection: [String: WorkspaceSection] = [:]
     /// Workspace id the current drag would land before, or `workspaceDropEnd`.
     @State private var workspaceDropBeforeID: String?
     #endif
@@ -209,6 +215,11 @@ struct RootView: View {
             // up with a pane over it that they never asked for.
             isOverlayVisible = false
             overlayHeldByPress = false
+            // Scope follows the route, in one place. A screen cannot then be
+            // showing one folder's cards under another folder's row.
+            todo.scope = next.workspaceID
+            automations.scope = next.workspaceID
+            workflows.scope = next.workspaceID
             guard next.isGlobal(.home) else { return }
             Task { await home.refreshIfStale() }
         }
@@ -713,6 +724,18 @@ struct RootView: View {
     private var inspectorContent: some View {
         Group {
             switch route {
+            case .workspace(_, .todo):
+                todoInspector
+            case .workspace(_, .workflows), .global(.workflows):
+                WorkflowsInspector(
+                    model: workflows,
+                    folders: workspaces.folders
+                ) { closeInspector() }
+            case .workspace(_, .automations), .global(.automations):
+                AutomationsInspector(
+                    model: automations,
+                    folders: workspaces.folders
+                ) { closeInspector() }
             case .workspace:
                 #if os(macOS)
                 WorkspaceInspector(
@@ -740,28 +763,7 @@ struct RootView: View {
                     }
                 ) { closeInspector() }
             case .global(.todo):
-                TodoInspector(
-                    model: todo,
-                    folders: workspaces.folders,
-                    onViewRun: { runID in
-                        navigate(to: .global(.automations))
-                        pendingRunID = runID
-                        isInspectorPresented = true
-                    },
-                    onRunInFront: { launch in
-                        launchTaskInFront(launch)
-                    }
-                ) { closeInspector() }
-            case .global(.automations):
-                AutomationsInspector(
-                    model: automations,
-                    folders: workspaces.folders
-                ) { closeInspector() }
-            case .global(.workflows):
-                WorkflowsInspector(
-                    model: workflows,
-                    folders: workspaces.folders
-                ) { closeInspector() }
+                todoInspector
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
             case .global(.insights):
@@ -770,6 +772,23 @@ struct RootView: View {
                 EmptyView()
             }
         }
+    }
+
+    /// Shared by the global board and a folder's, which differ only in what
+    /// the board is showing.
+    private var todoInspector: some View {
+        TodoInspector(
+            model: todo,
+            folders: workspaces.folders,
+            onViewRun: { runID in
+                navigate(to: .global(.automations))
+                pendingRunID = runID
+                isInspectorPresented = true
+            },
+            onRunInFront: { launch in
+                launchTaskInFront(launch)
+            }
+        ) { closeInspector() }
     }
 
     /// Whether the inspector is a floating overlay rather than a column:
@@ -1157,27 +1176,33 @@ struct RootView: View {
                         let showingTerminal = isCurrent
                             && workspaces.isShowingTerminal(in: folder.id)
                             && terminals.active(in: folder.id) != nil
+                        let isExpanded = expandedWorkspaces.contains(folder.id)
                         HStack(spacing: 0) {
                             Button {
-                                if collapsedWorkspaces.contains(folder.id) {
-                                    collapsedWorkspaces.remove(folder.id)
+                                if isExpanded {
+                                    expandedWorkspaces.remove(folder.id)
                                 } else {
-                                    collapsedWorkspaces.insert(folder.id)
+                                    expandedWorkspaces.insert(folder.id)
                                 }
                             } label: {
-                                Image(systemName: collapsedWorkspaces.contains(folder.id)
-                                      ? "chevron.right" : "chevron.down")
+                                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                                     .font(.system(size: 8, weight: .semibold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
                                     .frame(width: 18, height: 24)
                                     .contentShape(.rect)
                             }
                             .buttonStyle(.plain)
-                            .help(collapsedWorkspaces.contains(folder.id) ? "Expand workspace" : "Collapse workspace")
+                            .help(isExpanded ? "Collapse workspace" : "Expand workspace")
 
                             WorkspaceRow(
                                 folder: folder,
-                                isSelected: isCurrent && !showingTerminal,
+                                // Collapsed, the card carries the lit state of
+                                // whatever is inside it, because none of it is
+                                // on screen to carry its own. Expanded, one of
+                                // the section rows is the lit one and two
+                                // accent bars in the same group is the bug the
+                                // nested rows already avoid.
+                                isSelected: isCurrent && !isExpanded,
                                 isCurrent: isCurrent
                             ) { selectWorkspace(folder.id) }
                         }
@@ -1219,50 +1244,49 @@ struct RootView: View {
                         #endif
 
                         #if os(macOS)
-                        if !collapsedWorkspaces.contains(folder.id) {
-                            ForEach(automations.liveJobs(in: folder.id)) { job in
-                                let run = automations.lastRun(for: job)
-                                ActiveAutomationRow(
-                                    job: job,
-                                    backendLabel: automations.backends.first { $0.id == job.backend }?.label
-                                        ?? job.backend,
-                                    isSelected: route.isGlobal(.automations)
-                                        && automations.selectedJobID == job.id
+                        if isExpanded {
+                            // The same seven, in the same order, for every
+                            // folder. Live things sit directly under the
+                            // section that owns them, so a running workflow is
+                            // found where workflows are and not in a pile at
+                            // the bottom of the folder.
+                            ForEach(WorkspaceSection.allCases) { section in
+                                WorkspaceSectionRow(
+                                    section: section,
+                                    count: count(of: section, in: folder),
+                                    isSelected: route == .workspace(id: folder.id, section: section)
                                 ) {
-                                    openAutomation(jobID: job.id, runID: run?.id)
+                                    openSection(section, in: folder.id)
                                 }
-                            }
-                            ForEach(workflows.liveRuns(in: folder.id)) { run in
-                                ActiveWorkflowRow(
-                                    run: run,
-                                    isSelected: route.isGlobal(.workflows)
-                                        && workflows.selectedRunID == run.id
-                                ) {
-                                    openWorkflow(graphID: run.workflowID, runID: run.id)
-                                }
-                            }
-                            ForEach(activeSessions) { session in
-                                ActiveSessionRow(
-                                    session: session,
-                                    // Selected only when this session is the one
-                                    // actually on screen. `showingTerminal`
-                                    // carries the whole test, launcher
-                                    // included: with the launcher up, the
-                                    // pane is showing a grid of tools and no
-                                    // session at all, so no session row may
-                                    // claim to be what you are looking at.
-                                    isSelected: showingTerminal
-                                        && terminals.active(in: folder.id)?.id == session.id
-                                ) {
-                                    var transaction = Transaction()
-                                    transaction.animation = nil
-                                    withTransaction(transaction) {
-                                        route = .workspace(id: folder.id, section: .sessions)
-                                        workspaces.selectedID = folder.id
-                                        workspaces.showTerminal(in: folder.id)
-                                        terminals.select(session)
-                                        isInspectorPresented = true
+                                if section == .automations {
+                                    ForEach(automations.liveJobs(in: folder.id)) { job in
+                                        let run = automations.lastRun(for: job)
+                                        ActiveAutomationRow(
+                                            job: job,
+                                            backendLabel: automations.backends
+                                                .first { $0.id == job.backend }?.label ?? job.backend,
+                                            isSelected: automations.selectedJobID == job.id
+                                                && (route.isGlobal(.automations)
+                                                    || route == .workspace(id: folder.id, section: .automations))
+                                        ) {
+                                            openAutomation(jobID: job.id, runID: run?.id, in: folder.id)
+                                        }
                                     }
+                                }
+                                if section == .workflows {
+                                    ForEach(workflows.liveRuns(in: folder.id)) { run in
+                                        ActiveWorkflowRow(
+                                            run: run,
+                                            isSelected: workflows.selectedRunID == run.id
+                                                && (route.isGlobal(.workflows)
+                                                    || route == .workspace(id: folder.id, section: .workflows))
+                                        ) {
+                                            openWorkflow(graphID: run.workflowID, runID: run.id, in: folder.id)
+                                        }
+                                    }
+                                }
+                                if section == .sessions {
+                                    sessionRows(activeSessions, in: folder, showingTerminal: showingTerminal)
                                 }
                             }
                         }
@@ -1547,6 +1571,18 @@ struct RootView: View {
 
     // MARK: - Detail
 
+    /// Whether the centre pane is the workspace surface itself.
+    ///
+    /// Tasks, Workflows and Automations are the same screens as their global
+    /// versions with a folder's worth of rows in them, so they are drawn where
+    /// those are drawn rather than as a fourth thing inside the terminal pane.
+    private var showsWorkspaceSurface: Bool {
+        switch route.workspaceSection {
+        case .sessions, .changes, .files, .browser: return true
+        case .todo, .workflows, .automations, nil: return false
+        }
+    }
+
     @ViewBuilder
     private var detail: some View {
         #if os(macOS)
@@ -1562,20 +1598,20 @@ struct RootView: View {
             WorkspacesView(
                 model: workspaces,
                 terminals: terminals,
-                isActive: route.isWorkspace
+                isActive: showsWorkspaceSurface
             )
-            .opacity(route.isWorkspace ? 1 : 0)
-            .allowsHitTesting(route.isWorkspace)
-            .accessibilityHidden(!route.isWorkspace)
-            .zIndex(route.isWorkspace ? 1 : 0)
+            .opacity(showsWorkspaceSurface ? 1 : 0)
+            .allowsHitTesting(showsWorkspaceSurface)
+            .accessibilityHidden(!showsWorkspaceSurface)
+            .zIndex(showsWorkspaceSurface ? 1 : 0)
 
-            if !route.isWorkspace {
+            if !showsWorkspaceSurface {
                 nonWorkspaceDetail
                     .zIndex(1)
             }
         }
         #else
-        if route.isWorkspace {
+        if showsWorkspaceSurface {
             WorkspacesView(model: workspaces)
         } else {
             nonWorkspaceDetail
@@ -1588,7 +1624,8 @@ struct RootView: View {
     @ViewBuilder
     private var nonWorkspaceDetail: some View {
         switch route {
-        case .workspace:
+        case .workspace(_, .sessions), .workspace(_, .changes),
+             .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
         case .global(.home):
             HomeView(
@@ -1596,19 +1633,19 @@ struct RootView: View {
                 account: account,
                 onShowAccount: { navigate(to: .global(.account)) }
             )
-        case .global(.automations):
+        case .workspace(_, .automations), .global(.automations):
             AutomationsView(
                 model: automations,
                 folders: workspaces.folders,
                 onNavigate: { handle($0) },
                 pendingRunID: $pendingRunID
             )
-        case .global(.workflows):
+        case .workspace(_, .workflows), .global(.workflows):
             WorkflowsView(
                 model: workflows,
                 folders: workspaces.folders
             )
-        case .global(.todo):
+        case .workspace(_, .todo), .global(.todo):
             TodoView(
                 model: todo,
                 folders: workspaces.folders,
@@ -1669,9 +1706,10 @@ struct RootView: View {
         await workflows.load()
     }
 
-    /// Open a graph on Workflows, with its run in the inspector when we have one.
-    private func openWorkflow(graphID: String, runID: String?) {
-        navigate(to: .global(.workflows)) {
+    /// Open a graph on Workflows, with its run in the inspector when we have
+    /// one. A run clicked under a folder opens on that folder's board.
+    private func openWorkflow(graphID: String, runID: String?, in folderID: String? = nil) {
+        navigate(to: folderID.map { .workspace(id: $0, section: .workflows) } ?? .global(.workflows)) {
             workflows.selectGraph(graphID)
             if let runID, let run = workflows.runs.first(where: { $0.id == runID }) {
                 workflows.selectRun(run)
@@ -1680,9 +1718,10 @@ struct RootView: View {
         }
     }
 
-    /// Open a job on Automations, with its run in the inspector when we have one.
-    private func openAutomation(jobID: String, runID: String?) {
-        navigate(to: .global(.automations)) {
+    /// Open a job on Automations, with its run in the inspector when we have
+    /// one. A job clicked under a folder opens on that folder's board.
+    private func openAutomation(jobID: String, runID: String?, in folderID: String? = nil) {
+        navigate(to: folderID.map { .workspace(id: $0, section: .automations) } ?? .global(.automations)) {
             automations.selectJob(jobID)
             if let runID, let run = automations.runs.first(where: { $0.id == runID }) {
                 automations.selectRun(run)
@@ -1752,23 +1791,110 @@ struct RootView: View {
             .padding(.horizontal, Theme.Space.m)
     }
 
+    /// The live sessions of a folder, under its Sessions row.
+    #if os(macOS)
+    @ViewBuilder
+    private func sessionRows(
+        _ sessions: [TerminalSession],
+        in folder: WorkspaceFolder,
+        showingTerminal: Bool
+    ) -> some View {
+        ForEach(sessions) { session in
+            ActiveSessionRow(
+                session: session,
+                // Selected only when this session is the one actually on
+                // screen. `showingTerminal` carries the whole test, launcher
+                // included: with the launch grid up, the pane is showing a
+                // grid of tools and no session at all.
+                isSelected: showingTerminal
+                    && terminals.active(in: folder.id)?.id == session.id
+            ) {
+                openSection(.sessions, in: folder.id) {
+                    terminals.select(session)
+                }
+            }
+        }
+    }
+    #endif
+
+    /// What a section's badge says. Nil draws nothing: a zero is not news, and
+    /// seven greyed zeroes under every folder is a wall of them.
+    private func count(of section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
+        let value: Int
+        switch section {
+        case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
+        case .changes: value = folder.git?.files.count ?? 0
+        case .todo: value = todo.openCount(in: folder.id)
+        case .workflows: value = workflows.count(in: folder.id)
+        case .automations: value = automations.count(in: folder.id)
+        case .files: return nil
+        case .browser: value = workspaces.browserTabs(in: folder.id).count
+        }
+        return value > 0 ? value : nil
+    }
+
+    /// Open one of a folder's sections, and put the centre pane on it.
+    ///
+    /// The scoped screens (Tasks, Workflows, Automations) need nothing here:
+    /// their scope follows the route, set once in `onChange(of: route)`, so a
+    /// screen cannot be showing one folder's cards under another folder's row.
+    private func openSection(
+        _ section: WorkspaceSection,
+        in folderID: String,
+        then update: (() -> Void)? = nil
+    ) {
+        navigate(to: .workspace(id: folderID, section: section)) {
+            workspaces.selectedID = folderID
+            lastSection[folderID] = section
+            expandedWorkspaces.insert(folderID)
+            isInspectorPresented = true
+            #if os(macOS)
+            switch section {
+            case .sessions: workspaces.showTerminal(in: folderID)
+            case .changes: workspaces.reviewWorkingTree(in: folderID)
+            case .files: workspaces.showFiles(in: folderID)
+            case .browser:
+                // Back to the page you had open, rather than a second blank
+                // tab every time the row is clicked.
+                let existing = workspaces.tabs(in: folderID).last {
+                    if case .browser = $0 { return true }
+                    return false
+                }
+                if let existing {
+                    workspaces.show(existing, in: folderID)
+                } else {
+                    workspaces.showBrowser(in: folderID)
+                }
+            case .todo, .workflows, .automations:
+                break
+            }
+            #endif
+            update?()
+        }
+    }
+
     /// Select the folder and destination in one immediate transaction. The
     /// inspector is part of the workspace destination, so allowing SwiftUI to
     /// animate the two state changes separately makes it visibly trail the row.
-    private func selectWorkspace(_ id: String, section: WorkspaceSection = .sessions) {
-        navigate(to: .workspace(id: id, section: section)) {
-            if workspaces.selectedID == id {
-                // Second click on the same folder: swap between the running
-                // surface and the launcher, so a new agent can be started
-                // without hunting for the + menu.
-                workspaces.toggleLauncher(in: id)
-            } else {
-                workspaces.selectedID = id
+    /// Click the folder card: open it on whatever section it was left on, and
+    /// show its sections.
+    ///
+    /// A second click on a folder already open on its sessions swaps between
+    /// the running surface and the launcher, so a new agent can be started
+    /// without hunting for the + menu.
+    private func selectWorkspace(_ id: String) {
+        let section = lastSection[id] ?? .sessions
+        let wasCurrent = route.workspaceID == id
+        openSection(section, in: id) {
+            #if os(macOS)
+            guard wasCurrent, section == .sessions else {
                 // A first selection shows the folder as it was, not the
                 // launcher it might have been left on.
                 workspaces.exitLauncher(in: id)
+                return
             }
-            isInspectorPresented = true
+            workspaces.toggleLauncher(in: id)
+            #endif
         }
     }
 
@@ -2347,6 +2473,83 @@ private struct WorkspaceRow: View {
         // a card and the session under it, share an edge and read as one tall
         // shape rather than as two things.
         .padding(.vertical, 1)
+    }
+}
+
+/// One of a workspace's sections, indented under its folder card.
+///
+/// Deliberately lighter than everything around it. The folder card above is a
+/// 26pt mark and three lines, and the live rows below are cards of their own,
+/// so a section has to read as the label between them rather than as a third
+/// kind of object: one line, one small glyph, one count.
+///
+/// The rail is what says "inside". Each row draws its own segment, so the run
+/// of them looks continuous, and the selected row's segment is the accent.
+/// That is the selection mark here: a 3pt bar beside a 1pt rail is two edges
+/// arguing, and the folder card already owns the bar when it is collapsed.
+private struct WorkspaceSectionRow: View {
+    let section: WorkspaceSection
+    /// Nil draws nothing. A zero is not news, and seven greyed zeroes under
+    /// every folder is a wall of them.
+    let count: Int?
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    /// Where the rail sits, and where the content starts after it.
+    private static let railInset: CGFloat = Theme.Space.l
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: section.symbol)
+                    .font(.system(size: DisplayFit.dp(10.5)))
+                    .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                    .frame(width: 14)
+                Text(section.label)
+                    .font(.system(
+                        size: DisplayFit.dp(12),
+                        weight: isSelected ? .medium : .regular
+                    ))
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: Theme.Space.xs)
+                if let count {
+                    Text("\(count)")
+                        .font(Theme.numeric(11))
+                        .foregroundStyle(isSelected ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(.tertiary))
+                        .monospacedDigit()
+                }
+            }
+            .padding(.leading, Self.railInset + Theme.Space.s)
+            .padding(.trailing, Theme.Space.m)
+            .padding(.vertical, 3)
+            .background(background)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(section.label)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(count.map { "\(section.label), \($0)" } ?? section.label)
+    }
+
+    private var background: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(
+                    isSelected
+                        ? Theme.rowSelectedNested
+                        : (isHovering ? Theme.rowHighlight.opacity(0.6) : .clear)
+                )
+                .padding(.leading, Self.railInset)
+                .padding(.trailing, Theme.Space.xs)
+            Rectangle()
+                .fill(isSelected ? Theme.accent : Theme.border)
+                .frame(width: 1)
+                .padding(.leading, Self.railInset)
+        }
     }
 }
 

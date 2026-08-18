@@ -26,6 +26,8 @@ enum AutomationFocus: Sendable {
 @Observable
 final class AutomationsModel {
     private(set) var jobs: [Automation] = []
+    /// Which workspace this screen is showing. Nil is every workspace.
+    var scope: String?
     private(set) var runs: [RunRecord] = []
     private(set) var backends: [AgentBackend] = []
 
@@ -154,6 +156,17 @@ final class AutomationsModel {
 
     /// Jobs in this folder whose last run is still going. The workspace
     /// sidebar lists these so a hidden automation pty is still visible.
+    /// The jobs of the current scope. Nil scope is every folder.
+    var scoped: [Automation] {
+        guard let scope else { return jobs }
+        return jobs.filter { $0.workspaceID == scope }
+    }
+
+    /// Jobs set up in a folder, running or not: the sidebar count.
+    func count(in workspaceID: String) -> Int {
+        jobs.filter { $0.workspaceID == workspaceID }.count
+    }
+
     func liveJobs(in workspaceID: String) -> [Automation] {
         jobs.filter { job in
             job.workspaceID == workspaceID && lastRun(for: job)?.isRunning == true

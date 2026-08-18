@@ -711,6 +711,13 @@ private struct NewCardForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             AddCardTrigger(expanded: $expanded)
+                // A card added on a folder's board belongs to that folder. The
+                // picker stays, because a card can be moved, but it is a
+                // correction rather than a decision every time.
+                .onChange(of: expanded, initial: true) { _, open in
+                    guard open, let scope = model.scope else { return }
+                    workspaceID = scope
+                }
 
             if expanded {
                 SegmentedCapsulePicker(

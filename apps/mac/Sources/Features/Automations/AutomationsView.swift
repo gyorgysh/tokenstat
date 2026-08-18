@@ -138,7 +138,7 @@ struct AutomationsView: View {
             // Write the first-visit default so a later appear does not
             // recompute it from an empty in-flight list.
             guard loaded, examplesExpandedStored.isEmpty else { return }
-            examplesExpandedStored = model.jobs.isEmpty ? "1" : "0"
+            examplesExpandedStored = model.scoped.isEmpty ? "1" : "0"
         }
     }
 
@@ -270,7 +270,7 @@ struct AutomationsView: View {
         switch examplesExpandedStored {
         case "1": return true
         case "0": return false
-        default: return model.hasLoaded && model.jobs.isEmpty
+        default: return model.hasLoaded && model.scoped.isEmpty
         }
     }
 
@@ -413,8 +413,8 @@ struct AutomationsView: View {
 
     private var filteredJobs: [Automation] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return model.jobs }
-        return model.jobs.filter {
+        guard !query.isEmpty else { return model.scoped }
+        return model.scoped.filter {
             $0.name.localizedCaseInsensitiveContains(query)
                 || $0.prompt.localizedCaseInsensitiveContains(query)
                 || $0.backend.localizedCaseInsensitiveContains(query)

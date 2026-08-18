@@ -24,6 +24,9 @@ enum WorkflowFocus: Sendable {
 @Observable
 final class WorkflowsModel {
     private(set) var graphs: [WorkflowGraph] = []
+    /// Which workspace this screen is showing. Nil is every workspace, and a
+    /// global scope shows the graphs that are not bound to a folder.
+    var scope: String?
     private(set) var runs: [WorkflowRunRecord] = []
     private(set) var backends: [AgentBackend] = []
 
@@ -128,6 +131,23 @@ final class WorkflowsModel {
     }
 
     /// Live runs bound to this folder. The sidebar lists these.
+    /// The graphs of the current scope.
+    ///
+    /// A workspace shows the graphs bound to it. The global board shows the
+    /// ones bound to nothing, because a workspace graph already has a home and
+    /// listing it twice makes the library look longer than it is.
+    var scoped: [WorkflowGraph] {
+        guard let scope else { return graphs.filter { $0.scope == .global } }
+        return graphs.filter { $0.scope == .workspace && $0.workspaceID == scope }
+    }
+
+    /// What the sidebar counts: runs in flight, or the graphs waiting to run.
+    func count(in workspaceID: String) -> Int {
+        let live = liveRuns(in: workspaceID).count
+        if live > 0 { return live }
+        return graphs.filter { $0.scope == .workspace && $0.workspaceID == workspaceID }.count
+    }
+
     func liveRuns(in workspaceID: String) -> [WorkflowRunRecord] {
         runs.filter { $0.workspaceID == workspaceID && $0.isLive }
     }
