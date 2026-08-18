@@ -332,35 +332,17 @@ struct ClientWorkspaceChangesView: View {
                     ClientSectionEmpty(text: "Nothing uncommitted in this folder.")
                 } else {
                     ForEach(files) { file in
-                        HStack(spacing: Theme.Space.s) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(file.path.split(separator: "/").last.map(String.init) ?? file.path)
-                                    .font(ClientType.label)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                if !file.directory.isEmpty {
-                                    Text(file.directory)
-                                        .font(ClientType.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.head)
-                                }
-                            }
-                            Spacer()
-                            if let added = file.added, added > 0 {
-                                Text("+\(added)")
-                                    .font(ClientType.rowFigure)
-                                    .foregroundStyle(Theme.diffAdded)
-                            }
-                            if let removed = file.removed, removed > 0 {
-                                Text("−\(removed)")
-                                    .font(ClientType.rowFigure)
-                                    .foregroundStyle(Theme.diffRemoved)
-                            }
+                        NavigationLink {
+                            ClientDiffView(
+                                peer: peer,
+                                workspaceID: workspaceID,
+                                hostName: hostName,
+                                file: file
+                            )
+                        } label: {
+                            ClientChangedFileRow(file: file)
                         }
-                        .padding(Theme.Space.m)
-                        .frame(maxWidth: .infinity)
-                        .cardSurface()
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -401,6 +383,56 @@ struct ClientWorkspaceChangesView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity)
         .cardSurface()
+    }
+}
+
+/// One changed file, and the way into its diff.
+///
+/// Its own view rather than a label inline: the compiler gave up type-checking
+/// the stack once it was nested inside a `NavigationLink` inside a `ForEach`.
+private struct ClientChangedFileRow: View {
+    let file: FileChange
+
+    var body: some View {
+        HStack(spacing: Theme.Space.s) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.path.split(separator: "/").last.map(String.init) ?? file.path)
+                    .font(ClientType.label)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !file.directory.isEmpty {
+                    Text(file.directory)
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+            }
+            Spacer()
+            counts
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity)
+        .cardSurface()
+        .contentShape(.rect)
+    }
+
+    @ViewBuilder
+    private var counts: some View {
+        if let added = file.added, added > 0 {
+            Text("+\(added)")
+                .font(ClientType.rowFigure)
+                .foregroundStyle(Theme.diffAdded)
+        }
+        if let removed = file.removed, removed > 0 {
+            Text("−\(removed)")
+                .font(ClientType.rowFigure)
+                .foregroundStyle(Theme.diffRemoved)
+        }
     }
 }
 

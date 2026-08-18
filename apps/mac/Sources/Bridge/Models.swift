@@ -1044,6 +1044,18 @@ enum ChangeKind: String, Codable, Sendable {
         case .modified, .renamed: return Theme.secondary
         }
     }
+
+    /// The word for it, where there is room for a word rather than a glyph.
+    var label: String {
+        switch self {
+        case .added: return "Added"
+        case .modified: return "Modified"
+        case .deleted: return "Deleted"
+        case .renamed: return "Renamed"
+        case .untracked: return "Untracked"
+        case .conflicted: return "Conflicted"
+        }
+    }
 }
 
 /// One changed file.

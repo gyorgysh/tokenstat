@@ -55,6 +55,14 @@ enum ClientType {
     /// A number inside a row or a list, where it has to line up with the
     /// numbers above and below it.
     static let rowFigure = Font.callout.monospacedDigit()
+
+    /// Source code, and the gutter beside it.
+    ///
+    /// One role for both, because a diff's line numbers and its lines have to
+    /// share metrics or the columns come apart. A text style rather than a
+    /// point size, like everything else here, so code scales with Dynamic Type
+    /// and stays aligned while it does.
+    static let code = Font.system(.footnote, design: .monospaced)
 }
 
 #endif

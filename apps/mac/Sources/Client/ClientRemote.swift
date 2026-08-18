@@ -213,6 +213,16 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "workspace.status", ["id": workspace], as: WorkspaceFolder.self)
     }
 
+    /// One file's changes against HEAD, on the machine that owns the folder.
+    static func diff(peer: String, workspace: String, path: String) async throws -> FileDiff {
+        try await Bridge.onPeer(
+            peer,
+            "workspace.diff",
+            ["id": workspace, "path": path],
+            as: FileDiff.self
+        )
+    }
+
     /// Every badge on the folder screen, in one call instead of five lists.
     static func summaries(peer: String) async throws -> [WorkspaceSummary] {
         try await Bridge.onPeer(peer, "workspace.summary", as: [WorkspaceSummary].self)
