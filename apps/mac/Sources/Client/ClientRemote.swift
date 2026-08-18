@@ -245,6 +245,13 @@ enum ClientRemote {
     /// The same `todo.create` the Mac calls. A note carries a folder like a
     /// task does: unfiled is a choice made in the sheet, never a side effect
     /// of writing it somewhere.
+    /// The Mac's default time limit for a delegated run, in seconds.
+    ///
+    /// Zero means *no limit* on the host, so sending zero from here would have
+    /// made every card captured on a phone able to run an agent forever. Three
+    /// hours is what the Mac's form starts on.
+    static let defaultTaskBudgetSeconds: UInt64 = 180 * 60
+
     static func todoCreate(
         peer: String,
         title: String,
@@ -262,7 +269,9 @@ enum ClientRemote {
                 "column": "backlog",
                 "backend": "",
                 "workspaceId": workspaceID,
-                "budgetSeconds": 0,
+                // A note is never delegated, so its budget is moot; a task
+                // gets the same limit it would have been given on the Mac.
+                "budgetSeconds": kind == .note ? 0 : defaultTaskBudgetSeconds,
             ],
             as: TodoCard.self
         )
