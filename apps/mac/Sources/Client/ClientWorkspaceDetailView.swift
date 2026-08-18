@@ -34,6 +34,13 @@ struct ClientWorkspaceSessionsView: View {
     @State private var browserURL: String?
     @State private var forwardedPort: Int?
     @State private var pendingClose: PtySessionInfo?
+    /// False until the first `pty.list` and catalog answer land. An empty list
+    /// and an unasked question look identical and mean opposite things.
+    @State private var loaded = false
+    /// How many launch tiles this host had last time, so the grid opens at the
+    /// size it will end up. Without it the row painted one Shell tile and then
+    /// jumped to eight when the catalog answered.
+    @AppStorage("client.launchTileCount") private var rememberedTileCount = 6
     @Environment(\.scenePhase) private var scenePhase
 
     private var workspaceID: String {
@@ -180,11 +187,17 @@ struct ClientWorkspaceSessionsView: View {
                 ],
                 spacing: Theme.Space.s
             ) {
-                if catalog.isEmpty {
-                    // Keep the surface useful while the owning host's
-                    // catalog is loading. Once it arrives, it supplies the
-                    // host's actual shell and the Shell tile is not added a
-                    // second time here.
+                if !loaded, catalog.isEmpty {
+                    // Placeholders at the count this host had last time. The
+                    // real tiles replace them in place, so nothing moves under
+                    // a thumb already reaching for one.
+                    ForEach(0..<max(2, rememberedTileCount), id: \.self) { index in
+                        ClientLaunchTilePlaceholder(phase: Double(index) * 0.08)
+                    }
+                } else if catalog.isEmpty {
+                    // The host answered and has no catalog: keep the surface
+                    // useful. Once one arrives it supplies the host's actual
+                    // shell, and the Shell tile is not added a second time.
                     launchTile(RemoteLaunchProfile(
                         id: "shell",
                         name: "Shell",
@@ -266,16 +279,20 @@ struct ClientWorkspaceSessionsView: View {
             visibility.show(profile.id, scope: visibilityScope)
             catalog = (try? await ClientRemote.launcherCatalog(peer: peer)) ?? catalog
             adoptHostHidden()
+            if !visibleCatalog.isEmpty { rememberedTileCount = visibleCatalog.count }
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+        loaded = true
     }
 
     private var sessionsCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Sessions")
                 .font(ClientType.sectionTitle)
-            if sessions.isEmpty {
+            if !loaded {
+                ClientWireframe.Rows(count: 2)
+            } else if sessions.isEmpty {
                 Text("No sessions in this folder yet. Start one above.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)

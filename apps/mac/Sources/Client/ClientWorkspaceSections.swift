@@ -780,6 +780,7 @@ private struct ClientSectionList<Content: View>: View {
     var refreshKey: String? = nil
     let reload: () async -> Void
     @ViewBuilder var content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
@@ -791,14 +792,17 @@ private struct ClientSectionList<Content: View>: View {
                 }
                 if !isLoaded {
                     // Nothing yet is an answer, and it must not be given
-                    // before the question has been asked.
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, Theme.Space.xl)
+                    // before the question has been asked. A wireframe says
+                    // "rows are coming" and holds their shape, where a spinner
+                    // said nothing and then let the list appear all at once.
+                    ClientWireframe.Rows(count: 4)
+                        .transition(.smoothIn(reduceMotion: reduceMotion))
                 } else if isEmpty {
                     ClientSectionEmpty(text: emptyText)
+                        .transition(.smoothIn(reduceMotion: reduceMotion))
                 } else {
                     content
+                        .transition(.smoothIn(reduceMotion: reduceMotion))
                 }
             }
             .padding(.horizontal, Theme.Space.m)
@@ -806,6 +810,7 @@ private struct ClientSectionList<Content: View>: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        .animation(.easeInOut(duration: 0.22), value: isLoaded)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {

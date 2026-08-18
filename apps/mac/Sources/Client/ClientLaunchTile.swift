@@ -102,4 +102,29 @@ struct ClientMoreTile: View {
         .accessibilityLabel(showing ? "Hide extra tools" : "Show more tools")
     }
 }
+
+/// A launch tile before the host has said which tiles it has.
+///
+/// Same box, same corner radius, same height as the real one, so the grid is
+/// already the right shape when the catalog lands and the tiles fill in where
+/// the placeholders were rather than growing the row under a thumb.
+struct ClientLaunchTilePlaceholder: View {
+    var phase: Double = 0
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            Skeleton.Bar(width: 34, height: 34, phase: phase)
+            Skeleton.Bar(width: 52, height: 10, phase: phase + 0.05)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius)
+                .strokeBorder(Theme.border, lineWidth: 1)
+        )
+        .accessibilityHidden(true)
+    }
+}
+
 #endif
