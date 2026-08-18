@@ -73,7 +73,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "claude" => claude_events(cwd)?,
         "grok" => grok_events(cwd)?,
         "codex" => codex_events(cwd)?,
-        "opencode" => opencode_events(cwd)?,
+        "opencode" => opencode_events(cwd, started_at_ms)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -120,6 +120,13 @@ fn grok_billing() -> BillingMode {
     seen
 }
 
+/// How far before the spawn a turn still counts as this session's.
+///
+/// The harness stamps the turn and the daemon stamps the spawn, and they are
+/// not the same clock. Used by the in-memory filter and by the sources that
+/// can push the same floor down into their own query.
+const GRACE_MS: i64 = 2_000;
+
 /// Events this session could have produced.
 ///
 /// Borrowed, not cloned. This runs for every live session on every `pty.list`
@@ -131,7 +138,6 @@ fn grok_billing() -> BillingMode {
 /// one: the harness stamps the turn, the daemon stamps the spawn, and a first
 /// turn written a moment "before" launch is still this session's.
 fn since(events: &[UsageEvent], started_at_ms: u64) -> Vec<&UsageEvent> {
-    const GRACE_MS: i64 = 2_000;
     let floor = started_at_ms as i64 - GRACE_MS;
     events.iter().filter(|e| e.ts.utc_ms >= floor).collect()
 }
@@ -393,15 +399,19 @@ fn read_head(path: &Path) -> Option<String> {
     }
 }
 
-/// OpenCode's database, read for one session directory only.
+/// OpenCode's database, read for one folder since this session started.
 ///
-/// The filter is SQL rather than a pass over every message: one database holds
-/// every folder this machine has ever opened, and this runs on every poll.
-fn opencode_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+/// Both narrowings are SQL. One database holds every folder this machine has
+/// ever opened and reaches gigabytes: on a working Mac one folder is 3,700
+/// messages and 12 MB of JSON, all but a handful of it older than the session
+/// asking. Reading it whole four times a second is what this avoids.
+fn opencode_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     let db = opencode::discover(&home)?;
-    let events = cached_db_events(&db, cwd, |path| {
-        opencode::parse_db_in(path, Some(cwd)).events
+    let floor = started_at_ms as i64 - GRACE_MS;
+    let scope = format!("{cwd}#{floor}");
+    let events = cached_db_events(&db, &scope, |path| {
+        opencode::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
     (!events.is_empty()).then_some(events)
 }
@@ -545,8 +555,17 @@ fn newest_child_dir(dir: &Path) -> Option<String> {
 
 struct CachedParse {
     mtime: SystemTime,
+    /// When this parse ran, for stores that are written to continuously.
+    at: Instant,
     events: Arc<Vec<UsageEvent>>,
 }
+
+/// The shortest a parse of a live store is trusted, whatever its mtime says.
+///
+/// A database being written to by the session being measured changes on every
+/// poll, so mtime alone caches nothing at exactly the moment it matters. Two
+/// seconds is what the price book already uses for the same reason.
+const LIVE_PARSE_FLOOR: Duration = Duration::from_secs(2);
 
 fn parse_cache() -> &'static Mutex<HashMap<PathBuf, CachedParse>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedParse>>> = OnceLock::new();
@@ -571,6 +590,7 @@ fn cached_events(
             path.to_path_buf(),
             CachedParse {
                 mtime,
+                at: Instant::now(),
                 events: Arc::clone(&events),
             },
         );
@@ -597,9 +617,12 @@ fn cached_db_events(
             path.file_name().unwrap_or_default().to_string_lossy()
         ))
     };
+    // Mtime **or** recency. A store the measured session is writing to changes
+    // on every poll, so mtime alone stops being a cache at the one moment the
+    // meter is actually being watched.
     if let Ok(guard) = parse_cache().lock()
         && let Some(hit) = guard.get(&key)
-        && hit.mtime == mtime
+        && (hit.mtime == mtime || hit.at.elapsed() < LIVE_PARSE_FLOOR)
     {
         return Some(Arc::clone(&hit.events));
     }
@@ -609,6 +632,7 @@ fn cached_db_events(
             key,
             CachedParse {
                 mtime,
+                at: Instant::now(),
                 events: Arc::clone(&events),
             },
         );

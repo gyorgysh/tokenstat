@@ -69,15 +69,21 @@ struct MessageTime {
 
 /// Read every message that carries token counters.
 pub fn parse_db(path: &Path) -> ParseOutput {
-    parse_db_in(path, None)
+    parse_db_in(path, None, None)
 }
 
-/// Read the database, optionally keeping only one session directory.
+/// Read the database, optionally narrowed to one folder and one span of time.
 ///
-/// The live meter asks about one folder, and the archive asks about all of
-/// them. The filter is the session's own `directory`, matched whole: a label
-/// is a basename and two folders can share one.
-pub fn parse_db_in(path: &Path, directory: Option<&str>) -> ParseOutput {
+/// The live meter asks about one folder since one spawn; the archive asks about
+/// everything. Both narrowings are SQL rather than a filter on the results,
+/// because this database is not small: on a working machine it reaches
+/// gigabytes and holds every folder ever opened, and the live meter runs on a
+/// poll. Parsing three thousand messages to keep four is not a filter, it is
+/// the work done twice.
+///
+/// The directory is matched whole: a label is a basename and two checkouts can
+/// share one.
+pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) -> ParseOutput {
     let mut out = ParseOutput::default();
     let conn = match rusqlite::Connection::open_with_flags(
         path,
@@ -93,25 +99,26 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>) -> ParseOutput {
         }
     };
 
-    let sql = match directory {
-        Some(_) => {
-            r#"
-        SELECT m.id, m.session_id, m.time_created, m.data,
-               COALESCE(s.directory, s.path, '')
-        FROM message m
-        LEFT JOIN session s ON s.id = m.session_id
-        WHERE COALESCE(s.directory, s.path, '') = ?1
-    "#
-        }
-        None => {
-            r#"
-        SELECT m.id, m.session_id, m.time_created, m.data,
-               COALESCE(s.directory, s.path, '')
-        FROM message m
-        LEFT JOIN session s ON s.id = m.session_id
-    "#
-        }
-    };
+    // Built rather than matched, because the two narrowings are independent
+    // and the four-way match this used to be would only grow.
+    let mut sql = String::from(
+        "SELECT m.id, m.session_id, m.time_created, m.data,
+                COALESCE(s.directory, s.path, '')
+         FROM message m
+         LEFT JOIN session s ON s.id = m.session_id",
+    );
+    let mut clauses: Vec<&str> = Vec::new();
+    if directory.is_some() {
+        clauses.push("COALESCE(s.directory, s.path, '') = :dir");
+    }
+    if since_ms.is_some() {
+        clauses.push("m.time_created >= :since");
+    }
+    if !clauses.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&clauses.join(" AND "));
+    }
+    let sql = sql.as_str();
     let mut stmt = match conn.prepare(sql) {
         Ok(s) => s,
         Err(e) => {
@@ -124,10 +131,14 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>) -> ParseOutput {
     };
 
     let filter = directory.unwrap_or_default().to_string();
-    let params: Vec<&dyn rusqlite::ToSql> = match directory {
-        Some(_) => vec![&filter],
-        None => Vec::new(),
-    };
+    let floor = since_ms.unwrap_or_default();
+    let mut params: Vec<(&str, &dyn rusqlite::ToSql)> = Vec::new();
+    if directory.is_some() {
+        params.push((":dir", &filter));
+    }
+    if since_ms.is_some() {
+        params.push((":since", &floor));
+    }
     let rows = match stmt.query_map(params.as_slice(), |r| {
         Ok((
             r.get::<_, String>(0)?,
@@ -260,11 +271,31 @@ mod tests {
             ("msg2", "ses2", 2, data, "/Users/me/git/other"),
         ]);
         assert_eq!(parse_db(&path).events.len(), 2, "unfiltered reads both");
-        let mine = parse_db_in(&path, Some("/Users/me/git/tokenstat"));
+        let mine = parse_db_in(&path, Some("/Users/me/git/tokenstat"), None);
         assert_eq!(mine.events.len(), 1);
         assert_eq!(mine.events[0].project, "tokenstat");
         // Whole path, not a label: a basename cannot tell two checkouts apart.
-        assert!(parse_db_in(&path, Some("tokenstat")).events.is_empty());
+        assert!(
+            parse_db_in(&path, Some("tokenstat"), None)
+                .events
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_time_floor_keeps_only_messages_a_session_could_have_written() {
+        let data = r#"{"role":"assistant","modelID":"opencode/big","tokens":{"input":10,"output":5},"cost":0}"#;
+        let dir = "/Users/me/git/tokenstat";
+        let path = temp_db(&[
+            ("old", "ses1", 1_000, data, dir),
+            ("new", "ses1", 9_000, data, dir),
+        ]);
+        // The whole point: the rows below the floor are never read, rather than
+        // read and then discarded. One folder here is thousands of messages.
+        let mine = parse_db_in(&path, Some(dir), Some(5_000));
+        assert_eq!(mine.events.len(), 1);
+        assert_eq!(mine.rows_seen, 1, "the old row is not even parsed");
+        assert_eq!(parse_db_in(&path, Some(dir), None).events.len(), 2);
     }
 
     #[test]
