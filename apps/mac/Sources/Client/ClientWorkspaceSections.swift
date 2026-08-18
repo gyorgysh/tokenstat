@@ -155,7 +155,8 @@ struct ClientWorkspaceDetailView: View {
                 ClientWorkspaceTasksView(
                     peer: peer,
                     workspaceID: workspaceID,
-                    hostName: hostName
+                    hostName: hostName,
+                    folderName: folder.name
                 )
             } label: {
                 ClientSectionRow(section: .todo, count: counts.todo)
@@ -485,62 +486,284 @@ struct ClientWorkspaceTasksView: View {
     let peer: String
     let workspaceID: String
     let hostName: String
+    var folderName: String = ""
 
     @State private var cards: [TodoCard] = []
     @State private var errorMessage: String?
     @State private var loaded = false
+    @State private var composing = false
+    /// Finished work, off by default. The board hides it on the Mac too, but
+    /// the phone had no way to ask for it at all.
+    @State private var showingArchive = false
 
     private static let columns = [("backlog", "To Do"), ("doing", "Doing"), ("done", "Done")]
+
+    /// This folder's cards, minus the notes, which get their own section.
+    private var tasks: [TodoCard] {
+        cards.filter { $0.kind != .note && ($0.column == "archive") == showingArchive }
+    }
+
+    /// Notes are things to remember, not stages of work, so they sit together
+    /// rather than at the top of To Do. Same rule as the Mac board.
+    private var notes: [TodoCard] {
+        cards
+            .filter { $0.kind == .note && ($0.column == "archive") == showingArchive }
+            .sorted { $0.createdAtMs > $1.createdAtMs }
+    }
 
     var body: some View {
         ClientSectionList(
             title: "Tasks",
             errorMessage: errorMessage,
             isLoaded: loaded,
-            isEmpty: cards.isEmpty,
-            emptyText: "No cards in this folder yet.",
+            isEmpty: tasks.isEmpty && notes.isEmpty,
+            emptyText: showingArchive
+                ? "Nothing archived in this folder."
+                : "No cards in this folder yet. Add one with the plus.",
             reload: { await load() }
         ) {
             ForEach(Self.columns, id: \.0) { id, label in
-                let group = cards.filter { $0.column == id }
-                if !group.isEmpty {
-                    Text(label.uppercased())
-                        .font(ClientType.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, Theme.Space.xs)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                let group = tasks.filter { showingArchive || $0.column == id }
+                if !showingArchive, !group.isEmpty {
+                    sectionHeading(label)
                     ForEach(group) { card in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(card.title)
-                                .font(ClientType.label.weight(.medium))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            if !card.notes.isEmpty {
-                                Text(card.notes)
-                                    .font(ClientType.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .padding(Theme.Space.m)
-                        .frame(maxWidth: .infinity)
-                        .cardSurface()
+                        row(card)
                     }
                 }
+            }
+            if showingArchive, !tasks.isEmpty {
+                sectionHeading("Archived")
+                ForEach(tasks) { card in
+                    row(card)
+                }
+            }
+            if !notes.isEmpty {
+                sectionHeading("Notes")
+                ForEach(notes) { note in
+                    row(note)
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Add", .create) { composing = true }
+                    .labelStyle(.iconOnly)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(
+                    showingArchive ? "Show open cards" : "Show archive",
+                    showingArchive ? .restore : .archive
+                ) {
+                    showingArchive.toggle()
+                }
+                .labelStyle(.iconOnly)
+            }
+        }
+        .sheet(isPresented: $composing) {
+            ClientTaskComposer(
+                peer: peer,
+                workspaceID: workspaceID,
+                folderName: folderName,
+                hostName: hostName
+            ) {
+                await load()
             }
         }
         .task { await load() }
     }
 
+    private func sectionHeading(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(ClientType.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .padding(.top, Theme.Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One card, with the moves a phone can make on it.
+    ///
+    /// Swipes rather than a detail screen: moving a card along and putting it
+    /// away are the two things somebody does from a phone, and both are one
+    /// gesture. Editing stays on the Mac, where the prompt and the agent live.
+    private func row(_ card: TodoCard) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(card.title)
+                .font(ClientType.label.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !card.notes.isEmpty {
+                Text(card.notes)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity)
+        .cardSurface()
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if card.column == "archive" {
+                Button("Restore") { Task { await move(card, to: "backlog") } }
+            } else {
+                Button("Archive") { Task { await move(card, to: "archive") } }
+            }
+            Button("Delete", role: .destructive) { Task { await remove(card) } }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if card.kind != .note, card.column != "done" {
+                Button("Done") { Task { await move(card, to: "done") } }
+                if card.column == "backlog" {
+                    Button("Doing") { Task { await move(card, to: "doing") } }
+                }
+            }
+        }
+    }
+
+    private func move(_ card: TodoCard, to column: String) async {
+        do {
+            _ = try await ClientRemote.todoMove(peer: peer, id: card.id, column: column)
+            await load()
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+
+    private func remove(_ card: TodoCard) async {
+        do {
+            try await ClientRemote.todoRemove(peer: peer, id: card.id)
+            await load()
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
+    }
+
     private func load() async {
         do {
             cards = try await ClientRemote.todoCards(peer: peer)
-                .filter { $0.workspaceID == workspaceID && $0.column != "archive" }
+                .filter { $0.workspaceID == workspaceID }
             errorMessage = nil
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
         loaded = true
+    }
+}
+
+/// Capture a task or a note from the phone.
+///
+/// A note needs a title and nothing else, which is the point: an idea worth
+/// keeping should cost two taps, not a trip to the Mac. A task can carry a
+/// prompt, but the agent, model and time limit stay on the Mac, where the run
+/// is actually started.
+struct ClientTaskComposer: View {
+    let peer: String
+    let workspaceID: String
+    let folderName: String
+    let hostName: String
+    /// Offered when the composer is opened from somewhere that is not one
+    /// folder. Empty means the caller already decided where this goes.
+    var folders: [WorkspaceFolder] = []
+    let onSaved: () async -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind: TodoKind = .note
+    @State private var title = ""
+    @State private var body_ = ""
+    @State private var saving = false
+    @State private var errorMessage: String?
+    /// Chosen destination when a picker is shown. Starts on what the caller
+    /// passed, so opening this from a folder keeps that folder.
+    @State private var destination: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Kind", selection: $kind) {
+                        Text("Note").tag(TodoKind.note)
+                        Text("Task").tag(TodoKind.task)
+                    }
+                    .pickerStyle(.segmented)
+                    TextField(
+                        kind == .note ? "What do you want to remember?" : "Task title",
+                        text: $title
+                    )
+                    TextField(
+                        kind == .note ? "Note" : "Prompt",
+                        text: $body_,
+                        axis: .vertical
+                    )
+                    .lineLimit(2...5)
+                    if !folders.isEmpty {
+                        Picker("Saving to", selection: destinationBinding) {
+                            Text("Inbox (no folder)").tag("")
+                            ForEach(folders) { folder in
+                                Text(folder.name)
+                                    .tag(ClientRemote.rawWorkspaceID(of: folder) ?? folder.id)
+                            }
+                        }
+                    }
+                } footer: {
+                    // The destination, said before Save. The Mac learned this
+                    // the hard way: a card that lands somewhere the screen
+                    // cannot show reads as one that was never saved.
+                    Text("Saving to \(placeName).")
+                }
+                if let errorMessage {
+                    Section {
+                        ClientErrorCard(message: errorMessage) {}
+                    }
+                }
+            }
+            .navigationTitle(kind == .note ? "New note" : "New task")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(saving || title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private var destinationBinding: Binding<String> {
+        Binding(
+            get: { destination ?? workspaceID },
+            set: { destination = $0 }
+        )
+    }
+
+    /// What the footer calls where this is going.
+    private var placeName: String {
+        let chosen = destination ?? workspaceID
+        if chosen.isEmpty { return "Inbox" }
+        if let match = folders.first(where: {
+            (ClientRemote.rawWorkspaceID(of: $0) ?? $0.id) == chosen
+        }) {
+            return match.name
+        }
+        return folderName.isEmpty ? "this folder" : folderName
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        do {
+            _ = try await ClientRemote.todoCreate(
+                peer: peer,
+                title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                kind: kind,
+                notes: body_,
+                workspaceID: destination ?? workspaceID
+            )
+            await onSaved()
+            dismiss()
+        } catch {
+            errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
+        }
     }
 }
 
@@ -771,7 +994,9 @@ struct ClientSectionEmpty: View {
 /// The shell every pushed section shares: one scroll view, one error card, one
 /// empty state, and pull to refresh. Written once so a folder's five sections
 /// cannot each arrive at their own idea of what a loading screen looks like.
-private struct ClientSectionList<Content: View>: View {
+/// Shared by every section screen, and by the tasks overview, which is the
+/// same shape one level up.
+struct ClientSectionList<Content: View>: View {
     let title: String
     let errorMessage: String?
     let isLoaded: Bool
@@ -781,6 +1006,8 @@ private struct ClientSectionList<Content: View>: View {
     let reload: () async -> Void
     @ViewBuilder var content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The first read has been outstanding long enough to say so.
+    @State private var waitedTooLong = false
 
     var body: some View {
         ScrollView {
@@ -797,6 +1024,11 @@ private struct ClientSectionList<Content: View>: View {
                     // said nothing and then let the list appear all at once.
                     ClientWireframe.Rows(count: 4)
                         .transition(.smoothIn(reduceMotion: reduceMotion))
+                    // But a wireframe promises the answer is coming, so it
+                    // must not pulse forever when the machine never replies.
+                    if waitedTooLong {
+                        ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil))
+                    }
                 } else if isEmpty {
                     ClientSectionEmpty(text: emptyText)
                         .transition(.smoothIn(reduceMotion: reduceMotion))
@@ -810,6 +1042,10 @@ private struct ClientSectionList<Content: View>: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        .task {
+            try? await Task.sleep(for: .seconds(10))
+            if !isLoaded { waitedTooLong = true }
+        }
         .animation(.easeInOut(duration: 0.22), value: isLoaded)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)

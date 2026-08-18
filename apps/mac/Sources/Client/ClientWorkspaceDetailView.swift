@@ -93,7 +93,22 @@ struct ClientWorkspaceSessionsView: View {
             // swallowed while the spinner said otherwise.
             await ClientRefresh.pull("workspace-sessions-\(workspaceID)") { await reload() }
         }
-        .task { await reload() }
+        .task {
+            // A wireframe that cannot end is worse than the spinner it
+            // replaced: it promises an answer is on its way. If the host has
+            // not answered in ten seconds, stop promising and show what is
+            // known, which is nothing and why.
+            let watchdog = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(10))
+                guard !Task.isCancelled, !loaded else { return }
+                loaded = true
+                if errorMessage == nil {
+                    errorMessage = ClientTunnelCopy.waiting(hostName)
+                }
+            }
+            await reload()
+            watchdog.cancel()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await recoverAfterNetworkChange() }
         }
