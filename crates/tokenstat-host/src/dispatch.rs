@@ -1799,6 +1799,15 @@ fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> Work
                     && c.column != "archive"
             })
             .count(),
+        notes: live
+            .cards
+            .iter()
+            .filter(|c| {
+                c.workspace_id == ws.id
+                    && c.kind == crate::todo::CardKind::Note
+                    && c.column != "archive"
+            })
+            .count(),
         workflows: live
             .workflows
             .iter()
@@ -3155,6 +3164,57 @@ mod tests {
             timezone: Some("UTC".into()),
         })
         .expect("open temp archive")
+    }
+
+    /// Notes and tasks are counted apart.
+    ///
+    /// They live in one store as cards, so the only thing keeping a folder's
+    /// task badge honest is the kind filter. An archived note is not counted
+    /// at all: put away is put away, and a badge nobody can clear is a badge
+    /// nobody reads.
+    #[test]
+    fn a_folder_counts_notes_apart_from_tasks() {
+        fn card(kind: crate::todo::CardKind, column: &str, workspace: &str) -> crate::todo::Card {
+            crate::todo::Card {
+                id: String::new(),
+                title: "x".into(),
+                kind,
+                notes: String::new(),
+                column: column.into(),
+                order: 0,
+                priority: Default::default(),
+                backend: String::new(),
+                model: None,
+                effort: None,
+                workspace_id: workspace.into(),
+                budget_seconds: 0,
+                created_at_ms: 0,
+                updated_at_ms: 0,
+                delegate: None,
+            }
+        }
+        let ws = tokenstat_workspace::Workspace {
+            id: "ws1".into(),
+            path: std::path::PathBuf::from("/tmp/does-not-exist-ws1"),
+            name: "ws1".into(),
+            added_at_ms: 0,
+        };
+        let live = FolderContents {
+            sessions: Vec::new(),
+            cards: vec![
+                card(crate::todo::CardKind::Task, "backlog", "ws1"),
+                card(crate::todo::CardKind::Note, "backlog", "ws1"),
+                card(crate::todo::CardKind::Note, "backlog", "ws1"),
+                card(crate::todo::CardKind::Note, "archive", "ws1"),
+                card(crate::todo::CardKind::Note, "backlog", "ws2"),
+            ],
+            automations: Vec::new(),
+            workflows: Vec::new(),
+            runs: Vec::new(),
+        };
+        let summary = summarize(&ws, &live);
+        assert_eq!(summary.tasks, 1, "a note is not a task");
+        assert_eq!(summary.notes, 2, "archived and another folder's are out");
     }
 
     #[test]

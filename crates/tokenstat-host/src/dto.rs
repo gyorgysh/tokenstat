@@ -473,7 +473,13 @@ pub struct WorkspaceSummaryDto {
     /// is missing, so "we did not look" is not drawn as "nothing changed".
     pub changed: Option<usize>,
     /// Cards that are neither done nor archived. Work left, not work logged.
+    ///
+    /// Notes are not tasks and are counted separately, below.
     pub tasks: usize,
+    /// Notes kept in this folder, archived ones excluded. Put away is put
+    /// away: an archive that keeps adding to the badge is a badge nobody can
+    /// clear.
+    pub notes: usize,
     /// Graphs bound to this folder, and how many are in flight right now.
     pub workflows: usize,
     pub workflows_running: usize,
