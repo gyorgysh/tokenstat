@@ -6,8 +6,15 @@
 //! ~/.local/share/opencode/opencode.db
 //! ```
 //!
-//! Usage lives in `message.data` as JSON with `tokens.{input,output,reasoning,
-//! cache.{read,write}}` and `modelID`. Identity is the message primary key.
+//! Usage lives in the message `data` column as JSON with `tokens.{input,
+//! output,reasoning,cache.{read,write}}`. Identity is the message primary key.
+//!
+//! **Two schemas share that file.** OpenCode 1 writes `message` joined to
+//! `session`, with the model in `modelID`. OpenCode 2 writes `session_message`
+//! joined to `session_v2`, with the model in `model.id` and the role in a
+//! `type` column rather than in the JSON. Both are read: a machine that has
+//! run both has history in both, and reading only the first is why an
+//! OpenCode 2 session reported zero for everything.
 //!
 //! Cache read/write are **disjoint** from input here (unlike Codex/Grok): the
 //! vendor's own `tokens.total` equals the sum of those fields.
@@ -42,10 +49,17 @@ pub struct ParseOutput {
 struct MessageData {
     #[serde(rename = "modelID")]
     model_id: Option<String>,
+    /// OpenCode 2 nests what version 1 kept at the top level.
+    model: Option<ModelRef>,
     role: Option<String>,
     tokens: Option<Tokens>,
     cost: Option<f64>,
     time: Option<MessageTime>,
+}
+
+#[derive(Deserialize)]
+struct ModelRef {
+    id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -99,13 +113,61 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         }
     };
 
+    for layout in [Layout::V1, Layout::V2] {
+        read_layout(&conn, path, layout, directory, since_ms, &mut out);
+    }
+    out.events.sort_by_key(|e| e.ts.utc_ms);
+    out
+}
+
+/// Which pair of tables a query reads.
+#[derive(Clone, Copy)]
+enum Layout {
+    V1,
+    V2,
+}
+
+impl Layout {
+    fn messages(self) -> &'static str {
+        match self {
+            Layout::V1 => "message",
+            Layout::V2 => "session_message",
+        }
+    }
+
+    fn sessions(self) -> &'static str {
+        match self {
+            Layout::V1 => "session",
+            Layout::V2 => "session_v2",
+        }
+    }
+}
+
+/// Read one schema's messages into `out`.
+///
+/// A missing table is not a warning. An install that has only ever run one
+/// major version has only that version's tables, and saying so on every poll
+/// would turn the normal case into a complaint.
+fn read_layout(
+    conn: &rusqlite::Connection,
+    path: &Path,
+    layout: Layout,
+    directory: Option<&str>,
+    since_ms: Option<i64>,
+    out: &mut ParseOutput,
+) {
+    if !has_table(conn, layout.messages()) {
+        return;
+    }
     // Built rather than matched, because the two narrowings are independent
     // and the four-way match this used to be would only grow.
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT m.id, m.session_id, m.time_created, m.data,
                 COALESCE(s.directory, s.path, '')
-         FROM message m
-         LEFT JOIN session s ON s.id = m.session_id",
+         FROM {} m
+         LEFT JOIN {} s ON s.id = m.session_id",
+        layout.messages(),
+        layout.sessions()
     );
     let mut clauses: Vec<&str> = Vec::new();
     if directory.is_some() {
@@ -114,19 +176,23 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
     if since_ms.is_some() {
         clauses.push("m.time_created >= :since");
     }
+    // Version 2 keeps the role in a column, so the rows that carry no usage
+    // are left in the database rather than parsed and thrown away.
+    if matches!(layout, Layout::V2) {
+        clauses.push("m.type = 'assistant'");
+    }
     if !clauses.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&clauses.join(" AND "));
     }
-    let sql = sql.as_str();
-    let mut stmt = match conn.prepare(sql) {
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(e) => {
             out.warnings.push(Warning::Unreadable {
                 path: path.to_path_buf(),
                 reason: e.to_string(),
             });
-            return out;
+            return;
         }
     };
 
@@ -154,7 +220,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 path: path.to_path_buf(),
                 reason: e.to_string(),
             });
-            return out;
+            return;
         }
     };
 
@@ -191,6 +257,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             .to_string();
         let model = msg
             .model_id
+            .or_else(|| msg.model.and_then(|m| m.id))
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "unknown".to_string());
         let ts_ms = msg.time.and_then(|t| t.created).unwrap_or(time_created);
@@ -225,8 +292,16 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             confidence: Confidence::Exact,
         });
     }
+}
 
-    out
+/// Whether this database has that table, so a one-version install is quiet.
+fn has_table(conn: &rusqlite::Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
 
 #[cfg(test)]
@@ -261,6 +336,62 @@ mod tests {
             .unwrap();
         }
         path
+    }
+
+    /// A version 2 database, whose tables the version 1 query cannot see.
+    fn temp_db_v2(rows: &[(&str, &str, i64, &str, &str)]) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("tokenstat-opencode2-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("opencode.db");
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, path TEXT);
+             CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        for (id, sid, tc, data, directory) in rows {
+            conn.execute(
+                "INSERT OR IGNORE INTO session_v2 (id, directory, path) VALUES (?1, ?2, '')",
+                rusqlite::params![sid, directory],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_message (id, session_id, type, time_created, data)
+                 VALUES (?1, ?2, 'assistant', ?3, ?4)",
+                rusqlite::params![id, sid, tc, data],
+            )
+            .unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn version_two_messages_are_read() {
+        // No `role`, no `modelID`: the role is a column and the model is
+        // nested. Read against the version 1 query this row counts as zero,
+        // which is exactly what an OpenCode 2 session used to report.
+        let data = r#"{"model":{"id":"gpt-5.6-luna","providerID":"opencode-go"},"tokens":{"input":3,"output":44,"reasoning":0,"cache":{"read":13182,"write":135}},"cost":0.00035}"#;
+        let dir = "/Users/me/git/www";
+        let path = temp_db_v2(&[("msg1", "ses1", 10, data, dir)]);
+        let out = parse_db_in(&path, Some(dir), None);
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.events[0].model, "gpt-5.6-luna");
+        assert_eq!(out.events[0].counters.input_fresh, Some(3));
+        assert_eq!(out.events[0].counters.cache_read, Some(13182));
+        assert_eq!(out.events[0].billing, BillingMode::Metered);
+        // The other folder is still excluded, and the missing version 1
+        // tables are silence rather than a warning.
+        assert!(
+            parse_db_in(&path, Some("/Users/me/git/other"), None)
+                .events
+                .is_empty()
+        );
+        assert!(out.warnings.is_empty());
     }
 
     #[test]
