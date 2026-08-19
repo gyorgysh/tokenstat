@@ -67,6 +67,10 @@ ALLOWED = [
     # alert action: the platform's own convention is text.
     ("Design/Theme.swift", "Button(actionLabel) {"),
 
+    # Invisible carriers for the iPad's keyboard shortcuts. They are never
+    # drawn, and their titles are what the system lists when Command is held.
+    ("Client/ClientShortcuts.swift", "Button(command.title) {"),
+
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),
