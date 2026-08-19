@@ -271,7 +271,12 @@ const PROFILES: &[Profile] = &[
         bypass_args: &[],
         harness_id: Some("hermes"),
         symbol: None,
-        install_command: Some("curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"),
+        // --non-interactive --skip-setup: the script otherwise opens /dev/tty
+        // for a setup wizard even when stdin is a pipe, so an in-app install
+        // sat on "Installing…" until the host timeout.
+        install_command: Some(
+            "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --non-interactive --skip-setup",
+        ),
         // The installer puts a symlink in ~/.local/bin, which search_path
         // already looks at. No extra directory to declare.
         install_dirs: &[],
@@ -1085,6 +1090,10 @@ mod tests {
         let command = hermes.install_command.expect("a bundled installer");
         assert!(
             command.contains("hermes-agent.nousresearch.com/install.sh"),
+            "{command}"
+        );
+        assert!(
+            command.contains("--non-interactive") && command.contains("--skip-setup"),
             "{command}"
         );
 
