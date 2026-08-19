@@ -94,6 +94,10 @@ struct RootView: View {
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
+    #if os(macOS)
+    /// The session a right-click asked to close, held until it is confirmed.
+    @State private var sessionPendingClose: TerminalSession?
+    #endif
     /// Folders whose sections are showing. Collapsed is the default: a
     /// sidebar of six folders each listing every section is a wall, and the
     /// question it should answer first is which folder, not which section.
@@ -1426,6 +1430,16 @@ struct RootView: View {
                 }
             )
         }
+        #if os(macOS)
+        .background {
+            CloseSessionConfirm(
+                session: $sessionPendingClose,
+                close: { session in
+                    Task { await terminals.close(session) }
+                }
+            )
+        }
+        #endif
     }
 
     /// Who is signed in, pinned to the bottom of the sidebar with a menu.
@@ -1869,7 +1883,16 @@ struct RootView: View {
                 // included: with the launch grid up, the pane is showing a
                 // grid of tools and no session at all.
                 isSelected: showingTerminal
-                    && terminals.active(in: folder.id)?.id == session.id
+                    && terminals.active(in: folder.id)?.id == session.id,
+                // A session that has already exited has nothing to kill, so
+                // it closes on the spot. A live one asks first.
+                close: {
+                    if session.alive {
+                        sessionPendingClose = session
+                    } else {
+                        Task { await terminals.close(session) }
+                    }
+                }
             ) {
                 openSection(.sessions, in: folder.id) {
                     terminals.select(session)
@@ -2079,6 +2102,35 @@ private struct RemoveWorkspaceConfirm: View {
 }
 
 #if os(macOS)
+/// Same words as the session strip's own close, because it is the same act.
+private struct CloseSessionConfirm: View {
+    @Binding var session: TerminalSession?
+    var close: (TerminalSession) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .confirmationDialog(
+                "Stop this session?",
+                isPresented: Binding(
+                    get: { session != nil },
+                    set: { if !$0 { session = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Stop and close", role: .destructive) {
+                    if let session {
+                        close(session)
+                    }
+                    session = nil
+                }
+                Button("Cancel", role: .cancel) { session = nil }
+            } message: {
+                Text("The process will be killed. A stopped session can still close in one click.")
+            }
+    }
+}
+
 /// One entry in a menu popped by `NativeMenuTrigger`.
 struct NativeMenuItem {
     enum Kind {
@@ -2875,6 +2927,9 @@ private struct ActiveAutomationRow: View {
 private struct ActiveSessionRow: View {
     let session: TerminalSession
     let isSelected: Bool
+    /// Right-click, because the row has no room for a button and a session
+    /// was closeable from the strip and from nowhere else.
+    let close: () -> Void
     let action: () -> Void
 
     @State private var isHovering = false
@@ -3028,6 +3083,11 @@ private struct ActiveSessionRow: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
+        .contextMenu {
+            Button(session.alive ? "Stop and close" : "Close", role: .destructive) {
+                close()
+            }
+        }
         .help(helpText)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(spokenLabel)
