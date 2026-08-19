@@ -281,6 +281,23 @@ enum Command {
         #[arg(long, value_name = "WXYZ-1234")]
         code: Option<String>,
     },
+    /// Show or set what this machine is called on the account
+    ///
+    /// A device list of unnamed rows is a list nobody can act on, and a
+    /// headless install has no app to rename itself from. With no flags this
+    /// prints the name, the platform and the machine id. `--name` writes the
+    /// name locally and, when this machine is signed in, on the account.
+    Device {
+        /// Call this machine something
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        /// Go back to the name the system reports
+        #[arg(long)]
+        clear: bool,
+        /// API origin: `sandbox`, `prod`, or an absolute http(s) URL
+        #[arg(long, value_name = "URL|sandbox|prod")]
+        host: Option<String>,
+    },
     /// Forget the tokenstat.ai sync token for a host (no server call)
     Logout {
         #[arg(long, value_name = "URL|sandbox|prod")]
@@ -504,6 +521,10 @@ fn main() -> Result<()> {
         return render::profile_logout(host.as_deref(), cli.json);
     }
 
+    if let Command::Device { name, clear, host } = &command {
+        return render::device(host.as_deref(), name.as_deref(), *clear, cli.json);
+    }
+
     if let Command::Sync {
         host,
         prune,
@@ -611,6 +632,7 @@ fn main() -> Result<()> {
         | Command::Update { .. }
         | Command::Login { .. }
         | Command::Logout { .. }
+        | Command::Device { .. }
         | Command::Sync { .. }
         | Command::Mcp => unreachable!("handled above"),
         Command::Daily(w) => {

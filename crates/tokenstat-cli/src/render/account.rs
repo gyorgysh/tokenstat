@@ -346,6 +346,65 @@ pub fn profile_sync_status(host: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// `tokenstat device`: what this machine is called, and what it is.
+///
+/// A name is worth having because a device list with three unnamed rows is a
+/// list nobody can act on. The CLI needs its own way to set one: a headless
+/// Linux install has no app, and the name it publishes at login is the
+/// hostname, which is often a string a hosting provider chose.
+///
+/// The name is written locally, the same file the app writes, and pushed to
+/// the account when this machine is signed in. Blank clears it and the
+/// system's own name comes back.
+pub fn device(host: Option<&str>, name: Option<&str>, clear: bool, json: bool) -> Result<()> {
+    if clear || name.is_some() {
+        let wanted = if clear { "" } else { name.unwrap_or("").trim() };
+        tokenstat_identity::set_machine_label(wanted).map_err(|e| anyhow::anyhow!("{e}"))?;
+        // And on the account, when there is one. Not being signed in is not a
+        // failure to name a machine: the local name is what travels to a
+        // paired peer either way, so that case says nothing at all.
+        let machine =
+            tokenstat_sync::config::ensure_machine_id().map_err(|e| anyhow::anyhow!("{e}"))?;
+        if let Err(e) = tokenstat_sync::rename_machine(host, &machine, wanted)
+            && !e.is_unauthenticated()
+        {
+            eprintln!("  {DIM}named on this machine; the account was not updated: {e}{DIM:#}");
+        }
+    }
+
+    let label = tokenstat_identity::machine_label();
+    let chosen = tokenstat_identity::machine_label_is_chosen();
+    let platform = tokenstat_identity::platform();
+    let machine = tokenstat_sync::config::ensure_machine_id().unwrap_or_default();
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "name": label,
+                "chosen": chosen,
+                "machine": machine,
+                "platform": platform.pretty(),
+                "os": platform.os,
+                "arch": platform.arch,
+            })
+        );
+        return Ok(());
+    }
+
+    println!();
+    println!("  {BOLD}{label}{BOLD:#}");
+    println!("  {DIM}what{DIM:#}     {}", platform.pretty());
+    println!("  {DIM}machine{DIM:#}  {machine}");
+    if chosen {
+        println!("  {DIM}named on this machine (tokenstat device --clear undoes it){DIM:#}");
+    } else {
+        println!("  {DIM}the system's own name (tokenstat device --name \"…\" changes it){DIM:#}");
+    }
+    println!();
+    Ok(())
+}
+
 /// Upload (or dry-run) the sealed sync payload.
 pub fn profile_sync(
     store: &Store,

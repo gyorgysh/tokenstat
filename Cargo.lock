@@ -2497,6 +2497,7 @@ dependencies = [
  "ratatui",
  "serde_json",
  "tokenstat-core",
+ "tokenstat-identity",
  "tokenstat-mcp",
  "tokenstat-sync",
 ]

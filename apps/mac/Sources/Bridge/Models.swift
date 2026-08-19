@@ -735,6 +735,13 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
     var trustState: String?
     /// `"host"` uploads usage; `"client"` is a phone that reaches hosts (P5).
     var kind: String?
+    /// What the machine says it is: "Ubuntu 24.04 · x86_64". Sent at login, so
+    /// a device that only ever ran the CLI still says what kind of computer it
+    /// is instead of showing an id.
+    var platform: String?
+    /// `"user"` when somebody typed the name, so a machine's own registration
+    /// does not take a rename back.
+    var labelSource: String?
 
     enum CodingKeys: String, CodingKey {
         case machineID = "id"
@@ -745,6 +752,8 @@ struct Machine: Codable, Sendable, Hashable, Identifiable {
         case publicIdentity
         case trustState
         case kind
+        case platform
+        case labelSource = "label_source"
     }
 
     /// Hosts only; clients (phones) are not dialable from Devices.

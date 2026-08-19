@@ -249,6 +249,11 @@ pub fn login_with_code(host_flag: Option<&str>, code: &str) -> Result<LoginResul
     }
     keychain::store_token(&host, &ok.token)?;
     config::set_sync_host(&host)?;
+    // Say what this machine is, now that there is an account to tell. Signing
+    // in is the explicit act that permits it, and without this a CLI-only
+    // install sits in everybody's device list as a row of hex. Best effort: an
+    // account that could not be told the name is still an account.
+    let _ = publish_machine_profile(Some(&host));
     Ok(LoginResult {
         host,
         handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
@@ -422,6 +427,9 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
         }
         keychain::store_token(&login.host, &ok.token)?;
         config::set_sync_host(&login.host)?;
+        // Same as the pairing path: name this machine on the account it just
+        // joined, and do not fail the login if that call does not land.
+        let _ = publish_machine_profile(Some(&login.host));
         return Ok(DeviceStatus::Confirmed(Box::new(LoginResult {
             host: login.host.clone(),
             handle: ok.handle.unwrap_or_else(|| "(unknown)".into()),
@@ -691,6 +699,11 @@ pub fn register_machine_identity_kind(
             "public_identity": public_identity,
             "label": label,
             "kind": kind,
+            // What this machine is, in the words a person reads: "Ubuntu 24.04
+            // · x86_64". Coarse on purpose, and the machine's own answer
+            // rather than a name, so it is refreshed on every registration
+            // while a name somebody typed is not.
+            "platform": tokenstat_identity::platform().pretty(),
         }))
         .send()?;
     let status = resp.status();
@@ -701,6 +714,73 @@ pub fn register_machine_identity_kind(
     if !status.is_success() {
         return Err(ProfileError::Message(format!(
             "remote reach registration failed ({status}): {text}"
+        )));
+    }
+    Ok(())
+}
+
+/// Tell the account what this machine is called and what it is.
+///
+/// The same record as [`register_machine_identity_kind`] with no public key,
+/// because this is not remote reach: a CLI install on a server should still
+/// appear in the device list under its own name rather than as a row of hex,
+/// and it has no tunnel to offer. Called after a login, which is an explicit
+/// act, and never from a plain sync.
+pub fn publish_machine_profile(host_flag: Option<&str>) -> Result<(), ProfileError> {
+    let machine_id = crate::config::ensure_machine_id()?;
+    register_machine_identity_kind(
+        host_flag,
+        &machine_id,
+        "",
+        &tokenstat_identity::machine_label(),
+        default_machine_kind(),
+    )
+}
+
+/// What kind of device this build runs on.
+///
+/// A phone reaches hosts and never uploads an archive. The server pins the
+/// kind at first registration, so this only has to be right, not defended.
+fn default_machine_kind() -> &'static str {
+    if cfg!(target_os = "ios") {
+        "client"
+    } else {
+        "host"
+    }
+}
+
+/// Call a device on this account something.
+///
+/// The label on the account row, not the one on that machine's disk. That is
+/// the point: a headless server cannot be reached to be renamed, so the name
+/// people see has to be settable from whichever machine they are holding. The
+/// server marks it as chosen, so the named machine's own registration stops
+/// overwriting it.
+///
+/// An empty name is a reset rather than an error, the same undo the local
+/// field has: the machine names itself again on its next login.
+pub fn rename_machine(
+    host_flag: Option<&str>,
+    machine_id: &str,
+    label: &str,
+) -> Result<(), ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .patch(format!("{host}/api/v1/machines/{machine_id}"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "label": label.trim() }))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        return Err(ProfileError::Message(format!(
+            "could not rename the device on the account ({status}): {text}"
         )));
     }
     Ok(())

@@ -29,6 +29,10 @@ struct MachinesView: View {
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
     @State private var pendingUnlink: Machine?
+    /// Which account device is having its name edited, by machine id. Inline
+    /// rather than a sheet: naming a device is not a decision with
+    /// consequences, it is how the list reads.
+    @State private var renamingID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -679,8 +683,25 @@ struct MachinesView: View {
                             // is rather than its primary key: `Machine
                             // m_c9826340c403872c` as a row title is a database
                             // showing through the window.
-                            Text(deviceTitle(resolved: resolved, machine: machine))
-                                .font(.callout.weight(.medium))
+                            if renamingID != nil, renamingID == machine.machineID {
+                                AccountNameField(
+                                    machine: machine,
+                                    placeholder: deviceTitle(resolved: resolved, machine: machine)
+                                ) { name in
+                                    renamingID = nil
+                                    await model.renameAccountMachine(machine, to: name)
+                                } onCancel: {
+                                    renamingID = nil
+                                }
+                            } else {
+                                Text(deviceTitle(resolved: resolved, machine: machine))
+                                    .font(.callout.weight(.medium))
+                            }
+                            if let platform = machine.platform, !platform.isEmpty {
+                                Text(platform)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             if let id = machine.machineID {
                                 Text(id)
                                     .font(Theme.mono(11))
@@ -728,6 +749,15 @@ struct MachinesView: View {
                                         .help("Connects through the tunnel from anywhere")
                                 }
                             }
+                            // Any device on the account, not only this one:
+                            // a server that only ever ran the CLI cannot be
+                            // renamed from itself without an ssh session.
+                            Button("Rename", .edit) {
+                                renamingID = machine.machineID
+                            }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .labelStyle(.iconOnly)
+                            .help("Call this device something on this account")
                             Button {
                                 pendingUnlink = machine
                             } label: {
@@ -1050,6 +1080,44 @@ private struct MachineNameField: View {
         let name = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard name != identity.label else { return }
         Task { await rename(name) }
+    }
+}
+
+/// The name of a device on the account, edited where it is read.
+///
+/// Separate from `MachineNameField`, which names *this* machine by writing a
+/// file beside its key. This one writes the account row, which is the only
+/// name a machine you cannot log into has.
+private struct AccountNameField: View {
+    var machine: Machine
+    /// What the row says when the name is empty, so the field offers to
+    /// replace what is on screen rather than starting blank with no context.
+    var placeholder: String
+    var commit: (String) async -> Void
+    var onCancel: () -> Void
+
+    @State private var draft = ""
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        HStack(spacing: Theme.Space.xs) {
+            TextField("Name", text: $draft, prompt: Text(placeholder))
+                .textFieldStyle(.plain)
+                .font(.callout.weight(.medium))
+                .focused($editing)
+                .frame(maxWidth: 220)
+                .onSubmit { Task { await commit(draft) } }
+            Button("Save", .save) { Task { await commit(draft) } }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .labelStyle(.iconOnly)
+            Button("Cancel", .dismiss, role: .cancel) { onCancel() }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .labelStyle(.iconOnly)
+        }
+        .onAppear {
+            draft = machine.label ?? ""
+            editing = true
+        }
     }
 }
 

@@ -53,7 +53,8 @@ struct ClientDevicesView: View {
                                 machine: machine,
                                 usage: model.usage(for: machine),
                                 accountTotal: model.total,
-                                isThisDevice: isThisDevice(machine)
+                                isThisDevice: isThisDevice(machine),
+                                onRenamed: { await account.load() }
                             )
                         } label: {
                             DeviceRow(
@@ -333,6 +334,15 @@ struct ClientDeviceDetailView: View {
     let usage: MachineUsage?
     let accountTotal: Int64
     let isThisDevice: Bool
+    /// Re-read the account after a rename, so the list behind this screen says
+    /// the new name too.
+    var onRenamed: () async -> Void = {}
+
+    @State private var renaming = false
+    @State private var draft = ""
+    @State private var savingName = false
+    @State private var renameError: String?
+    @FocusState private var editingName: Bool
 
     var body: some View {
         ScrollView {
@@ -395,6 +405,62 @@ struct ClientDeviceDetailView: View {
         return parts.joined(separator: ", ")
     }
 
+    /// Naming a device, in the row where the name is read.
+    ///
+    /// Empty is the undo rather than an error: the machine goes back to
+    /// naming itself, which is the same rule the Mac's own name field has.
+    private var nameField: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Name")
+                .font(ClientType.caption)
+                .foregroundStyle(.secondary)
+            TextField("Name this device", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .autocorrectionDisabled()
+                .focused($editingName)
+                .submitLabel(.done)
+                .onSubmit { Task { await saveName() } }
+            HStack(spacing: Theme.Space.s) {
+                Button(savingName ? "Saving…" : "Save", .save) {
+                    Task { await saveName() }
+                }
+                .clientProminentStyle()
+                .tint(Theme.accent)
+                .disabled(savingName)
+                Button("Cancel", .dismiss, role: .cancel) {
+                    renaming = false
+                    renameError = nil
+                }
+                .font(ClientType.caption.weight(.semibold))
+                .tint(Theme.accent)
+            }
+            Text("Empty puts back the name the device gives itself.")
+                .font(ClientType.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func saveName() async {
+        guard let id = machine.machineID, !id.isEmpty else {
+            renameError = "This device has no id on the account yet."
+            return
+        }
+        savingName = true
+        defer { savingName = false }
+        do {
+            try await Bridge.renameAccountMachine(
+                id: id,
+                name: draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+            renameError = nil
+            renaming = false
+            await onRenamed()
+        } catch {
+            renameError = FriendlyError.from(error.localizedDescription).message
+        }
+    }
+
     private var reach: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Reach")
@@ -455,12 +521,37 @@ struct ClientDeviceDetailView: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("What this is")
                 .font(ClientType.sectionTitle)
-            DetailLine(
-                label: "Name",
-                value: machine.label?.isEmpty == false
-                    ? machine.label ?? ""
-                    : "not named on this account"
-            )
+            if renaming {
+                nameField
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    DetailLine(
+                        label: "Name",
+                        value: machine.label?.isEmpty == false
+                            ? machine.label ?? ""
+                            : "not named on this account"
+                    )
+                    Spacer(minLength: Theme.Space.s)
+                    // Any device on the account, not only this phone. A Linux
+                    // server with nothing but the CLI on it has no other way
+                    // to be named.
+                    Button("Rename", .edit) {
+                        draft = machine.label ?? ""
+                        renaming = true
+                        editingName = true
+                    }
+                    .font(ClientType.caption.weight(.semibold))
+                    .tint(Theme.accent)
+                }
+            }
+            if let renameError {
+                Text(renameError)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.danger)
+            }
+            if let platform = machine.platform, !platform.isEmpty {
+                DetailLine(label: "What it runs", value: platform)
+            }
             if let id = machine.machineID {
                 DetailLine(label: "Device id", value: id)
             }
@@ -541,6 +632,15 @@ private enum DeviceCopy {
     /// only ever synced.
     static func name(_ machine: Machine) -> String {
         if let label = machine.label, !label.isEmpty { return label }
+        // What the machine says it is, before giving up. A CLI-only install
+        // sends this at login, so "Linux computer" is usually available where
+        // a name is not, and it places the row in a way "Unnamed" cannot.
+        if let platform = machine.platform,
+           let family = platform.split(separator: "·").first?
+               .split(separator: " ").first,
+           !family.isEmpty {
+            return "\(family) \(machine.isHost ? "computer" : "phone")"
+        }
         return "Unnamed device"
     }
 

@@ -324,6 +324,132 @@ pub fn set_machine_label(name: &str) -> Result<(), IdentityError> {
     })
 }
 
+/// What kind of machine this is, in the words a person would use.
+///
+/// The account's device list had a name or a hex id and nothing else, so a
+/// headless Linux install and a phone read the same: a row nobody could place.
+/// A name is the user's answer to "which machine is this"; this is the
+/// machine's answer to "what am I", and the two are not the same question.
+///
+/// Deliberately coarse. The operating system, its marketing version and the
+/// architecture are what tell one server from another in a list. Anything
+/// finer is a fingerprint, and this crosses to the account directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Platform {
+    /// `macos`, `linux`, `windows`, `ios`. The compile-time constant, so it
+    /// cannot disagree with the binary it is in.
+    pub os: String,
+    /// The distribution or release name, when the system will say: "Ubuntu
+    /// 24.04", "15.5", "11". Empty when it will not.
+    pub version: String,
+    /// `aarch64`, `x86_64`.
+    pub arch: String,
+}
+
+impl Platform {
+    /// One line for a device row: "Ubuntu 24.04 · aarch64".
+    pub fn pretty(&self) -> String {
+        let name = self.family();
+        let head = if self.version.is_empty() {
+            name.to_string()
+        } else if self.version.starts_with(name) {
+            self.version.clone()
+        } else {
+            format!("{name} {}", self.version)
+        };
+        if self.arch.is_empty() {
+            head
+        } else {
+            format!("{head} · {}", self.arch)
+        }
+    }
+
+    /// What people call this system, rather than what the compiler calls it.
+    pub fn family(&self) -> &str {
+        match self.os.as_str() {
+            "macos" => "macOS",
+            "ios" => "iOS",
+            "linux" => "Linux",
+            "windows" => "Windows",
+            other => other,
+        }
+    }
+}
+
+/// Read this machine's platform.
+///
+/// Shells out the same way [`machine_label`] does rather than taking a
+/// dependency: this runs once per login, and a crate that must never reach the
+/// network is not the place to add a system-information library.
+pub fn platform() -> Platform {
+    Platform {
+        os: std::env::consts::OS.to_string(),
+        version: os_version(),
+        arch: std::env::consts::ARCH.to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn os_version() -> String {
+    command_output("sw_vers", &["-productVersion"])
+}
+
+/// The distribution's own name for itself, which is what somebody recognises.
+/// `PRETTY_NAME` already reads "Ubuntu 24.04.1 LTS", so no assembly needed;
+/// a kernel version is the fallback because a system with no `os-release` is
+/// still a Linux somebody has to tell from another one.
+#[cfg(target_os = "linux")]
+fn os_version() -> String {
+    if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
+        for line in text.lines() {
+            if let Some(value) = line.strip_prefix("PRETTY_NAME=") {
+                let name = value.trim().trim_matches('"').trim();
+                if !name.is_empty() {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+    let release = command_output("uname", &["-r"]);
+    if release.is_empty() {
+        String::new()
+    } else {
+        format!("kernel {release}")
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn os_version() -> String {
+    // `ver` prints "Microsoft Windows [Version 10.0.22631.4317]". The build
+    // number is the only part that tells two of them apart.
+    let raw = command_output("cmd", &["/c", "ver"]);
+    match (raw.find('['), raw.find(']')) {
+        (Some(open), Some(close)) if close > open => raw[open + 1..close]
+            .trim()
+            .trim_start_matches("Version")
+            .trim()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
+/// iOS and iPadOS have no shell to ask. The client fills this in from the
+/// model identifier, the same place its name comes from.
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn os_version() -> String {
+    String::new()
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+fn command_output(program: &str, args: &[&str]) -> String {
+    std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
 /// Whether the name on screen is one somebody chose, which is what lets the
 /// field offer to clear itself only when there is something to clear.
 pub fn machine_label_is_chosen() -> bool {
@@ -548,6 +674,18 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
         unsafe { std::env::remove_var("TOKENSTAT_IDENTITY_DIR") };
+    }
+
+    /// Whatever this test runs on, the platform has to be answerable and it
+    /// has to read like something a person would recognise in a list.
+    #[test]
+    fn the_platform_names_itself() {
+        let p = platform();
+        assert!(!p.os.is_empty());
+        assert!(!p.arch.is_empty());
+        let pretty = p.pretty();
+        assert!(pretty.contains(p.family()) || pretty.starts_with(&p.version));
+        assert!(pretty.contains(&p.arch), "{pretty}");
     }
 
     #[test]

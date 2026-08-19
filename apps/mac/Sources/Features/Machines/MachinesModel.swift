@@ -362,6 +362,31 @@ final class MachinesModel {
         }
     }
 
+    /// Call another device on this account something.
+    ///
+    /// Renames the account row, not that machine's own file: the point is that
+    /// a headless server nobody can log into is still nameable from here. The
+    /// list is reloaded rather than patched, because the server decides what
+    /// the name ends up as when the field is cleared.
+    func renameAccountMachine(_ machine: Machine, to name: String) async {
+        guard let id = machine.machineID, !id.isEmpty else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != (machine.label ?? "") else { return }
+        do {
+            try await Bridge.renameAccountMachine(id: id, name: trimmed)
+            if let fresh = try? await Bridge.account(), fresh.signedIn {
+                account = fresh
+                accountMachines = fresh.machines
+            }
+            errorMessage = nil
+            showNotice(trimmed.isEmpty
+                ? "Back to the name that device gives itself."
+                : "Every screen on this account calls it \(trimmed) now.")
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     /// Refresh the peer list alone.
     ///
     /// Separate from `load` because a machine that just connected appears here

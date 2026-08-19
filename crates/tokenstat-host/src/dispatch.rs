@@ -2249,6 +2249,27 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // of this reads the archive.
         "usage.limits" => Ok(usage_limits()),
 
+        // Call a device on this account something, from any front end. The
+        // label lives on the account row rather than on the machine, which is
+        // what lets this app name a headless server it will never log into.
+        "account.renameMachine" => {
+            #[derive(Deserialize)]
+            struct RenameParams {
+                id: String,
+                #[serde(default)]
+                name: String,
+            }
+            let p: RenameParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Some(Err(e.to_string())),
+            };
+            if let Err(e) = tokenstat_sync::profile::rename_machine(None, &p.id, &p.name) {
+                return Some(Err(e.to_string()));
+            }
+            crate::account_activity::invalidate();
+            Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
+        }
+
         "account.unlinkMachine" => {
             #[derive(Deserialize)]
             struct UnlinkParams {

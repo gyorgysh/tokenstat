@@ -21,7 +21,7 @@ mod tables;
 mod updates;
 
 pub use account::{
-    auth, fetch_reports, profile_login, profile_login_code, profile_logout, profile_sync,
+    auth, device, fetch_reports, profile_login, profile_login_code, profile_logout, profile_sync,
     profile_sync_scheduled, profile_sync_status,
 };
 pub use reference::{budget, catalog, models_detail, plans, pricing};

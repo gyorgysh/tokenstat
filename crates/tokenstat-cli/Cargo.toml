@@ -16,6 +16,9 @@ path = "src/main.rs"
 
 [dependencies]
 tokenstat-core.workspace = true
+# The machine's own name and platform, for `tokenstat device`. No network in
+# this crate, which is why the CLI can read it directly.
+tokenstat-identity.workspace = true
 tokenstat-sync.workspace = true
 tokenstat-mcp.workspace = true
 anyhow.workspace = true

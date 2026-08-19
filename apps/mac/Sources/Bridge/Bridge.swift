@@ -1071,6 +1071,7 @@ extension Bridge {
 }
 
 private struct Removed: Codable, Sendable { let removed: Bool }
+private struct RenamedMachine: Codable, Sendable { let renamed: Bool }
 private struct Renamed: Codable, Sendable { let renamed: Bool }
 
 private struct RemoteWorkspaceTarget {
@@ -1611,6 +1612,19 @@ extension Bridge {
             "proxy.unlisten",
             ["peer": peer, "host": host, "port": port],
             as: Stopped.self
+        )
+    }
+
+    /// Call a device on the account something.
+    ///
+    /// The name on the account row rather than on that machine's own disk,
+    /// which is what lets this Mac name a headless server it will never log
+    /// into. An empty name is the undo: the machine names itself again.
+    static func renameAccountMachine(id: String, name: String) async throws {
+        _ = try await background(
+            "account.renameMachine",
+            ["id": id, "name": name],
+            as: RenamedMachine.self
         )
     }
 
