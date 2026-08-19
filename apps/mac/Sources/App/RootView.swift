@@ -2220,8 +2220,7 @@ private struct SidebarRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)
-                // Zero is not news. `ClientSectionRow` on the phone has always
-                // said so; this one drew whatever it was handed.
+                // Hide a zero count. Zero is not news.
                 if let trailing, trailing != "0" {
                     Text(trailing)
                         .font(Theme.numeric(11))

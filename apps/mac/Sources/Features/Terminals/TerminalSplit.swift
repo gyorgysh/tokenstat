@@ -9,14 +9,6 @@
 import AppKit
 import SwiftUI
 
-/// What the inspector bottom console is showing.
-enum InspectorConsoleMode: String, Sendable, Equatable, Hashable {
-    /// Read-only tail of the focused main-pane session. Does not remount it.
-    case follow
-    /// A small login shell, owned by this console and hidden from the strip.
-    case shell
-}
-
 /// How the workspace terminal column is arranged.
 ///
 /// Stored per folder. Session pairing is not: the focused tab and the other
@@ -40,8 +32,6 @@ enum TerminalSplitLayout: String, Sendable, Equatable {
 extension WorkspacePreference {
     private static let splitKey = "workspace.split"
     private static let splitFractionKey = "workspace.splitFraction"
-    private static let consoleKey = "workspace.console"
-    private static let consoleModeKey = "workspace.consoleMode"
     private static let consoleShellKey = "workspace.consoleShell"
 
     static func splitLayout(for workspaceID: String) -> TerminalSplitLayout {
@@ -65,28 +55,6 @@ extension WorkspacePreference {
 
     static func setSplitFraction(_ fraction: Double, for workspaceID: String) {
         UserDefaults.standard.set(fraction, forKey: "\(splitFractionKey).\(workspaceID)")
-    }
-
-    static func inspectorConsole(for workspaceID: String) -> Bool {
-        UserDefaults.standard.bool(forKey: "\(consoleKey).\(workspaceID)")
-    }
-
-    static func setInspectorConsole(_ on: Bool, for workspaceID: String) {
-        UserDefaults.standard.set(on, forKey: "\(consoleKey).\(workspaceID)")
-    }
-
-    static func inspectorConsoleMode(for workspaceID: String) -> InspectorConsoleMode {
-        let raw = UserDefaults.standard.string(forKey: "\(consoleModeKey).\(workspaceID)") ?? ""
-        return InspectorConsoleMode(rawValue: raw) ?? .follow
-    }
-
-    static func setInspectorConsoleMode(_ mode: InspectorConsoleMode, for workspaceID: String) {
-        let key = "\(consoleModeKey).\(workspaceID)"
-        if mode == .follow {
-            UserDefaults.standard.removeObject(forKey: key)
-        } else {
-            UserDefaults.standard.set(mode.rawValue, forKey: key)
-        }
     }
 
     static func inspectorShellHostID(for workspaceID: String) -> String? {

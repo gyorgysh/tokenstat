@@ -201,7 +201,7 @@ struct HarnessConfigView: View {
         var values: [String: String] = [:]
         for field in config.fields {
             let next = draft[field.key] ?? ""
-            if next != (field.value ?? ""), !next.isEmpty || field.kind == "bool" {
+            if next != (field.value ?? "") {
                 values[field.key] = next
             }
         }

@@ -70,12 +70,10 @@ enum TerminalMouseForwarder {
 
         let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
         let button = TerminalMouse.xtermButton(event.buttonNumber)
-        let encoded: Int
-        if isDrag {
-            encoded = button + 32
-        } else {
-            encoded = button
-        }
+        let encoded = TerminalMouse.sgrButton(
+            base: isDrag ? button + 32 : button,
+            event: event
+        )
         session.sendBytes(
             TerminalMouse.sgr(
                 button: encoded,
@@ -84,9 +82,10 @@ enum TerminalMouseForwarder {
                 release: isUp
             )
         )
-        // Swallow so SwiftTerm cannot send urxvt on top of SGR. The stack's
-        // click monitor is installed later, so it has already seen this
-        // down and selected the pane.
+        // The monitor swallows the click so SwiftTerm cannot send urxvt on
+        // top of SGR. Make this view first responder first, or a field that
+        // already has the keyboard keeps it.
+        window.makeFirstResponder(view)
         return nil
     }
 }
@@ -96,6 +95,15 @@ enum TerminalMouse {
     static func sgr(button: Int, col: Int, row: Int, release: Bool) -> [UInt8] {
         let suffix = release ? "m" : "M"
         return Array("\u{1b}[<\(button);\(col);\(row)\(suffix)".utf8)
+    }
+
+    /// xterm Cb extras: shift +4, meta/option +8, control +16.
+    static func sgrButton(base: Int, event: NSEvent) -> Int {
+        var button = base
+        if event.modifierFlags.contains(.shift) { button += 4 }
+        if event.modifierFlags.contains(.option) { button += 8 }
+        if event.modifierFlags.contains(.control) { button += 16 }
+        return button
     }
 
     /// AppKit: 0 left, 1 right, 2 middle. xterm: 0 left, 1 middle, 2 right.

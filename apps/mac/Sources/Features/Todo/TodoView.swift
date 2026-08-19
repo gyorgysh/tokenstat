@@ -794,9 +794,7 @@ private struct NewCardForm: View {
                     axis: .vertical
                 )
                 .lineLimit(2...4)
-                // Where this is going, said before Save rather than found
-                // out afterwards, which is how two notes were once written
-                // into a place the board that wrote them could not show.
+                // Empty workspace id is unfiled. The picker says so before Save.
                 AppMenuPicker(
                     title: "Saving to",
                     options: [(value: "", label: "Uncategorized (no folder)")]

@@ -87,13 +87,13 @@ struct DayDetailSheet: View {
 
     private func partRow(_ row: DayPart) -> some View {
         HStack(spacing: Theme.Space.s) {
-            HarnessMark(id: row.src, size: 26)
+            HarnessMark(id: harnessToolKey(row.src), size: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(row.model)
                     .font(ClientType.label.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(harnessName(row.src))
+                Text(harnessName(harnessToolKey(row.src)))
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
             }
@@ -107,7 +107,7 @@ struct DayDetailSheet: View {
         .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(row.model) on \(harnessName(row.src)), \(formatTokens(row.tokens)) tokens"
+            "\(row.model) on \(harnessName(harnessToolKey(row.src))), \(formatTokens(row.tokens)) tokens"
         )
     }
 }

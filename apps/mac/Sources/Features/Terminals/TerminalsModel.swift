@@ -51,9 +51,9 @@ final class TerminalsModel {
         sessions.first { $0.id == selectedID }
     }
 
-    func sessions(in workspaceID: String, includeInspector: Bool = false) -> [TerminalSession] {
+    func sessions(in workspaceID: String) -> [TerminalSession] {
         sessions.filter {
-            $0.workspaceID == workspaceID && (includeInspector || !$0.isInspectorShell)
+            $0.workspaceID == workspaceID && !$0.isInspectorShell
         }
     }
 
@@ -65,14 +65,8 @@ final class TerminalsModel {
     private(set) var splitLeadingID: [String: String] = [:]
     /// Right / bottom session when split.
     private(set) var splitTrailingID: [String: String] = [:]
-    /// Inspector bottom console, per folder.
-    private(set) var inspectorConsoleOn: [String: Bool] = [:]
-    /// Follow the focused session, or a tiny shell.
-    private(set) var inspectorConsoleModes: [String: InspectorConsoleMode] = [:]
-    /// Sessions the main pane is showing. Combined with the console set.
+    /// Sessions the main pane is showing.
     private var paneFocusIDs: Set<String> = []
-    /// Sessions the inspector console is watching.
-    private var consoleFocusIDs: Set<String> = []
 
     func layout(for workspaceID: String) -> TerminalSplitLayout {
         if let cached = splitLayout[workspaceID] { return cached }
@@ -181,8 +175,7 @@ final class TerminalsModel {
     ///
     /// A split shows two, and both have to drain at the visible rate or the
     /// half you are only watching freezes. First responder is a separate
-    /// question, answered by the stack. The inspector console is a second
-    /// owner: the pane must not un-focus a shell it is not looking at.
+    /// question, answered by the stack.
     func focus(_ ids: Set<String>) {
         paneFocusIDs = ids
         applyFocus()
@@ -192,44 +185,11 @@ final class TerminalsModel {
         focus(id.map { [$0] } ?? [])
     }
 
-    func focusConsole(_ ids: Set<String>) {
-        consoleFocusIDs = ids
-        applyFocus()
-    }
-
     private func applyFocus() {
-        let ids = paneFocusIDs.union(consoleFocusIDs)
         for session in sessions {
-            let next = ids.contains(session.id)
+            let next = paneFocusIDs.contains(session.id)
             if session.isFocused != next { session.isFocused = next }
         }
-    }
-
-    func inspectorConsole(for workspaceID: String) -> Bool {
-        if let cached = inspectorConsoleOn[workspaceID] { return cached }
-        let stored = WorkspacePreference.inspectorConsole(for: workspaceID)
-        inspectorConsoleOn[workspaceID] = stored
-        return stored
-    }
-
-    func setInspectorConsole(_ on: Bool, for workspaceID: String) {
-        inspectorConsoleOn[workspaceID] = on
-        WorkspacePreference.setInspectorConsole(on, for: workspaceID)
-        if !on {
-            focusConsole([])
-        }
-    }
-
-    func inspectorConsoleMode(for workspaceID: String) -> InspectorConsoleMode {
-        if let cached = inspectorConsoleModes[workspaceID] { return cached }
-        let stored = WorkspacePreference.inspectorConsoleMode(for: workspaceID)
-        inspectorConsoleModes[workspaceID] = stored
-        return stored
-    }
-
-    func setInspectorConsoleMode(_ mode: InspectorConsoleMode, for workspaceID: String) {
-        inspectorConsoleModes[workspaceID] = mode
-        WorkspacePreference.setInspectorConsoleMode(mode, for: workspaceID)
     }
 
     func select(_ session: TerminalSession) {
@@ -502,8 +462,7 @@ final class TerminalsModel {
     }
 
     /// Re-apply the inspector-shell mark after a host reconcile. The flag is
-    /// local. The host only knows a hidden-or-not pty, and this shell is a
-    /// normal one that we keep off the strip.
+    /// local. Leftover hidden shells from the old console stay off the strip.
     func retagInspectorShells() {
         for session in sessions where !session.isInspectorShell {
             let host = WorkspacePreference.inspectorShellHostID(for: session.workspaceID)
@@ -511,47 +470,6 @@ final class TerminalsModel {
                 session.isInspectorShell = true
             }
         }
-    }
-
-    /// A small login shell for the inspector console. Not an agent TUI.
-    @discardableResult
-    func startInspectorShell(workspace: WorkspaceFolder, rows: Int, cols: Int) async -> TerminalSession? {
-        if let existing = sessions(in: workspace.id, includeInspector: true)
-            .first(where: \.isInspectorShell)
-        {
-            return existing
-        }
-        if let host = WorkspacePreference.inspectorShellHostID(for: workspace.id),
-           let info = try? await Bridge.ptyInfo(id: host),
-           info.alive
-        {
-            let session = TerminalSession(info: info)
-            session.isInspectorShell = true
-            sessions.append(session)
-            return session
-        }
-        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 }
-            ?? "/bin/zsh"
-        let session = begin(
-            workspace: workspace,
-            command: shell,
-            rows: rows,
-            cols: cols,
-            selectAfter: false
-        )
-        session.isInspectorShell = true
-        let started = await complete(
-            session,
-            args: [],
-            rows: rows,
-            cols: cols,
-            hidden: true,
-            selectAfter: false
-        )
-        if let started, !started.isPending {
-            WorkspacePreference.setInspectorShellHostID(started.hostID, for: workspace.id)
-        }
-        return started
     }
 }
 #endif

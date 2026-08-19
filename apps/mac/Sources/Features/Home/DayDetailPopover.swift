@@ -164,7 +164,7 @@ struct DayDetailPopover: View {
                         Circle()
                             .fill(Self.dotColor(part))
                             .frame(width: 6, height: 6)
-                        Text("\(shortModel(part.model)) · \(harnessName(part.src))")
+                        Text("\(shortModel(part.model)) · \(harnessName(harnessToolKey(part.src)))")
                             .font(.system(size: 11))
                             .lineLimit(1)
                             .foregroundStyle(.primary)

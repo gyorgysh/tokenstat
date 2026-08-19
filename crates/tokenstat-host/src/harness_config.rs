@@ -496,7 +496,7 @@ fn read_toml(text: &str, fields: &[Field]) -> Vec<Value> {
 }
 
 fn read_json(text: &str, fields: &[Field]) -> Result<Vec<Value>, String> {
-    let stripped = strip_jsonc(text);
+    let stripped = strip_trailing_commas(&strip_jsonc(text));
     let root: Value = serde_json::from_str(&stripped).map_err(|e| e.to_string())?;
     Ok(fields
         .iter()
@@ -594,10 +594,7 @@ fn toml_get(text: &str, section: Option<&str>, key: &str) -> Option<String> {
 
 fn section_range(text: &str, section: Option<&str>) -> Option<Range<usize>> {
     match section {
-        None => {
-            let end = text.find("\n[").unwrap_or(text.len());
-            Some(0..end)
-        }
+        None => Some(0..root_table_end(text)),
         Some(name) => {
             let header = format!("[{name}]");
             let start = text.find(&header)?;
@@ -693,6 +690,32 @@ fn insert_key(text: &str, section: Option<&str>, assignment: &str) -> String {
     }
 }
 
+/// End of the root table: the first table header, including one on line 1.
+fn root_table_end(text: &str) -> usize {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        if is_table_header(line.trim()) {
+            return offset;
+        }
+        offset += line.len();
+    }
+    text.len()
+}
+
+fn is_table_header(trimmed: &str) -> bool {
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return false;
+    }
+    let rest = if let Some(rest) = trimmed.strip_prefix("[[") {
+        rest
+    } else if let Some(rest) = trimmed.strip_prefix('[') {
+        rest
+    } else {
+        return false;
+    };
+    rest.contains(']')
+}
+
 fn unquote(value: &str) -> String {
     let value = value.trim();
     if value.len() >= 2 && value.starts_with('"') && value.ends_with('"') {
@@ -702,6 +725,48 @@ fn unquote(value: &str) -> String {
     } else {
         value.to_string()
     }
+}
+
+fn strip_trailing_commas(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(chars.len());
+    let mut in_string = false;
+    let mut escape = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            out.push(c);
+            if escape {
+                escape = false;
+            } else if c == '\\' {
+                escape = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == ',' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && (chars[j] == '}' || chars[j] == ']') {
+                i += 1;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 fn strip_jsonc(text: &str) -> String {
@@ -1014,8 +1079,8 @@ fn consume_value(text: &str, start: usize) -> Result<Range<usize>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Field, FieldKind, Loc, encode_field, insert_key, json_set, strip_jsonc, toml_get, toml_set,
-        unquote,
+        Field, FieldKind, Loc, encode_field, insert_key, json_set, read_json, strip_jsonc,
+        strip_trailing_commas, toml_get, toml_set, unquote,
     };
     use serde_json::json;
 
@@ -1088,5 +1153,50 @@ mod tests {
         assert_eq!(unquote("\"grok-4.6\""), "grok-4.6");
         assert_eq!(unquote("80"), "80");
         assert_eq!(unquote("true"), "true");
+    }
+
+    #[test]
+    fn toml_root_write_does_not_touch_the_first_table() {
+        let text = "[features]\nmodel = \"inside\"\n";
+        let next = toml_set(text, None, "model", "\"root\"");
+        assert!(
+            next.contains("model = \"root\""),
+            "root key should be inserted: {next}"
+        );
+        assert!(next.contains("[features]"), "first table must stay: {next}");
+        assert!(
+            next.contains("model = \"inside\""),
+            "table key must stay: {next}"
+        );
+        assert_eq!(
+            toml_get(next.as_str(), Some("features"), "model").as_deref(),
+            Some("inside")
+        );
+        assert_eq!(
+            toml_get(next.as_str(), None, "model").as_deref(),
+            Some("root")
+        );
+    }
+
+    #[test]
+    fn jsonc_read_tolerates_a_trailing_comma() {
+        let text = "{\n  \"model\": \"a\",\n  \"compaction\": { \"auto\": true, },\n}\n";
+        let prepared = strip_trailing_commas(&strip_jsonc(text));
+        let parsed: serde_json::Value = serde_json::from_str(&prepared).expect("parse");
+        assert_eq!(parsed["model"], "a");
+        assert_eq!(parsed["compaction"]["auto"], json!(true));
+        let fields = read_json(
+            text,
+            &[Field {
+                key: "model",
+                label: "Model",
+                kind: FieldKind::Text,
+                options: &[],
+                hint: None,
+                loc: Loc::Json { pointer: "/model" },
+            }],
+        )
+        .expect("read");
+        assert_eq!(fields[0]["value"], "a");
     }
 }

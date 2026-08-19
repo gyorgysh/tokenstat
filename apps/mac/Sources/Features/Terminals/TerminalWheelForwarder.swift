@@ -55,7 +55,10 @@ enum TerminalWheelForwarder {
               terminal.isCurrentBufferAlternate
         else { return event }
 
-        let flags = event.deltaY > 0 ? wheelUp : wheelDown
+        let flags = TerminalMouse.sgrButton(
+            base: event.deltaY > 0 ? wheelUp : wheelDown,
+            event: event
+        )
         let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
         // One wheel event covers several lines. Clamped, because a trackpad
         // flick reports a delta that would send a hundred events at once.

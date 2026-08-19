@@ -171,10 +171,8 @@ final class TodoModel {
 
     /// Turn a note into a card on the board.
     ///
-    /// The one bridge between the two, and the reason capture can be cheap:
-    /// nothing has to be decided while writing the thing down. The note's own
-    /// text becomes the prompt, which is what `todo.rs` hands an agent anyway
-    /// when a card has no separate body.
+    /// The note's text becomes the prompt. An empty workspace id is allowed:
+    /// the card lands unfiled, the same as a task created that way.
     func convertToTask(_ card: TodoCard, workspaceID: String) async {
         do {
             _ = try await Bridge.todoUpdate(
@@ -227,7 +225,10 @@ final class TodoModel {
     /// a folder, which `todo.rs` has always allowed.
     var unfiledCount: Int {
         cards.filter {
-            $0.workspaceID.isEmpty && $0.column != "done" && $0.column != "archive"
+            $0.kind != .note
+                && $0.workspaceID.isEmpty
+                && $0.column != "done"
+                && $0.column != "archive"
         }.count
     }
 

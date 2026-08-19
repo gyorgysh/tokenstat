@@ -45,9 +45,11 @@ enum Route: Hashable {
 
     /// Whether the trailing inspector column exists here.
     ///
-    /// Account is the one screen with nothing to put beside it. Everything
-    /// else has a panel, so the default is yes.
-    var hasInspector: Bool { globalSection != .account }
+    /// Account and Notes have nothing to put beside them. Everything else
+    /// has a panel, so the default is yes.
+    var hasInspector: Bool {
+        globalSection != .account && globalSection != .notes
+    }
 }
 
 /// The machine-wide screens.

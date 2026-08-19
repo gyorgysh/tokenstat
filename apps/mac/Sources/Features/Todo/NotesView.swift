@@ -6,13 +6,8 @@ import SwiftUI
 
 /// Small things worth keeping, and nothing else.
 ///
-/// Notes used to be a kind of card on the kanban board, which meant they sat in
-/// a column called To Do and made writing one down a decision about where it
-/// belonged. They have their own screen now. A note can still live on a project
-/// or stay unassigned, but that is a label, not a stage.
-///
-/// The field stays focused after each note, because the point of quick capture
-/// is the second thought that arrives while writing the first one down.
+/// A note can live on a project or stay unassigned. That is a label, not a
+/// column. The field stays focused after each note so the next one is ready.
 struct NotesView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
