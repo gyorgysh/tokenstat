@@ -48,7 +48,9 @@ enum Route: Hashable {
     /// Account and Notes have nothing to put beside them. Everything else
     /// has a panel, so the default is yes.
     var hasInspector: Bool {
-        globalSection != .account && globalSection != .notes
+        globalSection != .account
+            && globalSection != .notes
+            && workspaceSection != .notes
     }
 }
 
@@ -111,6 +113,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case sessions
     case changes
     case todo
+    case notes
     case workflows
     case automations
     case files
@@ -123,6 +126,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "Sessions"
         case .changes: return "Changes"
         case .todo: return "Tasks"
+        case .notes: return "Notes"
         case .workflows: return "Workflows"
         case .automations: return "Automations"
         case .files: return "Files"
@@ -135,6 +139,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "terminal.fill"
         case .changes: return "plusminus"
         case .todo: return "checklist"
+        case .notes: return "note.text"
         case .workflows: return "point.3.connected.trianglepath.dotted"
         case .automations: return "bolt.fill"
         case .files: return "folder.fill"

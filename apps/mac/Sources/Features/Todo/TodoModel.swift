@@ -245,6 +245,18 @@ final class TodoModel {
         }.count
     }
 
+    /// Notes kept in a folder: the sidebar count.
+    ///
+    /// Archived notes are put away, so they are not part of what the folder
+    /// is holding on to.
+    func noteCount(in workspaceID: String) -> Int {
+        cards.filter {
+            $0.workspaceID == workspaceID
+                && $0.kind == .note
+                && $0.column != "archive"
+        }.count
+    }
+
     /// Drop a selection that the new scope would hide.
     func dropOutOfScopeSelection() {
         if let selected = selectedCard, !inScope(selected) {

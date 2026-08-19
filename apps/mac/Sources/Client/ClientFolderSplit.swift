@@ -48,7 +48,10 @@ struct ClientFolderSplit: View {
                             Task { await reload() }
                         }
                     }
-                    ForEach(WorkspaceSection.allCases) { item in
+                    // Notes are local to the machine that owns the folder,
+                    // so a connected client has nothing to show under that
+                    // row yet.
+                    ForEach(WorkspaceSection.allCases.filter { $0 != .notes }) { item in
                         Button {
                             if item == .browser {
                                 showPort = true
@@ -128,6 +131,9 @@ struct ClientFolderSplit: View {
                 hostName: hostName,
                 folderName: current.name
             )
+        case .notes:
+            // Not offered in the list above, so this cannot be selected.
+            EmptyView()
         case .files:
             ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
         case .browser:
@@ -163,7 +169,7 @@ struct ClientFolderSplit: View {
         case .todo: return counts.todo
         case .workflows: return counts.workflows
         case .automations: return counts.automations
-        case .files, .browser: return nil
+        case .notes, .files, .browser: return nil
         }
     }
 

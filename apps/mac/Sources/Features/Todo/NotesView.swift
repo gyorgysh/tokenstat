@@ -8,13 +8,19 @@ import SwiftUI
 ///
 /// A note can live on a project or stay unassigned. That is a label, not a
 /// column. The field stays focused after each note so the next one is ready.
+///
+/// The same screen serves the global list and one folder's. With a
+/// `workspaceID` the chips go away: a folder's notes are that folder's, and a
+/// filter on top of it would be two answers to one question.
 struct NotesView: View {
     @Bindable var model: TodoModel
     var folders: [WorkspaceFolder]
+    /// The folder this screen is scoped to, or nil for every folder.
+    var workspaceID: String?
 
     @State private var draft = ""
     @State private var showingArchive = false
-    @State private var scope: TodoModel.NoteScope = .all
+    @State private var picked: TodoModel.NoteScope = .all
     @State private var converting: TodoCard?
     @FocusState private var writing: Bool
 
@@ -34,22 +40,24 @@ struct NotesView: View {
                     systemImage: showingArchive ? "archivebox.fill" : "archivebox",
                     help: showingArchive
                         ? "Show current notes"
-                        : (model.archivedNoteCount == 0
+                        : (archivedCount == 0
                             ? "Nothing archived"
-                            : "Show \(model.archivedNoteCount) archived"),
+                            : "Show \(archivedCount) archived"),
                     isAccent: showingArchive,
                     showsBadge: false
                 ) {
                     showingArchive.toggle()
                 }
-                .disabled(model.archivedNoteCount == 0 && !showingArchive)
+                .disabled(archivedCount == 0 && !showingArchive)
             }
             if let error = model.errorMessage {
                 Banner(text: error, severity: .warning)
                     .padding(Theme.Space.m)
             }
             composer
-            scopeBar
+            if workspaceID == nil {
+                scopeBar
+            }
             list
         }
         .background(Theme.background)
@@ -70,8 +78,21 @@ struct NotesView: View {
         .onDisappear { model.disappeared() }
     }
 
-    /// Where a new note lands: the chip you picked, or unassigned when
-    /// looking at everything.
+    /// What the list is showing: the folder this screen belongs to, or the
+    /// chip you picked on the global one.
+    private var scope: TodoModel.NoteScope {
+        if let workspaceID { return .workspace(workspaceID) }
+        return picked
+    }
+
+    /// How many notes are put away in what is on screen. Scoped, so a folder's
+    /// archive button does not light up for another folder's notes.
+    private var archivedCount: Int {
+        model.notes(in: scope, archived: true).count
+    }
+
+    /// Where a new note lands: this folder, the chip you picked, or unassigned
+    /// when looking at everything.
     private var destinationID: String {
         if case let .workspace(id) = scope { return id }
         return ""
@@ -114,18 +135,18 @@ struct NotesView: View {
     private var scopeBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
-                ChoiceChip(title: "All", isSelected: scope == .all) {
-                    scope = .all
+                ChoiceChip(title: "All", isSelected: picked == .all) {
+                    picked = .all
                 }
-                ChoiceChip(title: "Unassigned", isSelected: scope == .unassigned) {
-                    scope = .unassigned
+                ChoiceChip(title: "Unassigned", isSelected: picked == .unassigned) {
+                    picked = .unassigned
                 }
                 ForEach(folders) { folder in
                     ChoiceChip(
                         title: folder.name,
-                        isSelected: scope == .workspace(folder.id)
+                        isSelected: picked == .workspace(folder.id)
                     ) {
-                        scope = .workspace(folder.id)
+                        picked = .workspace(folder.id)
                     }
                 }
             }
@@ -220,15 +241,10 @@ struct NotesView: View {
                 }
             }
             if !showingArchive {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Turn into a task when this is work, not a reminder.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Button("Make a task", .move) {
-                        converting = note
-                    }
-                    .buttonStyle(SecondaryButtonStyle())
+                Button("Make a task", .move) {
+                    converting = note
                 }
+                .buttonStyle(SecondaryButtonStyle())
             }
         }
         .padding(Theme.Space.m)

@@ -11,8 +11,9 @@ import UIKit
 
 /// One folder on a connected host, as its sections.
 ///
-/// The same seven the Mac's sidebar lists, in the same order and with the same
-/// counts, because they are the same folder. The phone has no sidebar and no
+/// The same ones the Mac's sidebar lists, in the same order and with the same
+/// counts, because they are the same folder. Notes are the exception: they
+/// live on the machine that owns the folder and a client cannot read them yet. The phone has no sidebar and no
 /// tab strip, so a section pushes instead of opening a tab: list, workspace,
 /// section, and a document is the fourth and last level.
 ///
@@ -127,7 +128,7 @@ struct ClientWorkspaceDetailView: View {
         .cardSurface()
     }
 
-    /// The seven, in the Mac's order. Files, Changes and the rest push.
+    /// In the Mac's order. Files, Changes and the rest push.
     /// Browser is a cover: it is a web page, not a level of this folder.
     @ViewBuilder
     private var sections: some View {
@@ -297,7 +298,7 @@ struct WorkspaceSectionCounts {
 ///
 /// The same glyph and the same word as the Mac's sidebar row, at the size a
 /// thumb needs. Zero draws nothing, for the reason it draws nothing there: a
-/// zero is not news, and seven grey zeroes is a wall of them.
+/// zero is not news, and a column of grey zeroes is a wall of them.
 struct ClientSectionRow: View {
     let section: WorkspaceSection
     let count: Int?

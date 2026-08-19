@@ -95,7 +95,7 @@ struct RootView: View {
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
     /// Folders whose sections are showing. Collapsed is the default: a
-    /// sidebar of six folders each listing seven sections is a wall, and the
+    /// sidebar of six folders each listing every section is a wall, and the
     /// question it should answer first is which folder, not which section.
     @State private var expandedWorkspaces: Set<String> = []
     /// The section each folder was last left on, so returning to a folder
@@ -761,6 +761,8 @@ struct RootView: View {
             switch route {
             case .workspace(_, .todo):
                 todoInspector
+            case .workspace(_, .notes):
+                EmptyView()
             case .workspace(_, .workflows), .global(.workflows):
                 WorkflowsInspector(
                     model: workflows,
@@ -1299,7 +1301,7 @@ struct RootView: View {
 
                         #if os(macOS)
                         if isExpanded {
-                            // The same seven, in the same order, for every
+                            // The same rows, in the same order, for every
                             // folder. Live things sit directly under the
                             // section that owns them, so a running workflow is
                             // found where workflows are and not in a pile at
@@ -1633,7 +1635,7 @@ struct RootView: View {
     private var showsWorkspaceSurface: Bool {
         switch route.workspaceSection {
         case .sessions, .changes, .files, .browser: return true
-        case .todo, .workflows, .automations, nil: return false
+        case .todo, .notes, .workflows, .automations, nil: return false
         }
     }
 
@@ -1712,8 +1714,12 @@ struct RootView: View {
                     launchTaskInFront(launch)
                 }
             )
-        case .global(.notes):
-            NotesView(model: todo, folders: workspaces.folders)
+        case .workspace(_, .notes), .global(.notes):
+            NotesView(
+                model: todo,
+                folders: workspaces.folders,
+                workspaceID: route.workspaceID
+            )
         case .global(.machines):
             MachinesView(model: machines)
         case .global(.account):
@@ -1874,7 +1880,7 @@ struct RootView: View {
     #endif
 
     /// What a section's badge says. Nil draws nothing: a zero is not news, and
-    /// seven greyed zeroes under every folder is a wall of them.
+    /// a column of greyed zeroes under every folder is a wall of them.
     private func count(of section: WorkspaceSection, in folder: WorkspaceFolder) -> Int? {
         // Cards, graphs and jobs on another machine are not in this app's
         // models, so a remote folder used to draw no badge for any of them.
@@ -1887,6 +1893,10 @@ struct RootView: View {
         case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
         case .changes: value = folder.git?.files.count ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
+        case .notes:
+            // No remote count for notes yet, and a folder on another machine
+            // would otherwise borrow this one's number.
+            value = folder.isRemote ? 0 : todo.noteCount(in: folder.id)
         case .workflows:
             if let remote {
                 value = remote.workflowsRunning > 0 ? remote.workflowsRunning : remote.workflows
@@ -1932,7 +1942,7 @@ struct RootView: View {
                 } else {
                     workspaces.showBrowser(in: folderID)
                 }
-            case .todo, .workflows, .automations:
+            case .todo, .notes, .workflows, .automations:
                 break
             }
             #endif
@@ -2658,7 +2668,7 @@ extension SidebarGroupHeader where Trailing == EmptyView {
 /// arguing, and the folder card already owns the bar when it is collapsed.
 private struct WorkspaceSectionRow: View {
     let section: WorkspaceSection
-    /// Nil draws nothing. A zero is not news, and seven greyed zeroes under
+    /// Nil draws nothing. A zero is not news, and greyed zeroes under
     /// every folder is a wall of them.
     let count: Int?
     let isSelected: Bool
