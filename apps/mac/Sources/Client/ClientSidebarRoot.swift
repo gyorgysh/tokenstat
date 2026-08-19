@@ -23,6 +23,9 @@ struct ClientSidebarRoot: View {
 
     @Environment(AccountModel.self) private var account
     @Environment(ClientNavigationModel.self) private var navigation
+    /// A pointer means a person aiming, not a thumb landing. Rows tighten and
+    /// grow hover states. See `ClientLayout`.
+    @Environment(PointerKeyboardModel.self) private var input
 
     /// One workspaces model for the whole layout: the tree in the sidebar and
     /// the screen in the detail column are the same connection, not two.
@@ -39,6 +42,7 @@ struct ClientSidebarRoot: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .clientShortcuts(shortcuts)
         .task { await workspaces.refresh(account: account.account) }
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
             Task { await workspaces.recoverAfterNetworkChange(account: account.account) }
@@ -113,6 +117,9 @@ struct ClientSidebarRoot: View {
             }
         }
         .listStyle(.sidebar)
+        // A thumb needs 44 points. A trackpad pointer does not, and the whole
+        // point of this layout is seeing more of the account at once.
+        .environment(\.defaultMinListRowHeight, input.hasPointer ? 32 : 44)
         .navigationTitle("tokenstat")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await workspaces.refresh(account: account.account) }
@@ -121,6 +128,40 @@ struct ClientSidebarRoot: View {
                 AvatarButton { showAccount = true }
             }
         }
+    }
+
+    /// What `⌘` opens, and what holding it lists.
+    ///
+    /// The numbers follow the sidebar's own order rather than the tab bar's,
+    /// because the sidebar is what is on screen. `⌘,` is Settings everywhere
+    /// on this platform, and here the account is the settings.
+    private var shortcuts: [ClientShortcut] {
+        var commands: [ClientShortcut] = []
+        for (index, tab) in ClientTab.allCases.enumerated() {
+            guard let key = "1234".dropFirst(index).first else { continue }
+            commands.append(
+                ClientShortcut(id: tab.rawValue, title: tab.label, key: KeyEquivalent(key)) {
+                    navigation.destination = tab
+                    navigation.folderID = nil
+                }
+            )
+        }
+        commands.append(
+            ClientShortcut(id: "refresh", title: "Refresh", key: "r") {
+                Task { await workspaces.refresh(account: account.account) }
+            }
+        )
+        commands.append(
+            ClientShortcut(id: "sidebar", title: "Toggle Sidebar", key: "\\") {
+                columns = columns == .detailOnly ? .all : .detailOnly
+            }
+        )
+        commands.append(
+            ClientShortcut(id: "account", title: "Account", key: ",") {
+                showAccount = true
+            }
+        )
+        return commands
     }
 
     /// A machine, with the dot that says whether it is awake.
