@@ -42,6 +42,10 @@ struct ClientRootView: View {
     /// account plane, which means every screen depends on the network, so the
     /// answer belongs at the root rather than in each of them.
     @State private var connectivity = ConnectivityModel()
+    /// What the app believes about the network, folded from the internet, the
+    /// service and the tunnel. Every screen reads this one rather than each
+    /// deciding for itself. See `ConnectionModel`.
+    @State private var connection = ConnectionModel()
     /// Whether this iPad has a keyboard or a trackpad attached, which is what
     /// decides between the tab bar and the sidebar. See `ClientLayout`.
     @State private var input = PointerKeyboardModel()
@@ -152,6 +156,7 @@ struct ClientRootView: View {
         .tint(Theme.accent)
         .environment(account)
         .environment(connectivity)
+        .environment(connection)
         .environment(store)
         .environment(input)
         .environment(navigation)
@@ -166,6 +171,13 @@ struct ClientRootView: View {
         .task {
             connectivity.start()
             input.start()
+            connection.attach(connectivity)
+            // Every call that leaves this device reports here. Installed once,
+            // at the root, so no screen has to remember to.
+            BridgeObserver.report = { method, error in
+                guard let plane = NetworkPlane.of(method: method) else { return }
+                Task { @MainActor in connection.note(plane: plane, failure: error) }
+            }
             // Sign-in presents over the app rather than handing the URL to
             // Safari and hoping somebody comes back. See `ClientWebAuth`.
             account.signInPresenter = { ClientWebAuth.shared.start($0) }
@@ -197,6 +209,7 @@ struct ClientRootView: View {
             // Cold start offline leaves authNeedsRetry. Signed-in screens also
             // want a fresh me after the network returns, and the tunnel session
             // this phone holds should reconnect now, not after its backoff.
+            connection.reset()
             Task { await account.load() }
             Task { await Bridge.nudgeTunnel(reconnect: true) }
         }

@@ -25,6 +25,22 @@ enum BridgeError: LocalizedError {
     }
 }
 
+/// Where every call's outcome is reported, so one place can decide what the
+/// app believes about the network.
+///
+/// A closure rather than a dependency: `Bridge` owns no state and knows about
+/// no models, and it is not going to start now. The client installs a reporter
+/// at launch, the Mac may install one later, and with nothing installed this
+/// costs a nil check per call.
+enum BridgeObserver {
+    /// Method name, and the error it failed with, or nil when it worked.
+    nonisolated(unsafe) static var report: (@Sendable (String, Error?) -> Void)?
+
+    static func note(_ method: String, _ error: Error?) {
+        report?(method, error)
+    }
+}
+
 /// Envelope every method returns. One decoding path for success and failure.
 private struct Envelope<T: Decodable>: Decodable {
     struct Failure: Decodable {
@@ -487,8 +503,28 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
-        try await offMainActor {
-            try invoke(method, params, patience: patience, as: type)
+        try await observed(method) {
+            try await offMainActor {
+                try invoke(method, params, patience: patience, as: type)
+            }
+        }
+    }
+
+    /// Report what happened to `BridgeObserver` and pass the answer through.
+    ///
+    /// Wrapping the three async entry points rather than the sync core, so a
+    /// call is reported once even though `invoke` is reached several ways.
+    private static func observed<T: Sendable>(
+        _ method: String,
+        _ work: () async throws -> T
+    ) async throws -> T {
+        do {
+            let value = try await work()
+            BridgeObserver.note(method, nil)
+            return value
+        } catch {
+            BridgeObserver.note(method, error)
+            throw error
         }
     }
 
@@ -500,10 +536,11 @@ enum Bridge {
         _ params: [String: Any] = [:],
         as type: T.Type
     ) async throws -> T {
-        try await offMainActor {
-            let paramData = try JSONSerialization.data(withJSONObject: params)
-            let paramString = String(decoding: paramData, as: UTF8.self)
-            let json = try Self.callUrgent(
+        try await observed(method) {
+            try await offMainActor {
+                let paramData = try JSONSerialization.data(withJSONObject: params)
+                let paramString = String(decoding: paramData, as: UTF8.self)
+                let json = try Self.callUrgent(
                 method: method,
                 params: paramString,
                 patience: Patience.interactive
@@ -526,6 +563,7 @@ enum Bridge {
                 throw BridgeError.decoding(method: method, underlying: "missing result")
             }
             return result
+            }
         }
     }
 
@@ -576,8 +614,10 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T? {
-        try await offMainActor {
-            try invokeOptional(method, params, patience: patience, as: type)
+        try await observed(method) {
+            try await offMainActor {
+                try invokeOptional(method, params, patience: patience, as: type)
+            }
         }
     }
 

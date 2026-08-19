@@ -6,7 +6,9 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if !os(macOS)
 import UIKit
+#endif
 
 // The client is iOS and iPadOS only. The Mac has `RootView`, and these
 // screens lean on toolbar placements and a tab bar that macOS does not
