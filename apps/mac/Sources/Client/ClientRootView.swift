@@ -393,6 +393,11 @@ private extension View {
                 // The wordmark, not the screen's name. The tab bar already
                 // says which screen this is, and the middle of the top bar is
                 // the one piece of pure brand the client gets.
+                // The one global word about the network, and only when there
+                // is one to say. See `ClientConnectionChip`.
+                ToolbarItem(placement: .topBarTrailing) {
+                    ClientConnectionChip()
+                }
                 ToolbarItem(placement: .principal) {
                     // Larger than the Mac's sidebar lockup, and not filling:
                     // this is the one brand on the screen and it has a whole

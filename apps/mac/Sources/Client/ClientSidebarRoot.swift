@@ -127,6 +127,9 @@ struct ClientSidebarRoot: View {
             ToolbarItem(placement: .topBarLeading) {
                 AvatarButton { showAccount = true }
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                ClientConnectionChip()
+            }
         }
     }
 

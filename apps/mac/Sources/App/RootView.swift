@@ -31,6 +31,10 @@ struct RootView: View {
     @State private var todo = TodoModel()
     @State private var appUpdate = AppUpdateModel()
     @State private var connectivity = ConnectivityModel()
+    /// The service and the tunnel, alongside the internet. See
+    /// `ConnectionModel`: the Mac shows it in the sidebar's offline card
+    /// rather than as a chip, because it has the room.
+    @State private var connection = ConnectionModel()
     @State private var isInspectorPresented = true
     /// What the user chose for the sidebar, kept separate from the fit.
     ///
@@ -154,7 +158,14 @@ struct RootView: View {
         .task { await watchPointer() }
         // A pending auto-hide outlives the window it was scheduled for; drop it
         // when the view goes away.
-        .onAppear { connectivity.start() }
+        .onAppear {
+            connectivity.start()
+            connection.attach(connectivity)
+            BridgeObserver.report = { method, error in
+                guard let plane = NetworkPlane.of(method: method) else { return }
+                Task { @MainActor in connection.note(plane: plane, failure: error) }
+            }
+        }
         .onDisappear { connectivity.stop() }
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
@@ -1448,7 +1459,7 @@ struct RootView: View {
         VStack(spacing: 0) {
             // Offline is the same card language as sync and update, so the
             // footer reads as one place for "what is the network doing".
-            OfflineCard(connectivity: connectivity)
+            OfflineCard(connectivity: connectivity, connection: connection)
             HostStatusCard()
             // Sync feedback is a card in the same slot and the same language
             // as the update card: success is the accent, rate limiting is
