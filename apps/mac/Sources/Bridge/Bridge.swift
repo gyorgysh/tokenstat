@@ -36,6 +36,17 @@ enum BridgeObserver {
     /// Method name, and the error it failed with, or nil when it worked.
     nonisolated(unsafe) static var report: (@Sendable (String, Error?) -> Void)?
 
+    /// Asked before a call is made. Returning an error refuses it without
+    /// going near the transport.
+    ///
+    /// This exists for one case: a device with no internet. An account call
+    /// made in airplane mode sits on its patience budget and then fails with
+    /// the same answer it could have given immediately, and the screen waits
+    /// half a minute to say "offline". Nothing else belongs here: a gate that
+    /// starts guessing which calls are worth making is a gate that will block
+    /// the one that would have recovered.
+    nonisolated(unsafe) static var precheck: (@Sendable (String) -> Error?)?
+
     static func note(_ method: String, _ error: Error?) {
         report?(method, error)
     }
@@ -518,6 +529,10 @@ enum Bridge {
         _ method: String,
         _ work: () async throws -> T
     ) async throws -> T {
+        if let refusal = BridgeObserver.precheck?(method) {
+            BridgeObserver.note(method, refusal)
+            throw refusal
+        }
         do {
             let value = try await work()
             BridgeObserver.note(method, nil)

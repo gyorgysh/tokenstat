@@ -165,6 +165,17 @@ struct RootView: View {
                 guard let plane = NetworkPlane.of(method: method) else { return }
                 Task { @MainActor in connection.note(plane: plane, failure: error) }
             }
+            // Offline, a call that has to leave the device fails now rather
+            // than after its patience budget. See `BridgeObserver.precheck`.
+            BridgeObserver.precheck = { method in
+                guard NetworkGate.isOffline, NetworkPlane.of(method: method) != nil else {
+                    return nil
+                }
+                return BridgeError.core(
+                    code: "offline",
+                    message: "This device is offline."
+                )
+            }
         }
         .onDisappear { connectivity.stop() }
         // Track which screen the window is on so the display fit and the

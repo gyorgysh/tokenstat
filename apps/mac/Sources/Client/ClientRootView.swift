@@ -178,6 +178,17 @@ struct ClientRootView: View {
                 guard let plane = NetworkPlane.of(method: method) else { return }
                 Task { @MainActor in connection.note(plane: plane, failure: error) }
             }
+            // Offline, a call that has to leave the device fails now rather
+            // than after its patience budget. See `BridgeObserver.precheck`.
+            BridgeObserver.precheck = { method in
+                guard NetworkGate.isOffline, NetworkPlane.of(method: method) != nil else {
+                    return nil
+                }
+                return BridgeError.core(
+                    code: "offline",
+                    message: "This device is offline."
+                )
+            }
             // Sign-in presents over the app rather than handing the URL to
             // Safari and hoping somebody comes back. See `ClientWebAuth`.
             account.signInPresenter = { ClientWebAuth.shared.start($0) }

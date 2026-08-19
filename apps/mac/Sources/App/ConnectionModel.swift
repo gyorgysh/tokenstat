@@ -95,6 +95,8 @@ enum NetworkClassifier {
 
     static func kind(code: String, message: String) -> NetworkFailureKind {
         switch code {
+        case "offline":
+            return .offline
         case "host_timeout":
             return .timedOut
         case "host_unreachable":

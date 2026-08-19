@@ -15,6 +15,29 @@ extension Notification.Name {
     static let connectivityChanged = Notification.Name("tokenstat.connectivityChanged")
 }
 
+/// The offline flag, readable from anywhere without hopping actors.
+///
+/// `ConnectivityModel` is main-actor isolated, and the place that needs this
+/// answer is a call about to leave the process on a background queue. Copying
+/// one bool behind a lock is cheaper than making every call wait for the main
+/// actor to say what it already knows.
+enum NetworkGate {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var offline = false
+
+    static var isOffline: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return offline
+    }
+
+    static func set(offline value: Bool) {
+        lock.lock()
+        offline = value
+        lock.unlock()
+    }
+}
+
 /// Whether this machine can reach the internet, and the retry that watches
 /// for it to come back.
 ///
@@ -134,6 +157,7 @@ final class ConnectivityModel {
     private func setOffline() {
         let changed = !isOffline
         status = .offline
+        NetworkGate.set(offline: true)
         offlineSince = offlineSince ?? Date()
         if changed {
             NotificationCenter.default.post(name: .connectivityChanged, object: self)
@@ -143,6 +167,7 @@ final class ConnectivityModel {
     private func setOnline() {
         let wasOffline = isOffline
         status = .online
+        NetworkGate.set(offline: false)
         offlineSince = nil
         probeTask?.cancel()
         NotificationCenter.default.post(name: .connectivityChanged, object: self)
