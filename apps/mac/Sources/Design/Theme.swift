@@ -1318,6 +1318,65 @@ struct BrandToggleChip: View {
     }
 }
 
+/// One option in a mutually exclusive set, same capsule as `BrandToggleChip`.
+///
+/// Tapping a selected chip does not deselect it. Empty is a valid state, and
+/// it comes from a value that matches none of the options, not from tapping
+/// again.
+struct ChoiceChip: View {
+    var title: String
+    var isSelected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Group {
+            if isSelected {
+                Button(title) { action() }
+                    .buttonStyle(AccentButtonStyle(small: true))
+            } else {
+                Button(title) { action() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+        }
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+/// Minutes as a choice, with the field kept for anything else.
+///
+/// A gauge on a linear scale crowds three of its four ticks into the first
+/// fifth of the bar, and nobody can move it. These chips are the values a
+/// person actually picks. A custom number in the field selects none of them.
+struct TimeLimitChips: View {
+    @Binding var minutesText: String
+    @Binding var noLimit: Bool
+    var onChange: () -> Void = {}
+
+    private static let presets: [(minutes: Int, title: String)] = [
+        (15, "15m"), (30, "30m"), (60, "1h"), (180, "3h"), (480, "8h"),
+    ]
+
+    var body: some View {
+        FlowLayout(spacing: 6, rowSpacing: 6) {
+            ForEach(Self.presets, id: \.minutes) { preset in
+                ChoiceChip(title: preset.title, isSelected: isPreset(preset.minutes)) {
+                    noLimit = false
+                    minutesText = String(preset.minutes)
+                    onChange()
+                }
+            }
+            ChoiceChip(title: "No limit", isSelected: noLimit) {
+                noLimit = true
+                onChange()
+            }
+        }
+    }
+
+    private func isPreset(_ minutes: Int) -> Bool {
+        !noLimit && (Int(minutesText) ?? 0) == minutes
+    }
+}
+
 /// One segment of `SegmentedCapsulePicker`.
 private struct SegmentButton: View {
     var label: String

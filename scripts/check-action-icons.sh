@@ -83,6 +83,7 @@ ALLOWED = [
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
+    ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),
 ]
 

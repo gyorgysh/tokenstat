@@ -198,20 +198,12 @@ struct AutomationsView: View {
                     Text("minutes")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    BrandToggleChip(title: "No limit", isOn: $model.queueNoLimit)
-                        .onChange(of: model.queueNoLimit) { _, _ in
-                            schedulerJustSaved = false
-                        }
                 }
-                // Three hours is neither long nor short until you see it
-                // against the marks either side of it.
-                if !model.queueNoLimit {
-                    ScaleBar(
-                        ticks: [(15, "15m"), (60, "1h"), (180, "3h"), (480, "8h")],
-                        value: Double(model.queueBudgetMinutes) ?? 0
-                    )
-                    .frame(maxWidth: 260)
-                }
+                TimeLimitChips(
+                    minutesText: $model.queueBudgetMinutes,
+                    noLimit: $model.queueNoLimit,
+                    onChange: { schedulerJustSaved = false }
+                )
                 HStack {
                     Text("Max concurrent jobs")
                         .font(.callout)
