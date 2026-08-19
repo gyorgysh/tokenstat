@@ -285,30 +285,39 @@ private struct WorkflowsScene: View {
 
 // MARK: - Automations
 
-/// A clock with nothing scheduled: the face is drawn, the hand sweeps, and the
-/// slot where a job would sit is still open.
+/// A clock with nothing on it: the face is drawn and the hand sweeps, and the
+/// row underneath where a job would sit is still an outline.
 private struct AutomationsScene: View {
     var reduceMotion: Bool
     @State private var swept = false
 
     var body: some View {
-        HStack(spacing: 14) {
+        VStack(spacing: 10) {
             ZStack {
                 Circle().strokeBorder(Ink.quiet, style: Ink.style)
+                ForEach(0..<4, id: \.self) { index in
+                    Capsule()
+                        .fill(Ink.quiet)
+                        .frame(width: Ink.width, height: 5)
+                        .offset(y: -19)
+                        .rotationEffect(.degrees(Double(index) * 90))
+                }
                 Capsule()
                     .fill(Ink.lead)
-                    .frame(width: Ink.width, height: 13)
-                    .offset(y: -6.5)
-                    .rotationEffect(.degrees(reduceMotion || !swept ? 40 : 400))
-                Circle().fill(Ink.lead).frame(width: 3.5, height: 3.5)
+                    .frame(width: Ink.width, height: 15)
+                    .offset(y: -7.5)
+                    .rotationEffect(.degrees(reduceMotion || !swept ? 45 : 405))
+                Circle().fill(Ink.lead).frame(width: 4, height: 4)
             }
-            .frame(width: 42, height: 42)
+            .frame(width: 46, height: 46)
 
-            VStack(alignment: .leading, spacing: 9) {
-                Ghost(width: 38, color: Ink.lead)
-                Ghost(width: 30)
-                Ghost(width: 34)
-            }
+            // The empty slot. Dashed, because it is where something would be.
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    Ink.quiet,
+                    style: StrokeStyle(lineWidth: Ink.width, lineCap: .round, dash: [4, 5])
+                )
+                .frame(width: 86, height: 20)
         }
         .onAppear {
             guard !reduceMotion else { return }
@@ -427,7 +436,7 @@ private struct WaitingScene: View {
                 ForEach(0..<3, id: \.self) { index in
                     Arc()
                         .stroke(Ink.lead, style: Ink.style)
-                        .frame(width: CGFloat(9 + index * 9), height: CGFloat(18 + index * 14))
+                        .frame(width: CGFloat(12 + index * 11), height: CGFloat(24 + index * 17))
                         .opacity(reduceMotion ? 0.75 - Double(index) * 0.22 : (out ? 0.12 : 0.9))
                         .animation(
                             reduceMotion
@@ -439,7 +448,7 @@ private struct WaitingScene: View {
                         )
                 }
             }
-            .frame(width: 30, height: 46)
+            .frame(width: 38, height: 60)
         }
         .onAppear { out = true }
     }
