@@ -48,9 +48,13 @@ struct ClientFolderSplit: View {
     /// a list that pushes, and nothing overflows because nothing is nested.
     private static let splitInsideSplit: CGFloat = 900
 
+    /// The sections column. Named once, because the detail width is what is
+    /// left after it and two numbers that must agree will not.
+    private static let sectionsColumn: CGFloat = 280
+
     var body: some View {
         GeometryReader { geo in
-            split(detailWidth: geo.size.width - 280)
+            split(detailWidth: geo.size.width - Self.sectionsColumn)
         }
         .background(Theme.background)
         .navigationTitle(current.name)
@@ -107,7 +111,7 @@ struct ClientFolderSplit: View {
                 }
                 .padding(Theme.Space.m)
             }
-            .frame(width: 280)
+            .frame(width: Self.sectionsColumn)
             .background(Theme.background)
             Divider()
             detail(width: detailWidth)

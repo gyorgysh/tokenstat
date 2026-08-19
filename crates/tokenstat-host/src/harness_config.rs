@@ -1241,6 +1241,28 @@ mod tests {
         assert!(replaced.contains("// schema"), "{replaced}");
     }
 
+    /// Claude Code's own file shape: a `permissions` object that already
+    /// holds rules. The mode has to land inside it, not beside it, or the
+    /// rules the person wrote are shadowed by a second object.
+    #[test]
+    fn a_mode_lands_inside_an_existing_permissions_object() {
+        let text = "{\n  \"model\": \"opus\",\n  \"permissions\": {\n    \"allow\": [\"Read\"],\n    \"deny\": []\n  }\n}\n";
+        let next = json_set(text, "/permissions/defaultMode", &json!("plan")).expect("set");
+        let parsed: serde_json::Value = serde_json::from_str(&next).expect("parse");
+        assert_eq!(parsed["permissions"]["defaultMode"], json!("plan"));
+        assert_eq!(parsed["permissions"]["allow"], json!(["Read"]));
+        assert_eq!(parsed["model"], json!("opus"));
+        // And again on a file that has no permissions object at all.
+        let bare = json_set(
+            "{\n  \"model\": \"opus\"\n}\n",
+            "/permissions/defaultMode",
+            &json!("auto"),
+        )
+        .expect("set");
+        let parsed: serde_json::Value = serde_json::from_str(&bare).expect("parse");
+        assert_eq!(parsed["permissions"]["defaultMode"], json!("auto"));
+    }
+
     #[test]
     fn choice_rejects_an_unknown_value() {
         let field = Field {

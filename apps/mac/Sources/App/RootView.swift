@@ -94,10 +94,8 @@ struct RootView: View {
     #if os(macOS)
     @State private var terminals = TerminalsModel()
     @State private var workspacePendingRemove: WorkspaceFolder?
-    #if os(macOS)
     /// The session a right-click asked to close, held until it is confirmed.
     @State private var sessionPendingClose: TerminalSession?
-    #endif
     /// Folders whose sections are showing. Collapsed is the default: a
     /// sidebar of six folders each listing every section is a wall, and the
     /// question it should answer first is which folder, not which section.
@@ -1430,7 +1428,6 @@ struct RootView: View {
                 }
             )
         }
-        #if os(macOS)
         .background {
             CloseSessionConfirm(
                 session: $sessionPendingClose,
@@ -1439,7 +1436,6 @@ struct RootView: View {
                 }
             )
         }
-        #endif
     }
 
     /// Who is signed in, pinned to the bottom of the sidebar with a menu.

@@ -14,11 +14,14 @@
 //! joined to `session_v2`, with the model in `model.id` and the role in a
 //! `type` column rather than in the JSON. Both are read: a machine that has
 //! run both has history in both, and reading only the first is why an
-//! OpenCode 2 session reported zero for everything.
+//! OpenCode 2 session reported zero for everything. Upgrading copies the old
+//! rows across under the same ids, so version 2 is read first and an id seen
+//! twice is counted once.
 //!
 //! Cache read/write are **disjoint** from input here (unlike Codex/Grok): the
 //! vendor's own `tokens.total` equals the sum of those fields.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -113,8 +116,17 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
         }
     };
 
-    for layout in [Layout::V1, Layout::V2] {
-        read_layout(&conn, path, layout, directory, since_ms, &mut out);
+    // Version 2 first, and its ids remembered, because upgrading copies the
+    // old rows into the new tables **with the same primary keys**: on this
+    // machine 4,518 of 4,532 version 1 messages are also version 2 rows. The
+    // archive would collapse them on the event id, but the live meter folds
+    // what it is handed, so a session would have read every migrated turn
+    // twice.
+    let mut seen = HashSet::new();
+    for layout in [Layout::V2, Layout::V1] {
+        read_layout(
+            &conn, path, layout, directory, since_ms, &mut seen, &mut out,
+        );
     }
     out.events.sort_by_key(|e| e.ts.utc_ms);
     out
@@ -154,6 +166,7 @@ fn read_layout(
     layout: Layout,
     directory: Option<&str>,
     since_ms: Option<i64>,
+    seen: &mut HashSet<String>,
     out: &mut ParseOutput,
 ) {
     if !has_table(conn, layout.messages()) {
@@ -228,6 +241,9 @@ fn read_layout(
         let Ok((id, session, time_created, data, directory)) = row else {
             continue;
         };
+        if !seen.insert(id.clone()) {
+            continue;
+        }
         let Ok(msg) = serde_json::from_str::<MessageData>(&data) else {
             out.warnings.push(Warning::MalformedLine {
                 path: path.to_path_buf(),
@@ -392,6 +408,48 @@ mod tests {
                 .is_empty()
         );
         assert!(out.warnings.is_empty());
+    }
+
+    /// Upgrading copies version 1 rows into the version 2 tables under the
+    /// same ids. Counted once, or every migrated turn is worth double in a
+    /// live session's reading.
+    #[test]
+    fn a_message_in_both_schemas_is_counted_once() {
+        let dir = "/Users/me/git/www";
+        let v1 = r#"{"role":"assistant","modelID":"opencode/big","tokens":{"input":10,"output":5},"cost":0}"#;
+        let v2 = r#"{"model":{"id":"opencode/big"},"tokens":{"input":10,"output":5},"cost":0}"#;
+        let path = temp_db_v2(&[("msg1", "ses1", 10, v2, dir)]);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, path TEXT);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session (id, directory, path) VALUES ('ses1', ?1, '')",
+            rusqlite::params![dir],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data) VALUES ('msg1', 'ses1', 10, ?1)",
+            rusqlite::params![v1],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data) VALUES ('msg2', 'ses1', 11, ?1)",
+            rusqlite::params![v1],
+        )
+        .unwrap();
+        drop(conn);
+        let out = parse_db_in(&path, Some(dir), None);
+        assert_eq!(out.events.len(), 2, "the shared id is one event, not two");
+        assert_eq!(
+            out.events
+                .iter()
+                .filter_map(|e| e.counters.input_fresh)
+                .sum::<u64>(),
+            20
+        );
     }
 
     #[test]
