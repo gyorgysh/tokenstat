@@ -518,8 +518,14 @@ struct ClientFilesView: View {
     var body: some View {
         List {
             if let errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(Theme.danger)
+                // The shared card rather than a red line: it knows what to say
+                // when the device is offline, and a file list is exactly where
+                // a tunnel failure used to arrive as a sentence about sockets.
+                ClientErrorCard(message: errorMessage) {
+                    Task { await load() }
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
             if loaded, children.isEmpty, errorMessage == nil {
                 ClientSectionEmpty(

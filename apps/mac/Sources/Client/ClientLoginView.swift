@@ -20,6 +20,7 @@ import SwiftUI
 /// says what actually happens instead.
 #if !os(macOS)
 struct ClientLoginView: View {
+    @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
     @Environment(AccountModel.self) private var account
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
     @State private var webURL: URL?
@@ -80,7 +81,13 @@ struct ClientLoginView: View {
                 }
 
                 if let message = account.errorMessage {
-                    Text(message)
+                    // Signing in is the one screen where "could not reach the
+                    // account" is not a partial failure: nothing happened at
+                    // all, and saying which is what stops somebody trying a
+                    // password they never typed.
+                    Text(connectivity?.isOffline == true
+                        ? "This device is offline. Sign in once it is back on the internet."
+                        : message)
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)

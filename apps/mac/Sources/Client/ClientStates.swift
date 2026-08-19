@@ -121,10 +121,36 @@ struct ClientErrorCard: View {
     var retry: (() -> Void)?
     @State private var showingDetail = false
 
+    /// Optional on purpose. Every screen inside the client has this, and a
+    /// card drawn somewhere that does not simply keeps the sentence it was
+    /// given rather than crashing over a missing model.
+    @Environment(ConnectivityModel.self) private var connectivity: ConnectivityModel?
+
     private var friendly: FriendlyError { FriendlyError.from(message) }
 
+    /// Offline rewrites the card, whatever the call happened to say.
+    ///
+    /// A device with no internet produces a different sentence per subsystem:
+    /// a timeout here, a refused socket there, a tunnel that cannot pair. All
+    /// of them have one cause and one answer, and a Retry that cannot work is
+    /// worse than no button. This is also what keeps a screen from
+    /// contradicting the chip in the top bar.
+    private var isOffline: Bool { connectivity?.isOffline ?? false }
+
+    private var offlineError: FriendlyError {
+        FriendlyError(
+            title: "You are offline",
+            message: "This device cannot reach the internet. It retries every "
+                + "\(Int(ConnectivityModel.retryInterval.components.seconds)) seconds, and "
+                + "everything comes back on its own.",
+            symbol: "wifi.slash",
+            actionTitle: nil,
+            raw: message.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
     var body: some View {
-        let error = friendly
+        let error = isOffline ? offlineError : friendly
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Image(systemName: error.symbol)

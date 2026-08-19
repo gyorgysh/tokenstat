@@ -23,12 +23,28 @@ struct ClientPaywallView: View {
 
     @State private var webURL: URL?
 
+    /// What a failed purchase says.
+    ///
+    /// A network fault during a purchase means the request never got anywhere,
+    /// and the one thing somebody needs to hear is that they were not charged.
+    /// Anything else keeps the store's own words: they are about the account
+    /// or the product, not about the connection.
+    private func purchaseFailureText(_ message: String) -> String {
+        let kind = NetworkClassifier.kind(code: "", message: message)
+        guard kind.isNetwork else { return message }
+        return "Could not reach the store, so nothing was charged. Try again once the "
+            + "connection is back."
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     if let message = store.errorMessage {
-                        Text(message)
+                        // A purchase that could not reach anything has to say
+                        // plainly that no money moved. Anything vaguer and
+                        // somebody presses buy again.
+                        Text(purchaseFailureText(message))
                             .font(ClientType.body)
                             .foregroundStyle(Theme.danger)
                             .frame(maxWidth: .infinity, alignment: .leading)
