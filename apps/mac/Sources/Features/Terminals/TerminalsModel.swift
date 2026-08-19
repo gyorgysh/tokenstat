@@ -44,6 +44,7 @@ final class TerminalsModel {
         // The wheel is a terminal-wide concern, not a per-session one, so it is
         // wired up once here rather than by whichever session appears first.
         TerminalWheelForwarder.install()
+        TerminalMouseForwarder.install()
     }
 
     var selected: TerminalSession? {

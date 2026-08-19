@@ -56,34 +56,30 @@ enum TerminalWheelForwarder {
         else { return event }
 
         let flags = event.deltaY > 0 ? wheelUp : wheelDown
-        let position = gridPosition(of: event, in: view, terminal: terminal)
+        let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
         // One wheel event covers several lines. Clamped, because a trackpad
         // flick reports a delta that would send a hundred events at once.
         let lines = min(5, max(1, Int(abs(event.deltaY).rounded())))
-        for _ in 0 ..< lines {
-            terminal.sendEvent(buttonFlags: flags, x: position.col, y: position.row)
+        // SGR, not SwiftTerm's last-write protocol. A program that enabled
+        // both 1006 and 1015 is left on urxvt inside SwiftTerm, and Grok
+        // does not read that encoding.
+        if let session = (view as? TerminalDropView)?.session {
+            for _ in 0 ..< lines {
+                session.sendBytes(
+                    TerminalMouse.sgr(
+                        button: flags,
+                        col: position.col + 1,
+                        row: position.row + 1,
+                        release: false
+                    )
+                )
+            }
+        } else {
+            for _ in 0 ..< lines {
+                terminal.sendEvent(buttonFlags: flags, x: position.col, y: position.row)
+            }
         }
         return nil
-    }
-
-    /// The cell under the pointer. Derived from the view's bounds and the grid
-    /// rather than from SwiftTerm's cell metrics, which it keeps to itself. A
-    /// wheel event only needs to name the pane it happened over, so being a
-    /// cell out at the edges costs nothing.
-    private static func gridPosition(
-        of event: NSEvent,
-        in view: TerminalView,
-        terminal: Terminal
-    ) -> (col: Int, row: Int) {
-        let cols = max(1, terminal.cols)
-        let rows = max(1, terminal.rows)
-        let bounds = view.bounds
-        guard bounds.width > 0, bounds.height > 0 else { return (0, 0) }
-        let point = view.convert(event.locationInWindow, from: nil)
-        let col = Int(point.x / (bounds.width / CGFloat(cols)))
-        // AppKit's origin is the bottom left, the terminal grid's is the top.
-        let row = Int((bounds.height - point.y) / (bounds.height / CGFloat(rows)))
-        return (min(cols - 1, max(0, col)), min(rows - 1, max(0, row)))
     }
 }
 #endif

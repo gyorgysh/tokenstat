@@ -1445,6 +1445,16 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         eventStream.continuation.yield(.write(bytes))
     }
 
+    /// Bytes that did not come from a key, still queued like one.
+    ///
+    /// Mouse reporting is a byte stream, the same as an arrow key. Bracketed
+    /// paste must not wrap it, or the program sees a paste instead of a click.
+    func sendBytes(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        wake()
+        eventStream.continuation.yield(.write(bytes))
+    }
+
     // MARK: - TerminalViewDelegate
 
     /// Keystrokes go back to the process. Bytes, not text: an escape sequence
