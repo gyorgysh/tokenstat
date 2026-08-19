@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- A build signed for development gets a sandbox device token, which the
+	     production APNs host answers with BadDeviceToken. The account stores
+	     which host a token belongs to, per device, so both can coexist. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

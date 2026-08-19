@@ -63,6 +63,7 @@ struct AccountView: View {
                     terminalCard
                     localModelsCard
                     #endif
+                    notificationsCard
                     licensesCard
                     deleteAccountCard
                     privacyNote
@@ -677,6 +678,82 @@ struct AccountView: View {
     private func machineIcon(_ machine: Machine, isThisMachine: Bool) -> String {
         if !machine.isHost { return "iphone" }
         return isThisMachine ? "laptopcomputer" : "desktopcomputer"
+    }
+
+    /// Being told when a run ends.
+    ///
+    /// Two different mechanisms behind one switch, because they are one
+    /// feature to the person using them. The Mac watches its own run list and
+    /// posts the notification itself, with no account and no network. A phone
+    /// with the app closed cannot watch anything, so it asks the account to
+    /// have Apple wake it, which is why that side needs signing in and this
+    /// one does not.
+    private var notificationsCard: some View {
+        Card(
+            title: "Notifications",
+            subtitle: "When an agent run finishes or stops for a question.",
+            mark: "mark_device"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                #if os(macOS)
+                toggleRow(
+                    "Tell me when a run finishes",
+                    detail: "Automations and workflows on this Mac. Nothing leaves the machine: this Mac is watching its own runs.",
+                    isOn: Binding(
+                        get: { RunNotifications.shared.isOn },
+                        set: { RunNotifications.shared.isOn = $0 }
+                    )
+                )
+                if let note = RunNotifications.shared.authorizationNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+                if RunNotifications.shared.isOn {
+                    HStack {
+                        Spacer()
+                        Button("Send a test", .preview) { RunNotifications.shared.sendTest() }
+                            .buttonStyle(AccentButtonStyle(small: true))
+                    }
+                }
+                #else
+                toggleRow(
+                    "Notify this device",
+                    detail: "Sent through Apple, so it arrives with the app closed. The notification says which machine and that a run ended, and carries nothing about the work.",
+                    isOn: Binding(
+                        get: { PushRegistrar.shared.isOn },
+                        set: { on in
+                            Task {
+                                if on {
+                                    await PushRegistrar.shared.enable()
+                                } else {
+                                    await PushRegistrar.shared.disable()
+                                }
+                            }
+                        }
+                    )
+                )
+                if let message = PushRegistrar.shared.errorMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+                if PushRegistrar.shared.isOn {
+                    HStack {
+                        Spacer()
+                        Button("Send a test", .preview) {
+                            Task { await PushRegistrar.shared.sendTest() }
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .disabled(PushRegistrar.shared.isWorking)
+                    }
+                }
+                #endif
+            }
+        }
+        #if os(macOS)
+        .task { await RunNotifications.shared.refreshAuthorization() }
+        #endif
     }
 
     private var licensesCard: some View {

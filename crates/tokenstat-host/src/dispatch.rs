@@ -1275,6 +1275,64 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             Ok(json!({"host": host}))
         }
 
+        // Push notifications. A phone with the app closed cannot see a run
+        // end, so it asks the account to be told. Registration is per device
+        // and repeated on every launch: iOS reissues the token when it likes,
+        // and the server keys devices by the token itself.
+        //
+        // The payload a device can ask for is a fixed reason, never text. See
+        // `tokenstat_sync::push` and the website's `lib/push.js`.
+        "push.register" => {
+            #[derive(Default, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RegisterParams {
+                token: String,
+                platform: String,
+                #[serde(default)]
+                environment: Option<String>,
+            }
+            let p: RegisterParams = parse(params)?;
+            if p.token.is_empty() {
+                return Err("push.register needs a device token".into());
+            }
+            tokenstat_sync::push::register_device(
+                &p.token,
+                &p.platform,
+                p.environment.as_deref().unwrap_or("production"),
+            )
+            .envelope()?;
+            Ok(json!({"registered": true}))
+        }
+
+        "push.unregister" => {
+            #[derive(Default, Deserialize)]
+            struct UnregisterParams {
+                token: String,
+            }
+            let p: UnregisterParams = parse(params)?;
+            if p.token.is_empty() {
+                return Err("push.unregister needs a device token".into());
+            }
+            tokenstat_sync::push::unregister_device(&p.token).envelope()?;
+            Ok(json!({"registered": false}))
+        }
+
+        // "Send a test notification", from the app's own settings. Answers how
+        // many devices took it, which is the only way somebody can tell the
+        // difference between "off" and "on but nothing has happened yet".
+        "push.test" => {
+            let sent =
+                tokenstat_sync::push::notify(tokenstat_sync::push::Reason::Test).envelope()?;
+            Ok(json!({
+                "sent": sent.devices,
+                // Whether the server has an APNs key at all. A test that sent
+                // to nobody and a server that cannot send are different
+                // answers and the settings row says different things.
+                "enabled": sent.enabled,
+                "signedIn": sent.signed_in,
+            }))
+        }
+
         // Opt-in plan-limits posting (P2). Stored in SyncConfig so CLI and app
         // share one switch. Default off.
         "config.limitsSync" => {

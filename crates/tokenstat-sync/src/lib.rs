@@ -40,6 +40,7 @@ pub mod opencode_limits;
 mod power;
 pub mod pricing;
 pub mod profile;
+pub mod push;
 pub mod schema;
 pub mod snapshot;
 pub mod update;

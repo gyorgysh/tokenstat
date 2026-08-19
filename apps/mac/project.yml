@@ -169,3 +169,26 @@ targets:
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      # Push notifications, iOS and iPadOS only.
+      #
+      # Scoped by SDK on purpose. The Mac notifies itself locally, which needs
+      # no entitlement, and putting `aps-environment` on the macOS build would
+      # make the Developer ID release need a provisioning profile it does not
+      # have today.
+      #
+      # Two files because the value is the environment: a development build's
+      # device token belongs to Apple's sandbox host and a TestFlight build's
+      # to production, and a token sent to the wrong one is refused with
+      # BadDeviceToken. The simulator keeps the development file: it cannot
+      # receive a real push either way, and it must still build.
+      #
+      # This needs Push Notifications enabled on the App ID in the developer
+      # account, and a provisioning profile regenerated after that. Without it
+      # a device build fails to sign rather than failing quietly at runtime.
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Entitlements/iOS-Debug.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Entitlements/iOS-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]: Entitlements/iOS-Release.entitlements
+          CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]: Entitlements/iOS-Debug.entitlements

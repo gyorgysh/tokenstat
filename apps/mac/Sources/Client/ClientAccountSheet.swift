@@ -89,6 +89,7 @@ private struct ClientAccountContent: View {
                         .padding(Theme.Space.xl)
                 }
 
+                notificationsCard
                 layoutCard
                 legalCard
                 licensesCard
@@ -479,6 +480,62 @@ private struct ClientAccountContent: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+
+    /// Notifications for this phone or iPad.
+    ///
+    /// A run finishes on a Mac. With this app closed there is nothing here to
+    /// notice it, so the account asks Apple to wake the device. That is the
+    /// whole reason this needs an account when the Mac's own version does not.
+    ///
+    /// What arrives is composed on the server from a fixed list of reasons and
+    /// the machine's own label. No folder name, no prompt, no path is eligible,
+    /// which is the same boundary sync keeps.
+    private var notificationsCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ClientSectionTitle(title: "Notifications", mark: "mark_device")
+            Toggle(isOn: Binding(
+                get: { PushRegistrar.shared.isOn },
+                set: { on in
+                    Task {
+                        if on {
+                            await PushRegistrar.shared.enable()
+                        } else {
+                            await PushRegistrar.shared.disable()
+                        }
+                    }
+                }
+            )) {
+                Text("Notify this device")
+                    .font(ClientType.label)
+            }
+            .tint(Theme.accent)
+            .disabled(!model.signedIn || PushRegistrar.shared.isWorking)
+            Text(model.signedIn
+                ? "When an agent run on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work."
+                : "Sign in first. A notification has to reach this device from your account.")
+                .font(ClientType.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let message = PushRegistrar.shared.errorMessage {
+                Text(message)
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if PushRegistrar.shared.isOn {
+                Button("Send a test", .preview) {
+                    Task { await PushRegistrar.shared.sendTest() }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.accent)
+                .font(ClientType.label)
+                .disabled(PushRegistrar.shared.isWorking)
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
     }
 
     private var licensesCard: some View {

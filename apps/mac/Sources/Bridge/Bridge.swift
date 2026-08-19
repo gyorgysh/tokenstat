@@ -406,6 +406,15 @@ enum Bridge {
         return code == "host_unreachable" || code == "host_timeout"
     }
 
+    /// Whether an error is "sign in first" rather than a fault.
+    ///
+    /// Push registration runs at launch whether or not anybody is signed in,
+    /// and a settings row that reports being signed out as a failure is noise
+    /// beside the sign-in button that is already on screen.
+    static func isSignedOutError(_ error: Error) -> Bool {
+        error.localizedDescription.localizedCaseInsensitiveContains("sign in")
+    }
+
     /// How many times a call is retried after repairing the host. The repair
     /// itself waits for the socket, so a host that is merely slow to boot is
     /// given this many chances to answer before an error is shown.
@@ -926,6 +935,45 @@ extension Bridge {
             as: LimitsSyncState.self
         )
     }
+
+    // MARK: - Push notifications
+
+    /// Tell the account where to reach this device.
+    ///
+    /// `environment` is the Apple host the token belongs to, sandbox for a
+    /// development build and production for a shipped one. The account keeps
+    /// it per device, because a token minted for one is refused by the other.
+    static func pushRegister(token: String, platform: String, environment: String) async throws {
+        _ = try await background(
+            "push.register",
+            ["token": token, "platform": platform, "environment": environment],
+            as: PushRegistration.self
+        )
+    }
+
+    static func pushUnregister(token: String) async throws {
+        _ = try await background("push.unregister", ["token": token], as: PushRegistration.self)
+    }
+
+    /// Ask the account to send this device a test notification.
+    ///
+    /// Answers how many devices took it, and whether the server can send at
+    /// all: a test that reached nobody and a server with no APNs key look the
+    /// same from here otherwise, and they need different words.
+    static func pushTest() async throws -> PushTestResult {
+        try await background("push.test", as: PushTestResult.self)
+    }
+}
+
+private struct PushRegistration: Codable, Sendable {
+    var registered: Bool
+}
+
+struct PushTestResult: Codable, Sendable {
+    var sent: Int
+    /// False when the server has no APNs key configured.
+    var enabled: Bool = true
+    var signedIn: Bool = false
 }
 
 // MARK: - Workspaces

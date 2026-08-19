@@ -704,6 +704,12 @@ impl Store {
                     NodeOutcome::Gate => {
                         run.status = "waiting".into();
                         let _ = self.upsert_run(run);
+                        // A gate is the one state that cannot resolve itself.
+                        // Worth waking a phone for, where a finished run is
+                        // only worth telling.
+                        tokenstat_sync::push::notify_in_background(
+                            tokenstat_sync::push::Reason::RunNeedsInput,
+                        );
                         return;
                     }
                     NodeOutcome::Done => {}
@@ -718,6 +724,14 @@ impl Store {
         run.current_node_id = None;
         self.kill_live(run);
         let _ = self.upsert_run(run.clone());
+        // A phone with the app closed has no other way to learn this. The Mac
+        // sees it for itself and notifies locally. "stopped" is somebody at
+        // the keyboard, so it stays quiet.
+        if status != "stopped" {
+            tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::for_exit(
+                status, None,
+            ));
+        }
     }
 
     fn run_node(&self, run: &mut WorkflowRun, node: &Node, workspace_path: &str) -> NodeOutcome {

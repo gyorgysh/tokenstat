@@ -1544,6 +1544,20 @@ impl Store {
         };
         let _ = manager.close(pty_id);
         self.finish_run(run_id, exit_code, status);
+        // Tell this account's phones, if it has any. Only here, at the end of
+        // a drain: the other `finish_run` callers are a run somebody stopped
+        // by hand and a launch that never started, and neither is news to the
+        // person who just pressed the button. A stopped run is not a failure
+        // either, so it goes out as "finished" or not at all.
+        //
+        // The Mac notifies itself locally from the app, so this is for a
+        // phone with the app closed. Fire and forget: a run that finished is
+        // finished whether or not Apple was reachable.
+        if status != "stopped" {
+            tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::for_exit(
+                status, exit_code,
+            ));
+        }
         if owns_slot {
             self.release_slot();
         }

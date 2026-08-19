@@ -29,6 +29,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HostOwnerLock.release()
     }
 }
+#else
+import UIKit
+
+/// The phone and tablet have one thing AppKit's delegate does not: the APNs
+/// device token, which arrives nowhere else. Everything else this app does at
+/// launch lives in `TokenstatApp.init`.
+final class ClientAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        MainActor.assumeIsolated {
+            PushRegistrar.shared.received(token: deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        MainActor.assumeIsolated {
+            PushRegistrar.shared.failed(error)
+        }
+    }
+}
 #endif
 
 extension Notification.Name {
@@ -59,6 +84,8 @@ extension Notification.Name {
 struct TokenstatApp: App {
     #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    #else
+    @UIApplicationDelegateAdaptor(ClientAppDelegate.self) private var delegate
     #endif
 
     /// Pick the transport before any view can call across it.
@@ -71,6 +98,15 @@ struct TokenstatApp: App {
         Self.adoptPreferencesFromPreviousBundleID()
         Self.excludeSecretsFromBackup()
         Bridge.connect()
+        // Before anything can deliver: a delegate installed later loses the
+        // callbacks for whatever arrived first, and on a Mac that is the
+        // difference between a banner and silence while the app is in front.
+        NotificationPresenter.install()
+        #if os(iOS)
+        // A token is only asked for when somebody has already said yes, and
+        // then on every launch, because iOS reissues them.
+        PushRegistrar.shared.refresh()
+        #endif
         // Before anything asks for a figure. A machine with no price book
         // renders every value as unknown, and on a platform with no CLI and no
         // daemon the bundled book is the only one there will be until a refresh

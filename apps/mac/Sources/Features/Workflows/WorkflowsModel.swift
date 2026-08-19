@@ -94,6 +94,9 @@ final class WorkflowsModel {
             async let a = Bridge.automations()
             graphs = try await g
             runs = try await r
+            #if os(macOS)
+            RunNotifications.shared.settle(workflows: runs)
+            #endif
             backends = try await b
             jobs = try await a
             hasLoaded = true
@@ -114,6 +117,9 @@ final class WorkflowsModel {
             async let r = Bridge.workflowRuns()
             graphs = try await g
             runs = try await r
+            #if os(macOS)
+            RunNotifications.shared.settle(workflows: runs)
+            #endif
         } catch {
             // The next tick tries again.
         }
@@ -777,6 +783,9 @@ final class WorkflowsModel {
             let latest = try await Bridge.workflowRuns()
             let before = runs.first { $0.id == selectedRunID }
             runs = latest
+            #if os(macOS)
+            RunNotifications.shared.settle(workflows: runs)
+            #endif
             let after = runs.first { $0.id == selectedRunID }
             if let before, let after, before.status != after.status, !after.isLive {
                 stopPolling()

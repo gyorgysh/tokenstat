@@ -106,6 +106,9 @@ final class AutomationsModel {
             async let q = Bridge.automationQueue()
             jobs = try await j
             runs = try await r
+            #if os(macOS)
+            RunNotifications.shared.settle(automations: runs)
+            #endif
             backends = try await b
             if let queue = try? await q {
                 applyQueue(queue)
@@ -194,6 +197,12 @@ final class AutomationsModel {
             async let r = Bridge.automationRuns()
             jobs = try await j
             runs = try await r
+            // Every path that replaces the run list feeds the notifier, so
+            // there is one answer to "did something just finish" rather than
+            // one per screen that happens to be open.
+            #if os(macOS)
+            RunNotifications.shared.settle(automations: runs)
+            #endif
         } catch {
             // The next tick tries again.
         }
