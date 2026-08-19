@@ -83,6 +83,12 @@ ALLOWED = [
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
     ("Client/ClientWorkspaceNotesView.swift", "startEditing(note)"),
+    # The iPad sidebar's tree. A folder, one of its sections and a session in
+    # it are each a whole row: the glyph is inside the label the row draws,
+    # and a second one on the button would be the same mark twice.
+    ("Client/ClientSidebarRoot.swift", "folderLabel(folder)"),
+    ("Client/ClientSidebarRoot.swift", "sectionLabel(section, in: folder)"),
+    ("Client/ClientSidebarRoot.swift", "sessionLabel(session)"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
