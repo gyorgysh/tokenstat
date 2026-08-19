@@ -9,7 +9,7 @@ use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
     antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, grok,
-    openclaw, opencode, zed,
+    hermes, kilo, openclaw, opencode, pi, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -55,6 +55,8 @@ from_parsed!(
     openclaw::ParseOutput,
     zed::ParseOutput,
     copilot::ParseOutput,
+    pi::ParseOutput,
+    hermes::ParseOutput,
 );
 
 impl FileOutcome {
@@ -293,6 +295,49 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
             &mut marks_to_store,
             vec![outcome],
         );
+    }
+
+    // Kilo Code: OpenCode's schema under its own name, so the same reader
+    // against a different file. See `sources::kilo`.
+    if let Some(db) = kilo::discover(&home) {
+        report.files_found += 1;
+        let outcome = read_db_shard(&db, &marks, |p| kilo::parse_db(p).into());
+        absorb(
+            &mut report,
+            &mut all_events,
+            &mut marks_to_store,
+            vec![outcome],
+        );
+    }
+
+    // Hermes Agent: SQLite, already rolled up per session and model. Its rows
+    // grow rather than being appended to, which the archive's max-on-conflict
+    // upsert handles. See `sources::hermes`.
+    if let Some(db) = hermes::discover(&home) {
+        report.files_found += 1;
+        let outcome = read_db_shard(&db, &marks, |p| hermes::parse_db(p).into());
+        absorb(
+            &mut report,
+            &mut all_events,
+            &mut marks_to_store,
+            vec![outcome],
+        );
+    }
+
+    // Pi: JSONL, one file per session, appended to. Read from the last offset
+    // like Claude Code's transcripts.
+    if let Some(sessions) = pi::discover(&home) {
+        let files = pi::shards(&sessions);
+        report.files_found += files.len() as u64;
+        let parsed: Vec<_> = files
+            .par_iter()
+            .map(|path| {
+                read_shard(path, &marks, |p, text| {
+                    pi::parse_file(p, &sessions, text).into()
+                })
+            })
+            .collect();
+        absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
     }
 
     // Cline: whole-document JSON. Always re-parse the full file on change;

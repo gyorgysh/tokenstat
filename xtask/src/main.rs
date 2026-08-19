@@ -63,7 +63,88 @@ const CLAUDE_ALLOW: &[&str] = &[
 /// Fields holding an identifier that must be replaced but whose equality
 /// relationships have to survive, or the deduplication fixtures stop testing
 /// anything.
-const ID_FIELDS: &[&str] = &["requestId", "uuid", "parentUuid", "sessionId", "message.id"];
+const ID_FIELDS: &[&str] = &[
+    "requestId",
+    "uuid",
+    "parentUuid",
+    "sessionId",
+    "message.id",
+    // Pi keeps the event id and its parent at the top level.
+    "id",
+    "parentId",
+];
+
+/// Keys a Pi fixture may keep.
+///
+/// Its own allowlist rather than a wider shared one: a key that means counters
+/// in one tool can mean content in another, and the point of an allowlist is
+/// that adding a tool cannot quietly widen what an existing one publishes.
+///
+/// `cwd` is deliberately absent. It is an absolute path to somebody's work, the
+/// parser only ever takes its last component, and a fixture does not need a
+/// real one to prove that.
+const PI_ALLOW: &[&str] = &[
+    "type",
+    "id",
+    "parentId",
+    "timestamp",
+    "version",
+    "provider",
+    "modelId",
+    "message.role",
+    "message.model",
+    "message.usage.input",
+    "message.usage.output",
+    "message.usage.cacheRead",
+    "message.usage.cacheWrite",
+    "message.usage.reasoning",
+    "message.usage.totalTokens",
+    "message.usage.cost.input",
+    "message.usage.cost.output",
+    "message.usage.cost.cacheRead",
+    "message.usage.cost.cacheWrite",
+    "message.usage.cost.total",
+];
+
+/// Which tool's logs are being redacted.
+#[derive(Clone, Copy, PartialEq)]
+enum Profile {
+    ClaudeCode,
+    Pi,
+}
+
+impl Profile {
+    fn parse(name: &str) -> Result<Self> {
+        match name {
+            "claude" | "claude_code" => Ok(Self::ClaudeCode),
+            "pi" => Ok(Self::Pi),
+            other => anyhow::bail!("unknown redaction profile: {other} (claude_code, pi)"),
+        }
+    }
+
+    fn allow(self) -> &'static [&'static str] {
+        match self {
+            Self::ClaudeCode => CLAUDE_ALLOW,
+            Self::Pi => PI_ALLOW,
+        }
+    }
+
+    /// Whether this line is worth keeping. Only rows that carry counters are,
+    /// which for Pi also means the session header is dropped: it exists to
+    /// carry `cwd`, and that is the one field a fixture must not have.
+    fn keeps(self, obj: &serde_json::Map<String, Value>) -> bool {
+        match self {
+            Self::ClaudeCode => obj.get("type").and_then(Value::as_str) == Some("assistant"),
+            Self::Pi => {
+                obj.get("type").and_then(Value::as_str) == Some("message")
+                    && obj
+                        .get("message")
+                        .and_then(Value::as_object)
+                        .is_some_and(|m| m.contains_key("usage"))
+            }
+        }
+    }
+}
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -71,14 +152,18 @@ fn main() -> Result<()> {
         Some("redact") => {
             let input = args
                 .next()
-                .context("usage: xtask redact <input> <output> [max]")?;
+                .context("usage: xtask redact <input> <output> [max] [profile]")?;
             let output = args
                 .next()
-                .context("usage: xtask redact <input> <output> [max]")?;
+                .context("usage: xtask redact <input> <output> [max] [profile]")?;
             // Fixtures are read by humans and live in git forever, so they stay
             // small on purpose. A whole project directory is 15 MB.
             let max = args.next().and_then(|v| v.parse().ok()).unwrap_or(8);
-            redact(Path::new(&input), Path::new(&output), max)
+            let profile = match args.next() {
+                Some(name) => Profile::parse(&name)?,
+                None => Profile::ClaudeCode,
+            };
+            redact(Path::new(&input), Path::new(&output), max, profile)
         }
         Some("notices") => {
             // Generated into target/ on purpose: a tracked generated file is
@@ -153,7 +238,7 @@ fn pricing_seed(out: &Path) -> Result<()> {
     }
 }
 
-fn redact(input: &Path, out_dir: &Path, max_files: usize) -> Result<()> {
+fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> Result<()> {
     let files: Vec<PathBuf> = if input.is_dir() {
         walkdir::WalkDir::new(input)
             .into_iter()
@@ -183,10 +268,10 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize) -> Result<()> {
                 continue;
             };
             // Only usage-bearing rows are worth keeping in a fixture.
-            if obj.get("type").and_then(Value::as_str) != Some("assistant") {
+            if !profile.keeps(obj) {
                 continue;
             }
-            let filtered = filter_object(obj, "", CLAUDE_ALLOW, &mut names);
+            let filtered = filter_object(obj, "", profile.allow(), &mut names);
             kept.push_str(&serde_json::to_string(&Value::Object(filtered))?);
             kept.push('\n');
         }

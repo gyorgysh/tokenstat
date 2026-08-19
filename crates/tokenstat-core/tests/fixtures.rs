@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use tokenstat_core::sources::claude_code;
+use tokenstat_core::sources::{claude_code, pi};
 
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -138,10 +138,54 @@ fn committed_fixtures_contain_no_long_strings() {
     }
 }
 
+/// Keys any committed Pi fixture may contain.
+///
+/// A second list rather than a wider first one. The two tools spell their
+/// counters differently, and a shared list would let a key that is safe in one
+/// of them through in the other, which is the whole failure this guard exists
+/// to prevent.
+///
+/// `cwd` is not here on purpose: Pi's session header carries an absolute path
+/// and no fixture needs one.
+const PI_ALLOWED_KEYS: &[&str] = &[
+    "type",
+    "id",
+    "parentId",
+    "timestamp",
+    "version",
+    "provider",
+    "modelId",
+    "message",
+    "role",
+    "model",
+    "usage",
+    "input",
+    "output",
+    "cacheRead",
+    "cacheWrite",
+    "reasoning",
+    "totalTokens",
+    "cost",
+    "total",
+];
+
+/// Which allowlist a fixture is held to, by the directory it sits in.
+///
+/// An unknown directory gets the strictest list rather than a free pass, so
+/// adding fixtures for a new tool without saying what it may contain fails
+/// loudly instead of publishing whatever the redactor happened to keep.
+fn allowlist_for(path: &Path) -> &'static [&'static str] {
+    if path.components().any(|c| c.as_os_str() == "pi") {
+        PI_ALLOWED_KEYS
+    } else {
+        ALLOWED_KEYS
+    }
+}
+
 #[test]
 fn committed_fixtures_use_only_allowlisted_keys() {
-    let allowed: HashSet<&str> = ALLOWED_KEYS.iter().copied().collect();
     for path in fixture_files() {
+        let allowed: HashSet<&str> = allowlist_for(&path).iter().copied().collect();
         let contents = std::fs::read_to_string(&path).unwrap();
         for (n, line) in contents.lines().enumerate() {
             let v: serde_json::Value = serde_json::from_str(line).unwrap();
@@ -178,6 +222,57 @@ fn parse_dir(dir: &Path) -> Vec<tokenstat_core::UsageEvent> {
         events.extend(out.events);
     }
     events
+}
+
+#[test]
+fn pi_fixtures_parse_into_events() {
+    let dir = fixtures_root().join("pi");
+    if !dir.is_dir() {
+        return;
+    }
+    let mut events = Vec::new();
+    for path in walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let contents = std::fs::read_to_string(path.path()).unwrap();
+        let out = pi::parse_file(path.path(), &dir, &contents);
+        assert!(
+            out.warnings.is_empty(),
+            "{}: unexpected warnings {:?}",
+            path.path().display(),
+            out.warnings
+        );
+        events.extend(out.events);
+    }
+    assert!(!events.is_empty(), "fixtures produced no events");
+
+    // The redacted files keep the interrupted turns, which is the point: they
+    // are in a real session and must not be counted.
+    assert!(
+        events
+            .iter()
+            .all(|e| e.counters.input_fresh.unwrap_or(0) > 0 || e.counters.output.unwrap_or(0) > 0),
+        "an all-zero turn became an event"
+    );
+
+    // Every event is its own turn. A file re-read must not add a second copy,
+    // which is what the id being the vendor's own event id buys.
+    let unique: HashSet<_> = events.iter().map(|e| e.id).collect();
+    assert_eq!(unique.len(), events.len(), "two turns share an id");
+
+    // Reasoning is inside output, so it can never exceed it.
+    for e in &events {
+        if let (Some(reasoning), Some(output)) =
+            (e.extras.reasoning_within_output, e.counters.output)
+        {
+            assert!(
+                reasoning <= output,
+                "reasoning {reasoning} exceeds output {output}, so it is not inside it"
+            );
+        }
+    }
 }
 
 #[test]

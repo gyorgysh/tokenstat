@@ -38,7 +38,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use tokenstat_core::model::BillingMode;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
-use tokenstat_core::sources::{antigravity_cli, claude_code, codex, grok, opencode};
+use tokenstat_core::sources::{
+    antigravity_cli, claude_code, codex, grok, hermes, kilo, opencode, pi,
+};
 use tokenstat_core::{Catalog, UsageEvent};
 
 /// What a front end can draw for one live session.
@@ -74,6 +76,9 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "grok" => grok_events(cwd)?,
         "codex" => codex_events(cwd)?,
         "opencode" => opencode_events(cwd, started_at_ms)?,
+        "kilo" => kilo_events(cwd, started_at_ms)?,
+        "hermes" => hermes_events(cwd, started_at_ms)?,
+        "pi" => pi_events(cwd)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -262,6 +267,9 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "grok" => grok::discover(&home).is_some(),
         "codex" => codex::discover(&home).is_some(),
         "opencode" => opencode::discover(&home).is_some(),
+        "kilo" => kilo::discover(&home).is_some(),
+        "hermes" => hermes::discover(&home).is_some(),
+        "pi" => pi::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -276,6 +284,11 @@ fn harness_name(command: &str) -> Option<&'static str> {
         // The launcher ships a second OpenCode tile for a side-by-side
         // install. Same logs, same database, so the same reader.
         "opencode" | "opencode2" => Some("opencode"),
+        // Kilo Code forked OpenCode but keeps its own database, so it is its
+        // own harness here rather than another name for that one.
+        "kilo" | "kilocode" => Some("kilo"),
+        "hermes" => Some("hermes"),
+        "pi" => Some("pi"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -414,6 +427,67 @@ fn opencode_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>
         opencode::parse_db_in(path, Some(cwd), Some(floor)).events
     })?;
     (!events.is_empty()).then_some(events)
+}
+
+/// Kilo Code's database, narrowed the same way OpenCode's is. Same schema,
+/// same reason for the narrowing.
+fn kilo_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let db = kilo::discover(&home)?;
+    let floor = started_at_ms as i64 - GRACE_MS;
+    let scope = format!("{cwd}#{floor}");
+    let events = cached_db_events(&db, &scope, |path| {
+        kilo::parse_db_in(path, Some(cwd), Some(floor)).events
+    })?;
+    (!events.is_empty()).then_some(events)
+}
+
+/// Hermes's state database, for this folder since this session started.
+///
+/// Its rows are running totals rather than per-call records, so a reading here
+/// is the session's total so far rather than a sum of turns. That is the same
+/// number either way while only one session of it is running in a folder,
+/// which is the case the meter is for.
+fn hermes_events(cwd: &str, started_at_ms: u64) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let db = hermes::discover(&home)?;
+    let floor = started_at_ms as i64 - GRACE_MS;
+    let scope = format!("{cwd}#{floor}");
+    let events = cached_db_events(&db, &scope, |path| {
+        hermes::parse_db_in(path, Some(cwd), Some(floor)).events
+    })?;
+    (!events.is_empty()).then_some(events)
+}
+
+/// Pi's newest session log for this folder.
+///
+/// Pi files sessions under a directory named after the folder, so the folder
+/// is found by name rather than by reading heads: `/Users/x/git/demo` is
+/// `--Users-x-git-demo--`. That encoding is lossy in the other direction, so
+/// this only ever goes forwards, from the folder we already know to the
+/// directory it must be in.
+fn pi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let root = pi::discover(&home)?;
+    let dir = root.join(pi_dir_name(cwd));
+    let path = resolve_log("pi", cwd, || {
+        let files = std::fs::read_dir(&dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+            .collect();
+        newest_first(files).into_iter().next()
+    })?;
+    let root_for_parse = root.clone();
+    cached_events(&path, |contents| {
+        pi::parse_file(&path, &root_for_parse, contents).events
+    })
+}
+
+/// How Pi spells a folder as a directory name.
+fn pi_dir_name(cwd: &str) -> String {
+    format!("--{}--", cwd.trim_matches('/').replace('/', "-"))
 }
 
 /// The Antigravity conversation whose workspace is this folder.
@@ -983,6 +1057,15 @@ mod tests {
     }
 
     #[test]
+    fn pi_names_a_folders_directory_the_way_pi_does() {
+        assert_eq!(pi_dir_name("/Users/x/git/demo"), "--Users-x-git-demo--");
+        assert_eq!(pi_dir_name("/private/tmp"), "--private-tmp--");
+        // A trailing separator must not add an empty part, or the directory
+        // gains a third dash and is never found.
+        assert_eq!(pi_dir_name("/Users/x/git/"), "--Users-x-git--");
+    }
+
+    #[test]
     fn unsupported_harnesses_have_no_reading() {
         assert_eq!(harness_name("zsh"), None);
         assert_eq!(harness_name("cline"), None);
@@ -996,6 +1079,12 @@ mod tests {
         assert_eq!(harness_name("/usr/local/bin/opencode"), Some("opencode"));
         // The launcher's second OpenCode tile is the same reader.
         assert_eq!(harness_name("opencode2"), Some("opencode"));
+        // Kilo forked OpenCode and kept the schema, but not the database, so
+        // it must not resolve to that reader.
+        assert_eq!(harness_name("kilo"), Some("kilo"));
+        assert_eq!(harness_name("kilocode"), Some("kilo"));
+        assert_eq!(harness_name("hermes"), Some("hermes"));
+        assert_eq!(harness_name("pi"), Some("pi"));
         assert_eq!(harness_name("agy"), Some("antigravity"));
     }
 

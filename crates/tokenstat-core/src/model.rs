@@ -32,6 +32,15 @@ pub enum SourceId {
     OpenClaw,
     Zed,
     Copilot,
+    /// Pi's CLI agent. JSONL sessions, one file per session under the folder
+    /// it was run in.
+    Pi,
+    /// Hermes Agent. One SQLite state file, with usage already rolled up per
+    /// session and model.
+    Hermes,
+    /// Kilo Code's CLI. An OpenCode fork, so the same database shape under its
+    /// own name, and counted as its own tool because it is one.
+    Kilo,
 }
 
 impl SourceId {
@@ -49,6 +58,9 @@ impl SourceId {
             SourceId::OpenClaw => "openclaw",
             SourceId::Zed => "zed",
             SourceId::Copilot => "copilot",
+            SourceId::Pi => "pi",
+            SourceId::Hermes => "hermes",
+            SourceId::Kilo => "kilo",
         }
     }
 
@@ -66,6 +78,9 @@ impl SourceId {
             SourceId::OpenClaw => "OpenClaw",
             SourceId::Zed => "Zed",
             SourceId::Copilot => "Copilot CLI",
+            SourceId::Pi => "Pi",
+            SourceId::Hermes => "Hermes Agent",
+            SourceId::Kilo => "Kilo Code",
         }
     }
 
@@ -111,6 +126,9 @@ impl SourceId {
             "openclaw" => Some(Self::OpenClaw),
             "zed" => Some(Self::Zed),
             "copilot" => Some(Self::Copilot),
+            "pi" => Some(Self::Pi),
+            "hermes" => Some(Self::Hermes),
+            "kilo" => Some(Self::Kilo),
             _ => None,
         }
     }

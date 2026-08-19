@@ -89,6 +89,16 @@ pub fn parse_db(path: &Path) -> ParseOutput {
     parse_db_in(path, None, None)
 }
 
+/// The same read, for a fork that ships this schema under its own name.
+///
+/// Kilo Code's CLI is OpenCode with a different database file, so the tables,
+/// the JSON in `data` and the arithmetic are the same to the byte. Copying the
+/// reader to change two strings would mean fixing every future bug twice, so
+/// the source travels as an argument instead.
+pub fn parse_db_as(path: &Path, source: SourceId) -> ParseOutput {
+    parse_db_in_as(path, source, None, None)
+}
+
 /// Read the database, optionally narrowed to one folder and one span of time.
 ///
 /// The live meter asks about one folder since one spawn; the archive asks about
@@ -101,6 +111,16 @@ pub fn parse_db(path: &Path) -> ParseOutput {
 /// The directory is matched whole: a label is a basename and two checkouts can
 /// share one.
 pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) -> ParseOutput {
+    parse_db_in_as(path, SourceId::OpenCode, directory, since_ms)
+}
+
+/// `parse_db_in`, naming which tool the rows belong to. See `parse_db_as`.
+pub fn parse_db_in_as(
+    path: &Path,
+    source: SourceId,
+    directory: Option<&str>,
+    since_ms: Option<i64>,
+) -> ParseOutput {
     let mut out = ParseOutput::default();
     let conn = match rusqlite::Connection::open_with_flags(
         path,
@@ -125,7 +145,7 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
     let mut seen = HashSet::new();
     for layout in [Layout::V2, Layout::V1] {
         read_layout(
-            &conn, path, layout, directory, since_ms, &mut seen, &mut out,
+            &conn, path, layout, source, directory, since_ms, &mut seen, &mut out,
         );
     }
     out.events.sort_by_key(|e| e.ts.utc_ms);
@@ -160,10 +180,12 @@ impl Layout {
 /// A missing table is not a warning. An install that has only ever run one
 /// major version has only that version's tables, and saying so on every poll
 /// would turn the normal case into a complaint.
+#[allow(clippy::too_many_arguments)]
 fn read_layout(
     conn: &rusqlite::Connection,
     path: &Path,
     layout: Layout,
+    source: SourceId,
     directory: Option<&str>,
     since_ms: Option<i64>,
     seen: &mut HashSet<String>,
@@ -281,8 +303,11 @@ fn read_layout(
         // Reasoning is additive in OpenCode's own total, so fold it into output
         // and keep the split in extras for transparency.
         out.events.push(UsageEvent {
-            id: EventId::derive(&["opencode", &id]),
-            source: SourceId::OpenCode,
+            // The tool's own name in the id, so a machine that runs both
+            // OpenCode and a fork of it cannot collide on a message id that is
+            // only unique inside one database.
+            id: EventId::derive(&[source.as_str(), &id]),
+            source,
             ts: Timestamp::from_ms(ts_ms),
             model,
             session,
