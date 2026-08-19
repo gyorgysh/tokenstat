@@ -1088,6 +1088,12 @@ struct ClientCardList<Content: View>: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        // Rows carry the gap below them and nothing above, so without this the
+        // first card sits flush against whatever the screen puts over the list.
+        // On notes that is the composer's own border, and an empty state that
+        // touches the field it belongs to reads as part of it.
+        .contentMargins(.top, Theme.Space.m, for: .scrollContent)
+        .contentMargins(.bottom, Theme.Space.l, for: .scrollContent)
         .background(Theme.background)
         .animation(.easeInOut(duration: 0.22), value: isLoaded)
         .navigationTitle(title)
@@ -1116,11 +1122,15 @@ struct ClientCardList<Content: View>: View {
 
 extension View {
     /// A card as a list row: our spacing, no separator, no system fill.
+    ///
+    /// The gap lives below the row rather than around it, so the list's own
+    /// content margins own both ends and cards cannot end up twice as far
+    /// apart as they are from the top of the screen.
     func clientCardRow() -> some View {
         listRowInsets(EdgeInsets(
             top: 0,
             leading: Theme.Space.m,
-            bottom: Theme.Space.s,
+            bottom: Theme.Space.m,
             trailing: Theme.Space.m
         ))
         .listRowSeparator(.hidden)

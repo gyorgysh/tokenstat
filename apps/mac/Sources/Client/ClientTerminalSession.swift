@@ -554,21 +554,26 @@ struct ClientTerminalScreen: View {
             }
 
             ClientTerminalRepresentable(session: session)
-                .ignoresSafeArea(.container, edges: .bottom)
-                // Above the keyboard when it is up, above the home indicator
-                // when it is not. Either way it is where a thumb already is.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    ClientTerminalKeys(
-                        send: { session.sendBytes($0) },
-                        toggleKeyboard: { session.toggleKeyboard() },
-                        scrolls: Binding(
-                            get: { session.scrolls },
-                            set: { session.scrolls = $0 }
-                        )
-                    )
-                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // A row in the stack, not a `safeAreaInset`. The terminal is a
+            // UIKit view that draws across its whole frame and ignores the
+            // safe area it is handed, so an inset reserved nothing and the
+            // bar covered the last lines of output. Taking the space out of
+            // the layout is the only thing the terminal reflows around.
+            //
+            // Above the keyboard when it is up, above the home indicator when
+            // it is not. Either way it is where a thumb already is.
+            ClientTerminalKeys(
+                send: { session.sendBytes($0) },
+                toggleKeyboard: { session.toggleKeyboard() },
+                scrolls: Binding(
+                    get: { session.scrolls },
+                    set: { session.scrolls = $0 }
+                )
+            )
         }
-        .background(Color.black)
+        .background(Color.black.ignoresSafeArea())
         .navigationBarHidden(true)
         .onAppear {
             session.setForeground(true)

@@ -104,7 +104,14 @@ struct ClientTerminalKeys: View {
             .padding(.vertical, 6)
         }
         .scrollIndicators(.hidden)
-        .background(.bar)
+        // The keys stay above the home indicator, the material carries on
+        // past it. Container only: when the keyboard is up this bar rides on
+        // top of it and has nothing left to fill.
+        .background {
+            Rectangle()
+                .fill(.bar)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
         ) { _ in
