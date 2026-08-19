@@ -81,8 +81,27 @@ fn rename(params: &str) -> Result<Value, String> {
     }
     let p: NameParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     tokenstat_identity::set_machine_label(&p.name).map_err(|e| e.to_string())?;
-    // The whole identity back, not just the name. One shape for "who am I"
-    // means the caller replaces what it holds instead of patching a field.
+    push_name_to_account(&p.name);
+    identity()
+}
+
+/// Tell the account this machine's new name.
+///
+/// **Never in a test build.** This is one HTTP call against the real account
+/// with this machine's real credentials, and `TOKENSTAT_IDENTITY_DIR` does not
+/// redirect it: it moves the identity file, not the account. A unit test for
+/// renaming therefore renamed the developer's own machine on the website, and
+/// because the push runs on a detached thread that the process outlives by
+/// nothing, the test's own undo often never landed. The name it happened to
+/// use sat on the account afterwards.
+///
+/// The guard is `cfg!(test)` rather than an environment variable, because a
+/// person may legitimately set any variable and none of them should mean
+/// "do not update my account".
+fn push_name_to_account(name: &str) {
+    if cfg!(test) {
+        return;
+    }
     // With remote reach on, the account directory shows this name on the
     // other screens, so it is refreshed rather than waiting for a reconnect.
     crate::remote::register_if_tunnel_enabled();
@@ -94,16 +113,15 @@ fn rename(params: &str) -> Result<Value, String> {
     // then says this machine's own name, so "use the computer's name" leaves
     // the account showing that name rather than showing none.
     //
-    // On its own thread, like the registration above it: this is one HTTP
-    // round trip, and a rename must not sit there waiting for it on a machine
-    // that is offline. Best effort: no account, no call, no complaint.
-    let named = p.name.clone();
+    // On its own thread: this is one HTTP round trip, and a rename must not
+    // sit there waiting for it on a machine that is offline. Best effort: no
+    // account, no call, no complaint.
+    let named = name.to_string();
     std::thread::spawn(move || {
         if let Ok(machine_id) = tokenstat_sync::config::ensure_machine_id() {
             let _ = tokenstat_sync::profile::rename_machine(None, &machine_id, &named);
         }
     });
-    identity()
 }
 
 fn peers() -> Result<Value, String> {
