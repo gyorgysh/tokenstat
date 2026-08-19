@@ -2899,38 +2899,30 @@ private struct ActiveSessionRow: View {
 
     /// Line two: what this session is costing.
     ///
-    /// List-rate dollars and a short token total when the host meter has
-    /// spoken. CPU · RAM stay as the fallback, and move to the tooltip
-    /// once the meter lands. `nil` before either reading, so a row never
-    /// invents a zero.
+    /// Once the host can meter this harness, the three parts stay in the same
+    /// places even at zero: `0% ctx · $0.00 · 0k`. A lone `$0.00` looked like
+    /// a missing reading rather than a start. CPU · RAM stay the fallback
+    /// before any meter exists.
     private var stats: String? {
         if let meter = session.meter {
-            var parts: [String] = []
-            // Context leads. On a subscription it is the number that means
-            // something, and the money beside it is a list-rate equivalent
-            // that nobody is charged.
-            if let context = contextText { parts.append(context) }
-            if let micros = meter.costMicros {
-                parts.append(
-                    Money(
-                        micros: micros,
-                        estimated: meter.estimated,
-                        complete: meter.complete
-                    ).formatted
-                )
-            }
-            if meter.tokens > 0 {
-                parts.append(formatTokens(meter.tokens))
-            }
-            if !parts.isEmpty { return parts.joined(separator: " · ") }
+            let money = Money(
+                micros: meter.costMicros ?? 0,
+                estimated: meter.estimated,
+                complete: meter.complete
+            ).formatted
+            let tokens = meter.tokens == 0 ? "0k" : formatTokens(meter.tokens)
+            return "\(contextText) · \(money) · \(tokens)"
         }
         return resourceStats
     }
 
     /// The context reading: a percentage when a window is known, otherwise
     /// what the last turn sent. `~` when the window came from siblings.
-    private var contextText: String? {
-        guard let meter = session.meter, let used = meter.contextUsed else { return nil }
+    /// Zero before the first turn, so the row's shape does not change.
+    private var contextText: String {
+        guard let meter = session.meter, let used = meter.contextUsed else {
+            return "0% ctx"
+        }
         guard let window = meter.contextWindow, window > 0 else {
             return "\(formatTokens(used)) ctx"
         }
