@@ -174,9 +174,11 @@ struct ClientRootView: View {
             connection.attach(connectivity)
             // Every call that leaves this device reports here. Installed once,
             // at the root, so no screen has to remember to.
-            BridgeObserver.report = { method, error in
+            BridgeObserver.report = { method, peer, error in
                 guard let plane = NetworkPlane.of(method: method) else { return }
-                Task { @MainActor in connection.note(plane: plane, failure: error) }
+                Task { @MainActor in
+                    connection.note(plane: plane, peer: peer, failure: error)
+                }
             }
             // Offline, a call that has to leave the device fails now rather
             // than after its patience budget. See `BridgeObserver.precheck`.

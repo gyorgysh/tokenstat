@@ -161,9 +161,11 @@ struct RootView: View {
         .onAppear {
             connectivity.start()
             connection.attach(connectivity)
-            BridgeObserver.report = { method, error in
+            BridgeObserver.report = { method, peer, error in
                 guard let plane = NetworkPlane.of(method: method) else { return }
-                Task { @MainActor in connection.note(plane: plane, failure: error) }
+                Task { @MainActor in
+                    connection.note(plane: plane, peer: peer, failure: error)
+                }
             }
             // Offline, a call that has to leave the device fails now rather
             // than after its patience budget. See `BridgeObserver.precheck`.
@@ -1786,6 +1788,9 @@ struct RootView: View {
         // Machines: identity, peers, account directory. Parallel inside load().
         if !machines.isWarmed {
             await machines.load()
+            // So the connection card can name a machine rather than saying
+            // "computer" to somebody with four of them.
+            connection.setPeerNames(machines.peers)
         }
         guard !Task.isCancelled else { return }
 

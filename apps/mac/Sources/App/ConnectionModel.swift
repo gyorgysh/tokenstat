@@ -164,11 +164,27 @@ final class ConnectionModel {
     static let failuresBeforeUnwell = 2
 
     private(set) var serviceFailing = false
-    private(set) var peerFailing = false
     private(set) var lastServiceSuccess: Date?
     private(set) var lastPeerSuccess: Date?
     private var serviceFailures = 0
-    private var peerFailures = 0
+    /// Failures in a row, per machine.
+    ///
+    /// Per machine and not one number, because a machine asleep in a bag was
+    /// speaking for the one being worked on: the sidebar dials every approved
+    /// peer on a loop, so a laptop that is off failed every thirty seconds and
+    /// kept a single shared counter above the threshold for good.
+    private var peerFailures: [String: Int] = [:]
+    /// Machines that have answered at least once since this window opened.
+    ///
+    /// A machine is only worth a warning if it *was* reachable and stopped.
+    /// One that has never answered is not news, it is a machine that is off,
+    /// and Machines says so in the place somebody goes to ask.
+    private var peersSeenWorking: Set<String> = []
+    /// Machines that were working and are not now.
+    private(set) var unreachablePeers: Set<String> = []
+    /// Key to the name its owner gave it, so the card can say which machine.
+    /// Empty until something that lists peers hands them over.
+    private var peerNames: [String: String] = [:]
     private weak var connectivity: ConnectivityModel?
 
     func attach(_ connectivity: ConnectivityModel) {
@@ -177,6 +193,9 @@ final class ConnectionModel {
 
     var isOffline: Bool { connectivity?.isOffline ?? false }
 
+    /// Whether a machine that was reachable has stopped answering.
+    var peerFailing: Bool { !unreachablePeers.isEmpty }
+
     var severity: Severity {
         if isOffline { return .down }
         if serviceFailing { return .down }
@@ -184,11 +203,31 @@ final class ConnectionModel {
         return .ok
     }
 
+    /// Names for the machines this app knows about. Cheap to hand over on
+    /// every peer load, and it is what lets the card say "Studio" rather than
+    /// "Computer", which is the difference between news and a puzzle when an
+    /// account has four machines.
+    func setPeerNames(_ peers: [Peer]) {
+        for peer in peers where !peer.label.isEmpty {
+            peerNames[peer.key] = peer.label
+        }
+    }
+
+    /// The machine this card is about, when exactly one is unreachable and its
+    /// name is known.
+    private var unreachableName: String? {
+        guard unreachablePeers.count == 1, let key = unreachablePeers.first else { return nil }
+        return peerNames[key]
+    }
+
     /// Four words at most, for the chip.
     var title: String {
         if isOffline { return "Offline" }
         if serviceFailing { return "No connection" }
-        if peerFailing { return "Computer unreachable" }
+        if peerFailing {
+            if let name = unreachableName { return "\(name) unreachable" }
+            return unreachablePeers.count > 1 ? "Computers unreachable" : "Computer unreachable"
+        }
         return "Connected"
     }
 
@@ -203,15 +242,16 @@ final class ConnectionModel {
                 + "ones this device read."
         }
         if peerFailing {
-            return "The internet is fine and the computer is not on the tunnel. It is asleep, "
+            let subject = unreachableName ?? "the computer"
+            return "The internet is fine and \(subject) stopped answering. It is asleep, "
                 + "or tokenstat is not running there."
         }
         return "Everything is answering."
     }
 
-    /// A call came back. Success clears the plane it was on outright: one good
-    /// answer proves more than any number of failures suggested.
-    func note(plane: NetworkPlane, failure: Error?) {
+    /// A call came back. Success clears what it proves and nothing else: one
+    /// good answer from a machine proves that machine, not the next one.
+    func note(plane: NetworkPlane, peer: String?, failure: Error?) {
         guard let failure else {
             switch plane {
             case .account:
@@ -219,9 +259,11 @@ final class ConnectionModel {
                 serviceFailing = false
                 lastServiceSuccess = Date()
             case .peer:
-                peerFailures = 0
-                peerFailing = false
                 lastPeerSuccess = Date()
+                guard let peer else { return }
+                peerFailures[peer] = 0
+                peersSeenWorking.insert(peer)
+                unreachablePeers.remove(peer)
             }
             return
         }
@@ -229,18 +271,22 @@ final class ConnectionModel {
         guard kind.isNetwork else { return }
         // A peer that is absent says nothing about the service, and a service
         // that is down says nothing about that one machine.
-        if kind == .peerAbsent {
-            peerFailures += 1
-            peerFailing = peerFailures >= Self.failuresBeforeUnwell
+        if plane == .peer || kind == .peerAbsent {
+            guard let peer else { return }
+            let failures = (peerFailures[peer] ?? 0) + 1
+            peerFailures[peer] = failures
+            // Never seen working: it is off, not unreachable. Raising this for
+            // a machine that has been asleep all along is how an ambient
+            // warning becomes something people learn to ignore.
+            guard peersSeenWorking.contains(peer) else { return }
+            if failures >= Self.failuresBeforeUnwell {
+                unreachablePeers.insert(peer)
+            }
             return
         }
-        switch plane {
-        case .account:
+        if plane == .account {
             serviceFailures += 1
             serviceFailing = serviceFailures >= Self.failuresBeforeUnwell
-        case .peer:
-            peerFailures += 1
-            peerFailing = peerFailures >= Self.failuresBeforeUnwell
         }
     }
 
@@ -249,8 +295,12 @@ final class ConnectionModel {
     /// evidence about a network that no longer exists.
     func reset() {
         serviceFailures = 0
-        peerFailures = 0
+        peerFailures.removeAll()
         serviceFailing = false
-        peerFailing = false
+        unreachablePeers.removeAll()
+        // What each machine had proved is kept: a machine that answered five
+        // minutes ago is still one this app has seen working, and forgetting
+        // that would put every peer back behind the never-seen rule after any
+        // press of Try now.
     }
 }

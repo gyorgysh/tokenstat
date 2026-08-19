@@ -33,8 +33,13 @@ enum BridgeError: LocalizedError {
 /// at launch, the Mac may install one later, and with nothing installed this
 /// costs a nil check per call.
 enum BridgeObserver {
-    /// Method name, and the error it failed with, or nil when it worked.
-    nonisolated(unsafe) static var report: (@Sendable (String, Error?) -> Void)?
+    /// Method name, the peer it was addressed to when there was one, and the
+    /// error it failed with, or nil when it worked.
+    ///
+    /// The peer matters: "a machine is not answering" is a fact about that
+    /// machine, and folding every peer into one verdict made a laptop asleep in
+    /// a bag speak for the Mac being worked on.
+    nonisolated(unsafe) static var report: (@Sendable (String, String?, Error?) -> Void)?
 
     /// Asked before a call is made. Returning an error refuses it without
     /// going near the transport.
@@ -47,8 +52,8 @@ enum BridgeObserver {
     /// the one that would have recovered.
     nonisolated(unsafe) static var precheck: (@Sendable (String) -> Error?)?
 
-    static func note(_ method: String, _ error: Error?) {
-        report?(method, error)
+    static func note(_ method: String, peer: String?, _ error: Error?) {
+        report?(method, peer, error)
     }
 }
 
@@ -523,7 +528,7 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T {
-        try await observed(method) {
+        try await observed(method, peer: peerOf(params)) {
             try await offMainActor {
                 try invoke(method, params, patience: patience, as: type)
             }
@@ -536,20 +541,26 @@ enum Bridge {
     /// call is reported once even though `invoke` is reached several ways.
     private static func observed<T: Sendable>(
         _ method: String,
+        peer: String?,
         _ work: () async throws -> T
     ) async throws -> T {
         if let refusal = BridgeObserver.precheck?(method) {
-            BridgeObserver.note(method, refusal)
+            BridgeObserver.note(method, peer: peer, refusal)
             throw refusal
         }
         do {
             let value = try await work()
-            BridgeObserver.note(method, nil)
+            BridgeObserver.note(method, peer: peer, nil)
             return value
         } catch {
-            BridgeObserver.note(method, error)
+            BridgeObserver.note(method, peer: peer, error)
             throw error
         }
+    }
+
+    /// Which machine a call was addressed to, for `remote.call`.
+    private static func peerOf(_ params: [String: Any]) -> String? {
+        params["peer"] as? String
     }
 
     /// A one-shot call the user is waiting on. Same decoding as `background`,
@@ -560,7 +571,7 @@ enum Bridge {
         _ params: [String: Any] = [:],
         as type: T.Type
     ) async throws -> T {
-        try await observed(method) {
+        try await observed(method, peer: peerOf(params)) {
             try await offMainActor {
                 let paramData = try JSONSerialization.data(withJSONObject: params)
                 let paramString = String(decoding: paramData, as: UTF8.self)
@@ -638,7 +649,7 @@ enum Bridge {
         patience: TimeInterval = Patience.standard,
         as type: T.Type
     ) async throws -> T? {
-        try await observed(method) {
+        try await observed(method, peer: peerOf(params)) {
             try await offMainActor {
                 try invokeOptional(method, params, patience: patience, as: type)
             }

@@ -767,6 +767,9 @@ final class WorkspacesModel {
     /// last-known folders stay; a machine that keeps failing is gone, and its
     /// folders must not linger in the sidebar pretending to be reachable.
     private var remotePeerFailures: [String: Int] = [:]
+    /// Peers that have answered a workspace list at least once this session.
+    /// The ones that never do are dialled far less often. See `loadRemote`.
+    private var remotePeerEverAnswered: Set<String> = []
     /// Peers the user explicitly disconnected. Their folders stay out of the
     /// sidebar until Connect is chosen again; without this the peer sweep
     /// would re-dial an approved, reachable machine on its next pass and the
@@ -842,11 +845,22 @@ final class WorkspacesModel {
                     }
                     remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRefreshSeconds)
                     remotePeerFailures[peer.key] = 0
+                    remotePeerEverAnswered.insert(peer.key)
                     NotificationCenter.default.post(name: .remotePeerDidConnect, object: peer.key)
                 } catch {
-                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(Self.peerRetrySeconds)
                     let failures = (remotePeerFailures[peer.key] ?? 0) + 1
                     remotePeerFailures[peer.key] = failures
+                    // A machine that answered before is worth asking again
+                    // soon: it is probably asleep and will be back. One that
+                    // has never answered at all is usually a phone or a tablet,
+                    // which cannot host a folder in the first place, and asking
+                    // it every thirty seconds for the rest of the session is
+                    // three pointless tunnel dials a minute, forever.
+                    let neverAnswered = !remotePeerEverAnswered.contains(peer.key)
+                    let wait = neverAnswered && failures >= Self.failuresBeforeBackingOff
+                        ? Self.peerColdRetrySeconds
+                        : Self.peerRetrySeconds
+                    remotePeerNextDial[peer.key] = Date().addingTimeInterval(wait)
                     if failures >= Self.maxPeerFailures {
                         let hadFolders = remoteFolders.removeValue(forKey: peer.key) != nil
                         // Clear the Devices "Connected" mark without suppressing
@@ -888,6 +902,14 @@ final class WorkspacesModel {
     /// How long a peer that did not answer is left alone. Shorter, because a
     /// machine waking up should show up reasonably soon.
     private static let peerRetrySeconds: TimeInterval = 30
+    /// How long a peer that has never answered is left alone, once it has
+    /// missed enough times to have made the point. An approved peer is not
+    /// necessarily a machine that can host: an iPhone and an iPad are paired
+    /// like anything else and have no workspaces to list, because the mobile
+    /// build has no host in it at all.
+    private static let peerColdRetrySeconds: TimeInterval = 600
+    /// Misses before a peer that has never answered moves to the slow rate.
+    private static let failuresBeforeBackingOff = 3
     /// Consecutive failures before a peer's folders leave the sidebar.
     private static let maxPeerFailures = 2
 
@@ -947,6 +969,11 @@ final class WorkspacesModel {
     /// allowed back and fetched immediately rather than after the next sweep.
     func reconnect(peer key: String) {
         suppressedPeers.remove(key)
+        // Clear the backoff too. Somebody pressing Connect is asking now, and
+        // a peer that had been dialled down to the slow rate would otherwise
+        // sit out most of the next ten minutes before being tried.
+        remotePeerNextDial.removeValue(forKey: key)
+        remotePeerFailures.removeValue(forKey: key)
         Task { await loadRemote() }
     }
 
