@@ -38,6 +38,21 @@ struct ClientTerminalKeys: View {
     /// what this bar last did, so a tap on the terminal keeps the key honest.
     @State private var keyboardUp = true
 
+    /// Whether this iPad has a keyboard plugged into it. Optional lookup: this
+    /// bar is also drawn on a phone, where nothing installs the model.
+    @Environment(PointerKeyboardModel.self) private var input: PointerKeyboardModel?
+
+    /// iPadOS will not show the on-screen keyboard while a hardware one is
+    /// attached. Not a setting, and not something an app can override: the
+    /// system suppresses its own keyboard and leaves this bar, which is
+    /// exactly what somebody sees when they press the key and nothing happens.
+    ///
+    /// So the key is not drawn. Nothing is covering the terminal for it to
+    /// dismiss, and a control whose only outcome is nothing is worse than no
+    /// control. Typing still reaches the terminal and every other key on this
+    /// bar still works, because none of them are the software keyboard.
+    private var canToggleKeyboard: Bool { input?.hasKeyboard != true }
+
     private enum Key {
         static let escape: [UInt8] = [0x1B]
         static let tab: [UInt8] = [0x09]
@@ -57,11 +72,13 @@ struct ClientTerminalKeys: View {
                 // it, and the way back: one key, both directions, because the
                 // way back used to be a tap on the terminal that nothing on
                 // screen mentioned.
-                iconKey(
-                    keyboardUp ? "keyboard.chevron.compact.down" : "keyboard",
-                    label: keyboardUp ? "Hide keyboard" : "Show keyboard"
-                ) {
-                    toggleKeyboard()
+                if canToggleKeyboard {
+                    iconKey(
+                        keyboardUp ? "keyboard.chevron.compact.down" : "keyboard",
+                        label: keyboardUp ? "Hide keyboard" : "Show keyboard"
+                    ) {
+                        toggleKeyboard()
+                    }
                 }
                 // An agent holds mouse reporting on, which turns a drag into
                 // an event for the program rather than a scroll, so the view
