@@ -20,8 +20,19 @@ struct ClientWorkspacesView: View {
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
-    @State private var model = ClientWorkspacesModel()
+    @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
+
+    /// The sidebar layout owns one model for the whole window: its tree and
+    /// this screen are one connection, not two dialling the same machine.
+    /// Tab mode passes nothing and gets its own, as it always had.
+    /// Nil means "make your own". A default argument cannot construct one:
+    /// the model is main-actor isolated and a default is evaluated where the
+    /// caller is, which is not always here.
+    @MainActor
+    init(model: ClientWorkspacesModel? = nil) {
+        _model = State(initialValue: model ?? ClientWorkspacesModel())
+    }
 
     private var remoteAllowed: Bool {
         if let remote = account.account?.canRemote { return remote }

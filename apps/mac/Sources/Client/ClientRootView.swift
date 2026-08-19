@@ -134,6 +134,9 @@ struct ClientRootView: View {
                 .transition(.opacity)
             } else if !account.signedIn {
                 signedOut
+            } else if layout == .sidebar {
+                ClientSidebarRoot(showAccount: $showAccount)
+                    .transition(.opacity)
             } else {
                 tabs
                     .transition(.opacity)
@@ -142,6 +145,10 @@ struct ClientRootView: View {
         .animation(.easeInOut(duration: 0.28), value: account.signedIn)
         .animation(.easeInOut(duration: 0.28), value: account.authChecked)
         .animation(.easeInOut(duration: 0.28), value: account.authNeedsRetry)
+        // The layout swap is animated like the other door changes: a keyboard
+        // being attached should read as the app rearranging itself, not as a
+        // new screen appearing from nowhere.
+        .animation(.easeInOut(duration: 0.28), value: layout)
         .tint(Theme.accent)
         .environment(account)
         .environment(connectivity)
@@ -294,6 +301,9 @@ enum ClientTab: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Built on the main actor, like every other view. Said out loud because
+    /// this is an enum member rather than a `View`, so nothing else says it.
+    @MainActor
     @ViewBuilder
     var content: some View {
         switch self {

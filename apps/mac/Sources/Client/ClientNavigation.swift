@@ -29,9 +29,6 @@ final class ClientNavigationModel {
     /// The folder open in the workspace plane, as `remote:<peer>:<id>`.
     var folderID: String?
 
-    /// Which of that folder's sections is showing.
-    var section: WorkspaceSection = .sessions
-
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?) {
         self.folderID = folderID
