@@ -508,6 +508,10 @@ struct ClientFilesView: View {
     @State private var children: [TreeEntry] = []
     @State private var errorMessage: String?
     @State private var openFile: OpenFile?
+    /// False until this folder has answered. An empty list and a folder nobody
+    /// has read yet look identical and mean opposite things, so the empty
+    /// state waits rather than calling a full folder empty for a moment.
+    @State private var loaded = false
 
     private var currentPath: String { pathStack.last ?? "" }
 
@@ -517,7 +521,7 @@ struct ClientFilesView: View {
                 Text(errorMessage)
                     .foregroundStyle(Theme.danger)
             }
-            if children.isEmpty, errorMessage == nil {
+            if loaded, children.isEmpty, errorMessage == nil {
                 ClientSectionEmpty(
                     text: "Nothing in this folder",
                     art: .files,
@@ -557,7 +561,10 @@ struct ClientFilesView: View {
                 }
             }
         }
-        .task(id: currentPath) { await load() }
+        .task(id: currentPath) {
+            loaded = false
+            await load()
+        }
         .sheet(item: $openFile) { file in
             ClientFileEditor(peer: peer, workspace: workspace, path: file.path, content: file.content)
         }
@@ -571,6 +578,7 @@ struct ClientFilesView: View {
             errorMessage = error.localizedDescription
             children = []
         }
+        loaded = true
     }
 
     private func open(_ entry: TreeEntry) async {

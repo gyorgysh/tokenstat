@@ -343,6 +343,18 @@ struct ClientDeviceDetailView: View {
     @State private var savingName = false
     @State private var renameError: String?
     @FocusState private var editingName: Bool
+    /// The name this screen just set. `machine` is the copy this screen was
+    /// pushed with, so without it a rename read as having done nothing until
+    /// you went back to the list.
+    @State private var renamedTo: String?
+
+    /// The device as it stands now: what was typed here, or what was pushed.
+    private var current: Machine {
+        guard let renamedTo else { return machine }
+        var updated = machine
+        updated.label = renamedTo.isEmpty ? nil : renamedTo
+        return updated
+    }
 
     var body: some View {
         ScrollView {
@@ -365,7 +377,7 @@ struct ClientDeviceDetailView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
-        .navigationTitle(DeviceCopy.name(machine))
+        .navigationTitle(DeviceCopy.name(current))
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -449,10 +461,9 @@ struct ClientDeviceDetailView: View {
         savingName = true
         defer { savingName = false }
         do {
-            try await Bridge.renameAccountMachine(
-                id: id,
-                name: draft.trimmingCharacters(in: .whitespacesAndNewlines)
-            )
+            let wanted = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await Bridge.renameAccountMachine(id: id, name: wanted)
+            renamedTo = wanted
             renameError = nil
             renaming = false
             await onRenamed()
@@ -527,8 +538,8 @@ struct ClientDeviceDetailView: View {
                 HStack(alignment: .firstTextBaseline) {
                     DetailLine(
                         label: "Name",
-                        value: machine.label?.isEmpty == false
-                            ? machine.label ?? ""
+                        value: current.label?.isEmpty == false
+                            ? current.label ?? ""
                             : "not named on this account"
                     )
                     Spacer(minLength: Theme.Space.s)
@@ -536,7 +547,7 @@ struct ClientDeviceDetailView: View {
                     // server with nothing but the CLI on it has no other way
                     // to be named.
                     Button("Rename", .edit) {
-                        draft = machine.label ?? ""
+                        draft = current.label ?? ""
                         renaming = true
                         editingName = true
                     }

@@ -347,15 +347,21 @@ pub struct Platform {
 }
 
 impl Platform {
-    /// One line for a device row: "Ubuntu 24.04 · aarch64".
+    /// One line for a device row: "Ubuntu 24.04.1 LTS · x86_64".
+    ///
+    /// A version that starts with a digit is a number and needs the system's
+    /// name in front of it ("26.6.1" is nobody's idea of a computer). A version
+    /// that starts with a word already *is* the name, because a distribution
+    /// calls itself Ubuntu rather than Linux, and "Linux Ubuntu 24.04" reads
+    /// like a machine wrote it.
     pub fn pretty(&self) -> String {
         let name = self.family();
         let head = if self.version.is_empty() {
             name.to_string()
-        } else if self.version.starts_with(name) {
-            self.version.clone()
-        } else {
+        } else if self.version.starts_with(|c: char| c.is_ascii_digit()) {
             format!("{name} {}", self.version)
+        } else {
+            self.version.clone()
         };
         if self.arch.is_empty() {
             head
@@ -414,7 +420,9 @@ fn os_version() -> String {
     if release.is_empty() {
         String::new()
     } else {
-        format!("kernel {release}")
+        // Named in full, because the rule above hands a version that starts
+        // with a word straight through: "kernel 6.8" alone would not say Linux.
+        format!("Linux kernel {release}")
     }
 }
 
@@ -433,8 +441,10 @@ fn os_version() -> String {
     }
 }
 
-/// iOS and iPadOS have no shell to ask. The client fills this in from the
-/// model identifier, the same place its name comes from.
+/// iOS and iPadOS have no shell to ask, so a phone reports its family and its
+/// architecture and stops there. The *name* is the part that matters on a
+/// phone, and the client already fills that in from the model identifier
+/// (`ClientDeviceName`).
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 fn os_version() -> String {
     String::new()
@@ -686,6 +696,32 @@ mod tests {
         let pretty = p.pretty();
         assert!(pretty.contains(p.family()) || pretty.starts_with(&p.version));
         assert!(pretty.contains(&p.arch), "{pretty}");
+    }
+
+    /// A distribution names itself, so its name replaces the family rather
+    /// than following it: "Linux Ubuntu 24.04" reads like a machine wrote it.
+    #[test]
+    fn a_named_release_is_not_prefixed_with_the_family() {
+        let numbered = Platform {
+            os: "macos".into(),
+            version: "26.6.1".into(),
+            arch: "aarch64".into(),
+        };
+        assert_eq!(numbered.pretty(), "macOS 26.6.1 · aarch64");
+
+        let named = Platform {
+            os: "linux".into(),
+            version: "Ubuntu 24.04.1 LTS".into(),
+            arch: "x86_64".into(),
+        };
+        assert_eq!(named.pretty(), "Ubuntu 24.04.1 LTS · x86_64");
+
+        let bare = Platform {
+            os: "ios".into(),
+            version: String::new(),
+            arch: "arm64".into(),
+        };
+        assert_eq!(bare.pretty(), "iOS · arm64");
     }
 
     #[test]

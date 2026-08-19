@@ -839,11 +839,11 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// the emulator; the queue exists so the poll loop never waits on main-
     /// thread parse work and so output remains ordered while the renderer gets
     /// its fair share of each frame.
-    /// Output on its way to the emulator, minus what it cannot read correctly.
-    @ObservationIgnored private var outputFilter = TerminalOutputFilter()
     @ObservationIgnored private var pendingFeed: [Data] = []
     @ObservationIgnored private var pendingFeedHead = 0
     @ObservationIgnored private var pendingFeedBytes = 0
+    /// Output on its way to the emulator, minus what it cannot read correctly.
+    @ObservationIgnored private var outputFilter = TerminalOutputFilter()
     /// True while `pumpFeed` is on the main actor eating `pendingFeed`.
     @ObservationIgnored private var feedInFlight = false
     @ObservationIgnored private var feedPumpScheduled = false

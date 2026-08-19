@@ -87,12 +87,16 @@ fn rename(params: &str) -> Result<Value, String> {
     // other screens, so it is refreshed rather than waiting for a reconnect.
     crate::remote::register_if_tunnel_enabled();
     // And with remote reach off, the account still has a device list with this
-    // machine in it. Renaming the computer here and having the website keep
-    // the old name is one name too many. Best effort: no account, no call, no
-    // complaint.
+    // machine in it. Renaming the computer here and leaving the website on the
+    // old name is one name too many.
+    //
+    // Clearing is handled there too: `rename_machine` drops the choice and
+    // then says this machine's own name, so "use the computer's name" leaves
+    // the account showing that name rather than showing none.
+    //
     // On its own thread, like the registration above it: this is one HTTP
     // round trip, and a rename must not sit there waiting for it on a machine
-    // that is offline.
+    // that is offline. Best effort: no account, no call, no complaint.
     let named = p.name.clone();
     std::thread::spawn(move || {
         if let Ok(machine_id) = tokenstat_sync::config::ensure_machine_id() {

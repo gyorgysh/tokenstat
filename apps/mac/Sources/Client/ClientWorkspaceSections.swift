@@ -1058,7 +1058,6 @@ struct ClientCardList<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var waitedTooLong = false
 
-
     /// The empty screen this list was configured with. One place, so the two
     /// list shells cannot describe the same folder differently.
     private var emptyState: some View {
@@ -1158,7 +1157,6 @@ struct ClientSectionList<Content: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The first read has been outstanding long enough to say so.
     @State private var waitedTooLong = false
-
 
     /// The empty screen this list was configured with. One place, so the two
     /// list shells cannot describe the same folder differently.

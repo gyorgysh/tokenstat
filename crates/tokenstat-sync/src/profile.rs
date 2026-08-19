@@ -758,7 +758,7 @@ fn default_machine_kind() -> &'static str {
 /// overwriting it.
 ///
 /// An empty name is a reset rather than an error, the same undo the local
-/// field has: the machine names itself again on its next login.
+/// field has: the device goes back to the name it gives itself.
 pub fn rename_machine(
     host_flag: Option<&str>,
     machine_id: &str,
@@ -768,10 +768,11 @@ pub fn rename_machine(
     let token =
         keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
     let client = http_client()?;
+    let label = label.trim();
     let resp = client
         .patch(format!("{host}/api/v1/machines/{machine_id}"))
         .header("authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({ "label": label.trim() }))
+        .json(&serde_json::json!({ "label": label }))
         .send()?;
     let status = resp.status();
     let text = limited_text(resp)?;
@@ -782,6 +783,13 @@ pub fn rename_machine(
         return Err(ProfileError::Message(format!(
             "could not rename the device on the account ({status}): {text}"
         )));
+    }
+    // Clearing only drops the choice. The row is now nameless until the named
+    // machine registers again, which on a machine with remote reach off may be
+    // never, so this machine says its own name straight away. Only for itself:
+    // clearing another device's name cannot be answered with this one's.
+    if label.is_empty() && crate::config::ensure_machine_id().is_ok_and(|mine| mine == machine_id) {
+        publish_machine_profile(host_flag)?;
     }
     Ok(())
 }

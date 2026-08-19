@@ -1071,7 +1071,6 @@ extension Bridge {
 }
 
 private struct Removed: Codable, Sendable { let removed: Bool }
-private struct RenamedMachine: Codable, Sendable { let renamed: Bool }
 private struct Renamed: Codable, Sendable { let renamed: Bool }
 
 private struct RemoteWorkspaceTarget {
@@ -1624,7 +1623,7 @@ extension Bridge {
         _ = try await background(
             "account.renameMachine",
             ["id": id, "name": name],
-            as: RenamedMachine.self
+            as: Renamed.self
         )
     }
 
