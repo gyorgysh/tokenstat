@@ -3172,6 +3172,11 @@ mod tests {
     /// task badge honest is the kind filter. An archived note is not counted
     /// at all: put away is put away, and a badge nobody can clear is a badge
     /// nobody reads.
+    ///
+    /// Gated like everything it touches: `summarize`, `FolderContents` and the
+    /// card store are all behind `local-host`, and the client-only build has
+    /// no folders of its own to count.
+    #[cfg(feature = "local-host")]
     #[test]
     fn a_folder_counts_notes_apart_from_tasks() {
         fn card(kind: crate::todo::CardKind, column: &str, workspace: &str) -> crate::todo::Card {
