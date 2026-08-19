@@ -18,6 +18,12 @@ import SwiftUI
 /// global answer, the screen gives the local one, and they cannot contradict
 /// each other because both read `ConnectionModel`.
 struct ClientConnectionChip: View {
+    /// Glyph only. The words are three of them and a top bar that is 300
+    /// points wide is already carrying an avatar and a title: "Computer
+    /// unreachable" landed on top of both. The sentence lives in the popover,
+    /// which is where somebody who tapped it is looking anyway.
+    var compact = false
+
     @Environment(ConnectionModel.self) private var connection
     @Environment(ConnectivityModel.self) private var connectivity
     @State private var showDetail = false
@@ -29,11 +35,14 @@ struct ClientConnectionChip: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: symbol)
-                    Text(connection.title)
-                        .font(ClientType.caption.weight(.medium))
+                    if !compact {
+                        Text(connection.title)
+                            .font(ClientType.caption.weight(.medium))
+                            .lineLimit(1)
+                    }
                 }
                 .foregroundStyle(tint)
-                .padding(.horizontal, Theme.Space.s)
+                .padding(.horizontal, compact ? 6 : Theme.Space.s)
                 .padding(.vertical, 4)
                 .background(tint.opacity(0.14), in: Capsule())
                 .contentShape(Capsule())
@@ -86,7 +95,11 @@ struct ClientConnectionChip: View {
             .tint(Theme.accent)
         }
         .padding(Theme.Space.m)
-        .frame(maxWidth: 320, alignment: .leading)
+        // A fixed width, not a maximum. A popover sizes itself to what it is
+        // given, and "at most 320" let it collapse around the longest line and
+        // then sit half over the bar it came from.
+        .frame(width: 300, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The most recent answer from either plane. "Nothing since you opened the

@@ -120,15 +120,27 @@ struct ClientSidebarRoot: View {
         // A thumb needs 44 points. A trackpad pointer does not, and the whole
         // point of this layout is seeing more of the account at once.
         .environment(\.defaultMinListRowHeight, input.hasPointer ? 32 : 44)
-        .navigationTitle("tokenstat")
+        // The lockup, not the word. The Mac's sidebar has the bars and the
+        // two-tone name at its head, and a system title spelling "tokenstat"
+        // in the same place is the one screen in the product where the brand
+        // is set in the platform's font. The mark also acknowledges a pull,
+        // which a title cannot do.
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await workspaces.refresh(account: account.account) }
+        .refreshable {
+            await ClientRefresh.pull("sidebar") {
+                await workspaces.refresh(account: account.account)
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 AvatarButton { showAccount = true }
             }
+            ToolbarItem(placement: .principal) {
+                Wordmark(size: 19, fills: false)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ToolbarItem(placement: .topBarTrailing) {
-                ClientConnectionChip()
+                ClientConnectionChip(compact: true)
             }
         }
     }
