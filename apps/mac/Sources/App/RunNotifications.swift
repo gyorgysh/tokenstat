@@ -80,10 +80,22 @@ final class RunNotifications {
     /// until asked, because "not decided" and "denied" need different words.
     private(set) var authorization: UNAuthorizationStatus?
 
-    /// Run id to the status it last had. The whole state this needs.
-    private var lastStatus: [String: String] = [:]
-    /// Whether a first read has happened. Before it, everything is history.
-    private var primed = false
+    /// Which list a refresh came from.
+    ///
+    /// Kept apart because the two arrive on their own timers into one object.
+    /// Holding a single map meant each feed's refresh replaced the other's
+    /// baseline, so by the time a run finished its previous status had been
+    /// wiped by the other list and nothing was ever posted.
+    private enum Feed: Hashable {
+        case automations
+        case workflows
+    }
+
+    /// Run id to the status it last had, per feed. The whole state this needs.
+    private var lastStatus: [Feed: [String: String]] = [:]
+    /// Feeds that have been read once. Before that, everything is history, and
+    /// it is per feed for the same reason the statuses are.
+    private var primed: Set<Feed> = []
 
     private init() {
         // `bool(forKey:)` is false for a key that was never written, which is
@@ -123,13 +135,19 @@ final class RunNotifications {
 
     /// Agent runs, as of this refresh.
     func settle(automations runs: [RunRecord]) {
-        settle(runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: $0.exitCode) })
+        settle(
+            runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: $0.exitCode) },
+            from: .automations
+        )
     }
 
     /// Workflow runs, as of this refresh. A workflow that is `waiting` has hit
     /// a gate, which is a person's turn and worth saying so.
     func settle(workflows runs: [WorkflowRunRecord]) {
-        settle(runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: nil) })
+        settle(
+            runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: nil) },
+            from: .workflows
+        )
     }
 
     private struct Ended {
@@ -139,14 +157,21 @@ final class RunNotifications {
         let exitCode: Int?
     }
 
-    private func settle(_ runs: [Ended]) {
+    private func settle(_ runs: [Ended], from feed: Feed) {
+        let before = lastStatus[feed] ?? [:]
         defer {
-            lastStatus = Dictionary(runs.map { ($0.id, $0.status) }, uniquingKeysWith: { _, last in last })
-            primed = true
+            // This feed's slice only. Replacing the whole map is what made one
+            // list forget the other, and merging without replacing would keep
+            // every run this app has ever seen.
+            lastStatus[feed] = Dictionary(
+                runs.map { ($0.id, $0.status) },
+                uniquingKeysWith: { _, last in last }
+            )
+            primed.insert(feed)
         }
-        guard isOn, primed else { return }
+        guard isOn, primed.contains(feed) else { return }
         for run in runs {
-            guard let before = lastStatus[run.id], before != run.status else { continue }
+            guard let before = before[run.id], before != run.status else { continue }
             // Only a live run can produce news. A record rewritten by a
             // reconcile is not something that just happened.
             guard before == "running" || before == "queued" else { continue }
@@ -204,6 +229,19 @@ final class PushRegistrar {
     static let shared = PushRegistrar()
 
     private static let onKey = "notifications.push"
+    /// The last token this device registered, kept across launches.
+    ///
+    /// Switching off has to name the device to the account, and the token
+    /// otherwise only exists in memory after Apple hands it over. A person who
+    /// relaunches and turns the switch off in the same second would have taken
+    /// the switch off a device the account was still sending to.
+    private static let tokenKey = "notifications.pushToken"
+    /// A token whose removal did not reach the account yet.
+    ///
+    /// Turning notifications off while offline used to be silently lost, and
+    /// the failure is invisible: the switch reads off and the notifications
+    /// keep arriving. Retried on the next launch.
+    private static let pendingRemovalKey = "notifications.pushPendingRemoval"
 
     /// Whether this device wants notifications. Off until asked for.
     private(set) var isOn: Bool
@@ -216,10 +254,16 @@ final class PushRegistrar {
 
     /// The token Apple last handed us, kept so switching off can name the
     /// device to remove rather than waiting for Apple to notice it is dead.
-    private var deviceToken: String?
+    private var deviceToken: String? {
+        didSet {
+            guard deviceToken != oldValue else { return }
+            UserDefaults.standard.set(deviceToken, forKey: Self.tokenKey)
+        }
+    }
 
     private init() {
         isOn = UserDefaults.standard.bool(forKey: Self.onKey)
+        deviceToken = UserDefaults.standard.string(forKey: Self.tokenKey)
     }
 
     /// Turn notifications on for this device: ask the person, then ask Apple.
@@ -240,24 +284,51 @@ final class PushRegistrar {
         }
         isOn = true
         UserDefaults.standard.set(true, forKey: Self.onKey)
+        // A removal that never landed is moot now: this device is asking to be
+        // sent to again, and retrying it later would take it back off.
+        UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
         UIApplication.shared.registerForRemoteNotifications()
     }
 
     /// Stop notifications for this device, at the account rather than only on
     /// the phone, so nothing is sent that a Do Not Disturb happens to hide.
+    ///
+    /// The token comes from the stored one when Apple has not handed one over
+    /// yet this launch, and a removal that does not reach the account is
+    /// remembered rather than dropped: a switch that reads off while
+    /// notifications keep arriving is the worst of the states this can be in.
     func disable() async {
         isOn = false
         UserDefaults.standard.set(false, forKey: Self.onKey)
         UIApplication.shared.unregisterForRemoteNotifications()
-        if let token = deviceToken {
-            _ = try? await Bridge.pushUnregister(token: token)
-        }
         isRegistered = false
+        guard let token = deviceToken else { return }
+        do {
+            try await Bridge.pushUnregister(token: token)
+            UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
+        } catch {
+            UserDefaults.standard.set(token, forKey: Self.pendingRemovalKey)
+        }
     }
 
     /// Re-register at launch, and after signing in. Cheap, and it is the only
     /// thing that keeps a reissued token reachable.
+    ///
+    /// Also finishes a removal that never reached the account. That has to
+    /// happen before the registration below, or a device that was switched off
+    /// offline and switched back on would race its own removal.
     func refresh() {
+        if let pending = UserDefaults.standard.string(forKey: Self.pendingRemovalKey) {
+            Task {
+                if (try? await Bridge.pushUnregister(token: pending)) != nil {
+                    UserDefaults.standard.removeObject(forKey: Self.pendingRemovalKey)
+                }
+                if isOn {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+            return
+        }
         guard isOn else { return }
         UIApplication.shared.registerForRemoteNotifications()
     }

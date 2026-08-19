@@ -694,6 +694,47 @@ fn read_document_shard(
     }
 }
 
+/// How big a SQLite store is and when it last changed, **sidecars included**.
+///
+/// A database in WAL mode does not move its own file when it is written to: the
+/// turn lands in `<name>-wal` and the file this watermark is named after keeps
+/// its size and its mtime until a checkpoint, which can be hours later or, for
+/// a tool that holds the database open, not until it exits.
+///
+/// Watermarking the main file alone therefore reads a source once and then
+/// calls it unchanged for the rest of the day. The live meter already hit this
+/// and fixed it (`session_meter::store_mtime`, where an OpenCode 2 session
+/// reported `0% ctx · $0.00 · 0k` for its whole life); the archive scan had the
+/// same hole for every SQLite source.
+///
+/// Both halves have to fold the sidecars in. The size is summed because a
+/// checkpoint moves bytes from the WAL into the database while the total stays
+/// close, and the mtime is the newest of the three because that is the only one
+/// that moves on a plain write.
+fn store_stat(path: &std::path::Path) -> Option<(u64, i64)> {
+    let ms = |t: std::time::SystemTime| {
+        t.duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    };
+    let meta = std::fs::metadata(path).ok()?;
+    let mut size = meta.len();
+    let mut mtime_ms = meta.modified().ok().map(ms).unwrap_or(0);
+    for suffix in ["-wal", "-shm"] {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        let Ok(side) = std::fs::metadata(std::path::PathBuf::from(name)) else {
+            continue;
+        };
+        size = size.saturating_add(side.len());
+        if let Ok(modified) = side.modified() {
+            mtime_ms = mtime_ms.max(ms(modified));
+        }
+    }
+    Some((size, mtime_ms))
+}
+
 /// Watermark a binary/SQLite file and re-parse it wholesale when it changes.
 fn read_db_shard(
     path: &std::path::Path,
@@ -703,16 +744,9 @@ fn read_db_shard(
     let key = path.to_string_lossy().into_owned();
     let previous = marks.get(&key);
 
-    let Ok(meta) = std::fs::metadata(path) else {
+    let Some((size, mtime_ms)) = store_stat(path) else {
         return FileOutcome::skipped();
     };
-    let size = meta.len();
-    let mtime_ms = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
 
     if watermark::classify(previous, size, mtime_ms) == watermark::Change::Unchanged {
         return FileOutcome::skipped();
@@ -824,4 +858,73 @@ fn vendor_daily_tokens(store: &Store) -> Result<Vec<DailyModelTokens>, CoreError
             .insert(row.model, row.tokens);
     }
     Ok(by_day.into_iter().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A WAL-only write has to be visible to the watermark.
+    ///
+    /// This is the whole reason `store_stat` exists. Writing to a database in
+    /// WAL mode leaves the database file untouched, so a watermark taken from
+    /// it alone says "unchanged" and the scan skips a source that has hours of
+    /// new usage sitting in the sidecar.
+    #[test]
+    fn a_write_that_only_reaches_the_wal_still_counts_as_a_change() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-walmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        std::fs::write(&db, b"main").unwrap();
+        std::fs::write(dir.join("state.db-wal"), b"first").unwrap();
+
+        let (size, mtime) = store_stat(&db).unwrap();
+        let mark = watermark::Watermark {
+            size,
+            mtime_ms: mtime,
+            head_sig: String::new(),
+            sig_len: 0,
+            byte_offset: 0,
+        };
+        assert_eq!(
+            watermark::classify(Some(&mark), size, mtime),
+            watermark::Change::Unchanged,
+            "nothing has been written, so nothing to do"
+        );
+
+        // The database file is deliberately left alone, which is what a real
+        // WAL write does.
+        let before = std::fs::metadata(&db).unwrap().len();
+        std::fs::write(dir.join("state.db-wal"), b"first and second").unwrap();
+        assert_eq!(std::fs::metadata(&db).unwrap().len(), before);
+
+        let (grown, _) = store_stat(&db).unwrap();
+        assert!(grown > size, "the sidecar's bytes have to reach the size");
+        assert_ne!(
+            watermark::classify(Some(&mark), grown, mtime),
+            watermark::Change::Unchanged,
+            "a source with new rows in its WAL must be re-read"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A store with no sidecars is still readable, and reads as itself.
+    #[test]
+    fn a_database_without_sidecars_is_its_own_size() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-plainmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("plain.db");
+        std::fs::write(&db, b"0123456789").unwrap();
+        let (size, mtime) = store_stat(&db).unwrap();
+        assert_eq!(size, 10);
+        assert!(mtime > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_store_has_no_stat() {
+        assert!(store_stat(std::path::Path::new("/nope/does-not-exist.db")).is_none());
+    }
 }

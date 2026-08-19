@@ -95,7 +95,8 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
                 u.cache_write_tokens, u.reasoning_tokens,
                 u.estimated_cost_usd, u.actual_cost_usd, u.cost_status,
                 COALESCE(u.first_seen, u.last_seen, s.started_at, 0),
-                COALESCE(s.cwd, '')
+                COALESCE(s.cwd, ''),
+                COALESCE(u.billing_base_url, ''), COALESCE(u.billing_mode, '')
          FROM session_model_usage u
          LEFT JOIN sessions s ON s.id = u.session_id",
     );
@@ -147,6 +148,8 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             cost_status: r.get::<_, String>(11).unwrap_or_default(),
             seen: r.get::<_, f64>(12).unwrap_or(0.0),
             cwd: r.get::<_, String>(13).unwrap_or_default(),
+            base_url: r.get::<_, String>(14).unwrap_or_default(),
+            mode: r.get::<_, String>(15).unwrap_or_default(),
         })
     }) {
         Ok(rows) => rows,
@@ -172,10 +175,24 @@ pub fn parse_db_in(path: &Path, directory: Option<&str>, since_ms: Option<i64>) 
             .unwrap_or("unknown")
             .to_string();
         out.events.push(UsageEvent {
-            // Every part of the row's primary key that can differ within one
-            // session, and no timestamp: the row is a running total and has to
-            // land on the same event each time it is read.
-            id: EventId::derive(&["hermes", &row.session, &row.model, &row.task, &row.provider]),
+            // The row's whole primary key, and no timestamp: the row is a
+            // running total and has to land on the same event each time it is
+            // read.
+            //
+            // Base url and mode are part of that key and are not decoration.
+            // Hermes has `proxy`, `fallback` and `gateway`, so one session can
+            // bill the same model through two endpoints, and folding those two
+            // rows onto one id would have the archive's max-on-conflict keep
+            // the larger and drop the other's tokens outright.
+            id: EventId::derive(&[
+                "hermes",
+                &row.session,
+                &row.model,
+                &row.task,
+                &row.provider,
+                &row.base_url,
+                &row.mode,
+            ]),
             source: SourceId::Hermes,
             ts: Timestamp::from_ms((row.seen * 1000.0) as i64),
             model: if row.model.is_empty() {
@@ -223,6 +240,8 @@ struct Row {
     cost_status: String,
     seen: f64,
     cwd: String,
+    base_url: String,
+    mode: String,
 }
 
 impl Row {
@@ -338,6 +357,40 @@ mod tests {
             .filter_map(|e| e.counters.input_fresh)
             .sum();
         assert_eq!(total, 29557 + 721);
+    }
+
+    #[test]
+    fn two_endpoints_for_one_model_stay_two_events() {
+        // Hermes can bill the same model through a proxy and directly in one
+        // session. Its own primary key separates those rows, so ours must too,
+        // or the archive keeps the larger and loses the other outright.
+        let path = temp_db();
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO session_model_usage (session_id, model, billing_provider,
+             billing_base_url, billing_mode, task, api_call_count, input_tokens,
+             output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens,
+             estimated_cost_usd, actual_cost_usd, cost_status, cost_source,
+             first_seen, last_seen)
+             VALUES ('20260819_232554_02d29e', 'grok-composer-2.5-fast', 'xai-oauth',
+             'http://127.0.0.1:8080', '', '', 1, 500, 20, 0, 0, 0, 0, 0, '', 'none',
+             1787174812.0, 1787174812.0)",
+            [],
+        )
+        .unwrap();
+        let out = parse_db(&path);
+        let ids: std::collections::HashSet<_> = out.events.iter().map(|e| &e.id).collect();
+        assert_eq!(
+            ids.len(),
+            out.events.len(),
+            "a base url of its own is a row of its own"
+        );
+        let total: u64 = out
+            .events
+            .iter()
+            .filter_map(|e| e.counters.input_fresh)
+            .sum();
+        assert_eq!(total, 29557 + 721 + 500, "no row may be folded away");
     }
 
     #[test]
