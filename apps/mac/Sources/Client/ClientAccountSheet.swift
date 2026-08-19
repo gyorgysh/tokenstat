@@ -6,6 +6,7 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+import UIKit
 
 // The client is iOS and iPadOS only. The Mac has `RootView`, and these
 // screens lean on toolbar placements and a tab bar that macOS does not
@@ -57,6 +58,8 @@ private struct ClientAccountContent: View {
     @State private var deletionURL: URL?
     @State private var webURL: URL?
     @State private var confirmSignOut = false
+    /// Read by `ClientRootView`, written here. See `ClientLayoutPreference`.
+    @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
 
     var body: some View {
         ScrollView {
@@ -84,6 +87,7 @@ private struct ClientAccountContent: View {
                         .padding(Theme.Space.xl)
                 }
 
+                layoutCard
                 legalCard
                 licensesCard
                 deleteAccountCard
@@ -250,6 +254,36 @@ private struct ClientAccountContent: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+    }
+
+    /// Which shape the client draws itself in, on an iPad.
+    ///
+    /// Automatic is the answer for almost everybody and it is what the app
+    /// ships with. The card exists for the two cases a heuristic cannot see:
+    /// a keyboard used only for typing, and a person who prefers one shape.
+    /// It is absent on iPhone, where there is only ever one shape.
+    @ViewBuilder
+    private var layoutCard: some View {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            VStack(alignment: .leading, spacing: Theme.Space.s) {
+                ClientSectionTitle(title: "Layout", mark: "mark_device")
+                Picker("Layout", selection: $layoutPreference) {
+                    ForEach(ClientLayoutPreference.allCases) { option in
+                        Text(option.label).tag(option.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(
+                    (ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic).detail
+                )
+                .font(ClientType.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardSurface()
+        }
     }
 
     private func lastSync(_ account: Account) -> some View {
