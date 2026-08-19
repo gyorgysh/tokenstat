@@ -598,6 +598,30 @@ fn cached_events(
     Some(events)
 }
 
+/// When a SQLite store was last written, sidecars included.
+///
+/// This is why OpenCode 2 kept reporting `0% ctx · $0.00 · 0k`. The database
+/// runs in WAL mode, so a turn lands in `opencode.db-wal` and the database
+/// file itself does not change until a checkpoint, hours later. The cache
+/// compared the database file's mtime, found it equal every time, and served
+/// the parse it made when the session was still empty for the whole life of
+/// that session. Taking the newest of the database and its `-wal` and `-shm`
+/// sidecars makes "has this changed" mean what the cache assumed it meant.
+fn store_mtime(path: &Path) -> Option<SystemTime> {
+    let mut newest = path.metadata().ok()?.modified().ok()?;
+    for suffix in ["-wal", "-shm"] {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        if let Ok(m) = PathBuf::from(name).metadata()
+            && let Ok(t) = m.modified()
+            && t > newest
+        {
+            newest = t;
+        }
+    }
+    Some(newest)
+}
+
 /// The same cache, for a source that is read by path rather than as text.
 ///
 /// A SQLite database cannot be handed to a parser as a string, and OpenCode's
@@ -608,7 +632,7 @@ fn cached_db_events(
     scope: &str,
     parse: impl FnOnce(&Path) -> Vec<UsageEvent>,
 ) -> Option<Arc<Vec<UsageEvent>>> {
-    let mtime = path.metadata().ok()?.modified().ok()?;
+    let mtime = store_mtime(path)?;
     let key = if scope.is_empty() {
         path.to_path_buf()
     } else {
@@ -991,6 +1015,28 @@ mod tests {
         assert!(head.len() < 100_000, "reads a bounded head, not the file");
         assert!(head.starts_with("{\"a\":1}"));
         assert!(!head.ends_with('x'), "cut at a line boundary");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A WAL write must count as a change to the store.
+    ///
+    /// OpenCode's database file sits still for hours while every turn lands in
+    /// the `-wal` beside it, so a cache keyed on the database file alone
+    /// served a session's opening emptiness for the session's whole life.
+    #[test]
+    fn a_wal_write_moves_the_store_mtime() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-wal-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = dir.join("opencode.db");
+        std::fs::write(&db, b"db").expect("write db");
+        let checkpointed = store_mtime(&db).expect("mtime");
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("opencode.db-wal"), b"turn").expect("write wal");
+        let after_turn = store_mtime(&db).expect("mtime");
+        assert!(
+            after_turn > checkpointed,
+            "a turn written to the wal is a change to the store"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
