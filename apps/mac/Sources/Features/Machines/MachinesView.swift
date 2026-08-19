@@ -689,7 +689,17 @@ struct MachinesView: View {
                                     placeholder: deviceTitle(resolved: resolved, machine: machine)
                                 ) { name in
                                     renamingID = nil
-                                    await model.renameAccountMachine(machine, to: name)
+                                    // This computer names itself: that writes
+                                    // the local label and tells the account,
+                                    // so the two agree. Renaming only the
+                                    // account row would leave this Mac calling
+                                    // itself one thing and the website another.
+                                    if isSelf {
+                                        await model.rename(to: name)
+                                        await model.load()
+                                    } else {
+                                        await model.renameAccountMachine(machine, to: name)
+                                    }
                                 } onCancel: {
                                     renamingID = nil
                                 }
@@ -717,10 +727,19 @@ struct MachinesView: View {
                         }
                         Spacer()
                         if isSelf {
-                            // The machine you are sitting at has no Connect and
-                            // no revoke; "This device" under the name is the
-                            // whole mark.
-                            EmptyView()
+                            // No Connect and no revoke: you are sitting at it.
+                            // It does get a Rename, and it is the one row that
+                            // most needs one. The name of the computer you are
+                            // on was editable from a field further up the page
+                            // and from nowhere in the list where every other
+                            // device offers it, so the machine whose name was
+                            // wrong was the only one that looked unnameable.
+                            Button("Rename", .edit) {
+                                renamingID = machine.machineID
+                            }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .labelStyle(.iconOnly)
+                            .help("Call this computer something")
                         } else if !machine.isHost {
                             // A phone is never dialled from here, so it has no
                             // Connect. It can still be turned away, and this is
@@ -803,6 +822,16 @@ struct MachinesView: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .help("Removes the pairing. The phone has to knock again.")
         }
+        // Whatever else a phone row offers, it can be named. Two devices both
+        // called "iPad" is the list this account actually has, and the row
+        // that can be revoked and forgotten was the row that could not be
+        // told apart from its neighbour.
+        Button("Rename", .edit) {
+            renamingID = machine.machineID
+        }
+        .buttonStyle(SecondaryButtonStyle(small: true))
+        .labelStyle(.iconOnly)
+        .help("Call this device something on this account")
     }
 
     /// The peer record for an account machine, matched on identity only.
