@@ -55,6 +55,21 @@ extension View {
         }
     }
 
+    /// Size the first-run intro when it is presented as a sheet.
+    ///
+    /// `.form` is the platform's own card: readable width, centred, and it
+    /// tracks whatever the system decides that is on a given iPad rather than
+    /// a number written down here. iOS 17 has no such modifier and gets the
+    /// default sheet, which on an iPad is already a centred card.
+    @ViewBuilder
+    func clientIntroSheetSizing() -> some View {
+        if #available(iOS 18, *) {
+            presentationSizing(.form)
+        } else {
+            self
+        }
+    }
+
     /// Hide the iOS 26 scroll-edge fade. Older systems never drew it.
     @ViewBuilder
     func clientHideScrollEdgeEffect() -> some View {

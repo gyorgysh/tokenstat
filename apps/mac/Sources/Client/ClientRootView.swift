@@ -31,6 +31,8 @@ import UIKit
 /// the places no system control exists, and there are deliberately very few.
 struct ClientRootView: View {
     @Environment(\.scenePhase) private var scenePhase
+    /// iPad and iPhone want different intros. See `signedOut`.
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var launch = LaunchState()
     @State private var selection: ClientTab = .home
     /// One account model for the whole client. The avatar reads it, the sheet
@@ -45,6 +47,45 @@ struct ClientRootView: View {
     /// `AvatarButton`.
     @State private var showAccount = false
     @State private var store = ClientStore()
+
+    /// The door for a phone or an iPad with no account on it.
+    ///
+    /// **The app is behind the sign-in, not beside it.** Every screen here
+    /// answers a question about an account, so a signed out client that can
+    /// reach the tabs is four empty screens and a sign-in card repeated on
+    /// each of them. One door instead: the intro on a first run, the sign-in
+    /// screen after that.
+    ///
+    /// On an iPad the intro is a sheet over that sign-in screen rather than
+    /// the whole window. Ten pages drawn for a phone, stretched across a
+    /// 13 inch display, is a phone screen wearing an iPad's clothes: art
+    /// floating in the middle of nowhere and a line of body text a foot wide.
+    /// A sheet is the platform's own answer to "one thing on top of the app",
+    /// it lands at a readable width without a single hardcoded number, and
+    /// the screen behind it is where the person is going anyway.
+    @ViewBuilder
+    private var signedOut: some View {
+        if hasOnboarded {
+            ClientLoginView()
+                .transition(.opacity)
+        } else if sizeClass == .regular {
+            ClientLoginView()
+                .transition(.opacity)
+                .sheet(isPresented: Binding(
+                    get: { !hasOnboarded },
+                    // Dismissed by a swipe rather than by Get started: the
+                    // intro has still been seen, and putting it back would
+                    // trap somebody in a pitch they closed.
+                    set: { if !$0 { hasOnboarded = true } }
+                )) {
+                    ClientOnboarding()
+                        .clientIntroSheetSizing()
+                }
+        } else {
+            ClientOnboarding()
+                .transition(.opacity)
+        }
+    }
 
     /// Set once the intro has been seen or skipped. A signed-in phone never
     /// sees it, so a reinstall onto an account that already exists does not get
@@ -69,18 +110,7 @@ struct ClientRootView: View {
                 }
                 .transition(.opacity)
             } else if !account.signedIn {
-                // **The app is behind the sign-in, not beside it.** Every
-                // screen here answers a question about an account, so a signed
-                // out phone that can reach the tabs is four empty screens and a
-                // sign-in card repeated on each of them. One door instead: the
-                // intro on a first run, the sign-in screen after that.
-                if hasOnboarded {
-                    ClientLoginView()
-                        .transition(.opacity)
-                } else {
-                    ClientOnboarding()
-                        .transition(.opacity)
-                }
+                signedOut
             } else {
                 tabs
                     .transition(.opacity)

@@ -87,8 +87,14 @@ struct ClientEmptyState: View {
                     .multilineTextAlignment(.center)
             }
             if let actionTitle, let action {
+                // The glyph is spelled out, like every other prominent button
+                // in the client. Left to the system's own label style inside
+                // a glass button it disappeared, and the empty state was the
+                // one screen offering a bare capsule with no mark on it.
                 Button(actionTitle, actionIcon, action: action)
+                    .labelStyle(ActionLabelStyle())
                     .clientProminentStyle()
+                    .controlSize(.large)
                     .tint(Theme.accent)
                     .padding(.top, 4)
             }

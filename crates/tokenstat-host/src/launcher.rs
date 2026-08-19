@@ -216,18 +216,6 @@ const PROFILES: &[Profile] = &[
         open_url: Some("http://127.0.0.1:3080/"),
     },
     Profile {
-        id: "zed",
-        name: "Zed",
-        command: "zed",
-        args: &[],
-        bypass_args: &[],
-        harness_id: Some("zed"),
-        symbol: None,
-        install_command: None,
-        install_dirs: &[],
-        open_url: None,
-    },
-    Profile {
         id: "antigravity",
         name: "Antigravity",
         command: "agy",

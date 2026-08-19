@@ -38,7 +38,43 @@ struct ClientFolderSplit: View {
         return merged
     }
 
+    /// Below this, the detail side is too narrow to hold a second split.
+    ///
+    /// The sections column already spends 280 points. A workflow workspace
+    /// inside what is left adds its own list, board and run columns, and on
+    /// an iPad in portrait that list came out around 170 points wide with
+    /// cards that will not go below 180: the card spilled over the divider.
+    /// Narrow detail gets the stacked screen the phone uses instead, which is
+    /// a list that pushes, and nothing overflows because nothing is nested.
+    private static let splitInsideSplit: CGFloat = 900
+
     var body: some View {
+        GeometryReader { geo in
+            split(detailWidth: geo.size.width - 280)
+        }
+        .background(Theme.background)
+        .navigationTitle(current.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
+        }
+        .task { await reload() }
+        .sheet(isPresented: $showPort) { portSheet }
+        .fullScreenCover(item: Binding(
+            get: { browserURL.map { BrowserURL(url: $0) } },
+            set: { browserURL = $0?.url }
+        )) { item in
+            ClientBrowserScreen(url: item.url) {
+                browserURL = nil
+                if let port = forwardedPort {
+                    forwardedPort = nil
+                    Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
+                }
+            }
+        }
+    }
+
+    private func split(detailWidth: CGFloat) -> some View {
         HStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -74,32 +110,12 @@ struct ClientFolderSplit: View {
             .frame(width: 280)
             .background(Theme.background)
             Divider()
-            detail
-        }
-        .background(Theme.background)
-        .navigationTitle(current.name)
-        .navigationBarTitleDisplayMode(.inline)
-        .refreshable {
-            await ClientRefresh.pull("workspace-\(workspaceID)") { await reload() }
-        }
-        .task { await reload() }
-        .sheet(isPresented: $showPort) { portSheet }
-        .fullScreenCover(item: Binding(
-            get: { browserURL.map { BrowserURL(url: $0) } },
-            set: { browserURL = $0?.url }
-        )) { item in
-            ClientBrowserScreen(url: item.url) {
-                browserURL = nil
-                if let port = forwardedPort {
-                    forwardedPort = nil
-                    Task { await Bridge.proxyUnlisten(peer: peer, host: "127.0.0.1", port: port) }
-                }
-            }
+            detail(width: detailWidth)
         }
     }
 
     @ViewBuilder
-    private var detail: some View {
+    private func detail(width: CGFloat) -> some View {
         switch section {
         case .sessions:
             ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
@@ -118,19 +134,41 @@ struct ClientFolderSplit: View {
                 folderName: current.name
             )
         case .workflows:
-            ClientWorkflowWorkspace(
-                peer: peer,
-                workspaceID: workspaceID,
-                hostName: hostName,
-                folderName: current.name
-            )
+            if width >= Self.splitInsideSplit {
+                ClientWorkflowWorkspace(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: current.name
+                )
+            } else {
+                NavigationStack {
+                    ClientWorkspaceWorkflowsView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: current.name
+                    )
+                }
+            }
         case .automations:
-            ClientAutomationWorkspace(
-                peer: peer,
-                workspaceID: workspaceID,
-                hostName: hostName,
-                folderName: current.name
-            )
+            if width >= Self.splitInsideSplit {
+                ClientAutomationWorkspace(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: current.name
+                )
+            } else {
+                NavigationStack {
+                    ClientWorkspaceAutomationsView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: current.name
+                    )
+                }
+            }
         case .notes:
             // Not offered in the list above, so this cannot be selected.
             EmptyView()
