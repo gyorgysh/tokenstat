@@ -40,6 +40,14 @@ final class TerminalsModel {
     }
     private var selectedByWorkspace: [String: String] = [:]
 
+    /// Host ids whose `pty.close` is still in flight.
+    ///
+    /// Closing takes the session off screen straight away and tells the host
+    /// afterwards, so for a moment the host still lists a pty this window has
+    /// already forgotten. Without this the next reconcile would adopt it back
+    /// and the chip the person just closed would reappear.
+    @ObservationIgnored private var closingHostIDs: Set<String> = []
+
     init() {
         // The wheel is a terminal-wide concern, not a per-session one, so it is
         // wired up once here rather than by whichever session appears first.
@@ -257,7 +265,10 @@ final class TerminalsModel {
             // spawn over creating a second session: spawn completion and this
             // list can race, and creating both was the "session appears,
             // vanishes, comes back" glitch.
-            for info in list where !knownHostIDs.contains(info.id) && info.hidden != true {
+            for info in list
+            where !knownHostIDs.contains(info.id)
+                && info.hidden != true
+                && !closingHostIDs.contains(info.id) {
                 if let pending = pendingMatch(for: info) {
                     pending.attach(info: info)
                     // Drop any accidental second copy with the same host id.
@@ -443,12 +454,29 @@ final class TerminalsModel {
     }
 
     /// Kill the process and forget the session. The host's buffer goes with it.
+    ///
+    /// The screen is cleared before the host is told, and on purpose. `pty.close`
+    /// is a round trip, and a busy machine with several agents draining at once
+    /// can take seconds to answer it. Waiting first left the chip on the strip
+    /// and the terminal on screen after the person had already confirmed, which
+    /// reads as a button that did not work and gets clicked again.
+    ///
+    /// The local teardown happens before the first suspension point, so the
+    /// strip has already lost the chip by the time this yields.
     func close(_ session: TerminalSession) async {
-        if !session.isPending {
-            try? await Bridge.ptyClose(id: session.hostID)
-        }
         session.stop()
         sessions.removeAll { $0.id == session.id }
+        if !session.isPending {
+            let hostID = session.hostID
+            closingHostIDs.insert(hostID)
+            Task {
+                try? await Bridge.ptyClose(id: hostID)
+                // Whether or not it worked. A pty that survived the call is
+                // still running, and a later reconcile should say so rather
+                // than hide it forever.
+                closingHostIDs.remove(hostID)
+            }
+        }
         collapseIfNeeded(afterClosing: session)
         if selectedID == session.id {
             if !session.workspaceID.isEmpty {
