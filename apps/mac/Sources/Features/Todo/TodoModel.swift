@@ -104,33 +104,53 @@ final class TodoModel {
     /// been asked to show.
     var filter: TodoScope = .all
 
-    /// Every note, newest first, ignoring the board's own scope.
+    /// Which notes the notes screen is showing.
     ///
-    /// A note is not work in a stage and not work in a folder either: it is
-    /// something somebody wanted to keep. It has its own screen, so it is not
-    /// filtered by whatever the kanban board happens to be showing.
-    var notes: [TodoCard] {
-        cards
-            .filter { $0.kind == .note && $0.column != "archive" }
-            .sorted { $0.createdAtMs > $1.createdAtMs }
+    /// Notes are not work in a stage, but they do belong somewhere: a folder,
+    /// or unassigned (global). All is the union of those.
+    enum NoteScope: Hashable, Sendable {
+        case all
+        case unassigned
+        case workspace(String)
     }
 
-    /// Notes that have been put away. Kept readable, never deleted for you.
-    var archivedNotes: [TodoCard] {
+    /// Notes in a scope, newest first.
+    func notes(in scope: NoteScope, archived: Bool) -> [TodoCard] {
         cards
-            .filter { $0.kind == .note && $0.column == "archive" }
-            .sorted { $0.updatedAtMs > $1.updatedAtMs }
+            .filter { $0.kind == .note && ($0.column == "archive") == archived }
+            .filter { matches($0, scope: scope) }
+            .sorted {
+                archived
+                    ? $0.updatedAtMs > $1.updatedAtMs
+                    : $0.createdAtMs > $1.createdAtMs
+            }
+    }
+
+    /// Notes that have been put away, in any folder. Used to enable Archive.
+    var archivedNoteCount: Int {
+        cards.filter { $0.kind == .note && $0.column == "archive" }.count
+    }
+
+    private func matches(_ card: TodoCard, scope: NoteScope) -> Bool {
+        switch scope {
+        case .all: return true
+        case .unassigned: return card.workspaceID.isEmpty
+        case let .workspace(id): return card.workspaceID == id
+        }
     }
 
     /// Capture a note. Title only, because that is the whole point: the cost
     /// of writing one down has to be lower than the cost of losing it.
-    func addNote(_ text: String) async {
+    ///
+    /// `workspaceID` is empty for an unassigned (global) note, or a folder id
+    /// when the note belongs to a project.
+    func addNote(_ text: String, workspaceID: String) async {
         let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
         do {
             _ = try await Bridge.todoCreate(
                 title: title, kind: .note, notes: "", column: "backlog",
-                backend: "", workspaceID: "", budgetSeconds: 0
+                backend: "", workspaceID: workspaceID, budgetSeconds: 0
             )
             errorMessage = nil
             await load()
