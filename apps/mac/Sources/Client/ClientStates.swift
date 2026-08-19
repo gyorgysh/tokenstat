@@ -96,7 +96,7 @@ struct ClientEmptyState: View {
                     .clientProminentStyle()
                     .controlSize(.large)
                     .tint(Theme.accent)
-                    .padding(.top, 4)
+                    .padding(.top, Theme.Space.s)
             }
         }
         .frame(maxWidth: .infinity)

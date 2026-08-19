@@ -28,12 +28,12 @@ struct ClientLoginView: View {
         VStack(spacing: 0) {
             Spacer()
 
+            // Mark, name, sentence. No "Sign in" heading: the button at the
+            // bottom of the same screen says it, and saying it twice made the
+            // product's own name look like a subtitle to the word above it.
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 52)
                 Wordmark(size: 28, fills: false, showsMark: false)
-                Text("Sign in")
-                    .font(.system(.title, design: .rounded).weight(.semibold))
-                    .multilineTextAlignment(.center)
                 Text("Your usage across every device on your account, wherever you are.")
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
