@@ -69,13 +69,26 @@ impl SourceId {
         }
     }
 
+    /// The tool a stored source id belongs to.
+    ///
+    /// Recovery used to be written as `claude_code_estimate` and is still
+    /// written as `claude_code_rollup`. Those rows stay on disk under those
+    /// names so they can be recomputed and deleted independently. Anything
+    /// that names a tool folds them into Claude Code.
+    pub fn tool_id(id: &str) -> &str {
+        match id {
+            "claude_code_estimate" | "claude_code_rollup" => "claude_code",
+            other => other,
+        }
+    }
+
     /// Human name for a stored source id, including ids this enum does not
     /// carry.
     ///
     /// Recovery used to be written as `claude_code_estimate`. Those rows stay
     /// under that name on disk so [`crate::store::Store::clear_recovered`]
-    /// cannot delete them. Reports name them as Claude Code, recovered, rather
-    /// than as a second tool.
+    /// cannot delete them. A breakdown still names them as Claude Code,
+    /// recovered. A tool list folds them through [`Self::tool_id`].
     pub fn label(id: &str) -> &str {
         match id {
             "claude_code_estimate" => "Claude Code (recovered)",
@@ -383,6 +396,10 @@ mod tests {
             "Claude Code (recovered)"
         );
         assert_eq!(SourceId::label("mystery_tool"), "mystery_tool");
+        assert_eq!(SourceId::tool_id("claude_code"), "claude_code");
+        assert_eq!(SourceId::tool_id("claude_code_rollup"), "claude_code");
+        assert_eq!(SourceId::tool_id("claude_code_estimate"), "claude_code");
+        assert_eq!(SourceId::tool_id("codex"), "codex");
     }
 
     #[test]

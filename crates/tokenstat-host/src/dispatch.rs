@@ -1106,7 +1106,6 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
             with_session(s, |b| {
                 let rows = b
                     .engine()?
-                    .store()
                     .report_split(group, split, &Query::from(p.query))
                     .envelope()?;
                 let dtos: Vec<SplitBucketDto> =

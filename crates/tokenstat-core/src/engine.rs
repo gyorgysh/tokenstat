@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::CoreError;
-use crate::model::Counters;
+use crate::model::{Counters, SourceId};
 use crate::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
-use crate::store::{Bucket, GroupBy, Query, Store, Totals, UsageBlock};
+use crate::store::{Bucket, GroupBy, Query, SplitBucket, Store, Totals, UsageBlock};
 use crate::{ScanReport, timezone};
 
 /// A report row with its list-rate value attached.
@@ -91,7 +91,11 @@ impl Engine {
     }
 
     pub fn report(&self, group: GroupBy, q: &Query) -> Result<Vec<Bucket>, CoreError> {
-        self.store.report(group, q)
+        let rows = self.store.report(group, q)?;
+        Ok(match group {
+            GroupBy::Source => fold_source_buckets(rows),
+            _ => rows,
+        })
     }
 
     /// [`Engine::report`] with a list-rate value on every row.
@@ -126,7 +130,7 @@ impl Engine {
             }
         }
 
-        Ok(buckets
+        let priced: Vec<PricedBucket> = buckets
             .into_iter()
             .map(|b| {
                 let (micros, estimated, unpriced) =
@@ -141,7 +145,22 @@ impl Engine {
                     unpriced_models: unpriced,
                 }
             })
-            .collect())
+            .collect();
+        Ok(match group {
+            GroupBy::Source => fold_priced_source_buckets(priced),
+            _ => priced,
+        })
+    }
+
+    /// [`Store::report_split`] with recovery rows folded when a side is source.
+    pub fn report_split(
+        &self,
+        group: GroupBy,
+        split: GroupBy,
+        q: &Query,
+    ) -> Result<Vec<SplitBucket>, CoreError> {
+        let rows = self.store.report_split(group, split, q)?;
+        Ok(fold_split_source_keys(rows, group, split))
     }
 
     pub fn blocks(&self, q: &Query) -> Result<Vec<UsageBlock>, CoreError> {
@@ -157,6 +176,107 @@ impl Engine {
     pub fn scan(&mut self) -> Result<ScanReport, CoreError> {
         crate::scan(&mut self.store, &self.tz)
     }
+}
+
+/// Fold estimate and rollup rows into Claude Code. Disk ids stay as they are.
+fn fold_source_buckets(rows: Vec<Bucket>) -> Vec<Bucket> {
+    let mut merged: Vec<Bucket> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for row in rows {
+        let key = SourceId::tool_id(&row.key).to_string();
+        if let Some(&i) = index.get(&key) {
+            merged[i].counters.accumulate(&row.counters);
+            merged[i].events += row.events;
+            merged[i].sessions += row.sessions;
+        } else {
+            index.insert(key.clone(), merged.len());
+            merged.push(Bucket {
+                key,
+                counters: row.counters,
+                events: row.events,
+                sessions: row.sessions,
+            });
+        }
+    }
+    merged.sort_by_key(|b| std::cmp::Reverse(b.counters.total()));
+    merged
+}
+
+fn fold_priced_source_buckets(rows: Vec<PricedBucket>) -> Vec<PricedBucket> {
+    let mut merged: Vec<PricedBucket> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for row in rows {
+        let key = SourceId::tool_id(&row.key).to_string();
+        if let Some(&i) = index.get(&key) {
+            merged[i].counters.accumulate(&row.counters);
+            merged[i].events += row.events;
+            merged[i].sessions += row.sessions;
+            let micros = merged[i].value.micros() + row.value.micros();
+            merged[i].value = EquivalentValue::from_micros(micros);
+            merged[i].estimated |= row.estimated;
+            for model in row.unpriced_models {
+                if !merged[i].unpriced_models.contains(&model) {
+                    merged[i].unpriced_models.push(model);
+                }
+            }
+        } else {
+            index.insert(key.clone(), merged.len());
+            merged.push(PricedBucket { key, ..row });
+        }
+    }
+    merged.sort_by_key(|b| std::cmp::Reverse(b.counters.total()));
+    merged
+}
+
+fn fold_split_source_keys(
+    rows: Vec<SplitBucket>,
+    group: GroupBy,
+    split: GroupBy,
+) -> Vec<SplitBucket> {
+    let fold_key = matches!(group, GroupBy::Source);
+    let fold_split = matches!(split, GroupBy::Source);
+    if !fold_key && !fold_split {
+        return rows;
+    }
+    let mut merged: Vec<SplitBucket> = Vec::new();
+    let mut index: HashMap<(String, String), usize> = HashMap::new();
+    for row in rows {
+        let key = if fold_key {
+            SourceId::tool_id(&row.key).to_string()
+        } else {
+            row.key
+        };
+        let split_key = if fold_split {
+            SourceId::tool_id(&row.split).to_string()
+        } else {
+            row.split
+        };
+        let pair = (key.clone(), split_key.clone());
+        if let Some(&i) = index.get(&pair) {
+            merged[i].counters.accumulate(&row.counters);
+            merged[i].events += row.events;
+            merged[i].sessions += row.sessions;
+        } else {
+            index.insert(pair, merged.len());
+            merged.push(SplitBucket {
+                key,
+                split: split_key,
+                counters: row.counters,
+                events: row.events,
+                sessions: row.sessions,
+            });
+        }
+    }
+    let chronological = matches!(group, GroupBy::Day | GroupBy::Week);
+    merged.sort_by(|a, b| {
+        let keys = if chronological {
+            a.key.cmp(&b.key)
+        } else {
+            b.key.cmp(&a.key)
+        };
+        keys.then_with(|| b.counters.total().cmp(&a.counters.total()))
+    });
+    merged
 }
 
 #[cfg(test)]
@@ -311,5 +431,46 @@ mod tests {
         assert!((rows[0].value.dollars() - 30.0).abs() < 0.001);
         // Tokens are still fully counted, only the money is partial.
         assert_eq!(rows[0].counters.output, Some(2_000_000));
+    }
+
+    #[test]
+    fn recovered_claude_code_folds_into_the_live_tool() {
+        let mut e = engine();
+        let tz = jiff::tz::TimeZone::UTC;
+        let live = ev("a", "claude-opus-4-5", "s1");
+        let mut rollup = ev("b", "claude-opus-4-5", "s2");
+        rollup.source = SourceId::ClaudeCodeRollup;
+        e.store_mut().insert_events(&[live, rollup], &tz).unwrap();
+
+        // Old builds wrote the same shortfall as claude_code_estimate.
+        {
+            let conn = rusqlite::Connection::open(e.db_path()).unwrap();
+            conn.execute(
+                "INSERT INTO event (id, source, ts_ms, local_date, local_hour, model,
+                                    session, project, input_fresh, output, billing, confidence)
+                 VALUES (X'03', 'claude_code_estimate', 1700000000000, '2023-11-14', 22,
+                         'claude-opus-4-5', 's3', 'p', 1000000, 1000000, 'plan', 'derived')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let prices = PriceTable::parse(PRICES).unwrap();
+        let rows = e
+            .priced_report(GroupBy::Source, &Query::default(), &prices)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "claude_code");
+        assert_eq!(rows[0].events, 3);
+        assert_eq!(rows[0].sessions, 3);
+        assert_eq!(rows[0].counters.output, Some(3_000_000));
+        assert!((rows[0].value.dollars() - 90.0).abs() < 0.001);
+
+        let split = e
+            .report_split(GroupBy::Project, GroupBy::Source, &Query::default())
+            .unwrap();
+        assert_eq!(split.len(), 1);
+        assert_eq!(split[0].split, "claude_code");
+        assert_eq!(split[0].events, 3);
     }
 }

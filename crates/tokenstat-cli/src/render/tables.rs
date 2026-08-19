@@ -8,6 +8,35 @@ use tokenstat_core::{Bucket, GroupBy, PriceTable, Query, SourceId, Store};
 use super::*;
 use crate::ui::{self, BOLD, DIM, accent};
 
+/// Merge the two recovery source ids into one row for a human table.
+fn fold_recovered_sources(rows: Vec<Bucket>) -> Vec<Bucket> {
+    const RECOVERED: &str = "claude_code_rollup";
+    let mut recovered: Option<Bucket> = None;
+    let mut out: Vec<Bucket> = Vec::new();
+    for mut row in rows {
+        if matches!(
+            row.key.as_str(),
+            "claude_code_estimate" | "claude_code_rollup"
+        ) {
+            if let Some(acc) = recovered.as_mut() {
+                acc.counters.accumulate(&row.counters);
+                acc.events += row.events;
+                acc.sessions += row.sessions;
+            } else {
+                row.key = RECOVERED.to_string();
+                recovered = Some(row);
+            }
+        } else {
+            out.push(row);
+        }
+    }
+    if let Some(row) = recovered {
+        out.push(row);
+    }
+    out.sort_by_key(|b| std::cmp::Reverse(b.counters.total()));
+    out
+}
+
 fn bucket_key_label(group: GroupBy, key: &str) -> String {
     match group {
         GroupBy::Model => model_label(key),
@@ -24,6 +53,13 @@ pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool
     if json {
         return print_json_buckets(&rows);
     }
+    // JSON keeps the stored ids. The table is a breakdown, so estimate and
+    // rollup share one recovered row rather than looking like two tools.
+    let rows = if group == GroupBy::Source {
+        fold_recovered_sources(rows)
+    } else {
+        rows
+    };
     print_table(&rows, label, group);
     note_unmeasured_days(store, q);
     Ok(())

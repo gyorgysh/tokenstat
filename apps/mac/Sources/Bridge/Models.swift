@@ -994,6 +994,17 @@ func harnessID(forCommand command: String) -> String? {
     }
 }
 
+/// The tool a stored source id belongs to.
+///
+/// Recovery rows stay on disk as `claude_code_estimate` / `claude_code_rollup`.
+/// Surfaces that name a tool fold them into Claude Code.
+func harnessToolKey(_ id: String) -> String {
+    switch id {
+    case "claude_code_estimate", "claude_code_rollup": return "claude_code"
+    default: return id
+    }
+}
+
 /// Display name for a harness, the agent CLI that produced the events.
 ///
 /// The archive stores source ids like `claude_code`. These are shown to

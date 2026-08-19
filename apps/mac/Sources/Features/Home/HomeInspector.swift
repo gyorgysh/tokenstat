@@ -259,7 +259,7 @@ struct HomeInspector: View {
                 bucketRow($0, display: shortModel($0.key), monospaced: true)
             }
         }
-        return fold(detail.rows, key: \.model, display: shortModel, monospaced: true)
+        return fold(detail.rows, key: { $0.model }, display: shortModel, monospaced: true)
     }
 
     /// Models that have a list rate. Unpriced and local ones belong in
@@ -304,7 +304,7 @@ struct HomeInspector: View {
                 bucketRow($0, display: harnessName($0.key), monospaced: false)
             }
         }
-        return fold(detail.rows, key: \.src, display: harnessName, monospaced: false)
+        return fold(detail.rows, key: { harnessToolKey($0.src) }, display: harnessName, monospaced: false)
     }
 
     private func bucketRow(_ bucket: Bucket, display: String, monospaced: Bool) -> DayGroupRow {
@@ -319,14 +319,14 @@ struct HomeInspector: View {
 
     private func fold(
         _ parts: [DayPart],
-        key: KeyPath<DayPart, String>,
+        key: (DayPart) -> String,
         display: (String) -> String,
         monospaced: Bool
     ) -> [DayGroupRow] {
         var totals: [(String, UInt64)] = []
         var index: [String: Int] = [:]
         for part in parts {
-            let raw = part[keyPath: key]
+            let raw = key(part)
             if let i = index[raw] {
                 totals[i].1 += part.tokens
             } else {
