@@ -59,7 +59,7 @@ struct ClientLaunchTile: View {
 
     @ViewBuilder
     private var mark: some View {
-        if let harness = profile.harnessId {
+        if let harness = profile.harnessId, harnessBrandAsset(harness) != nil {
             HarnessMark(id: harness, size: 34)
                 .opacity(isMuted ? 0.45 : 1)
                 .saturation(isMuted ? 0.3 : 1)

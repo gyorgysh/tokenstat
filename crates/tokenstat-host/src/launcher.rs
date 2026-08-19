@@ -263,6 +263,35 @@ const PROFILES: &[Profile] = &[
         install_dirs: &[],
         open_url: None,
     },
+    Profile {
+        id: "hermes",
+        name: "Hermes Agent",
+        command: "hermes",
+        args: &[],
+        bypass_args: &[],
+        harness_id: Some("hermes"),
+        // No official vector in their repository. A letter or an invented
+        // mark would claim an identity we do not have, so the tile uses the
+        // same generic terminal glyph as the shell.
+        symbol: Some("terminal"),
+        install_command: Some("curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"),
+        // The installer puts a symlink in ~/.local/bin, which search_path
+        // already looks at. No extra directory to declare.
+        install_dirs: &[],
+        open_url: None,
+    },
+    Profile {
+        id: "kilo",
+        name: "Kilo Code",
+        command: "kilocode",
+        args: &[],
+        bypass_args: &[],
+        harness_id: Some("kilo"),
+        symbol: Some("terminal"),
+        install_command: Some("npm install -g @kilocode/cli"),
+        install_dirs: &[],
+        open_url: None,
+    },
 ];
 
 /// Tools taken off this machine's launcher. Display only: the binary stays.
@@ -716,18 +745,38 @@ fn valid_model_id(model: &str) -> bool {
 /// tokenstat cannot see it", which happens on any machine whose startup file
 /// does not export it.
 fn resolve_profile(profile: &Profile, path: &[String], home: &Path) -> Option<String> {
-    if let Some(found) = resolve_on_path(profile.command, path) {
-        return Some(found);
+    for name in command_names(profile) {
+        if let Some(found) = resolve_on_path(name, path) {
+            return Some(found);
+        }
     }
     if home.as_os_str().is_empty() {
         return None;
     }
-    profile
-        .install_dirs
-        .iter()
-        .map(|dir| home.join(dir).join(profile.command))
-        .find(|candidate| is_executable(candidate))
-        .map(|candidate| candidate.display().to_string())
+    for name in command_names(profile) {
+        let found = profile
+            .install_dirs
+            .iter()
+            .map(|dir| home.join(dir).join(name))
+            .find(|candidate| is_executable(candidate));
+        if let Some(candidate) = found {
+            return Some(candidate.display().to_string());
+        }
+    }
+    None
+}
+
+/// Executable names this profile answers to.
+///
+/// Most tools have one. Kilo's npm page calls the command `kilocode` and the
+/// docs call it `kilo`, so both are probed rather than guessing which install
+/// a machine has.
+fn command_names(profile: &Profile) -> impl Iterator<Item = &'static str> {
+    let extra: &[&str] = match profile.id {
+        "kilo" => &["kilo"],
+        _ => &[],
+    };
+    std::iter::once(profile.command).chain(extra.iter().copied())
 }
 
 /// Where a bare command name is on this machine: PATH, the login PATH,
@@ -831,8 +880,8 @@ fn search_path() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        PROFILES, Profile, catalog, hide_in, install, load_prefs_in, model_arguments,
-        model_environment, resolve_profile, show_in, strip_ansi,
+        PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
+        model_arguments, model_environment, resolve_profile, show_in, strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
@@ -1024,6 +1073,50 @@ mod tests {
             .filter_map(|v| v.get("id").and_then(|v| v.as_str()))
             .collect();
         assert!(ids.contains(&"shell"), "{ids:?}");
+    }
+
+    #[test]
+    fn hermes_and_kilo_are_in_the_catalog() {
+        let hermes = PROFILES
+            .iter()
+            .find(|p| p.id == "hermes")
+            .expect("Hermes Agent must be in the catalog");
+        assert_eq!(hermes.name, "Hermes Agent");
+        assert_eq!(hermes.command, "hermes");
+        assert_eq!(hermes.harness_id, Some("hermes"));
+        assert_eq!(hermes.symbol, Some("terminal"));
+        let command = hermes.install_command.expect("a bundled installer");
+        assert!(
+            command.contains("hermes-agent.nousresearch.com/install.sh"),
+            "{command}"
+        );
+
+        let kilo = PROFILES
+            .iter()
+            .find(|p| p.id == "kilo")
+            .expect("Kilo Code must be in the catalog");
+        assert_eq!(kilo.name, "Kilo Code");
+        assert_eq!(kilo.command, "kilocode");
+        assert_eq!(kilo.harness_id, Some("kilo"));
+        assert_eq!(kilo.symbol, Some("terminal"));
+        let command = kilo.install_command.expect("a bundled installer");
+        assert!(command.contains("@kilocode/cli"), "{command}");
+        let names: Vec<_> = command_names(kilo).collect();
+        assert_eq!(names, ["kilocode", "kilo"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kilo_is_found_under_the_docs_command_name() {
+        let home = home_with("preferred", "kilo");
+        let path = vec![home.join("preferred").display().to_string()];
+        let kilo = PROFILES
+            .iter()
+            .find(|p| p.id == "kilo")
+            .expect("Kilo Code must be in the catalog");
+        let found = resolve_profile(kilo, &path, &home).expect("kilo must resolve");
+        assert!(found.ends_with("preferred/kilo"), "{found}");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

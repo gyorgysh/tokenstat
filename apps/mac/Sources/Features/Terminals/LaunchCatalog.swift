@@ -159,7 +159,23 @@ struct LaunchProfile: Identifiable, Sendable {
             id: "cursor", name: "Cursor CLI", command: "cursor", args: [],
             bypassArgs: [], harnessID: "cursor", symbol: nil
         ),
+        LaunchProfile(
+            id: "hermes", name: "Hermes Agent", command: "hermes", args: [],
+            bypassArgs: [], harnessID: "hermes", symbol: "terminal",
+            installCommand: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+        ),
+        LaunchProfile(
+            id: "kilo", name: "Kilo Code", command: "kilocode", args: [],
+            bypassArgs: [], harnessID: "kilo", symbol: "terminal",
+            installCommand: "npm install -g @kilocode/cli"
+        ),
     ]
+
+    /// Names this tile answers to. Kilo's npm page and its docs disagree
+    /// (`kilocode` vs `kilo`), so both are probed rather than guessed.
+    var commandNames: [String] {
+        id == "kilo" ? [command, "kilo"] : [command]
+    }
 
     static var shellCommand: String {
         ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
@@ -441,14 +457,16 @@ final class LaunchCatalog {
 
     private nonisolated static func filter(_ profiles: [LaunchProfile], onPathIn path: [String]) -> [LaunchProfile] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return profiles.filter {
+        return profiles.filter { profile in
             // The shell is an absolute path; everything else is looked up.
-            $0.command.hasPrefix("/")
-                || isExecutable($0.command, in: path)
+            profile.command.hasPrefix("/")
+                || profile.commandNames.contains(where: { isExecutable($0, in: path) })
                 // A CLI that ships its own directory is on the PATH only
                 // because its installer edited a startup file, and an app
                 // launched from Finder never sourced one.
-                || isExecutable($0.command, in: $0.installDirs.map { "\(home)/\($0)" })
+                || profile.commandNames.contains(where: { name in
+                    isExecutable(name, in: profile.installDirs.map { "\(home)/\($0)" })
+                })
         }
     }
 

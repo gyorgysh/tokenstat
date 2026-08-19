@@ -965,6 +965,8 @@ func harnessID(forCommand command: String) -> String? {
     case "zed": return "zed"
     case "agy": return "antigravity"
     case "agent", "cursor": return "cursor"
+    case "hermes": return "hermes"
+    case "kilocode", "kilo": return "kilo"
     default: return nil
     }
 }
@@ -993,6 +995,8 @@ func harnessName(_ id: String) -> String {
     case "antigravity_ide": return "Antigravity IDE"
     case "cursor": return "Cursor"
     case "gemini": return "Gemini"
+    case "hermes": return "Hermes Agent"
+    case "kilo": return "Kilo Code"
     case "": return "unknown"
     default: return id
     }

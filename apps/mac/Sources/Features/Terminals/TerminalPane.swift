@@ -1248,7 +1248,7 @@ private struct LaunchSurface: View {
     /// supported harness, but with nothing to offer but its name.
     private func unavailableTile(_ profile: LaunchProfile) -> some View {
         VStack(spacing: Theme.Space.s) {
-            if let harness = profile.harnessID {
+            if let harness = profile.harnessID, harnessBrandAsset(harness) != nil {
                 HarnessMark(id: harness, size: 34)
                     .opacity(0.35)
                     .saturation(0.2)
@@ -1373,7 +1373,7 @@ private struct LaunchTile: View {
                         ProgressView()
                             .controlSize(.small)
                             .frame(height: 34)
-                    } else if let harness = profile.harnessID {
+                    } else if let harness = profile.harnessID, harnessBrandAsset(harness) != nil {
                         HarnessMark(id: harness, size: 34)
                     } else {
                         Image(systemName: profile.symbol ?? "terminal")
@@ -1500,12 +1500,12 @@ private struct LaunchInstallTile: View {
                     ProgressView()
                         .controlSize(.small)
                         .frame(height: 34)
-                } else if let harness = profile.harnessID {
+                } else if let harness = profile.harnessID, harnessBrandAsset(harness) != nil {
                     HarnessMark(id: harness, size: 34)
                         .opacity(0.45)
                         .saturation(0.3)
                 } else {
-                    Image(systemName: "arrow.down.circle")
+                    Image(systemName: profile.symbol ?? "arrow.down.circle")
                         .font(.system(size: 18))
                         .foregroundStyle(.tertiary)
                         .frame(height: 34)
