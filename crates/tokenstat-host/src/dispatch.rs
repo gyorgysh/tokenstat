@@ -2280,6 +2280,7 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
 fn terminals(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("pty.")
         && !method.starts_with("launcher.")
+        && !method.starts_with("harness.")
         && !method.starts_with("stream.")
         && !method.starts_with("proxy.")
     {
@@ -2558,6 +2559,32 @@ fn terminal_call(method: &str, params: &str) -> Result<Value, String> {
                 Err(e) => return Err(e.to_string()),
             };
             crate::launcher::show(&p.id)
+        }
+
+        // Allowlisted settings behind the launcher (i) badge. The form
+        // names the file. Save is the only write. Unknown keys are refused.
+        "harness.config.get" => {
+            #[derive(Deserialize)]
+            struct GetParams {
+                id: String,
+            }
+            let p: GetParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::harness_config::get(&p.id)
+        }
+        "harness.config.set" => {
+            #[derive(Deserialize)]
+            struct SetParams {
+                id: String,
+                values: serde_json::Map<String, serde_json::Value>,
+            }
+            let p: SetParams = match serde_json::from_str(params.trim()) {
+                Ok(p) => p,
+                Err(e) => return Err(e.to_string()),
+            };
+            crate::harness_config::set(&p.id, &p.values)
         }
 
         // Remove a machine from the account directory. The server deletes its

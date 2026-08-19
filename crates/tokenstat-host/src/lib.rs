@@ -56,6 +56,8 @@ pub mod base64;
 pub mod dispatch;
 pub mod dto;
 pub mod error;
+#[cfg(feature = "local-host")]
+pub(crate) mod harness_config;
 pub(crate) mod host_policy;
 pub(crate) mod keep_awake;
 #[cfg(feature = "local-host")]

@@ -832,6 +832,29 @@ struct LauncherInstallResult: Codable, Sendable {
     var output: String
 }
 
+/// Allowlisted settings behind a launch tile's (i) badge.
+///
+/// The host only ever returns these keys. The rest of the file, including
+/// credentials, never crosses the bridge.
+struct HarnessConfig: Codable, Sendable {
+    var id: String
+    var path: String?
+    var available: Bool
+    var reason: String?
+    var fields: [HarnessConfigField]
+}
+
+struct HarnessConfigField: Codable, Sendable, Identifiable {
+    var key: String
+    var label: String
+    var kind: String
+    var options: [String]
+    var hint: String?
+    var value: String?
+
+    var id: String { key }
+}
+
 /// A model server discovered on this machine's loopback.
 struct LocalProvider: Codable, Sendable, Hashable, Identifiable {
     var id: String

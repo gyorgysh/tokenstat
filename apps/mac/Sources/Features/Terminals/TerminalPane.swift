@@ -1344,11 +1344,10 @@ private struct LaunchSurface: View {
     }
 }
 
-/// One agent tile: mark, name, and a always-visible path (i) in the corner.
+/// One agent tile: mark, name, and an (i) in the corner.
 ///
-/// The (i) used to appear only on tile hover and was drawn too faint to see;
-/// hovering the invisible hit target also produced a busy cursor. It is now
-/// a real control on every tile: hover shows a Theme bubble with the path.
+/// Hover still shows the command path. A click opens the handful of settings
+/// that change how a long session goes. Save is the only write.
 private struct LaunchTile: View {
     let profile: LaunchProfile
     let isLaunching: Bool
@@ -1435,18 +1434,21 @@ private struct LaunchTile: View {
                         .shadow(color: Theme.shadow(0.35), radius: 3, x: 0, y: 1)
                 )
                 .overlay(alignment: .topTrailing) {
-                    if showPath {
+                    if hovered && !pinned {
                         pathBubble
                     }
                 }
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .popover(isPresented: $pinned, arrowEdge: .trailing) {
+            HarnessConfigView(profile: profile)
+        }
         .onHover { inside in
             withAnimation(.easeOut(duration: 0.12)) { hovered = inside }
         }
-        .animation(.easeOut(duration: 0.12), value: showPath)
-        .accessibilityLabel("Command path")
+        .animation(.easeOut(duration: 0.12), value: hovered && !pinned)
+        .accessibilityLabel("Settings")
         .accessibilityValue(profile.command)
     }
 

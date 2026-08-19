@@ -1259,6 +1259,21 @@ extension Bridge {
         struct Result: Codable, Sendable { var hidden: Bool?; var id: String? }
         _ = try await background("launcher.show", ["id": id], as: Result.self)
     }
+
+    /// Allowlisted settings for a launcher profile. The form names the file.
+    static func harnessConfig(id: String) async throws -> HarnessConfig {
+        try await background("harness.config.get", ["id": id], as: HarnessConfig.self)
+    }
+
+    /// Write allowlisted settings. Unknown keys are refused by the host.
+    @discardableResult
+    static func saveHarnessConfig(id: String, values: [String: String]) async throws -> HarnessConfig {
+        try await background(
+            "harness.config.set",
+            ["id": id, "values": values],
+            as: HarnessConfig.self
+        )
+    }
 }
 
 // MARK: - Automations
