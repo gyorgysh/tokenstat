@@ -55,7 +55,6 @@ struct WorkspaceInspector: View {
     @Bindable var model: WorkspacesModel
     #if os(macOS)
     @Bindable var automations: AutomationsModel
-    @Bindable var terminals: TerminalsModel
     #endif
     /// The signed-in account, for the picture beside your own commits in
     /// History. Nil signs in nobody and draws monograms throughout.
@@ -82,7 +81,7 @@ struct WorkspaceInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            InspectorChromeBar(onClose: onClose, accessory: { consoleToggle }) {
+            InspectorChromeBar(onClose: onClose) {
                 TabStrip(
                     // No icons: the inspector is 280pt at its narrowest and three
                     // labels plus three glyphs truncate before they fit.
@@ -103,15 +102,6 @@ struct WorkspaceInspector: View {
                     .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
                     .clipped()
             }
-            #if os(macOS)
-            if let folder, terminals.inspectorConsole(for: folder.id) {
-                InspectorConsole(folder: folder, terminals: terminals)
-                    .frame(height: 186)
-                    .overlay(alignment: .top) {
-                        Rectangle().fill(Theme.border).frame(height: 1)
-                    }
-            }
-            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
@@ -119,24 +109,6 @@ struct WorkspaceInspector: View {
 
     // The band above this panel is the window titlebar. AppKit owns the
     // mouse there, so the tabs stay in the panel they switch.
-
-    @ViewBuilder
-    private var consoleToggle: some View {
-        #if os(macOS)
-        if let folder {
-            InspectorConsoleToggle(isOn: consoleBinding(for: folder.id))
-        }
-        #endif
-    }
-
-    #if os(macOS)
-    private func consoleBinding(for workspaceID: String) -> Binding<Bool> {
-        Binding(
-            get: { terminals.inspectorConsole(for: workspaceID) },
-            set: { terminals.setInspectorConsole($0, for: workspaceID) }
-        )
-    }
-    #endif
 
     @ViewBuilder
     private var content: some View {

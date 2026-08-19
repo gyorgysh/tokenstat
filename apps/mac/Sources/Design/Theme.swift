@@ -1138,54 +1138,6 @@ struct InspectorCloseButton: View {
     }
 }
 
-/// Opens the inspector's bottom console. Same seat as the close mark, so the
-/// two chrome controls read as a pair.
-struct InspectorConsoleToggle: View {
-    @Binding var isOn: Bool
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button {
-            isOn.toggle()
-        } label: {
-            Image(systemName: "terminal")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(
-                    isOn
-                        ? Theme.accent
-                        : (isHovering ? Theme.controlGlyphHover : Theme.controlGlyph)
-                )
-                .frame(width: 22, height: 22)
-                .background(
-                    Circle().fill(
-                        isOn
-                            ? Theme.accentSoft
-                            : (isHovering ? Theme.rowHighlight : Theme.controlSeat)
-                    )
-                )
-                .overlay(
-                    Circle().strokeBorder(
-                        isOn
-                            ? Theme.accent.opacity(0.45)
-                            : Theme.border.opacity(isHovering ? 0.9 : 0.55),
-                        lineWidth: 1
-                    )
-                )
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .frame(width: 30, height: 30)
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .help(isOn
-            ? "Hide the inspector console"
-            : "Show a follow view or a small shell under this inspector")
-        .accessibilityLabel(isOn ? "Hide inspector console" : "Show inspector console")
-        .accessibilityAddTraits(isOn ? .isSelected : [])
-    }
-}
-
 /// A capsule selector in the app's own language: equal segments inside a
 /// bordered panel, the selected one filled with the accent's soft tint and
 /// accent text, hover in the same grey the sidebar rows use.

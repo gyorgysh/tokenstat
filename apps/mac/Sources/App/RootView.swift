@@ -776,7 +776,6 @@ struct RootView: View {
                 WorkspaceInspector(
                     model: workspaces,
                     automations: automations,
-                    terminals: terminals,
                     account: account.account,
                     onClose: { closeInspector() },
                     onOpenAutomation: { jobID, runID in
