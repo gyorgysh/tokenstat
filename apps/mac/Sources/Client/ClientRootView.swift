@@ -34,7 +34,6 @@ struct ClientRootView: View {
     /// iPad and iPhone want different intros. See `signedOut`.
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var launch = LaunchState()
-    @State private var selection: ClientTab = .home
     /// One account model for the whole client. The avatar reads it, the sheet
     /// edits it, and every screen that needs a tier or a machine list reads the
     /// same copy rather than starting a second sign-in state.
@@ -43,6 +42,12 @@ struct ClientRootView: View {
     /// account plane, which means every screen depends on the network, so the
     /// answer belongs at the root rather than in each of them.
     @State private var connectivity = ConnectivityModel()
+    /// Whether this iPad has a keyboard or a trackpad attached, which is what
+    /// decides between the tab bar and the sidebar. See `ClientLayout`.
+    @State private var input = PointerKeyboardModel()
+    /// Where the person is, held above both layouts so a keyboard being
+    /// attached or detached does not land them somewhere else.
+    @State private var navigation = ClientNavigationModel()
     /// The account sheet, opened from the avatar rather than from a tab. See
     /// `AvatarButton`.
     @State private var showAccount = false
@@ -92,6 +97,24 @@ struct ClientRootView: View {
     /// pitched the product it is already using.
     @AppStorage("client.hasOnboarded") private var hasOnboarded = false
 
+    /// The layout the person picked, which beats what the app worked out.
+    /// Written by the account sheet, read here and nowhere else.
+    @AppStorage("client.layoutMode") private var layoutPreference = ClientLayoutPreference.automatic.rawValue
+
+    /// The width of the window this scene is in, which the layout decision
+    /// needs and no environment value reports. Read once at the root rather
+    /// than by every screen.
+    @State private var windowWidth: CGFloat = 0
+
+    private var layout: ClientLayoutMode {
+        ClientLayout.mode(
+            preference: ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic,
+            hasDesktopInput: input.hasDesktopInput,
+            sizeClass: sizeClass,
+            width: windowWidth
+        )
+    }
+
     var body: some View {
         Group {
             // Three doors after the host is up, not two: still checking,
@@ -123,8 +146,19 @@ struct ClientRootView: View {
         .environment(account)
         .environment(connectivity)
         .environment(store)
+        .environment(input)
+        .environment(navigation)
+        .clientPointerProbe(input)
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { windowWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, width in windowWidth = width }
+            }
+        }
         .task {
             connectivity.start()
+            input.start()
             // Sign-in presents over the app rather than handing the URL to
             // Safari and hoping somebody comes back. See `ClientWebAuth`.
             account.signInPresenter = { ClientWebAuth.shared.start($0) }
@@ -183,8 +217,9 @@ struct ClientRootView: View {
 
     @ViewBuilder
     private var tabs: some View {
+        @Bindable var navigation = navigation
         if #available(iOS 18, *) {
-            TabView(selection: $selection) {
+            TabView(selection: $navigation.destination) {
                 ForEach(ClientTab.allCases) { tab in
                     Tab(tab.label, systemImage: tab.symbol, value: tab) {
                         NavigationStack {
@@ -201,7 +236,7 @@ struct ClientRootView: View {
             // the top bar. See `CompactTabBarOnPad`.
             .clientCompactTabBarOnPad()
         } else {
-            TabView(selection: $selection) {
+            TabView(selection: $navigation.destination) {
                 ForEach(ClientTab.allCases) { tab in
                     NavigationStack {
                         tab.content
