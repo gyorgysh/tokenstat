@@ -86,42 +86,42 @@ struct ClientSidebarRoot: View {
         summaries = Dictionary(uniqueKeysWithValues: list.map { ($0.id, $0) })
     }
 
-    // MARK: - Sidebar
-
-    private var selection: Binding<ClientSidebarItem?> {
-        Binding(
-            get: {
-                if let folder = navigation.folderID, navigation.destination == .workspaces {
-                    return .folder(folder, navigation.section)
-                }
-                return .destination(navigation.destination)
-            },
-            set: { item in
-                guard let item else { return }
-                switch item {
-                case .destination(let tab):
-                    navigation.destination = tab
-                    navigation.folderID = nil
-                case .folder(let id, let section):
-                    navigation.open(folderID: id, section: section)
-                case .session(let id):
-                    if let info = workspaces.sessions.first(where: { $0.id == id }) {
-                        workspaces.openSession(info)
-                    }
-                }
-            }
-        )
+    /// How tall a row is here. See `SidebarMetrics`.
+    private var rowHeight: CGFloat {
+        input.hasPointer ? SidebarMetrics.pointerRow : SidebarMetrics.touchRow
     }
 
+    private func isCurrent(_ tab: ClientTab) -> Bool {
+        navigation.destination == tab && navigation.folderID == nil
+    }
+
+    // MARK: - Sidebar
+
     private var sidebar: some View {
-        List(selection: selection) {
+        List {
             Section {
                 ForEach(ClientTab.allCases) { tab in
-                    Label(tab.label, systemImage: tab.symbol)
-                        .tag(ClientSidebarItem.destination(tab))
+                    Button {
+                        navigation.destination = tab
+                        navigation.folderID = nil
+                    } label: {
+                        HStack(spacing: Theme.Space.s) {
+                            Image(systemName: tab.symbol)
+                                .font(.system(size: 13))
+                                .foregroundStyle(isCurrent(tab) ? Theme.accent : Color.secondary)
+                                .frame(width: 16)
+                            Text(tab.label)
+                                .font(.system(size: 15, weight: isCurrent(tab) ? .medium : .regular))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .clientSidebarRowSurface(isSelected: isCurrent(tab), height: rowHeight)
+                    }
+                    .buttonStyle(.plain)
+                    .clientSidebarRowChrome()
                 }
             }
-            Section("Machines") {
+            Section {
                 if workspaces.hosts.isEmpty {
                     Text("No host computers yet")
                         .font(ClientType.caption)
@@ -149,12 +149,34 @@ struct ClientSidebarRoot: View {
                         }
                     }
                 }
+            } header: {
+                // The Mac's sidebar heading: small, uppercase, grey, with the
+                // count on the right. A title-case row in the platform's own
+                // header style was a third typographic voice in a list that
+                // already has two.
+                HStack {
+                    Text("Machines")
+                        .font(ClientType.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                    Spacer()
+                    if !workspaces.hosts.isEmpty {
+                        Text("\(workspaces.hosts.count)")
+                            .font(ClientType.caption.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
-        // A thumb needs 44 points. A trackpad pointer does not, and the whole
-        // point of this layout is seeing more of the account at once.
-        .environment(\.defaultMinListRowHeight, input.hasPointer ? 32 : 44)
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
+        // The rows set their own height, so the list must not insist on a
+        // taller one underneath them: its default is 44 whatever a row asks.
+        .environment(\.defaultMinListRowHeight, rowHeight)
+        // Sections were spending another 20 points on the gap above their
+        // heading, which is what made four destinations look like a menu.
+        .clientCompactSections()
         // The lockup, not the word. The Mac's sidebar has the bars and the
         // two-tone name at its head, and a system title spelling "tokenstat"
         // in the same place is the one screen in the product where the brand
@@ -237,14 +259,31 @@ struct ClientSidebarRoot: View {
                     ProgressView().controlSize(.small)
                 }
             }
-            .contentShape(.rect)
+            .clientSidebarRowSurface(isSelected: false, height: rowHeight)
         }
         .buttonStyle(.plain)
         .disabled(host.online == false)
-        .hoverEffect(.highlight)
+        .clientSidebarRowChrome()
     }
 
     private func folderRow(_ folder: WorkspaceFolder) -> some View {
+        Button {
+            navigation.open(
+                folderID: folder.id,
+                section: navigation.folderID == folder.id ? navigation.section : .sessions
+            )
+        } label: {
+            folderLabel(folder)
+                .clientSidebarRowSurface(
+                    isSelected: navigation.folderID == folder.id,
+                    height: rowHeight
+                )
+        }
+        .buttonStyle(.plain)
+        .clientSidebarRowChrome()
+    }
+
+    private func folderLabel(_ folder: WorkspaceFolder) -> some View {
         HStack(spacing: Theme.Space.s) {
             // The accent tile the phone's folder rows and the Mac's sidebar
             // both use. A plain grey system folder in a list of purple marks
@@ -264,10 +303,6 @@ struct ClientSidebarRoot: View {
                 gitLine(folder)
             }
         }
-        .tag(ClientSidebarItem.folder(folder.id, navigation.folderID == folder.id
-            ? navigation.section
-            : .sessions))
-        .hoverEffect(.highlight)
     }
 
     /// One of an open folder's sections, with what it holds.
@@ -275,6 +310,24 @@ struct ClientSidebarRoot: View {
     /// The Mac's row: glyph, word, count on the right, and nothing drawn for a
     /// zero. A column of grey zeroes is a wall of them.
     private func sectionRow(_ section: WorkspaceSection, in folder: WorkspaceFolder) -> some View {
+        Button {
+            navigation.open(folderID: folder.id, section: section)
+        } label: {
+            sectionLabel(section, in: folder)
+                .clientSidebarRowSurface(
+                    isSelected: navigation.folderID == folder.id
+                        && navigation.section == section,
+                    height: rowHeight
+                )
+        }
+        .buttonStyle(.plain)
+        .clientSidebarRowChrome()
+    }
+
+    private func sectionLabel(
+        _ section: WorkspaceSection,
+        in folder: WorkspaceFolder
+    ) -> some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: section.symbol)
                 .font(.system(size: 12))
@@ -290,8 +343,6 @@ struct ClientSidebarRoot: View {
             }
         }
         .padding(.leading, Theme.Space.m)
-        .tag(ClientSidebarItem.folder(folder.id, section))
-        .hoverEffect(.highlight)
     }
 
     /// What a section row says on its right. Nil where a count would be a
@@ -362,6 +413,17 @@ struct ClientSidebarRoot: View {
     }
 
     private func sessionRow(_ session: PtySessionInfo) -> some View {
+        Button {
+            workspaces.openSession(session)
+        } label: {
+            sessionLabel(session)
+                .clientSidebarRowSurface(isSelected: false, height: rowHeight)
+        }
+        .buttonStyle(.plain)
+        .clientSidebarRowChrome()
+    }
+
+    private func sessionLabel(_ session: PtySessionInfo) -> some View {
         Label {
             Text(sessionTitle(session)).lineLimit(1)
         } icon: {
@@ -370,8 +432,6 @@ struct ClientSidebarRoot: View {
         }
         .font(ClientType.caption)
         .padding(.leading, Theme.Space.l)
-        .tag(ClientSidebarItem.session(session.id))
-        .hoverEffect(.highlight)
     }
 
     private func sessionTitle(_ session: PtySessionInfo) -> String {
@@ -413,15 +473,85 @@ struct ClientSidebarRoot: View {
     }
 }
 
-/// What one row in the sidebar stands for.
+/// The sidebar's sizes, in one place.
 ///
-/// A folder row carries the section it stands for, which is what lets the
-/// sidebar hold the whole tree the Mac's does: folder, then Sessions, Changes,
-/// Tasks, Notes and the rest, each landing in the detail column on its own.
-enum ClientSidebarItem: Hashable {
-    case destination(ClientTab)
-    case folder(String, WorkspaceSection)
-    case session(String)
+/// The Mac's row is 28 points: 13 point text with five above and below. This
+/// list is touched as well as pointed at, so the **target** grows and the
+/// padding does not. Padding is the gap around a label, and growing it moves
+/// the rows apart without making any of them easier to hit. A minimum height
+/// grows the button itself: the wash, the leading bar and the tap area all
+/// follow it, and the type stays where it is.
+enum SidebarMetrics {
+    /// The Mac's row height, which everything here is measured against.
+    static let macRow: CGFloat = 28
+    /// A pointer is precise, so this is the Mac's row plus the 15 percent that
+    /// makes it comfortable rather than exact.
+    static let pointerRow: CGFloat = macRow * 1.15
+    /// A finger is not, and 44 is the platform's own number for one.
+    static let touchRow: CGFloat = 44
+}
+
+extension View {
+    /// Sections without the standard gap above their heading. iOS 17 and up;
+    /// earlier systems keep the roomier list they already had.
+    @ViewBuilder
+    func clientCompactSections() -> some View {
+        if #available(iOS 17, *) {
+            listSectionSpacing(.compact)
+        } else {
+            self
+        }
+    }
+
+    /// The Mac's sidebar row, drawn rather than borrowed.
+    ///
+    /// A `List(selection:)` cell draws the platform's highlight and, on an
+    /// iPad with a keyboard, a focus ring. Neither is replaceable from
+    /// underneath, so an accent wash added there came out as a boxed outline
+    /// with a wash inside it. The rows are plain buttons in a plain list
+    /// instead: nothing system-drawn to fight, and the selection is the Mac's,
+    /// a soft accent wash with a three point bar down the leading edge.
+    ///
+    /// **This goes on the button's label, never on the button.** A button's
+    /// hit area is its label, so padding and a minimum height applied outside
+    /// it grow the picture and not the target: the row looked full width and
+    /// answered only where the words were. `contentShape` says the whole of
+    /// that grown label is the button, and it can only say so from inside.
+    func clientSidebarRowSurface(isSelected: Bool, height: CGFloat) -> some View {
+        padding(.horizontal, Theme.Space.s)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+            .background(
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Theme.rowSelected : Color.clear)
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 1.5)
+                            .fill(Theme.accent)
+                            .frame(width: 3)
+                            .padding(.vertical, 3)
+                    }
+                }
+            )
+            .contentShape(.rect)
+    }
+
+    /// What the list needs to know about the row, applied to the button.
+    ///
+    /// Separate from the surface because these are the row's business rather
+    /// than the button's: insets, separators and the cell fill belong outside,
+    /// where the list can see them.
+    func clientSidebarRowChrome() -> some View {
+        hoverEffect(.highlight)
+            .listRowInsets(EdgeInsets(
+                top: 0,
+                leading: Theme.Space.xs,
+                bottom: 0,
+                trailing: Theme.Space.xs
+            ))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
 }
 
 #endif
