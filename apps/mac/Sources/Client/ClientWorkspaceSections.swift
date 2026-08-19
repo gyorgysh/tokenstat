@@ -519,17 +519,11 @@ struct ClientWorkspaceTasksView: View {
 
     private static let columns = [("backlog", "To Do"), ("doing", "Doing"), ("done", "Done")]
 
-    /// This folder's cards, minus the notes, which get their own section.
+    /// This folder's cards. Notes are not cards and have their own screen:
+    /// see `ClientWorkspaceNotesView`. A list of work with a second list of
+    /// things to remember underneath it was two screens in a trench coat.
     private var tasks: [TodoCard] {
         cards.filter { $0.kind != .note && ($0.column == "archive") == showingArchive }
-    }
-
-    /// Notes are things to remember, not stages of work, so they sit together
-    /// rather than at the top of To Do. Same rule as the Mac board.
-    private var notes: [TodoCard] {
-        cards
-            .filter { $0.kind == .note && ($0.column == "archive") == showingArchive }
-            .sorted { $0.createdAtMs > $1.createdAtMs }
     }
 
     var body: some View {
@@ -537,7 +531,7 @@ struct ClientWorkspaceTasksView: View {
             title: "Tasks",
             errorMessage: errorMessage,
             isLoaded: loaded,
-            isEmpty: tasks.isEmpty && notes.isEmpty,
+            isEmpty: tasks.isEmpty,
             emptyText: showingArchive ? "Nothing archived" : "No cards yet",
             emptyArt: .tasks,
             emptyMessage: showingArchive
@@ -561,12 +555,6 @@ struct ClientWorkspaceTasksView: View {
                 sectionHeading("Archived")
                 ForEach(tasks) { card in
                     row(card)
-                }
-            }
-            if !notes.isEmpty {
-                sectionHeading("Notes")
-                ForEach(notes) { note in
-                    row(note)
                 }
             }
         }
@@ -637,7 +625,7 @@ struct ClientWorkspaceTasksView: View {
             Button("Delete", role: .destructive) { Task { await remove(card) } }
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if card.kind != .note, card.column != "done" {
+            if card.column != "done" {
                 Button("Done") { Task { await move(card, to: "done") } }
                 if card.column == "backlog" {
                     Button("Doing") { Task { await move(card, to: "doing") } }
@@ -677,12 +665,15 @@ struct ClientWorkspaceTasksView: View {
     }
 }
 
-/// Capture a task or a note from the phone.
+/// Capture a task from the phone.
 ///
-/// A note needs a title and nothing else, which is the point: an idea worth
-/// keeping should cost two taps, not a trip to the Mac. A task can carry a
-/// prompt, but the agent, model and time limit stay on the Mac, where the run
-/// is actually started.
+/// A task can carry a prompt, but the agent, model and time limit stay on the
+/// Mac, where the run is actually started.
+///
+/// **Tasks only.** This used to ask which kind you meant before it asked for
+/// the text, which is a question about the app rather than about the thing
+/// being written down. Notes have their own screen, where writing one costs a
+/// line and a return.
 struct ClientTaskComposer: View {
     let peer: String
     let workspaceID: String
@@ -694,7 +685,6 @@ struct ClientTaskComposer: View {
     let onSaved: () async -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var kind: TodoKind = .task
     @State private var title = ""
     @State private var body_ = ""
     @State private var saving = false
@@ -707,21 +697,9 @@ struct ClientTaskComposer: View {
         NavigationStack {
             Form {
                 Section {
-                    Picker("Kind", selection: $kind) {
-                        Text("Note").tag(TodoKind.note)
-                        Text("Task").tag(TodoKind.task)
-                    }
-                    .pickerStyle(.segmented)
-                    TextField(
-                        kind == .note ? "What do you want to remember?" : "Task title",
-                        text: $title
-                    )
-                    TextField(
-                        kind == .note ? "Note" : "Prompt",
-                        text: $body_,
-                        axis: .vertical
-                    )
-                    .lineLimit(2...5)
+                    TextField("Task title", text: $title)
+                    TextField("Prompt", text: $body_, axis: .vertical)
+                        .lineLimit(2...5)
                     if !folders.isEmpty {
                         Picker("Saving to", selection: destinationBinding) {
                             Text("Uncategorized (no folder)").tag("")
@@ -743,7 +721,7 @@ struct ClientTaskComposer: View {
                     }
                 }
             }
-            .navigationTitle(kind == .note ? "New note" : "New task")
+            .navigationTitle("New task")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -783,7 +761,7 @@ struct ClientTaskComposer: View {
             _ = try await ClientRemote.todoCreate(
                 peer: peer,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                kind: kind,
+                kind: .task,
                 notes: body_,
                 workspaceID: destination ?? workspaceID
             )
