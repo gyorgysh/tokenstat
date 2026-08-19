@@ -117,71 +117,14 @@ struct ClientFolderSplit: View {
 
     @ViewBuilder
     private func detail(width: CGFloat) -> some View {
-        switch section {
-        case .sessions:
-            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
-        case .changes:
-            ClientWorkspaceChangesView(
-                peer: peer,
-                workspaceID: workspaceID,
-                folder: current,
-                hostName: hostName
-            )
-        case .todo:
-            ClientWorkspaceTasksView(
-                peer: peer,
-                workspaceID: workspaceID,
-                hostName: hostName,
-                folderName: current.name
-            )
-        case .workflows:
-            if width >= Self.splitInsideSplit {
-                ClientWorkflowWorkspace(
-                    peer: peer,
-                    workspaceID: workspaceID,
-                    hostName: hostName,
-                    folderName: current.name
-                )
-            } else {
-                NavigationStack {
-                    ClientWorkspaceWorkflowsView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: current.name
-                    )
-                }
-            }
-        case .automations:
-            if width >= Self.splitInsideSplit {
-                ClientAutomationWorkspace(
-                    peer: peer,
-                    workspaceID: workspaceID,
-                    hostName: hostName,
-                    folderName: current.name
-                )
-            } else {
-                NavigationStack {
-                    ClientWorkspaceAutomationsView(
-                        peer: peer,
-                        workspaceID: workspaceID,
-                        hostName: hostName,
-                        folderName: current.name
-                    )
-                }
-            }
-        case .notes:
-            ClientWorkspaceNotesView(
-                peer: peer,
-                workspaceID: workspaceID,
-                hostName: hostName,
-                folderName: current.name
-            )
-        case .files:
-            ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
-        case .browser:
-            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
-        }
+        ClientWorkspaceSectionDetail(
+            peer: peer,
+            hostName: hostName,
+            folder: folder,
+            current: current,
+            section: section,
+            width: width
+        )
     }
 
     private var header: some View {
@@ -280,6 +223,105 @@ struct ClientFolderSplit: View {
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             showPort = false
+        }
+    }
+}
+
+
+/// One of a folder's sections, drawn on its own.
+///
+/// Extracted so the phone's folder split and the iPad's sidebar mount the same
+/// screen for the same row. The split lists the sections beside the content;
+/// the sidebar lists them in the sidebar and gives the whole detail column to
+/// this. Two lists, one set of screens.
+struct ClientWorkspaceSectionDetail: View {
+    let peer: String
+    let hostName: String
+    /// What the list this came from knew, and the freshest read of it. The
+    /// split view has both, and the sidebar passes the same folder twice.
+    let folder: WorkspaceFolder
+    var current: WorkspaceFolder?
+    let section: WorkspaceSection
+    /// How much room the content has. Below `splitInsideSplit` the workflow
+    /// and automation workspaces give their stacked screen instead of nesting
+    /// a split inside a split.
+    var width: CGFloat = 10_000
+
+    /// Below this, a workspace inside the detail column is a squeeze. The
+    /// number lives here now, with the only code that reads it.
+    static let splitInsideSplit: CGFloat = 900
+
+    private var workspaceID: String {
+        ClientRemote.rawWorkspaceID(of: folder) ?? folder.id
+    }
+
+    private var folderNow: WorkspaceFolder { current ?? folder }
+
+    var body: some View {
+        switch section {
+        case .sessions:
+            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
+        case .changes:
+            ClientWorkspaceChangesView(
+                peer: peer,
+                workspaceID: workspaceID,
+                folder: folderNow,
+                hostName: hostName
+            )
+        case .todo:
+            ClientWorkspaceTasksView(
+                peer: peer,
+                workspaceID: workspaceID,
+                hostName: hostName,
+                folderName: folderNow.name
+            )
+        case .workflows:
+            if width >= Self.splitInsideSplit {
+                ClientWorkflowWorkspace(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: folderNow.name
+                )
+            } else {
+                NavigationStack {
+                    ClientWorkspaceWorkflowsView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: folderNow.name
+                    )
+                }
+            }
+        case .automations:
+            if width >= Self.splitInsideSplit {
+                ClientAutomationWorkspace(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: folderNow.name
+                )
+            } else {
+                NavigationStack {
+                    ClientWorkspaceAutomationsView(
+                        peer: peer,
+                        workspaceID: workspaceID,
+                        hostName: hostName,
+                        folderName: folderNow.name
+                    )
+                }
+            }
+        case .notes:
+            ClientWorkspaceNotesView(
+                peer: peer,
+                workspaceID: workspaceID,
+                hostName: hostName,
+                folderName: folderNow.name
+            )
+        case .files:
+            ClientFilesView(peer: peer, workspace: workspaceID, folderName: folder.name)
+        case .browser:
+            ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
         }
     }
 }
