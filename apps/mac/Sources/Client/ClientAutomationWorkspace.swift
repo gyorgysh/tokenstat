@@ -74,7 +74,11 @@ struct ClientAutomationWorkspace: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, Theme.Space.xl)
                 } else if session.jobs.isEmpty {
-                    ClientSectionEmpty(text: "No automations set up in this folder.")
+                    ClientSectionEmpty(
+                        text: "Nothing scheduled here",
+                        art: .automations,
+                        message: "Jobs are set up on the Mac. This folder's runs land here."
+                    )
                 } else {
                     ForEach(session.jobs) { job in
                         Button {
@@ -145,7 +149,7 @@ struct ClientAutomationWorkspace: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            ClientSectionEmpty(text: "Pick a job.")
+            ClientSectionEmpty(text: "Pick a job", message: "Its schedule and its last runs open here.")
                 .padding(Theme.Space.m)
         }
     }

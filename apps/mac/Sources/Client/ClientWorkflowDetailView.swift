@@ -52,7 +52,10 @@ struct ClientWorkflowDetailView: View {
                         .cardSurface()
                     runs(of: graph)
                 } else if session.loaded {
-                    ClientSectionEmpty(text: "This workflow is not in the folder any more.")
+                    ClientSectionEmpty(
+                        text: "This workflow is gone",
+                        message: "It is not in the folder any more."
+                    )
                 } else {
                     ProgressView()
                         .frame(maxWidth: .infinity)

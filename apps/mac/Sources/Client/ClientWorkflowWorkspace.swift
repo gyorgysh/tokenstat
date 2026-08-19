@@ -76,7 +76,11 @@ struct ClientWorkflowWorkspace: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, Theme.Space.xl)
                 } else if session.graphs.isEmpty {
-                    ClientSectionEmpty(text: "No workflows bound to this folder.")
+                    ClientSectionEmpty(
+                        text: "No workflows here",
+                        art: .workflows,
+                        message: "Graphs are drawn on the Mac. Bind one to this folder and its runs land here."
+                    )
                 } else {
                     ForEach(session.graphs) { graph in
                         Button {
@@ -118,7 +122,7 @@ struct ClientWorkflowWorkspace: View {
                 onSelect: { session.selectNode($0) }
             )
         } else {
-            ClientSectionEmpty(text: "Pick a workflow.")
+            ClientSectionEmpty(text: "Pick a workflow", message: "Its graph and its last runs open here.")
                 .padding(Theme.Space.m)
         }
     }

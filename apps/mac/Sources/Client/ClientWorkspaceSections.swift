@@ -13,9 +13,11 @@ import UIKit
 ///
 /// The same ones the Mac's sidebar lists, in the same order and with the same
 /// counts, because they are the same folder. Notes are the exception: they
-/// live on the machine that owns the folder and a client cannot read them yet. The phone has no sidebar and no
-/// tab strip, so a section pushes instead of opening a tab: list, workspace,
-/// section, and a document is the fourth and last level.
+/// live on the machine that owns the folder and a client cannot read them yet.
+///
+/// The phone has no sidebar and no tab strip, so a section pushes instead of
+/// opening a tab: list, workspace, section, and a document is the fourth and
+/// last level.
 ///
 /// Sessions, workflows and automations can start and stop work on the
 /// machine that owns the folder. Construction stays on the Mac: a phone
@@ -373,7 +375,11 @@ struct ClientWorkspaceChangesView: View {
                     branchCard(git)
                 }
                 if files.isEmpty {
-                    ClientSectionEmpty(text: "Nothing uncommitted in this folder.")
+                    ClientSectionEmpty(
+                        text: "Nothing to commit",
+                        art: .changes,
+                        message: "Every file in this folder matches the last commit."
+                    )
                 } else {
                     ForEach(files) { file in
                         NavigationLink {
@@ -518,9 +524,14 @@ struct ClientWorkspaceTasksView: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: tasks.isEmpty && notes.isEmpty,
-            emptyText: showingArchive
-                ? "Nothing archived in this folder."
-                : "No cards in this folder yet. Add one with the plus.",
+            emptyText: showingArchive ? "Nothing archived" : "No cards yet",
+            emptyArt: .tasks,
+            emptyMessage: showingArchive
+                ? "Cards you put away in this folder show up here."
+                : "Capture the next thing to do in \(folderName.isEmpty ? "this folder" : folderName).",
+            emptyActionTitle: showingArchive ? nil : "Add a card",
+            emptyActionIcon: .create,
+            emptyAction: showingArchive ? nil : { composing = true },
             reload: { await load() }
         ) {
             ForEach(Self.columns, id: \.0) { id, label in
@@ -790,7 +801,9 @@ struct ClientWorkspaceWorkflowsView: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: graphs.isEmpty && runs.isEmpty,
-            emptyText: "No workflows bound to this folder.",
+            emptyText: "No workflows here",
+            emptyArt: .workflows,
+            emptyMessage: "Graphs are drawn on the Mac. Bind one to this folder and its runs show up here.",
             refreshKey: "workspace-workflows-\(workspaceID)",
             reload: { await load() }
         ) {
@@ -855,7 +868,9 @@ struct ClientWorkspaceAutomationsView: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: jobs.isEmpty,
-            emptyText: "No automations set up in this folder.",
+            emptyText: "Nothing scheduled here",
+            emptyArt: .automations,
+            emptyMessage: "Jobs are set up on the Mac. This folder's runs and their output land here.",
             refreshKey: "workspace-automations-\(workspaceID)",
             reload: { await load() }
         ) {
@@ -981,16 +996,32 @@ struct ClientJobRow: View {
     }
 }
 
+/// Nothing here, said properly.
+///
+/// A wrapper over `ClientEmptyState` rather than its own card, so a section's
+/// empty screen cannot drift back into a grey sentence while Home and Devices
+/// draw something considered. The title is the state, the line under it is the
+/// next move.
 struct ClientSectionEmpty: View {
     let text: String
+    /// The picture. Nil falls back to the kind's mark, which is what an
+    /// incidental empty state inside a detail screen wants.
+    var art: EmptyArtKind?
+    var message: String?
+    var actionTitle: String?
+    var actionIcon: ActionIcon = .next
+    var action: (() -> Void)?
 
     var body: some View {
-        Text(text)
-            .font(ClientType.body)
-            .foregroundStyle(.secondary)
-            .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .cardSurface()
+        ClientEmptyState(
+            kind: .nothingYet,
+            title: text,
+            message: message,
+            actionTitle: actionTitle,
+            actionIcon: actionIcon,
+            action: action,
+            art: art
+        )
     }
 }
 
@@ -1012,12 +1043,34 @@ struct ClientCardList<Content: View>: View {
     let isLoaded: Bool
     let isEmpty: Bool
     let emptyText: String
+    /// What the empty screen draws, and what it offers. Every section passes
+    /// one: a folder with no jobs deserves the same care as a folder with no
+    /// activity, which is the surface these three used to be the exception to.
+    var emptyArt: EmptyArtKind? = nil
+    var emptyMessage: String? = nil
+    var emptyActionTitle: String? = nil
+    var emptyActionIcon: ActionIcon = .next
+    var emptyAction: (() -> Void)? = nil
     var refreshKey: String? = nil
     let reload: () async -> Void
     @ViewBuilder var content: Content
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var waitedTooLong = false
+
+
+    /// The empty screen this list was configured with. One place, so the two
+    /// list shells cannot describe the same folder differently.
+    private var emptyState: some View {
+        ClientSectionEmpty(
+            text: emptyText,
+            art: emptyArt,
+            message: emptyMessage,
+            actionTitle: emptyActionTitle,
+            actionIcon: emptyActionIcon,
+            action: emptyAction
+        )
+    }
 
     var body: some View {
         List {
@@ -1031,11 +1084,11 @@ struct ClientCardList<Content: View>: View {
                 ClientWireframe.Rows(count: 4)
                     .clientCardRow()
                 if waitedTooLong {
-                    ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil))
+                    ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil), art: .waiting)
                         .clientCardRow()
                 }
             } else if isEmpty {
-                ClientSectionEmpty(text: emptyText)
+                emptyState
                     .clientCardRow()
                     .transition(.smoothIn(reduceMotion: reduceMotion))
             } else {
@@ -1091,12 +1144,34 @@ struct ClientSectionList<Content: View>: View {
     let isLoaded: Bool
     let isEmpty: Bool
     let emptyText: String
+    /// What the empty screen draws, and what it offers. Every section passes
+    /// one: a folder with no jobs deserves the same care as a folder with no
+    /// activity, which is the surface these three used to be the exception to.
+    var emptyArt: EmptyArtKind? = nil
+    var emptyMessage: String? = nil
+    var emptyActionTitle: String? = nil
+    var emptyActionIcon: ActionIcon = .next
+    var emptyAction: (() -> Void)? = nil
     var refreshKey: String? = nil
     let reload: () async -> Void
     @ViewBuilder var content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The first read has been outstanding long enough to say so.
     @State private var waitedTooLong = false
+
+
+    /// The empty screen this list was configured with. One place, so the two
+    /// list shells cannot describe the same folder differently.
+    private var emptyState: some View {
+        ClientSectionEmpty(
+            text: emptyText,
+            art: emptyArt,
+            message: emptyMessage,
+            actionTitle: emptyActionTitle,
+            actionIcon: emptyActionIcon,
+            action: emptyAction
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -1116,10 +1191,10 @@ struct ClientSectionList<Content: View>: View {
                     // But a wireframe promises the answer is coming, so it
                     // must not pulse forever when the machine never replies.
                     if waitedTooLong {
-                        ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil))
+                        ClientSectionEmpty(text: ClientTunnelCopy.waiting(nil), art: .waiting)
                     }
                 } else if isEmpty {
-                    ClientSectionEmpty(text: emptyText)
+                    emptyState
                         .transition(.smoothIn(reduceMotion: reduceMotion))
                 } else {
                     content

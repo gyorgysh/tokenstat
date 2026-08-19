@@ -52,7 +52,10 @@ struct ClientAutomationDetailView: View {
                         .cardSurface()
                     runs(of: job)
                 } else if session.loaded {
-                    ClientSectionEmpty(text: "This job is not in the folder any more.")
+                    ClientSectionEmpty(
+                        text: "This job is gone",
+                        message: "It is not in the folder any more."
+                    )
                 } else {
                     ProgressView()
                         .frame(maxWidth: .infinity)

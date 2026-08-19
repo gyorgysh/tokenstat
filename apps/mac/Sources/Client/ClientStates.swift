@@ -61,14 +61,22 @@ struct ClientEmptyState: View {
     /// Override the kind's default mark when the empty state is about a
     /// specific surface (devices, workspaces) rather than activity.
     var mark: String?
+    /// A drawn scene instead of the mark, for the screens where "nothing here"
+    /// is worth a picture of the thing that is missing. See `ClientEmptyArt`.
+    var art: EmptyArtKind?
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
-            FeatureMark(
-                name: mark ?? kind.mark,
-                tint: kind == .unreachable ? Color.secondary : Theme.accent,
-                size: 30
-            )
+            if let art {
+                ClientEmptyArt(kind: art)
+                    .padding(.bottom, 2)
+            } else {
+                FeatureMark(
+                    name: mark ?? kind.mark,
+                    tint: kind == .unreachable ? Color.secondary : Theme.accent,
+                    size: 30
+                )
+            }
             Text(title)
                 .font(ClientType.screenTitle)
                 .multilineTextAlignment(.center)

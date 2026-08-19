@@ -74,9 +74,14 @@ struct ClientTasksOverview: View {
             errorMessage: errorMessage,
             isLoaded: loaded,
             isEmpty: visible.isEmpty,
-            emptyText: showingArchive
-                ? "Nothing archived on this machine."
-                : "No cards yet. Add one with the plus.",
+            emptyText: showingArchive ? "Nothing archived" : "No cards yet",
+            emptyArt: .tasks,
+            emptyMessage: showingArchive
+                ? "Cards you put away on this machine show up here."
+                : "Anything worth doing on this machine, in one place.",
+            emptyActionTitle: showingArchive ? nil : "Add a card",
+            emptyActionIcon: .create,
+            emptyAction: showingArchive ? nil : { composing = true },
             refreshKey: "todo-overview-\(peer)",
             reload: { await load() }
         ) {

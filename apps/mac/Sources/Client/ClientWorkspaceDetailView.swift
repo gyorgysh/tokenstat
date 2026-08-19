@@ -308,12 +308,11 @@ struct ClientWorkspaceSessionsView: View {
             if !loaded {
                 ClientWireframe.Rows(count: 2)
             } else if sessions.isEmpty {
-                Text("No sessions in this folder yet. Start one above.")
-                    .font(ClientType.body)
-                    .foregroundStyle(.secondary)
-                    .padding(Theme.Space.m)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .cardSurface()
+                ClientSectionEmpty(
+                    text: "Nothing running here",
+                    art: .sessions,
+                    message: "Start an agent from the row above and it opens right here."
+                )
             } else {
                 List {
                     ForEach(sessions) { session in
@@ -517,6 +516,15 @@ struct ClientFilesView: View {
             if let errorMessage {
                 Text(errorMessage)
                     .foregroundStyle(Theme.danger)
+            }
+            if children.isEmpty, errorMessage == nil {
+                ClientSectionEmpty(
+                    text: "Nothing in this folder",
+                    art: .files,
+                    message: "Files an agent writes here show up as it works."
+                )
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
             }
             ForEach(children) { entry in
                 Button {
