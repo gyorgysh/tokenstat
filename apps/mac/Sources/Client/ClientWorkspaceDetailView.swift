@@ -593,28 +593,43 @@ private struct OpenFile: Identifiable {
     var content: String
 }
 
+/// One file from the host, open for editing.
+///
+/// Backed by the same `EditorDocument` the Mac editor uses, so the phone gets
+/// the same colours from the same parse. `highlight` is a sessionless host
+/// method over the buffer rather than the path, so it answers in this process
+/// without asking the machine that owns the file.
 struct ClientFileEditor: View {
     let peer: String
     let workspace: String
     let path: String
-    @State var content: String
+
+    @State private var document: EditorDocument
     @Environment(\.dismiss) private var dismiss
     @State private var isSaving = false
     @State private var errorMessage: String?
-    @State private var original: String = ""
     @State private var confirmClose = false
+
+    @MainActor
+    init(peer: String, workspace: String, path: String, content: String) {
+        self.peer = peer
+        self.workspace = workspace
+        self.path = path
+        _document = State(
+            initialValue: EditorDocument(workspaceID: workspace, path: path, content: content)
+        )
+    }
 
     var body: some View {
         NavigationStack {
-            TextEditor(text: $content)
-                .font(.system(.body, design: .monospaced))
-                .padding(Theme.Space.s)
+            IOSCodeTextView(document: document)
+                .background(Theme.background)
                 .navigationTitle((path as NSString).lastPathComponent)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") {
-                            if content != original {
+                            if document.isDirty {
                                 confirmClose = true
                             } else {
                                 dismiss()
@@ -625,19 +640,14 @@ struct ClientFileEditor: View {
                         Button(isSaving ? "Saving…" : "Save") {
                             Task { await save() }
                         }
-                        .disabled(isSaving || content == original)
+                        .disabled(isSaving || !document.isDirty)
                     }
                 }
-                .safeAreaInset(edge: .bottom) {
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(ClientType.caption)
-                            .foregroundStyle(Theme.danger)
-                            .padding()
-                    }
-                }
+                .safeAreaInset(edge: .bottom) { status }
         }
-        .onAppear { original = content }
+        // The first parse, before anybody types. Colour is not worth blocking
+        // the sheet on, so the text is up either way.
+        .task { await document.highlightNow() }
         .confirmationDialog(
             "Discard changes?",
             isPresented: $confirmClose,
@@ -650,6 +660,25 @@ struct ClientFileEditor: View {
         }
     }
 
+    /// The line under the buffer. A failed save is the loud case; a file with
+    /// no grammar is the quiet one, and saying so beats leaving somebody to
+    /// wonder why their config is grey.
+    @ViewBuilder
+    private var status: some View {
+        if let errorMessage {
+            Text(errorMessage)
+                .font(ClientType.caption)
+                .foregroundStyle(Theme.danger)
+                .padding()
+        } else if let note = document.highlightNote {
+            Text(note)
+                .font(ClientType.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+        }
+    }
+
     private func save() async {
         isSaving = true
         defer { isSaving = false }
@@ -658,9 +687,9 @@ struct ClientFileEditor: View {
                 peer: peer,
                 workspace: workspace,
                 path: path,
-                content: content
+                content: document.text
             )
-            original = content
+            document.markSaved()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
