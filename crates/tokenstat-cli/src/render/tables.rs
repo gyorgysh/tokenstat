@@ -3,10 +3,18 @@ use std::path::Path;
 
 use anstream::println;
 use anyhow::{Context, Result};
-use tokenstat_core::{Bucket, GroupBy, PriceTable, Query, Store};
+use tokenstat_core::{Bucket, GroupBy, PriceTable, Query, SourceId, Store};
 
 use super::*;
 use crate::ui::{self, BOLD, DIM, accent};
+
+fn bucket_key_label(group: GroupBy, key: &str) -> String {
+    match group {
+        GroupBy::Model => model_label(key),
+        GroupBy::Source => SourceId::label(key).to_string(),
+        _ => key.to_string(),
+    }
+}
 
 pub fn grouped(store: &Store, group: GroupBy, q: &Query, label: &str, json: bool) -> Result<()> {
     let rows = store.report(group, q)?;
@@ -92,13 +100,7 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
 
     let key_w = rows
         .iter()
-        .map(|r| {
-            if group == GroupBy::Model {
-                model_label(&r.key).chars().count()
-            } else {
-                r.key.chars().count()
-            }
-        })
+        .map(|r| bucket_key_label(group, &r.key).chars().count())
         .max()
         .unwrap_or(8)
         .clamp(label.len().max(10), 36);
@@ -126,11 +128,7 @@ fn print_table(rows: &[Bucket], label: &str, group: GroupBy) {
         let c = &r.counters;
         let frac = c.total() as f64 / max as f64;
         let a = accent();
-        let key_label = if group == GroupBy::Model {
-            model_label(&r.key)
-        } else {
-            r.key.clone()
-        };
+        let key_label = bucket_key_label(group, &r.key);
         println!(
             "  {}  {}  {}  {}  {}  {}  {a}{}{a:#}",
             ui::pad_right(&key_label, key_w),

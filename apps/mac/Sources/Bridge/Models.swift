@@ -978,7 +978,7 @@ func harnessID(forCommand command: String) -> String? {
 func harnessName(_ id: String) -> String {
     switch id {
     case "claude_code": return "Claude Code"
-    case "claude_code_rollup": return "Claude Code rollup"
+    case "claude_code_rollup", "claude_code_estimate": return "Claude Code (recovered)"
     case "codex": return "Codex"
     case "grok": return "Grok Build"
     case "opencode": return "OpenCode"

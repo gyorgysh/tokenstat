@@ -68,6 +68,39 @@ impl SourceId {
             SourceId::Copilot => "Copilot CLI",
         }
     }
+
+    /// Human name for a stored source id, including ids this enum does not
+    /// carry.
+    ///
+    /// Recovery used to be written as `claude_code_estimate`. Those rows stay
+    /// under that name on disk so [`crate::store::Store::clear_recovered`]
+    /// cannot delete them. Reports name them as Claude Code, recovered, rather
+    /// than as a second tool.
+    pub fn label(id: &str) -> &str {
+        match id {
+            "claude_code_estimate" => "Claude Code (recovered)",
+            other => Self::from_archive(other)
+                .map(Self::display_name)
+                .unwrap_or(other),
+        }
+    }
+
+    fn from_archive(id: &str) -> Option<Self> {
+        match id {
+            "claude_code" => Some(Self::ClaudeCode),
+            "claude_code_rollup" => Some(Self::ClaudeCodeRollup),
+            "codex" => Some(Self::Codex),
+            "grok" => Some(Self::Grok),
+            "opencode" => Some(Self::OpenCode),
+            "cline" => Some(Self::Cline),
+            "cursor" => Some(Self::Cursor),
+            "antigravity" => Some(Self::Antigravity),
+            "openclaw" => Some(Self::OpenClaw),
+            "zed" => Some(Self::Zed),
+            "copilot" => Some(Self::Copilot),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for SourceId {
@@ -336,6 +369,20 @@ mod tests {
         assert_eq!(a.output, Some(7));
         // Never observed on either side, so it stays unknown rather than zero.
         assert_eq!(a.cache_read, None);
+    }
+
+    #[test]
+    fn recovered_claude_code_reads_as_the_same_tool() {
+        assert_eq!(SourceId::label("claude_code"), "Claude Code");
+        assert_eq!(
+            SourceId::label("claude_code_rollup"),
+            "Claude Code (recovered)"
+        );
+        assert_eq!(
+            SourceId::label("claude_code_estimate"),
+            "Claude Code (recovered)"
+        );
+        assert_eq!(SourceId::label("mystery_tool"), "mystery_tool");
     }
 
     #[test]
