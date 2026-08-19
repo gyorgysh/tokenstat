@@ -287,6 +287,45 @@ enum ClientRemote {
         )
     }
 
+    /// Rewrite a note's text.
+    ///
+    /// A note is its title, so this is the whole edit. The Mac cannot do this
+    /// yet: it captures and archives, and changing what you wrote means
+    /// writing it again.
+    static func todoRetitle(peer: String, id: String, title: String) async throws -> TodoCard {
+        try await Bridge.onPeer(
+            peer,
+            "todo.update",
+            ["id": id, "title": title],
+            as: TodoCard.self
+        )
+    }
+
+    /// Turn a note into a card on this folder's board.
+    ///
+    /// The same update the Mac makes: the note's text becomes the prompt and
+    /// the card lands in the backlog. One card changes kind rather than a new
+    /// one appearing beside a note that then has to be cleaned up.
+    static func todoConvertToTask(
+        peer: String,
+        id: String,
+        prompt: String,
+        workspaceID: String
+    ) async throws -> TodoCard {
+        try await Bridge.onPeer(
+            peer,
+            "todo.update",
+            [
+                "id": id,
+                "column": "backlog",
+                "kind": TodoKind.task.rawValue,
+                "notes": prompt,
+                "workspaceId": workspaceID,
+            ],
+            as: TodoCard.self
+        )
+    }
+
     static func todoRemove(peer: String, id: String) async throws {
         _ = try await Bridge.onPeer(peer, "todo.remove", ["id": id], as: TodoRemoved.self)
     }

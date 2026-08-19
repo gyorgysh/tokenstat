@@ -1371,6 +1371,10 @@ struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
     /// "nothing changed".
     var changed: Int?
     var tasks: Int
+    /// Notes kept here, archived ones excluded. Optional because a host older
+    /// than this field answers without it, and a row that says nothing is
+    /// honest where a zero would not be.
+    var notes: Int?
     var workflows: Int
     var workflowsRunning: Int
     var automations: Int
@@ -2211,6 +2215,33 @@ struct TodoCard: Codable, Sendable, Identifiable, Hashable {
     var isArchived: Bool { column == "archive" }
 
     var isNote: Bool { kind == .note }
+
+    /// A note drawn before the host has confirmed it.
+    ///
+    /// The phone's notes screen shows what you wrote at once and swaps this
+    /// for the host's card when it answers. Written as its own initializer
+    /// because the decoding one above takes the memberwise initializer away,
+    /// and the id is deliberately not a plausible one: nothing may act on this
+    /// row except the code that made it, and a temporary that looks real is a
+    /// delete aimed at nothing.
+    init(pendingNote text: String, workspaceID: String) {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        id = "pending:\(UUID().uuidString)"
+        title = text
+        kind = .note
+        notes = ""
+        column = "backlog"
+        order = 0
+        priority = "normal"
+        backend = ""
+        model = nil
+        effort = nil
+        self.workspaceID = workspaceID
+        budgetSeconds = 0
+        createdAtMs = now
+        updatedAtMs = now
+        delegate = nil
+    }
 
     /// The token a CLI `--model` flag accepts. Drops a tab-separated label
     /// or a mashed `idLabel` leftover from an older picker.

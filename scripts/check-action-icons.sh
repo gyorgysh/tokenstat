@@ -82,6 +82,7 @@ ALLOWED = [
     ("Client/ClientWorkflowRunView.swift", "session.selectNode"),
     ("App/RootView.swift", "Button(action: toggle) {"),
     ("Client/ClientWorkspacesView.swift", "model.openSession(session)"),
+    ("Client/ClientWorkspaceNotesView.swift", "startEditing(note)"),
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),

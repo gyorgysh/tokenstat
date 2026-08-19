@@ -167,6 +167,18 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
+                ClientWorkspaceNotesView(
+                    peer: peer,
+                    workspaceID: workspaceID,
+                    hostName: hostName,
+                    folderName: current.name
+                )
+            } label: {
+                ClientSectionRow(section: .notes, count: counts.notes)
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
                 ClientWorkspaceWorkflowsView(
                     peer: peer,
                     workspaceID: workspaceID,
@@ -265,6 +277,7 @@ struct ClientWorkspaceDetailView: View {
             sessions: summary.sessions,
             changes: summary.changed ?? current.git?.files.count ?? 0,
             todo: summary.tasks,
+            notes: summary.notes ?? 0,
             automations: summary.automations,
             workflows: summary.workflowsRunning > 0 ? summary.workflowsRunning : summary.workflows
         )
@@ -292,6 +305,7 @@ struct WorkspaceSectionCounts {
     var sessions = 0
     var changes = 0
     var todo = 0
+    var notes = 0
     var automations = 0
     var workflows = 0
 }
