@@ -137,6 +137,8 @@ struct HarnessConfigView: View {
                         }
                     }
                 }
+            case "number" where field.min != nil && field.max != nil:
+                numberSlider(field)
             default:
                 TextField(field.label, text: stringBinding(field.key))
                     .textFieldStyle(.roundedBorder)
@@ -149,6 +151,45 @@ struct HarnessConfigView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// A compaction threshold, as a dial rather than as digits.
+    ///
+    /// The band and the step come from the host, which reads them from what
+    /// the tool documents. An empty value is not zero: it means the key is
+    /// absent and the tool is using its own default, so the handle starts
+    /// there and the number beside it says so.
+    @ViewBuilder
+    private func numberSlider(_ field: HarnessConfigField) -> some View {
+        let low = Double(field.min ?? 0)
+        let high = Double(field.max ?? 100)
+        let step = Double(max(field.step ?? 1, 1))
+        let current = draft[field.key] ?? ""
+        let fallback = Double(field.fallback ?? field.min ?? 0)
+        let number = Double(current) ?? fallback
+        HStack(spacing: Theme.Space.s) {
+            Slider(
+                value: Binding(
+                    get: { min(max(number, low), high) },
+                    set: { draft[field.key] = String(Int($0.rounded())) }
+                ),
+                in: low...high,
+                step: step
+            )
+            Text(current.isEmpty ? "\(Int(fallback)) (default)" : numberLabel(field, current))
+                .font(Theme.mono(11))
+                .foregroundStyle(current.isEmpty ? .secondary : .primary)
+                .frame(minWidth: 92, alignment: .trailing)
+                .monospacedDigit()
+        }
+    }
+
+    /// Percentages read as they are written. Token counts get separators,
+    /// because 900000 and 90000 are the same shape at a glance.
+    private func numberLabel(_ field: HarnessConfigField, _ value: String) -> String {
+        guard let number = Int(value) else { return value }
+        if (field.max ?? 0) <= 100 { return "\(number)" }
+        return number.formatted(.number.grouping(.automatic))
     }
 
     private func choiceOptions(_ field: HarnessConfigField) -> [(value: String, label: String)] {

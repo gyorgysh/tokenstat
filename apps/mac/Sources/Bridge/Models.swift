@@ -859,9 +859,23 @@ struct HarnessConfigField: Codable, Sendable, Identifiable {
     var kind: String
     var options: [String]
     var hint: String?
+    /// The band a number sits in, when the tool documents one. Present means
+    /// the form draws a slider instead of a text box.
+    var min: Int?
+    var max: Int?
+    var step: Int?
+    /// What the tool itself uses when the key is absent, so a slider with no
+    /// value starts where the tool already is. `default` is a keyword.
+    var fallback: Int?
     var value: String?
 
     var id: String { key }
+
+    enum CodingKeys: String, CodingKey {
+        case key, label, kind, options, hint, min, max, step
+        case fallback = "default"
+        case value
+    }
 }
 
 /// A model server discovered on this machine's loopback.

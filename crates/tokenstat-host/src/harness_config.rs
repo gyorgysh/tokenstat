@@ -155,12 +155,29 @@ enum FieldKind {
     Choice,
 }
 
+/// The band a number is allowed to sit in, and the step a drag moves by.
+///
+/// A compaction threshold is a dial, not a free number: typed digits are how
+/// somebody ends up compacting at 4 percent or reserving more tokens than the
+/// window holds. Where the tool documents a sane band, it is given here and
+/// the form draws a slider. `default` is what the tool itself uses when the
+/// key is absent, so the slider starts where the tool already is.
+#[derive(Clone, Copy)]
+struct Span {
+    min: i64,
+    max: i64,
+    step: i64,
+    default: i64,
+}
+
 struct Field {
     key: &'static str,
     label: &'static str,
     kind: FieldKind,
     options: &'static [&'static str],
     hint: Option<&'static str>,
+    /// Numbers only. `None` keeps the plain text box.
+    span: Option<Span>,
     loc: Loc,
 }
 
@@ -218,6 +235,7 @@ const GROK: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: Some("models"),
             key: "default",
@@ -229,6 +247,7 @@ const GROK: &[Field] = &[
         kind: FieldKind::Choice,
         options: &["low", "medium", "high", "xhigh"],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: Some("models"),
             key: "default_reasoning_effort",
@@ -240,37 +259,38 @@ const GROK: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: Some("percent of the context window"),
+        span: Some(Span {
+            min: 30,
+            max: 100,
+            step: 5,
+            default: 85,
+        }),
         loc: Loc::Toml {
             section: Some("session"),
             key: "auto_compact_threshold_percent",
         },
     },
+    // The mode Grok actually reads. `always-approve` and `bypassPermissions`
+    // are two names for one mode, so only the product name is offered, and
+    // the legacy `[ui] yolo` flag is not offered at all: it is a managed
+    // policy key, not a second switch a person should flip here.
     Field {
         key: "permission",
         label: "Permissions",
         kind: FieldKind::Choice,
         options: &[
             "default",
-            "auto",
             "acceptEdits",
+            "plan",
+            "auto",
+            "dontAsk",
             "always-approve",
-            "bypassPermissions",
         ],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: Some("ui"),
             key: "permission_mode",
-        },
-    },
-    Field {
-        key: "yolo",
-        label: "YOLO",
-        kind: FieldKind::Bool,
-        options: &[],
-        hint: None,
-        loc: Loc::Toml {
-            section: Some("ui"),
-            key: "yolo",
         },
     },
     Field {
@@ -279,6 +299,7 @@ const GROK: &[Field] = &[
         kind: FieldKind::Bool,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: Some("ui"),
             key: "compact_mode",
@@ -293,6 +314,7 @@ const CODEX: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: None,
             key: "model",
@@ -304,6 +326,7 @@ const CODEX: &[Field] = &[
         kind: FieldKind::Choice,
         options: &["minimal", "low", "medium", "high", "xhigh"],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: None,
             key: "model_reasoning_effort",
@@ -317,6 +340,12 @@ const CODEX: &[Field] = &[
         hint: Some(
             "tokens. Codex's context-window override is not offered: it has been reported to break compaction.",
         ),
+        span: Some(Span {
+            min: 100_000,
+            max: 1_000_000,
+            step: 10_000,
+            default: 900_000,
+        }),
         loc: Loc::Toml {
             section: None,
             key: "model_auto_compact_token_limit",
@@ -328,6 +357,7 @@ const CODEX: &[Field] = &[
         kind: FieldKind::Choice,
         options: &["untrusted", "on-request", "never"],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: None,
             key: "approval_policy",
@@ -339,6 +369,7 @@ const CODEX: &[Field] = &[
         kind: FieldKind::Choice,
         options: &["read-only", "workspace-write", "danger-full-access"],
         hint: None,
+        span: None,
         loc: Loc::Toml {
             section: None,
             key: "sandbox_mode",
@@ -353,16 +384,81 @@ const CLAUDE: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json { pointer: "/model" },
     },
+    // xhigh and max exist and are model dependent: Claude Code rejects an
+    // effort the model or the organization does not allow, at the point the
+    // session starts, rather than at the point this file is written.
     Field {
         key: "effort",
         label: "Effort",
         kind: FieldKind::Choice,
-        options: &["low", "medium", "high"],
+        options: &["low", "medium", "high", "xhigh", "max"],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/effortLevel",
+        },
+    },
+    Field {
+        key: "permission",
+        label: "Permissions",
+        kind: FieldKind::Choice,
+        options: &[
+            "default",
+            "plan",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+        ],
+        hint: None,
+        span: None,
+        loc: Loc::Json {
+            pointer: "/permissions/defaultMode",
+        },
+    },
+    Field {
+        key: "thinking",
+        label: "Always thinking",
+        kind: FieldKind::Bool,
+        options: &[],
+        hint: None,
+        span: None,
+        loc: Loc::Json {
+            pointer: "/alwaysThinkingEnabled",
+        },
+    },
+    Field {
+        key: "compact_auto",
+        label: "Auto compact",
+        kind: FieldKind::Bool,
+        options: &[],
+        hint: None,
+        span: None,
+        loc: Loc::Json {
+            pointer: "/autoCompactEnabled",
+        },
+    },
+    // The one setting on this sheet that changes what tokenstat can report.
+    // Transcripts older than this are deleted by Claude Code itself, and a
+    // deleted transcript is usage nothing can recover: the archive keeps what
+    // it already read, and nothing else.
+    Field {
+        key: "cleanup_days",
+        label: "Keep transcripts",
+        kind: FieldKind::Number,
+        options: &[],
+        hint: Some("days. Claude Code deletes older sessions itself, default 30."),
+        span: Some(Span {
+            min: 1,
+            max: 365,
+            step: 1,
+            default: 30,
+        }),
+        loc: Loc::Json {
+            pointer: "/cleanupPeriodDays",
         },
     },
     Field {
@@ -371,6 +467,7 @@ const CLAUDE: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json { pointer: "/theme" },
     },
 ];
@@ -382,6 +479,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: Some("provider/model"),
+        span: None,
         loc: Loc::Json { pointer: "/model" },
     },
     Field {
@@ -390,6 +488,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Text,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/small_model",
         },
@@ -400,6 +499,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Bool,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/compaction/auto",
         },
@@ -410,6 +510,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Bool,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/compaction/prune",
         },
@@ -420,6 +521,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/compaction/tail_turns",
         },
@@ -430,6 +532,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/compaction/preserve_recent_tokens",
         },
@@ -440,6 +543,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/compaction/reserved",
         },
@@ -450,6 +554,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/tool_output/max_lines",
         },
@@ -460,6 +565,7 @@ const OPENCODE: &[Field] = &[
         kind: FieldKind::Number,
         options: &[],
         hint: None,
+        span: None,
         loc: Loc::Json {
             pointer: "/tool_output/max_bytes",
         },
@@ -478,6 +584,10 @@ fn field_json(field: &Field, value: Option<String>) -> Value {
         },
         "options": field.options,
         "hint": field.hint,
+        "min": field.span.map(|s| s.min),
+        "max": field.span.map(|s| s.max),
+        "step": field.span.map(|s| s.step),
+        "default": field.span.map(|s| s.default),
         "value": value,
     })
 }
@@ -510,6 +620,26 @@ fn read_json(text: &str, fields: &[Field]) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+/// A number to write, refused outside the band the field declares.
+///
+/// Clamping silently would write something the person did not choose into
+/// another tool's config, so an out of range value is an error instead.
+fn number(field: &Field, value: &Value) -> Result<i64, String> {
+    let n = value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+        .ok_or_else(|| format!("{} must be a number", field.key))?;
+    if let Some(span) = field.span
+        && (n < span.min || n > span.max)
+    {
+        return Err(format!(
+            "{} must be between {} and {}",
+            field.key, span.min, span.max
+        ));
+    }
+    Ok(n)
+}
+
 fn encode_field(field: &Field, value: &Value) -> Result<String, String> {
     match field.kind {
         FieldKind::Bool => match value {
@@ -517,13 +647,7 @@ fn encode_field(field: &Field, value: &Value) -> Result<String, String> {
             Value::String(s) if s == "true" || s == "false" => Ok(s.clone()),
             _ => Err(format!("{} must be true or false", field.key)),
         },
-        FieldKind::Number => {
-            let n = value
-                .as_i64()
-                .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-                .ok_or_else(|| format!("{} must be a number", field.key))?;
-            Ok(n.to_string())
-        }
+        FieldKind::Number => Ok(number(field, value)?.to_string()),
         FieldKind::Choice | FieldKind::Text => {
             let s = value
                 .as_str()
@@ -559,13 +683,7 @@ fn json_value(field: &Field, value: &Value) -> Result<Value, String> {
             Value::String(s) if s == "false" => Ok(json!(false)),
             _ => Err(format!("{} must be true or false", field.key)),
         },
-        FieldKind::Number => {
-            let n = value
-                .as_i64()
-                .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
-                .ok_or_else(|| format!("{} must be a number", field.key))?;
-            Ok(json!(n))
-        }
+        FieldKind::Number => Ok(json!(number(field, value)?)),
         FieldKind::Choice | FieldKind::Text => {
             let s = value
                 .as_str()
@@ -1079,7 +1197,7 @@ fn consume_value(text: &str, start: usize) -> Result<Range<usize>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Field, FieldKind, Loc, encode_field, insert_key, json_set, read_json, strip_jsonc,
+        Field, FieldKind, Loc, Span, encode_field, insert_key, json_set, read_json, strip_jsonc,
         strip_trailing_commas, toml_get, toml_set, unquote,
     };
     use serde_json::json;
@@ -1131,6 +1249,7 @@ mod tests {
             kind: FieldKind::Choice,
             options: &["low", "high"],
             hint: None,
+            span: None,
             loc: Loc::Toml {
                 section: None,
                 key: "effort",
@@ -1138,6 +1257,30 @@ mod tests {
         };
         assert!(encode_field(&field, &json!("medium")).is_err());
         assert!(encode_field(&field, &json!("low")).is_ok());
+    }
+
+    #[test]
+    fn a_number_outside_its_band_is_refused() {
+        let field = Field {
+            key: "compact",
+            label: "Compact at",
+            kind: FieldKind::Number,
+            options: &[],
+            hint: None,
+            span: Some(Span {
+                min: 30,
+                max: 100,
+                step: 5,
+                default: 85,
+            }),
+            loc: Loc::Toml {
+                section: Some("session"),
+                key: "auto_compact_threshold_percent",
+            },
+        };
+        assert!(encode_field(&field, &json!(4)).is_err());
+        assert!(encode_field(&field, &json!(120)).is_err());
+        assert_eq!(encode_field(&field, &json!(40)).as_deref(), Ok("40"));
     }
 
     #[test]
@@ -1193,6 +1336,7 @@ mod tests {
                 kind: FieldKind::Text,
                 options: &[],
                 hint: None,
+                span: None,
                 loc: Loc::Json { pointer: "/model" },
             }],
         )
