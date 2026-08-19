@@ -357,6 +357,12 @@ struct ClientWorkspaceSessionsView: View {
         } catch {
             errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
         }
+        // Outside the catch, like every other section screen: the question has
+        // been asked and answered, and a refusal is an answer. Without this the
+        // wireframe only ever ended on the watchdog, which the `.task` cancels
+        // the moment a *successful* load returns, so the screen that worked was
+        // the one that pulsed forever.
+        loaded = true
     }
 
     private func recoverAfterNetworkChange() async {
