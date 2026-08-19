@@ -270,10 +270,7 @@ const PROFILES: &[Profile] = &[
         args: &[],
         bypass_args: &[],
         harness_id: Some("hermes"),
-        // No official vector in their repository. A letter or an invented
-        // mark would claim an identity we do not have, so the tile uses the
-        // same generic terminal glyph as the shell.
-        symbol: Some("terminal"),
+        symbol: None,
         install_command: Some("curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"),
         // The installer puts a symlink in ~/.local/bin, which search_path
         // already looks at. No extra directory to declare.
@@ -287,7 +284,7 @@ const PROFILES: &[Profile] = &[
         args: &[],
         bypass_args: &[],
         harness_id: Some("kilo"),
-        symbol: Some("terminal"),
+        symbol: None,
         install_command: Some("npm install -g @kilocode/cli"),
         install_dirs: &[],
         open_url: None,
@@ -1084,7 +1081,7 @@ mod tests {
         assert_eq!(hermes.name, "Hermes Agent");
         assert_eq!(hermes.command, "hermes");
         assert_eq!(hermes.harness_id, Some("hermes"));
-        assert_eq!(hermes.symbol, Some("terminal"));
+        assert_eq!(hermes.symbol, None);
         let command = hermes.install_command.expect("a bundled installer");
         assert!(
             command.contains("hermes-agent.nousresearch.com/install.sh"),
@@ -1098,7 +1095,7 @@ mod tests {
         assert_eq!(kilo.name, "Kilo Code");
         assert_eq!(kilo.command, "kilocode");
         assert_eq!(kilo.harness_id, Some("kilo"));
-        assert_eq!(kilo.symbol, Some("terminal"));
+        assert_eq!(kilo.symbol, None);
         let command = kilo.install_command.expect("a bundled installer");
         assert!(command.contains("@kilocode/cli"), "{command}");
         let names: Vec<_> = command_names(kilo).collect();

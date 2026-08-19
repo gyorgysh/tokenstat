@@ -161,12 +161,12 @@ struct LaunchProfile: Identifiable, Sendable {
         ),
         LaunchProfile(
             id: "hermes", name: "Hermes Agent", command: "hermes", args: [],
-            bypassArgs: [], harnessID: "hermes", symbol: "terminal",
+            bypassArgs: [], harnessID: "hermes", symbol: nil,
             installCommand: "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
         ),
         LaunchProfile(
             id: "kilo", name: "Kilo Code", command: "kilocode", args: [],
-            bypassArgs: [], harnessID: "kilo", symbol: "terminal",
+            bypassArgs: [], harnessID: "kilo", symbol: nil,
             installCommand: "npm install -g @kilocode/cli"
         ),
     ]
