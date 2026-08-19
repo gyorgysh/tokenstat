@@ -274,7 +274,10 @@ struct ClientWorkspaceNotesView: View {
                 errorMessage = nil
             } catch {
                 cards.removeAll { $0.id == pending.id }
-                draft = text
+                // Only if nothing has been typed since. The round trip
+                // outlives the field, and putting the old text back over a
+                // half-written note loses the wrong one of the two.
+                if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { draft = text }
                 errorMessage = ClientTunnelCopy.display(error.localizedDescription, host: hostName)
             }
         }

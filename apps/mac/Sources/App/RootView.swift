@@ -403,6 +403,10 @@ struct RootView: View {
         // This is the connectionBack hook. Do it now, not on the next
         // 30-second retry tick.
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+            // The counters were evidence about a network that no longer
+            // exists. Without this the warning card stays up after the
+            // internet is back, until some call happens to succeed.
+            connection.reset()
             Task {
                 await account.load()
                 await home.refreshIfStale()

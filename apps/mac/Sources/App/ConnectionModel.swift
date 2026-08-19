@@ -167,9 +167,6 @@ final class ConnectionModel {
     private(set) var peerFailing = false
     private(set) var lastServiceSuccess: Date?
     private(set) var lastPeerSuccess: Date?
-    /// The last classified failure, for the popover's detail line.
-    private(set) var lastKind: NetworkFailureKind?
-
     private var serviceFailures = 0
     private var peerFailures = 0
     private weak var connectivity: ConnectivityModel?
@@ -226,12 +223,10 @@ final class ConnectionModel {
                 peerFailing = false
                 lastPeerSuccess = Date()
             }
-            lastKind = nil
             return
         }
         let kind = NetworkClassifier.kind(of: failure)
         guard kind.isNetwork else { return }
-        lastKind = kind
         // A peer that is absent says nothing about the service, and a service
         // that is down says nothing about that one machine.
         if kind == .peerAbsent {
@@ -257,6 +252,5 @@ final class ConnectionModel {
         peerFailures = 0
         serviceFailing = false
         peerFailing = false
-        lastKind = nil
     }
 }

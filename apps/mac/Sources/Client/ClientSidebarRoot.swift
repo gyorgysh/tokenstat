@@ -42,7 +42,14 @@ struct ClientSidebarRoot: View {
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 360)
         } detail: {
             NavigationStack {
-                detail
+                // The detail column's own width, not the window's. A folder
+                // section decides between a nested split and a stacked screen
+                // on the room it actually has, and on an 820 point iPad the
+                // sidebar takes 300 of them.
+                GeometryReader { geo in
+                    detail(width: geo.size.width)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
             }
         }
         .navigationSplitViewStyle(.balanced)
@@ -218,7 +225,7 @@ struct ClientSidebarRoot: View {
         }
         commands.append(
             ClientShortcut(id: "refresh", title: "Refresh", key: "r") {
-                Task { await workspaces.refresh(account: account.account) }
+                Task { await reload() }
             }
         )
         commands.append(
@@ -448,7 +455,7 @@ struct ClientSidebarRoot: View {
     // MARK: - Detail
 
     @ViewBuilder
-    private var detail: some View {
+    private func detail(width: CGFloat) -> some View {
         if let id = navigation.folderID,
            navigation.destination == .workspaces,
            let folder = workspaces.folders.first(where: { $0.id == id }),
@@ -460,7 +467,8 @@ struct ClientSidebarRoot: View {
                 peer: peer,
                 hostName: workspaces.hosts.first { $0.peerKey == peer }?.name ?? "",
                 folder: folder,
-                section: navigation.section
+                section: navigation.section,
+                width: width
             )
         } else {
             switch navigation.destination {

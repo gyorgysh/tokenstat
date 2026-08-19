@@ -556,28 +556,28 @@ enum Bridge {
                 let paramData = try JSONSerialization.data(withJSONObject: params)
                 let paramString = String(decoding: paramData, as: UTF8.self)
                 let json = try Self.callUrgent(
-                method: method,
-                params: paramString,
-                patience: Patience.interactive
-            )
-            let data = Data(json.utf8)
-            let envelope: Envelope<T>
-            do {
-                envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
-            } catch {
-                throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
-            }
-            guard envelope.ok else {
-                throw BridgeError.core(
-                    code: envelope.error?.code ?? "unknown",
-                    message: envelope.error?.message
-                        ?? "The core rejected the call without saying why."
+                    method: method,
+                    params: paramString,
+                    patience: Patience.interactive
                 )
-            }
-            guard let result = envelope.result else {
-                throw BridgeError.decoding(method: method, underlying: "missing result")
-            }
-            return result
+                let data = Data(json.utf8)
+                let envelope: Envelope<T>
+                do {
+                    envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+                } catch {
+                    throw BridgeError.decoding(method: method, underlying: "\(error) in \(json.prefix(400))")
+                }
+                guard envelope.ok else {
+                    throw BridgeError.core(
+                        code: envelope.error?.code ?? "unknown",
+                        message: envelope.error?.message
+                            ?? "The core rejected the call without saying why."
+                    )
+                }
+                guard let result = envelope.result else {
+                    throw BridgeError.decoding(method: method, underlying: "missing result")
+                }
+                return result
             }
         }
     }
