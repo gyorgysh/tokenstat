@@ -8,12 +8,15 @@
 #if os(macOS)
 import SwiftUI
 
-/// The (i) badge's form: the handful of settings that change how a long
-/// session goes, and the command path the bubble used to be.
+/// How this harness starts a long session: model, effort, compaction.
 ///
-/// Save is the only write. Opening this view only reads.
+/// A sheet, same shape as New automation, because a bubble next to a 22pt
+/// badge could only show one line at a time. Save is the only write.
 struct HarnessConfigView: View {
     let profile: LaunchProfile
+    var onClose: () -> Void = {}
+
+    @Environment(\.dismiss) private var dismiss
 
     @State private var config: HarnessConfig?
     @State private var draft: [String: String] = [:]
@@ -22,10 +25,25 @@ struct HarnessConfigView: View {
     @State private var error: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text(profile.name)
-                    .font(.callout.weight(.medium))
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Configure \(profile.name)")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Model, effort and compaction for the next session. Saved into this tool's own config.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                InspectorCloseButton(
+                    action: close,
+                    help: "Close",
+                    label: "Close"
+                )
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(profile.command)
                     .font(Theme.mono(11))
                     .foregroundStyle(.secondary)
@@ -36,40 +54,56 @@ struct HarnessConfigView: View {
                         .foregroundStyle(.tertiary)
                         .textSelection(.enabled)
                 }
-                if loading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else if let config, config.available, !config.fields.isEmpty {
-                    if let error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(Theme.danger)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(config.fields) { field in
-                        fieldRow(field)
-                    }
-                    HStack {
-                        if saving {
-                            ProgressView().controlSize(.small)
-                        }
-                        Spacer()
-                        Button("Save", .save) { Task { await save() } }
-                            .buttonStyle(AccentButtonStyle(small: true))
-                            .disabled(saving || !dirty)
-                    }
-                } else if let reason = config.flatMap({ $0.available ? nil : $0.reason }) ?? error {
-                    Text(reason)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
             }
-            .padding(Theme.Space.m)
-            .frame(width: 320, alignment: .leading)
+
+            if loading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, Theme.Space.l)
+            } else if let config, config.available, !config.fields.isEmpty {
+                if let error {
+                    Banner(text: error, severity: .warning)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.m) {
+                        ForEach(config.fields) { field in
+                            fieldRow(field)
+                        }
+                    }
+                }
+                .frame(maxHeight: 420)
+            } else {
+                Text(config.flatMap { $0.available ? nil : $0.reason } ?? error
+                     ?? "This tool has no settings tokenstat can change.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, Theme.Space.m)
+            }
+
+            HStack {
+                Button("Cancel", .dismiss, role: .cancel) { close() }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                if saving {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer()
+                Button("Save", .save) {
+                    Task {
+                        await save()
+                        if error == nil { close() }
+                    }
+                }
+                .buttonStyle(AccentButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .disabled(saving || loading || !dirty)
+            }
         }
-        .frame(maxHeight: 480)
+        .padding(Theme.Space.l)
+        .frame(width: 520)
+        .background(Theme.panel)
         .task { await load() }
     }
 
@@ -82,7 +116,7 @@ struct HarnessConfigView: View {
 
     @ViewBuilder
     private func fieldRow(_ field: HarnessConfigField) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(field.label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -106,12 +140,13 @@ struct HarnessConfigView: View {
             default:
                 TextField(field.label, text: stringBinding(field.key))
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
             }
             if let hint = field.hint {
                 Text(hint)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -137,6 +172,11 @@ struct HarnessConfigView: View {
             get: { (draft[key] ?? "") == "true" },
             set: { draft[key] = $0 ? "true" : "false" }
         )
+    }
+
+    private func close() {
+        dismiss()
+        onClose()
     }
 
     private func load() async {
