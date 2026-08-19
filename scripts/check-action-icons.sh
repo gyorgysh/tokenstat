@@ -66,6 +66,10 @@ ALLOWED = [
     # A toast's inline way to the thing it just named. Same class as an
     # alert action: the platform's own convention is text.
     ("Design/Theme.swift", "Button(actionLabel) {"),
+    # Items inside a Menu. The platform draws menus, and a glyph beside every
+    # folder name in a picker is noise rather than vocabulary.
+    ("Features/Todo/NotesView.swift", "Button(folder.name) {"),
+    ("Features/Todo/NotesView.swift", 'Button("No folder") {'),
     # A whole row is the target: the section list on the phone, and the
     # sidebar group heading on the Mac, where the label is the button.
     ("Client/ClientWorkspaceSections.swift", "showPort = true"),

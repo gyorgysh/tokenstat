@@ -150,11 +150,19 @@ struct NotesView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help("Make this a task")
-            Button(showingArchive ? "Restore" : "Archive", showingArchive ? .restore : .archive) {
-                Task { await model.archiveNote(note, archived: !showingArchive) }
+            if showingArchive {
+                Button("Restore", .restore) {
+                    Task { await model.archiveNote(note, archived: false) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(SecondaryButtonStyle())
+            } else {
+                Button("Archive", .archive) {
+                    Task { await model.archiveNote(note, archived: true) }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(SecondaryButtonStyle())
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(SecondaryButtonStyle())
         }
         .padding(Theme.Space.m)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
