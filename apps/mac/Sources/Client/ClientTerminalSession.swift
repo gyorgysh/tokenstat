@@ -36,6 +36,8 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
 
     @ObservationIgnored private var terminalView: TerminalView?
     @ObservationIgnored private var offset: UInt64 = 0
+    /// Output on its way to the emulator, minus what it cannot read correctly.
+    @ObservationIgnored private var outputFilter = TerminalOutputFilter()
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var writerTask: Task<Void, Never>?
     @ObservationIgnored private var removed = false
@@ -309,7 +311,10 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         if !chunk.bytes.isEmpty {
             offset = chunk.nextOffset
             hasOutput = true
-            let bytes = [UInt8](chunk.bytes)
+            // Same filter as the Mac pane, for the same reason: this build's
+            // SwiftTerm mistakes the kitty keyboard announcement for a cursor
+            // restore. See `TerminalOutputFilter`.
+            let bytes = outputFilter.filter([UInt8](chunk.bytes)[...])
             let slice = 24 * 1024
             var start = 0
             while start < bytes.count {

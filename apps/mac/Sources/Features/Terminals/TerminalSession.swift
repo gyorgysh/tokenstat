@@ -839,6 +839,8 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// the emulator; the queue exists so the poll loop never waits on main-
     /// thread parse work and so output remains ordered while the renderer gets
     /// its fair share of each frame.
+    /// Output on its way to the emulator, minus what it cannot read correctly.
+    @ObservationIgnored private var outputFilter = TerminalOutputFilter()
     @ObservationIgnored private var pendingFeed: [Data] = []
     @ObservationIgnored private var pendingFeedHead = 0
     @ObservationIgnored private var pendingFeedBytes = 0
@@ -954,7 +956,13 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         // sequence cut in half by a read boundary, so this changes nothing
         // about what is drawn.
         let slice = isCatchingUp ? Self.feedSliceCatchUp : Self.feedSlice
-        let all = [UInt8](bytes)
+        // One sequence never reaches the emulator. See `TerminalOutputFilter`:
+        // this build's SwiftTerm reads the kitty keyboard announcement as a
+        // cursor restore, which puts a live agent's composer in the corner.
+        // Stateful across chunks, and `pumpFeed` is the only caller, so the
+        // stream arrives here in order and whole.
+        let all = outputFilter.filter([UInt8](bytes)[...])
+        guard !all.isEmpty else { return }
         var start = 0
         while start < all.count {
             await Self.frameScheduler.acquire(id: sessionID)
