@@ -107,9 +107,16 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # Restore only. A release runs on a tag, and a cache saved under
+      # `refs/tags/v0.6.5` can never be read by the run for `v0.6.6`: cache
+      # scope is the ref that wrote it, plus the default branch. So saving here
+      # writes about 2.5 GB per release that nothing will ever restore, and the
+      # repository shares a 10 GB budget with CI. Three releases had taken 7.4
+      # GB of it and were evicting the caches on `main` that do get reused.
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
+          save-if: false
 
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }} -p tokenstat-cli
@@ -172,9 +179,11 @@ jobs:
           # Universal, so one download runs on both kinds of Mac.
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # Restore only, for the reason above the build matrix's cache step.
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-app
+          save-if: false
 
       - name: Install xcodegen
         run: brew install xcodegen
