@@ -91,8 +91,6 @@ struct ClientWorkspacesView: View {
                         peerName: model.hosts.first { $0.peerKey == model.connectedKey }?.name
                     )
 
-                    tasksLink
-
                     if model.connectedKey != nil {
                         if !model.folders.isEmpty {
                             ClientSectionTitle(title: "Folders", mark: "mark_archive")
@@ -236,26 +234,6 @@ struct ClientWorkspacesView: View {
             .accessibilityElement(children: .combine)
         }
     }
-    /// Every card on this machine, and quick capture, one tap from where the
-    /// folders are. A phone is better at "write this down before it is gone"
-    /// than at any per-folder view, and until now it could do neither.
-    @ViewBuilder
-    private var tasksLink: some View {
-        if let peer = model.connectedKey {
-            let host = model.hosts.first { $0.peerKey == peer }
-            NavigationLink {
-                ClientTasksOverview(
-                    peer: peer,
-                    hostName: host?.name ?? "",
-                    folders: model.folders
-                )
-            } label: {
-                ClientSectionRow(section: .todo, count: 0)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
 
     private func hostCard(_ host: ClientHost) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {

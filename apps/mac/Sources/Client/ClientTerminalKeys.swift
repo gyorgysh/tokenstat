@@ -25,8 +25,8 @@ import UIKit
 struct ClientTerminalKeys: View {
     /// Send raw bytes to the pty.
     let send: ([UInt8]) -> Void
-    /// Put the keyboard away, so the screen is all output.
-    let dismissKeyboard: () -> Void
+    /// Put the keyboard away, so the screen is all output, or bring it back.
+    let toggleKeyboard: () -> Void
     /// Whether a drag scrolls the buffer instead of reaching the program.
     @Binding var scrolls: Bool
 
@@ -34,6 +34,9 @@ struct ClientTerminalKeys: View {
     /// on purpose: a phone cannot hold one key while pressing another.
     @State private var shift = false
     @State private var control = false
+    /// Whether the soft keyboard is up. Read from the system rather than from
+    /// what this bar last did, so a tap on the terminal keeps the key honest.
+    @State private var keyboardUp = true
 
     private enum Key {
         static let escape: [UInt8] = [0x1B]
@@ -51,9 +54,14 @@ struct ClientTerminalKeys: View {
             HStack(spacing: 6) {
                 // Reading is half of what a phone does with a terminal, and
                 // the keyboard covers half the screen. This is the way out of
-                // it; tapping the terminal brings the keyboard back.
-                iconKey("keyboard.chevron.compact.down", label: "Hide keyboard") {
-                    dismissKeyboard()
+                // it, and the way back: one key, both directions, because the
+                // way back used to be a tap on the terminal that nothing on
+                // screen mentioned.
+                iconKey(
+                    keyboardUp ? "keyboard.chevron.compact.down" : "keyboard",
+                    label: keyboardUp ? "Hide keyboard" : "Show keyboard"
+                ) {
+                    toggleKeyboard()
                 }
                 // An agent holds mouse reporting on, which turns a drag into
                 // an event for the program rather than a scroll, so the view
@@ -80,6 +88,16 @@ struct ClientTerminalKeys: View {
         }
         .scrollIndicators(.hidden)
         .background(.bar)
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+        ) { _ in
+            keyboardUp = true
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+        ) { _ in
+            keyboardUp = false
+        }
     }
 
     /// Send one key, applying and then clearing whatever was armed.

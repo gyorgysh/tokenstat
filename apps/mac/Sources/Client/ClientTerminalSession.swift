@@ -422,9 +422,18 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         }
     }
 
-    /// Put the keyboard away without ending the session.
-    func dismissKeyboard() {
-        _ = terminalView?.resignFirstResponder()
+    /// Put the keyboard away, or bring it back, without ending the session.
+    ///
+    /// Hiding it is what makes a phone readable, and until the terminal is
+    /// tapped there is nothing that says how to get it back. The same key
+    /// does both.
+    func toggleKeyboard() {
+        guard let view = terminalView else { return }
+        if view.isFirstResponder {
+            _ = view.resignFirstResponder()
+        } else {
+            _ = view.becomeFirstResponder()
+        }
     }
 
     /// Type raw bytes, for the key bar above the keyboard.
@@ -551,7 +560,7 @@ struct ClientTerminalScreen: View {
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     ClientTerminalKeys(
                         send: { session.sendBytes($0) },
-                        dismissKeyboard: { session.dismissKeyboard() },
+                        toggleKeyboard: { session.toggleKeyboard() },
                         scrolls: Binding(
                             get: { session.scrolls },
                             set: { session.scrolls = $0 }
