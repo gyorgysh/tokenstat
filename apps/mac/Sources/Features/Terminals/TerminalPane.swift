@@ -529,10 +529,14 @@ struct TerminalPane: View {
     /// pane is split.
     private var visibleSessions: [TerminalSession] {
         if splitLayout.isSplit {
+            // Deduplicated: a leading pin whose session has gone falls back to
+            // the workspace's active session, which can be the trailing one,
+            // and the same id twice is not a list SwiftUI can identify.
+            var seen = Set<String>()
             return [
                 terminals.leadingSession(in: folder.id),
                 terminals.trailingSession(in: folder.id),
-            ].compactMap { $0 }
+            ].compactMap { $0 }.filter { seen.insert($0.id).inserted }
         }
         return [active].compactMap { $0 }
     }
@@ -1009,7 +1013,13 @@ private struct TerminalNotice: View {
     @State private var pauseHasHeld = false
 
     var body: some View {
-        Group {
+        ZStack(alignment: .trailing) {
+            // A zero-size anchor that is always there. Modifiers on a
+            // container that renders nothing attach to nothing, so with only
+            // the two conditional pills below, the timer never started while
+            // there was nothing to show, and the pause pill it gates could
+            // never appear at all.
+            Color.clear.frame(width: 0, height: 0)
             if session.droppedOutput {
                 pill {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -1033,6 +1043,9 @@ private struct TerminalNotice: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // Nothing to press, and it sits over the terminal: a click in
+                // that corner belongs to the emulator underneath.
+                .allowsHitTesting(false)
             }
         }
         .task(id: session.outputPaused) {
