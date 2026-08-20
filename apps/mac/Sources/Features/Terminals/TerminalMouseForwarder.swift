@@ -23,9 +23,25 @@ import SwiftTerm
 /// A local monitor sees the event first. When the program is listening we
 /// send SGR ourselves and keep the event away from SwiftTerm so it cannot
 /// send a second encoding.
+///
+/// Two rules keep that from wedging the window, and both are the reason this
+/// is not a one-line hit test:
+///
+/// - Nothing is swallowed while a dialog, a menu or another modal owns the
+///   clicks. The monitor runs before the window does, so a click meant to
+///   flash an open sheet went into the program behind it instead and the
+///   whole window read as dead.
+/// - A release is swallowed when its press was, never because the pointer
+///   happens to be over a terminal now. AppKit that saw a press and never the
+///   matching release stays in mouse-down tracking and stops answering
+///   clicks, which is the same frozen window by a different route.
 @MainActor
 enum TerminalMouseForwarder {
     private static var monitor: Any?
+
+    /// Buttons whose press this monitor swallowed. The release follows the
+    /// press, whatever the pointer is over by then.
+    private static var captured: Set<Int> = []
 
     /// Install the monitor. Safe to call more than once.
     static func install() {
@@ -40,33 +56,64 @@ enum TerminalMouseForwarder {
     }
 
     private static func handle(_ event: NSEvent) -> NSEvent? {
+        let button = event.buttonNumber
+        switch event.type {
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            guard captured.remove(button) != nil else { return event }
+            forward(event, isUp: true, isDrag: false)
+            return nil
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            guard captured.contains(button) else { return event }
+            forward(event, isUp: false, isDrag: true)
+            return nil
+        default:
+            guard reportsMouse(event) != nil else { return event }
+            captured.insert(button)
+            forward(event, isUp: false, isDrag: false)
+            return nil
+        }
+    }
+
+    /// The terminal under the pointer, if a program there is listening for
+    /// mouse events and the click is the window's to give away.
+    private static func reportsMouse(_ event: NSEvent) -> TerminalDropView? {
         guard let window = event.window,
-              let view = window.contentView?.hitTest(event.locationInWindow) as? TerminalView,
+              // A sheet, an alert or a modal has the clicks. Let AppKit answer
+              // them, including by flashing the dialog the person missed.
+              window.attachedSheet == nil,
+              NSApp.modalWindow == nil,
+              window.isKeyWindow,
+              let view = window.contentView?.hitTest(event.locationInWindow) as? TerminalDropView,
               let terminal = view.terminal,
               view.allowMouseReporting,
               terminal.mouseMode != .off,
-              terminal.isCurrentBufferAlternate
-        else { return event }
+              terminal.isCurrentBufferAlternate,
+              view.session != nil
+        else { return nil }
+        return view
+    }
 
-        let isUp = event.type == .leftMouseUp
-            || event.type == .rightMouseUp
-            || event.type == .otherMouseUp
-        let isDrag = event.type == .leftMouseDragged
-            || event.type == .rightMouseDragged
-            || event.type == .otherMouseDragged
+    /// Send the SGR bytes for one event, if this mode reports it at all.
+    ///
+    /// A mode that does not report drags or releases still swallows them:
+    /// they belong to a press this monitor already took, and handing one half
+    /// of a click to AppKit is what leaves a window stuck.
+    private static func forward(_ event: NSEvent, isUp: Bool, isDrag: Bool) {
+        guard let view = reportsMouse(event),
+              let terminal = view.terminal,
+              let session = view.session
+        else { return }
 
         switch terminal.mouseMode {
         case .off:
-            return event
+            return
         case .x10:
-            if isUp || isDrag { return event }
+            if isUp || isDrag { return }
         case .vt200:
-            if isDrag { return event }
+            if isDrag { return }
         case .buttonEventTracking, .anyEvent:
             break
         }
-
-        guard let session = (view as? TerminalDropView)?.session else { return event }
 
         let position = TerminalMouse.gridPosition(of: event, in: view, terminal: terminal)
         let button = TerminalMouse.xtermButton(event.buttonNumber)
@@ -82,11 +129,9 @@ enum TerminalMouseForwarder {
                 release: isUp
             )
         )
-        // The monitor swallows the click so SwiftTerm cannot send urxvt on
-        // top of SGR. Make this view first responder first, or a field that
-        // already has the keyboard keeps it.
-        window.makeFirstResponder(view)
-        return nil
+        // Make this view first responder, or a field that already has the
+        // keyboard keeps it.
+        view.window?.makeFirstResponder(view)
     }
 }
 
