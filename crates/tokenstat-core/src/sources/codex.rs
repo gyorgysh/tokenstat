@@ -145,6 +145,17 @@ pub fn session_cwd(contents: &str) -> Option<String> {
     None
 }
 
+/// Id of the one cumulative row this parser falls back to when the per-request
+/// deltas disagree with the vendor's own total.
+///
+/// A reader has to be able to recognize that row: its counters are the whole
+/// session, so anything that treats a row as one turn (a live context bar, for
+/// instance) has to leave it alone. Deriving the id in one place is what keeps
+/// the two sides from drifting apart.
+pub fn rollup_event_id(session: &str) -> EventId {
+    EventId::derive(&["codex", session, "total"])
+}
+
 pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
     let mut out = ParseOutput::default();
 
@@ -269,7 +280,7 @@ pub fn parse_file(path: &Path, contents: &str) -> ParseOutput {
             // disagree with the source.
             out.events.truncate(first_index);
             out.events.push(UsageEvent {
-                id: EventId::derive(&["codex", &session, "total"]),
+                id: rollup_event_id(&session),
                 source: SourceId::Codex,
                 ts: Timestamp::from_ms(0),
                 model: model.clone(),

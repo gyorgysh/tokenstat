@@ -171,9 +171,13 @@ pub(crate) fn fold_events(events: &[UsageEvent], prices: &PriceTable) -> Option<
 ///
 /// First-seen order is kept, so the model and the context figure still come
 /// from the newest turn.
-fn collapse(events: &[&UsageEvent]) -> Vec<UsageEvent> {
+///
+/// Borrowed, like `since`: this runs for every live session on every
+/// `pty.list` poll, so a merged request carries the strings it needs by
+/// reference rather than cloning a long session's events to read them once.
+fn collapse<'a>(events: &[&'a UsageEvent]) -> Vec<Folded<'a>> {
     let mut order: Vec<EventId> = Vec::with_capacity(events.len());
-    let mut by_id: HashMap<EventId, UsageEvent> = HashMap::with_capacity(events.len());
+    let mut by_id: HashMap<EventId, Folded<'a>> = HashMap::with_capacity(events.len());
     for event in events {
         match by_id.get_mut(&event.id) {
             Some(kept) => {
@@ -182,20 +186,51 @@ fn collapse(events: &[&UsageEvent]) -> Vec<UsageEvent> {
                 // lacked is still this request. Later rows win where they say
                 // something, never where they say nothing.
                 if kept.model.is_empty() || kept.model == "unknown" {
-                    kept.model = event.model.clone();
+                    kept.model = &event.model;
                 }
                 if kept.billing == BillingMode::Unknown {
                     kept.billing = event.billing;
                 }
-                kept.ts = kept.ts.max(event.ts);
             }
             None => {
                 order.push(event.id);
-                by_id.insert(event.id, (*event).clone());
+                by_id.insert(
+                    event.id,
+                    Folded {
+                        rollup: is_rollup(event),
+                        model: &event.model,
+                        billing: event.billing,
+                        counters: event.counters,
+                    },
+                );
             }
         }
     }
     order.iter().filter_map(|id| by_id.remove(id)).collect()
+}
+
+/// One request after the rows that streamed it have been merged.
+struct Folded<'a> {
+    /// A session running total rather than one turn: see `is_rollup`.
+    rollup: bool,
+    model: &'a str,
+    billing: BillingMode,
+    counters: Counters,
+}
+
+/// Whether this row is a session running total rather than one turn's usage.
+///
+/// Hermes only ever writes one, per session+model+task. Codex writes per
+/// request deltas until they disagree with the vendor's own total, and then
+/// replaces them with a single cumulative row. Either way the input side is
+/// the session's whole prompt history, so it cannot stand in for the live
+/// context.
+fn is_rollup(event: &UsageEvent) -> bool {
+    match event.source {
+        SourceId::Hermes => true,
+        SourceId::Codex => event.id == codex::rollup_event_id(&event.session),
+        _ => false,
+    }
 }
 
 /// Per-field maximum, mirroring the store's `ON CONFLICT` update.
@@ -227,7 +262,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
 
     for event in &events {
         tokens = tokens.saturating_add(event.counters.total());
-        let lookup = display_usage_model_id(&event.model);
+        let lookup = display_usage_model_id(event.model);
         match EquivalentValue::price(prices, &lookup, &event.counters) {
             Some(value) => {
                 cost = cost.saturating_add(value.micros().max(0));
@@ -247,18 +282,19 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         .rev()
         .find(|e| e.model != "unknown" && !e.model.is_empty())
         .or_else(|| events.last())
-        .map(|e| e.model.clone())
+        .map(|e| e.model.to_string())
         .unwrap_or_default();
 
-    // Hermes keeps one running total per session+model+task, not a per-turn
-    // prompt, and it persists no live context figure at all: the `124K / 200K`
-    // its own `/usage` prints is in-session state that never reaches `state.db`.
-    // The "last event's input_total" below is therefore the whole session's
-    // cumulative prompt (input + cache_read ≈ its "Prompt tokens (total)") for
-    // Hermes, which makes a context bar read as hundreds of percent. Withhold it
-    // rather than show a number that is meaningless as a context fill.
-    let rollup_source = events.iter().any(|e| e.source == SourceId::Hermes);
-    let context_used = if rollup_source {
+    // A rollup row carries the session's running total, not a per-turn prompt.
+    // Hermes writes nothing else, and it persists no live context figure at
+    // all: the `124K / 200K` its own `/usage` prints is in-session state that
+    // never reaches `state.db`. Codex falls back to one when its deltas
+    // disagree with the vendor's total. The "last event's input_total" below is
+    // then the whole session's cumulative prompt (input + cache_read), which
+    // makes a context bar read as hundreds of percent. Withhold it rather than
+    // show a number that is meaningless as a context fill.
+    let rollup = events.iter().any(|e| e.rollup);
+    let context_used = if rollup {
         None
     } else {
         events
@@ -306,7 +342,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
 ///
 /// Metered wins over plan: a session that billed one request per token is not
 /// covered, whatever the rest of it says.
-fn billing_mode(events: &[UsageEvent]) -> BillingMode {
+fn billing_mode(events: &[Folded<'_>]) -> BillingMode {
     if events.iter().any(|e| e.billing == BillingMode::Metered) {
         return BillingMode::Metered;
     }
@@ -1024,6 +1060,25 @@ mod tests {
         let reading = fold_events(&[e], &prices()).expect("reading");
         assert_eq!(reading.context_used, None);
         assert_eq!(reading.tokens, 328_000 + 4_962_304 + 44_969);
+    }
+
+    #[test]
+    fn codex_rollup_rows_do_not_feed_a_context_bar_but_per_turn_rows_do() {
+        // When codex's per-request deltas disagree with the vendor's running
+        // total, the parser replaces them with one cumulative row. That row is
+        // the same shape as a Hermes one, so it must be withheld from the bar
+        // for the same reason. An ordinary codex turn is unaffected.
+        let mut rollup = event("gpt-5.4-codex", 300_000, 1_200_000, 20_000);
+        rollup.source = SourceId::Codex;
+        rollup.id = codex::rollup_event_id(&rollup.session);
+        let reading = fold_events(&[rollup], &prices()).expect("reading");
+        assert_eq!(reading.context_used, None);
+        assert_eq!(reading.tokens, 300_000 + 1_200_000 + 20_000);
+
+        let mut turn = event("gpt-5.4-codex", 1_000, 5_000, 200);
+        turn.source = SourceId::Codex;
+        let reading = fold_events(&[turn], &prices()).expect("reading");
+        assert_eq!(reading.context_used, Some(6_000));
     }
 
     #[test]
