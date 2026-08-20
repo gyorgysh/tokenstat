@@ -6,6 +6,12 @@ number. Newest first.
 
 ## [0.6.8] - 2026-08-21
 
+### New
+
+- An agent that stops to ask you something can say so. Turn notifications on
+  in Account and a question waiting in a terminal reaches you the way a
+  finished run does, and it takes itself back when you open that terminal.
+
 ### Fixed
 
 - A live session's tokens and cost are counted once per request. A harness
@@ -16,14 +22,24 @@ number. Newest first.
   sessions are unaffected.
 - A terminal no longer repaints and loses its scroll position when a notice
   appears. The live notices float over the bottom of the terminal instead of
-  taking height from it, the dropped-output pill can be dismissed, and the
-  paused pill waits until output has genuinely stalled.
+  taking height from it, each one fades on its own rather than waiting to be
+  clicked away, and the paused notice waits until output has genuinely
+  stalled.
 - "Needs attention" goes away when the question does. It used to sit there
   until the agent printed enough to push the prompt out of view, and opening
   the session now clears it as well.
 - The plans screen no longer shows an error about a purchase nobody made,
   left behind by a transaction the App Store re-sent while the phone was
   offline or signed out.
+- One Mac going to sleep no longer freezes another. Calls to a machine that
+  has stopped answering used to take every connection the app had, so
+  terminals stopped drawing and screens stopped filling until they gave up.
+  They now have a share of their own and a time limit, and an unreachable
+  machine is reported as unreachable instead of as silence.
+- The tasks list arrives when the count does. The board no longer waits behind
+  a report, a sync, or another machine asking this one for a report.
+- A workflow no longer announces every step it takes on the way. It tells you
+  how it went when it is done, once, on this Mac and on your phone.
 
 ## [0.6.7] - 2026-08-20
 
