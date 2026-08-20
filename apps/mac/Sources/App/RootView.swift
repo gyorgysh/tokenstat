@@ -5,7 +5,6 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
-import AppKit
 import SwiftUI
 
 // Everything below is the desktop shell: a resizable window with two sidebars,
@@ -17,6 +16,9 @@ import SwiftUI
 // `AutomationsView` navigates by `NavigationRequest` and compiles for both
 // platforms.
 #if os(macOS)
+// Inside the guard: `Route` and its sections below compile for the phone too,
+// and an AppKit import at the top of the file breaks that build.
+import AppKit
 
 struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
