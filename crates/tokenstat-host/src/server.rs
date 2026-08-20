@@ -165,7 +165,15 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
                 let prev = live.fetch_add(1, Ordering::AcqRel);
                 if prev >= MAX_CONNECTIONS {
                     live.fetch_sub(1, Ordering::AcqRel);
-                    // Refuse without a thread. Same-UID flood must not grow forever.
+                    // Refuse without a thread. Same-UID flood must not grow
+                    // forever. Say so first: a socket that accepts and then
+                    // closes without a word is indistinguishable from a daemon
+                    // that died, and the app answers that by reinstalling the
+                    // launch agent and restarting the daemon, which kills every
+                    // terminal it owns. Losing somebody's running agents to a
+                    // busy minute is not a trade worth making, so this refusal
+                    // is a real envelope the caller can read and retry.
+                    let _ = refuse_busy(&stream);
                     drop(stream);
                     continue;
                 }
@@ -184,6 +192,29 @@ pub fn serve(listener: UnixListener, session: Session) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Tell a client the daemon is full, in the shape every other answer takes.
+///
+/// Best effort by design: the point is that the caller hears something, and a
+/// client that has already gone away needs nothing.
+#[cfg(unix)]
+fn refuse_busy(stream: &UnixStream) -> std::io::Result<()> {
+    let mut out = stream.try_clone()?;
+    let response = json!({
+        "id": Value::Null,
+        "ok": false,
+        "error": {
+            "code": "host_busy",
+            "message": format!(
+                "the tokenstat host is already serving {MAX_CONNECTIONS} connections"
+            )
+        }
+    })
+    .to_string();
+    out.write_all(response.as_bytes())?;
+    out.write_all(b"\n")?;
+    out.flush()
 }
 
 #[cfg(unix)]

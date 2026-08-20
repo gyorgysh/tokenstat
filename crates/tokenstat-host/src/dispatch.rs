@@ -1465,16 +1465,17 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
     }
 }
 
-/// Automations and the todo board: local work, and nothing to do with the
-/// archive.
+/// Automations: local work, and nothing to do with the archive.
 ///
 /// Split out of the big match so the whole family carries one `cfg` rather than
-/// fifteen. Still called from `dispatch` rather than from `sessionless`,
-/// because moving it would also move it out from under the session lock, and
-/// that is a concurrency change rather than a compilation one.
+/// fifteen. Still called from `dispatch`, so an automation runs under the
+/// session lock. Its sibling family, the todo board, is answered from
+/// `sessionless` instead: see the note there. Automations stayed because they
+/// start and stop real processes, which is a larger change to make on the
+/// strength of the same argument.
 #[cfg(feature = "local-host")]
 fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>> {
-    if !method.starts_with("automation.") && !method.starts_with("todo.") {
+    if !method.starts_with("automation.") {
         return None;
     }
     Some(local_job_call(method, params))
@@ -2221,6 +2222,17 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     // running on this one.
     if let Some(answer) = crate::remote::call(method, params) {
         return Some(answer);
+    }
+
+    // The tasks board. Its own store behind its own lock, and it never touches
+    // the archive, so it has no business waiting on one. Under the session lock
+    // the board queued behind whatever else held it: a report, a sync, or
+    // another machine asking this one for a report over the tunnel. The menu
+    // bar knew there were six tasks and the list they belonged to never
+    // arrived.
+    #[cfg(feature = "local-host")]
+    if method.starts_with("todo.") {
+        return Some(local_job_call(method, params).map_err(|e| e.message));
     }
 
     // Folders and terminals. Same reasoning: none of it reads the archive.
@@ -3412,6 +3424,15 @@ mod tests {
                 .expect("workflow.design must be answerable without a session");
             let design: Value = serde_json::from_str(&design).expect("workflow.design JSON");
             assert_eq!(design["ok"], false, "{design}");
+
+            // The tasks board keeps its own store behind its own lock. Under
+            // the session lock it queued behind reports, syncs, and another
+            // machine asking this one for a report, so the menu bar could know
+            // the count while the list never arrived.
+            let tasks = call_sessionless("todo.list", "{}")
+                .expect("todo.list must be answerable without a session");
+            let tasks: Value = serde_json::from_str(&tasks).expect("todo.list JSON");
+            assert_eq!(tasks["ok"], true, "{tasks}");
         }
 
         // Anything that reads the archive still does.

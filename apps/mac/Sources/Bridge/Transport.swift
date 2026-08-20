@@ -147,7 +147,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
     func call(method: String, params: String, patience: TimeInterval) throws -> String {
         // Remote calls queue among themselves rather than against the whole
         // pool. See `maxRemoteLive`.
-        let remote = Self.isRemote(method)
+        let remote = Self.isRemote(method, params)
         if remote { try beginRemote(patience: patience) }
         defer { if remote { endRemote() } }
 
@@ -250,13 +250,18 @@ final class SocketTransport: Transport, @unchecked Sendable {
         )
     }
 
-    /// Whether this method's work happens on another machine.
+    /// Whether this call's work happens on another machine.
     ///
-    /// `remote.call` carries the peer and the method it is forwarding, and
-    /// `remote.nudge` and friends talk to the relay. Everything else is this
-    /// machine's own daemon answering from local state.
-    private static func isRemote(_ method: String) -> Bool {
-        method.hasPrefix("remote.")
+    /// Two ways for it to. `remote.call` says so in the method name, along
+    /// with `remote.nudge` and the rest of that family. The other way is
+    /// quieter: a session or folder that lives on a peer is addressed by a
+    /// namespaced id (`remote:<key>:<id>`), and `pty.info`, `pty.read` and
+    /// their neighbours forward those over the tunnel while looking exactly
+    /// like local calls from here. Those are the ones a terminal polls several
+    /// times a second, so missing them would leave the share this is for
+    /// mostly unused.
+    private static func isRemote(_ method: String, _ params: String) -> Bool {
+        method.hasPrefix("remote.") || params.contains("\"remote:")
     }
 
     /// Take one of the remote calls' share of the pool, or wait for one.

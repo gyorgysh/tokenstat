@@ -228,11 +228,15 @@ enum Bridge {
     ///
     /// Synchronous and potentially slow. Everything public here is `async` and
     /// hops off the main actor first.
+    /// How many times a `host_busy` answer is waited out before it is reported.
+    private static let maxBusyRetries = 3
+
     private static func invoke<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
         patience: TimeInterval = Patience.standard,
-        as _: T.Type
+        as _: T.Type,
+        busyRetries: Int = 0
     ) throws -> T {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
@@ -260,6 +264,20 @@ enum Bridge {
 
         guard envelope.ok, let result = envelope.result else {
             let failure = envelope.error
+            // The daemon is at its connection ceiling. Nothing is wrong with
+            // the call and the crowd clears in milliseconds, so wait a beat and
+            // ask again rather than putting a fault on a screen. Bounded, and
+            // this runs on the calls queue where blocking is the norm.
+            if failure?.code == "host_busy", busyRetries < maxBusyRetries {
+                Thread.sleep(forTimeInterval: 0.05 * Double(busyRetries + 1))
+                return try invoke(
+                    method,
+                    params,
+                    patience: patience,
+                    as: T.self,
+                    busyRetries: busyRetries + 1
+                )
+            }
             throw BridgeError.core(
                 code: failure?.code ?? "unknown",
                 message: failure?.message ?? "The core rejected the call without saying why."
