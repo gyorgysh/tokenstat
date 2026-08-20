@@ -1025,17 +1025,20 @@ private struct TerminalNotice: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.warning)
-                    Text("Some output was lost: the reader fell behind.")
+                    // Plain words for what a person actually sees: a gap in
+                    // the scrollback. "The reader fell behind its buffer" is
+                    // how this end thinks about it, not how it reads.
+                    Text("Some lines are missing here.")
                         .font(.caption)
                         .foregroundStyle(.primary)
-                    // Icon only: the pill is already a sentence, and
-                    // `compactActions` is how this app asks for a glyph
-                    // without a word beside it.
-                    Button("Dismiss", .dismiss) { session.droppedOutput = false }
-                        .buttonStyle(.plain)
-                        .environment(\.compactActions, true)
-                        .foregroundStyle(Theme.controlGlyph)
                 }
+                // It says its piece and goes, like a toast. A pill that waits
+                // to be dismissed is a permanent mark on the terminal for
+                // something that already happened and cannot be acted on, and
+                // asking somebody to clear it is asking them to tidy up after
+                // a message they did not want.
+                .transition(.opacity)
+                .allowsHitTesting(false)
             } else if session.outputPaused, pauseHasHeld {
                 pill {
                     ProgressView().controlSize(.small)
@@ -1047,6 +1050,13 @@ private struct TerminalNotice: View {
                 // that corner belongs to the emulator underneath.
                 .allowsHitTesting(false)
             }
+        }
+        .animation(.easeInOut(duration: 0.2), value: session.droppedOutput)
+        .task(id: session.droppedOutput) {
+            guard session.droppedOutput else { return }
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            session.droppedOutput = false
         }
         .task(id: session.outputPaused) {
             guard session.outputPaused else {
