@@ -106,6 +106,23 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// to come back rather than opening the next.
     private static let maxLive = 16
 
+    /// How much of that ceiling calls to another machine may hold at once.
+    ///
+    /// A remote call is a different animal from a local one. It leaves the
+    /// daemon for the relay, and a machine that has gone to sleep with the
+    /// socket still open is not noticed until the relay's keepalive gives up,
+    /// so the call can hold its connection for the better part of a minute
+    /// while a local one takes milliseconds. Without a share of its own, a
+    /// handful of those took every connection in the pool and the local app
+    /// froze: terminals stopped drawing, screens stopped filling, all of it
+    /// waiting behind another computer that was not answering.
+    ///
+    /// Ten slots therefore always remain for work on this machine.
+    private static let maxRemoteLive = 6
+
+    /// Remote calls holding a connection right now.
+    private var remoteLive = 0
+
     let path: String
 
     var describedAs: String { "daemon at \(path)" }
@@ -128,6 +145,12 @@ final class SocketTransport: Transport, @unchecked Sendable {
     }
 
     func call(method: String, params: String, patience: TimeInterval) throws -> String {
+        // Remote calls queue among themselves rather than against the whole
+        // pool. See `maxRemoteLive`.
+        let remote = Self.isRemote(method)
+        if remote { try beginRemote(patience: patience) }
+        defer { if remote { endRemote() } }
+
         let request = Self.line(method: method, params: params)
 
         // One retry, and only on a connection taken from the pool. A daemon
@@ -227,6 +250,38 @@ final class SocketTransport: Transport, @unchecked Sendable {
         )
     }
 
+    /// Whether this method's work happens on another machine.
+    ///
+    /// `remote.call` carries the peer and the method it is forwarding, and
+    /// `remote.nudge` and friends talk to the relay. Everything else is this
+    /// machine's own daemon answering from local state.
+    private static func isRemote(_ method: String) -> Bool {
+        method.hasPrefix("remote.")
+    }
+
+    /// Take one of the remote calls' share of the pool, or wait for one.
+    private func beginRemote(patience: TimeInterval) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        let deadline = Date().addingTimeInterval(patience)
+        while remoteLive >= Self.maxRemoteLive {
+            if !lock.wait(until: deadline) {
+                throw Self.silence(path: path, patience: patience)
+            }
+        }
+        remoteLive += 1
+    }
+
+    private func endRemote() {
+        lock.lock()
+        remoteLive -= 1
+        // Broadcast rather than signal: the waiters are a mix of calls waiting
+        // for a connection and remote calls waiting for a share, and waking
+        // the wrong one would leave this slot unused until the next release.
+        lock.broadcast()
+        lock.unlock()
+    }
+
     /// A connection to use for one call: a pooled one, a new one, or nil when
     /// the ceiling is reached and the caller should open its own path.
     ///
@@ -260,8 +315,9 @@ final class SocketTransport: Transport, @unchecked Sendable {
         lock.lock()
         defer {
             // Somebody may be waiting for this slot, whether it came back as a
-            // reusable connection or as a closed one.
-            lock.signal()
+            // reusable connection or as a closed one. Broadcast, because the
+            // waiters are a mix: see `endRemote`.
+            lock.broadcast()
             lock.unlock()
         }
         if reusable, idle.count < Self.maxIdle {

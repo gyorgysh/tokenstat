@@ -217,6 +217,27 @@ impl Connection {
         read_one(&mut self.noise, &mut *self.stream, max, None)
     }
 
+    /// Receive one message, giving up when nothing arrives for `idle`.
+    ///
+    /// `receive` waits forever on purpose: a request/response caller cannot
+    /// know how long the far side needs. That is right for a peer that is
+    /// answering slowly and wrong for one that has stopped answering at all.
+    /// A Mac that sleeps leaves its relay socket open until the keepalive
+    /// notices, and until then a read here has nothing to wake it, so the
+    /// caller's thread and the connection it holds are parked on a machine
+    /// that is not coming back within the caller's patience anyway.
+    ///
+    /// The budget covers silence, not the whole answer: once the frame starts
+    /// arriving it is read to the end with no deadline.
+    pub fn receive_within(&mut self, max: usize, idle: Duration) -> Result<Vec<u8>, RemoteError> {
+        let result = read_one(&mut self.noise, &mut *self.stream, max, Some(idle));
+        // `read_one` leaves the idle timeout on the transport for the next
+        // frame. This connection goes back into a pool where the next caller
+        // decides its own budget, so hand it back the way it was found.
+        let _ = self.stream.set_read_timeout(None);
+        result
+    }
+
     /// Close the socket. Idempotent, and a failure is not worth reporting: the
     /// connection is being abandoned either way.
     pub fn close(&mut self) {

@@ -1391,8 +1391,19 @@ fn tunnel_dial(
     // before the answer arrives. All of those are transient, so a few short
     // retries ride over them instead of showing a failure that resolved
     // itself a second later.
+    // A whole-ladder budget, not three independent tries. Each attempt can
+    // spend ten seconds waiting for the relay to pair the channel and another
+    // ten on the handshake, so three of them plus the sleeps between is a
+    // minute of one thread and one of the app's connections for a machine that
+    // is asleep. The retries exist for a peer whose daemon is mid-restart,
+    // which comes back in a second or two, so a short overall budget keeps
+    // what they are for and drops what they cost.
+    let started = std::time::Instant::now();
     let mut last = String::new();
     for attempt in 0..3 {
+        if attempt > 0 && started.elapsed() >= DIAL_BUDGET {
+            break;
+        }
         match tunnel.open_channel(peer).and_then(|channel| {
             tokenstat_remote::handshake_initiator(Box::new(channel), identity, Some(peer), label)
         }) {
@@ -1429,12 +1440,26 @@ fn tunnel_dial(
     ))
 }
 
+/// How long a peer may say nothing before a forwarded call gives up.
+///
+/// Not a deadline on the answer: the budget resets as the frame arrives, so a
+/// peer that is slow but talking is never cut off. It is there for the peer
+/// that has stopped talking altogether, which on a Mac means the lid closed.
+/// The relay only notices that when its keepalive fails, and until then this
+/// end would hold a thread, a connection and one of the app's pool slots on a
+/// machine that is asleep. Shorter than the app's own patience, so the person
+/// gets "could not reach that machine" rather than a socket that went quiet.
+const ANSWER_IDLE: Duration = Duration::from_secs(45);
+
+/// How long the retry ladder in `tunnel_dial` keeps trying. See there.
+const DIAL_BUDGET: Duration = Duration::from_secs(12);
+
 fn round_trip(
     connection: &mut tokenstat_remote::Connection,
     request: &[u8],
 ) -> Result<String, tokenstat_remote::RemoteError> {
     connection.send(request)?;
-    let answer = connection.receive(MAX_MESSAGE)?;
+    let answer = connection.receive_within(MAX_MESSAGE, ANSWER_IDLE)?;
     Ok(String::from_utf8_lossy(&answer).to_string())
 }
 
