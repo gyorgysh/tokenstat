@@ -304,6 +304,19 @@ struct TerminalPane: View {
                 }
             }
             .frame(width: size.width, height: size.height)
+            // Notices float over the terminal instead of standing under it.
+            // A view under the emulator changes the emulator's height, which
+            // resizes the pty, which raises SIGWINCH, which makes a full
+            // screen program repaint from scratch and lose where it was
+            // scrolled to. "Output paused" arrives and leaves with the
+            // reader's backlog, so in the flow it did that every time the
+            // process printed hard, which is exactly when it hurts.
+            .overlay(alignment: .bottomTrailing) {
+                if showsTerminal {
+                    TerminalNotices(sessions: visibleSessions)
+                        .padding(Theme.Space.s)
+                }
+            }
             // Only the explicit launcher toggle animates. Animating
             // `sessions.isEmpty` made every spawn fade the whole pane in and
             // out (and re-layout the terminal under it), which read as the
@@ -510,6 +523,18 @@ struct TerminalPane: View {
                 showingPort = false
             }
         }
+    }
+
+    /// The sessions on screen right now, in reading order. One unless the
+    /// pane is split.
+    private var visibleSessions: [TerminalSession] {
+        if splitLayout.isSplit {
+            return [
+                terminals.leadingSession(in: folder.id),
+                terminals.trailingSession(in: folder.id),
+            ].compactMap { $0 }
+        }
+        return [active].compactMap { $0 }
     }
 
     @ViewBuilder
@@ -910,9 +935,15 @@ private struct SessionStartingView: View {
     }
 }
 
-/// A thin line under the terminal for the two facts a terminal should never
-/// hide: that its process ended, and that output was dropped because the reader
-/// fell behind.
+/// A thin line under the terminal for the one fact a dead terminal should
+/// never hide: that its process ended.
+///
+/// It stands **under** the emulator, which changes the emulator's height when
+/// it appears. That is only safe here because the process is already gone: a
+/// resize raises SIGWINCH, and a live full screen program answers one by
+/// repainting from scratch. The two live notices used to sit on this line and
+/// caused exactly that, so they float over the terminal now
+/// (`TerminalNotices`).
 ///
 /// Separate from the terminal view, which is owned by `TerminalStack` in AppKit
 /// so that switching sessions never relayouts it. Starting state lives in the
@@ -923,32 +954,20 @@ struct TerminalHost: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if session.exitCode != nil || session.droppedOutput || session.outputPaused {
-                statusLine
+            if let code = session.exitCode {
+                statusLine(code)
             }
         }
     }
 
-    private var statusLine: some View {
+    private func statusLine(_ code: Int) -> some View {
         HStack(spacing: Theme.Space.s) {
-            if let code = session.exitCode {
-                Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(code == 0 ? .green : .red)
-                Text(code == 0 ? "Process exited" : "Process exited with code \(code)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if session.droppedOutput {
-                Text("Some output was lost: the reader fell behind.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.warning)
-            }
-            if session.outputPaused {
-                Text("Output paused while the terminal catches up.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(code == 0 ? .green : .red)
+            Text(code == 0 ? "Process exited" : "Process exited with code \(code)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, Theme.Space.m)
@@ -957,6 +976,84 @@ struct TerminalHost: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.border).frame(height: 1)
         }
+    }
+}
+
+/// What a live terminal has to say about its own output, floated over the
+/// bottom of the emulator rather than stacked under it.
+///
+/// Nothing here may change the terminal's frame. Both facts arrive while the
+/// process is printing hard, and taking a strip's worth of height at that
+/// moment resizes the pty and makes the program repaint, which is what threw
+/// away the scroll position.
+private struct TerminalNotices: View {
+    let sessions: [TerminalSession]
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: Theme.Space.xs) {
+            ForEach(sessions, id: \.id) { session in
+                TerminalNotice(session: session)
+            }
+        }
+    }
+}
+
+/// One session's live notice. Absent when there is nothing to say, which is
+/// almost always.
+private struct TerminalNotice: View {
+    let session: TerminalSession
+
+    /// A pause is normal and brief while the reader drains a burst. Showing it
+    /// the instant it appears made a pill blink on and off through every busy
+    /// stretch, so it has to hold before it is worth a word.
+    @State private var pauseHasHeld = false
+
+    var body: some View {
+        Group {
+            if session.droppedOutput {
+                pill {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.warning)
+                    Text("Some output was lost: the reader fell behind.")
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                    // Icon only: the pill is already a sentence, and
+                    // `compactActions` is how this app asks for a glyph
+                    // without a word beside it.
+                    Button("Dismiss", .dismiss) { session.droppedOutput = false }
+                        .buttonStyle(.plain)
+                        .environment(\.compactActions, true)
+                        .foregroundStyle(Theme.controlGlyph)
+                }
+            } else if session.outputPaused, pauseHasHeld {
+                pill {
+                    ProgressView().controlSize(.small)
+                    Text("Output paused while the terminal catches up.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: session.outputPaused) {
+            guard session.outputPaused else {
+                pauseHasHeld = false
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(700))
+            pauseHasHeld = !Task.isCancelled
+        }
+    }
+
+    private func pill<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            content()
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.xs)
+        .background(Theme.sidebar, in: Capsule())
+        .overlay(Capsule().stroke(Theme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
     }
 }
 

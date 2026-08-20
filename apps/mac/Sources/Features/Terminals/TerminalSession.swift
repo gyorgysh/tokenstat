@@ -385,8 +385,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     var isInspectorShell = false
 
     /// The thin status strip under the emulator has something to say.
+    ///
+    /// Only the exit code, because that strip takes height from the terminal
+    /// and a live pty answers a height change with SIGWINCH. Dropped and
+    /// paused output float over the emulator instead, in `TerminalNotices`.
     var showsHostLine: Bool {
-        exitCode != nil || droppedOutput || outputPaused
+        exitCode != nil
     }
 
     /// True while the pane should show a starting state rather than the live
