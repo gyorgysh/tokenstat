@@ -138,7 +138,13 @@ final class ClientStore {
         guard updatesTask == nil else { return }
         updatesTask = Task { [weak self] in
             for await result in Transaction.updates {
-                await self?.handle(result)
+                // Quietly: nobody asked for this one. StoreKit redelivers
+                // unfinished transactions at launch, and a phone that is
+                // offline or not signed in yet cannot activate them. Writing
+                // the failure here put a message on the paywall that the
+                // person then met later, about something they had not done.
+                // The transaction stays unfinished and comes back.
+                await self?.handle(result, quietly: true)
             }
         }
         // App Store Connect will not turn Streamlined Purchasing off until
@@ -252,12 +258,12 @@ final class ClientStore {
     }
 
     @discardableResult
-    func handle(_ result: VerificationResult<Transaction>) async -> Bool {
+    func handle(_ result: VerificationResult<Transaction>, quietly: Bool = false) async -> Bool {
         do {
             try await activate(result)
             return true
         } catch {
-            errorMessage = error.localizedDescription
+            if !quietly { errorMessage = error.localizedDescription }
             return false
         }
     }
