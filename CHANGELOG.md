@@ -4,6 +4,35 @@ Every released version of tokenstat: the CLI, the macOS app, the iOS client, the
 host daemon, and the MCP server, which all ship together under one version
 number. Newest first.
 
+## [0.6.7] - 2026-08-20
+
+### New
+
+- Four more tools are read straight off disk: Pi, Hermes Agent, Kilo Code and
+  the DeepSeek Harness. Each one is counted as its own tool, so a machine
+  running Kilo Code and OpenCode side by side sees two rows rather than one.
+- Tell me when a run finishes. The Mac watches its own automations and
+  workflows and says so when one ends, fails, or stops to ask a question. It is
+  off until you turn it on, in Account, and nothing about the run leaves the
+  machine. iPhone and iPad carry the same switch, which starts arriving once
+  notifications are switched on for your account.
+
+### Fixed
+
+- Usage from a tool that keeps a SQLite database is picked up on the next scan
+  instead of waiting for that database to be tidied up, which could be hours.
+  This was quietly losing recent work for OpenCode, Cline, Copilot CLI and Zed.
+- A machine is only called unreachable when it was answering and stopped, and
+  the card names which one. A phone or tablet paired to the account no longer
+  reports a computer as unreachable, and a machine that is simply off is left
+  to the Machines screen to say so.
+- Stop and close takes the session off screen at once rather than waiting on
+  the computer to answer.
+- A full-screen agent no longer swallows the window's own clicks, so a
+  confirmation dialog flashes and the window keeps answering.
+- The phone's terminal keys no longer cover the last lines of output, and notes
+  are not pressed against the field above them.
+
 ## [0.6.6] - 2026-08-19
 
 ### New

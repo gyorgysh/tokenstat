@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.6"
+    MARKETING_VERSION: "0.6.7"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -53,8 +53,8 @@ settings:
     # upload, and bump alongside MARKETING_VERSION in the same commit on each
     # release.
     #
-    # 40 has been uploaded as 0.6.5 on TestFlight. This cut uploads 41 as 0.6.6.
-    CURRENT_PROJECT_VERSION: "41"
+    # 41 has been uploaded as 0.6.6 on TestFlight. This cut uploads 42 as 0.6.7.
+    CURRENT_PROJECT_VERSION: "42"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
