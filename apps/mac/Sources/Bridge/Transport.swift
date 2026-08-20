@@ -166,7 +166,10 @@ final class SocketTransport: Transport, @unchecked Sendable {
             do {
                 pooled.patience = patience
                 let response = try pooled.roundTrip(request)
-                release(pooled, reusable: true)
+                // A refusal at the daemon's ceiling is a well-formed answer on
+                // a socket the daemon has already closed. Keeping it would
+                // hand the next caller a dead connection to discover.
+                release(pooled, reusable: !Self.isBusyRefusal(response))
                 return response
             } catch TransportFailure.timedOut {
                 release(pooled, reusable: false)
@@ -185,7 +188,7 @@ final class SocketTransport: Transport, @unchecked Sendable {
         do {
             fresh.patience = patience
             let response = try fresh.roundTrip(request)
-            release(fresh, reusable: true)
+            release(fresh, reusable: !Self.isBusyRefusal(response))
             return response
         } catch TransportFailure.timedOut {
             release(fresh, reusable: false)
@@ -250,6 +253,14 @@ final class SocketTransport: Transport, @unchecked Sendable {
         )
     }
 
+    /// Whether the daemon refused this call because it is at its ceiling.
+    ///
+    /// It answers and then closes, so the connection is spent whatever the
+    /// caller does about the answer itself.
+    private static func isBusyRefusal(_ response: String) -> Bool {
+        response.contains("\"host_busy\"")
+    }
+
     /// Whether this call's work happens on another machine.
     ///
     /// Two ways for it to. `remote.call` says so in the method name, along
@@ -261,7 +272,15 @@ final class SocketTransport: Transport, @unchecked Sendable {
     /// times a second, so missing them would leave the share this is for
     /// mostly unused.
     private static func isRemote(_ method: String, _ params: String) -> Bool {
-        method.hasPrefix("remote.") || params.contains("\"remote:")
+        if method.hasPrefix("remote.") { return true }
+        // A value that *starts* a JSON string, not the text `remote:`
+        // anywhere in one. Params are built by `JSONSerialization`, so a
+        // namespaced id always reads `"key":"remote:…"`, while a person
+        // typing `"remote:` into a terminal or saving a file that mentions it
+        // is an ordinary local call and must not spend the remote share.
+        if params.contains(":\"remote:") { return true }
+        // A port forward names the machine instead of carrying its id.
+        return params.contains("\"peer\":")
     }
 
     /// Take one of the remote calls' share of the pool, or wait for one.

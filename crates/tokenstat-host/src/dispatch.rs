@@ -3429,10 +3429,22 @@ mod tests {
             // the session lock it queued behind reports, syncs, and another
             // machine asking this one for a report, so the menu bar could know
             // the count while the list never arrived.
-            let tasks = call_sessionless("todo.list", "{}")
-                .expect("todo.list must be answerable without a session");
-            let tasks: Value = serde_json::from_str(&tasks).expect("todo.list JSON");
-            assert_eq!(tasks["ok"], true, "{tasks}");
+            //
+            // Asked without an id on purpose: this must prove the routing, not
+            // exercise the board. `todo.list` reconciles and auto-archives the
+            // real `todo.json` of whoever runs the suite, and a test that tidies
+            // somebody's finished cards away is a test that costs more than it
+            // proves. This arm answers before it touches the store.
+            let tasks = call_sessionless("todo.remove", "{}")
+                .expect("the todo family must be answerable without a session");
+            let tasks: Value = serde_json::from_str(&tasks).expect("todo.remove JSON");
+            assert_eq!(tasks["ok"], false, "{tasks}");
+            assert!(
+                tasks["error"]["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("needs an id")),
+                "reached the board instead of failing on the missing id: {tasks}"
+            );
         }
 
         // Anything that reads the archive still does.

@@ -1292,10 +1292,16 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     }
 
     /// What to call this session in a notification: what the program asked to
-    /// be called, or the command that started it. Never a path.
+    /// be called, or the command that started it.
+    ///
+    /// A shell's default title is often the working directory, so this can be
+    /// a path and the last component is enough to recognize the terminal by.
+    /// The notification is local either way, and `docs/push-notifications.md`
+    /// is why: a push carries a reason and a machine id, never text from here.
     private var attentionName: String {
-        if let title, !title.isEmpty { return title }
-        return command
+        guard let title, !title.isEmpty else { return command }
+        guard title.contains("/") else { return title }
+        return title.split(separator: "/").last.map(String.init) ?? title
     }
 
     /// Take the host's token meter.

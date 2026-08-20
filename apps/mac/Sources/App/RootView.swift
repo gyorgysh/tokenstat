@@ -5,6 +5,7 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
+import AppKit
 import SwiftUI
 
 // Everything below is the desktop shell: a resizable window with two sidebars,
@@ -402,6 +403,14 @@ struct RootView: View {
             }
         }
         // The network came back: refresh what the offline stretch starved.
+        // A banner brought them back, or they came back on their own. Either
+        // way the terminal on screen has been seen, so its call for attention
+        // is answered and the notification goes with it.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in
+            terminals.acknowledgeVisibleAttention()
+        }
         // This is the connectionBack hook. Do it now, not on the next
         // 30-second retry tick.
         .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in

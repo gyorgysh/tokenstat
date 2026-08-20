@@ -224,19 +224,35 @@ enum Bridge {
         #endif
     }
 
+    /// How many times a `host_busy` answer is waited out before it is reported.
+    private static let maxBusyWaits = 3
+
+    /// Whether this envelope is the daemon saying it is at its connection
+    /// ceiling.
+    ///
+    /// Read from the raw response rather than after decoding, because it has
+    /// to cover every path a call can take out of here, and each of those
+    /// decodes into a different type. A busy daemon is not a failed call: the
+    /// crowd clears in milliseconds and asking again is the whole fix.
+    private static func isBusy(_ response: String) -> Bool {
+        response.contains("\"host_busy\"")
+    }
+
+    /// Wait between busy attempts. Runs on the calls queue, where blocking is
+    /// what every call here does anyway.
+    private static func waitOutBusy(_ attempt: Int) {
+        Thread.sleep(forTimeInterval: 0.05 * Double(attempt))
+    }
+
     /// Call across the boundary and decode the result.
     ///
     /// Synchronous and potentially slow. Everything public here is `async` and
     /// hops off the main actor first.
-    /// How many times a `host_busy` answer is waited out before it is reported.
-    private static let maxBusyRetries = 3
-
     private static func invoke<T: Decodable>(
         _ method: String,
         _ params: [String: Any] = [:],
         patience: TimeInterval = Patience.standard,
-        as _: T.Type,
-        busyRetries: Int = 0
+        as _: T.Type
     ) throws -> T {
         let paramData = try JSONSerialization.data(withJSONObject: params)
         let paramString = String(decoding: paramData, as: UTF8.self)
@@ -264,20 +280,6 @@ enum Bridge {
 
         guard envelope.ok, let result = envelope.result else {
             let failure = envelope.error
-            // The daemon is at its connection ceiling. Nothing is wrong with
-            // the call and the crowd clears in milliseconds, so wait a beat and
-            // ask again rather than putting a fault on a screen. Bounded, and
-            // this runs on the calls queue where blocking is the norm.
-            if failure?.code == "host_busy", busyRetries < maxBusyRetries {
-                Thread.sleep(forTimeInterval: 0.05 * Double(busyRetries + 1))
-                return try invoke(
-                    method,
-                    params,
-                    patience: patience,
-                    as: T.self,
-                    busyRetries: busyRetries + 1
-                )
-            }
             throw BridgeError.core(
                 code: failure?.code ?? "unknown",
                 message: failure?.message ?? "The core rejected the call without saying why."
@@ -303,9 +305,15 @@ enum Bridge {
         // Repair and retry a bounded number of times so the caller gets its
         // answer instead of an error the moment the host is ready again.
         var attempt = 0
+        var busy = 0
         while true {
             do {
                 let result = try route.transport.call(method: method, params: params, patience: patience)
+                if Self.isBusy(result), busy < maxBusyWaits {
+                    busy += 1
+                    Self.waitOutBusy(busy)
+                    continue
+                }
                 Self.postHostRecoveryFinished()
                 return result
             } catch {
@@ -360,6 +368,7 @@ enum Bridge {
         patience: TimeInterval
     ) throws -> String {
         var attempt = 0
+        var busy = 0
         while true {
             do {
                 let result = try currentRoute.transport.callUrgent(
@@ -367,6 +376,11 @@ enum Bridge {
                     params: params,
                     patience: patience
                 )
+                if Self.isBusy(result), busy < maxBusyWaits {
+                    busy += 1
+                    Self.waitOutBusy(busy)
+                    continue
+                }
                 Self.postHostRecoveryFinished()
                 return result
             } catch {

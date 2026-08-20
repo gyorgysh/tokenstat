@@ -193,6 +193,18 @@ final class TerminalsModel {
         focus(id.map { [$0] } ?? [])
     }
 
+    /// Somebody came back to the app. Anything on screen has been seen.
+    ///
+    /// The `isFocused` hook cannot cover this: the session that raised the
+    /// call is usually the one already showing, so coming back to the app
+    /// changes nothing about focus and the notification would sit in
+    /// Notification Centre about a question the person is looking at.
+    func acknowledgeVisibleAttention() {
+        for session in sessions where session.isFocused {
+            session.acknowledgeAttention()
+        }
+    }
+
     private func applyFocus() {
         for session in sessions {
             let next = paneFocusIDs.contains(session.id)
