@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use tokenstat_core::model::BillingMode;
+use tokenstat_core::model::{BillingMode, Counters, EventId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
     antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, opencode, pi,
@@ -157,11 +157,67 @@ pub(crate) fn fold_events(events: &[UsageEvent], prices: &PriceTable) -> Option<
     fold(&events.iter().collect::<Vec<_>>(), prices)
 }
 
+/// Collapse events that are the same request seen more than once.
+///
+/// A transcript is not a list of requests, it is a list of rows, and one
+/// request is written many times while it streams: the prompt side is fixed
+/// and `output_tokens` grows. The archive never sees that, because the store
+/// upserts on the event id and keeps the larger counter per field, so a
+/// duplicate updates a row instead of adding one. The meter reads the same
+/// parsers and never goes near the store, so without this it charged a
+/// session once per row and read roughly double what the harness itself
+/// reports. Same key, same rule: highest wins per field, `None` is absent
+/// rather than zero.
+///
+/// First-seen order is kept, so the model and the context figure still come
+/// from the newest turn.
+fn collapse(events: &[&UsageEvent]) -> Vec<UsageEvent> {
+    let mut order: Vec<EventId> = Vec::with_capacity(events.len());
+    let mut by_id: HashMap<EventId, UsageEvent> = HashMap::with_capacity(events.len());
+    for event in events {
+        match by_id.get_mut(&event.id) {
+            Some(kept) => {
+                keep_larger(&mut kept.counters, &event.counters);
+                // A row that streamed a model or a billing mode the first one
+                // lacked is still this request. Later rows win where they say
+                // something, never where they say nothing.
+                if kept.model.is_empty() || kept.model == "unknown" {
+                    kept.model = event.model.clone();
+                }
+                if kept.billing == BillingMode::Unknown {
+                    kept.billing = event.billing;
+                }
+                kept.ts = kept.ts.max(event.ts);
+            }
+            None => {
+                order.push(event.id);
+                by_id.insert(event.id, (*event).clone());
+            }
+        }
+    }
+    order.iter().filter_map(|id| by_id.remove(id)).collect()
+}
+
+/// Per-field maximum, mirroring the store's `ON CONFLICT` update.
+fn keep_larger(kept: &mut Counters, seen: &Counters) {
+    fn larger(kept: &mut Option<u64>, seen: Option<u64>) {
+        if let Some(n) = seen {
+            *kept = Some(kept.map_or(n, |k| k.max(n)));
+        }
+    }
+    larger(&mut kept.input_fresh, seen.input_fresh);
+    larger(&mut kept.cache_read, seen.cache_read);
+    larger(&mut kept.cache_write_5m, seen.cache_write_5m);
+    larger(&mut kept.cache_write_1h, seen.cache_write_1h);
+    larger(&mut kept.output, seen.output);
+}
+
 /// Sum events into the wire shape. Pure, so tests do not need a home directory.
 pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterReading> {
     if events.is_empty() {
         return None;
     }
+    let events = collapse(events);
 
     let mut tokens = 0u64;
     let mut cost = 0i64;
@@ -169,7 +225,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
     let mut estimated = false;
     let mut complete = true;
 
-    for event in events {
+    for event in &events {
         tokens = tokens.saturating_add(event.counters.total());
         let lookup = display_usage_model_id(&event.model);
         match EquivalentValue::price(prices, &lookup, &event.counters) {
@@ -220,7 +276,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
     // costs what it costs, and $0.00 counting up reads as a meter where an
     // absent figure that later appears at $7.98 reads as a surprise. Nothing
     // priced at all is still nothing, never a made-up zero.
-    let billing = billing_mode(events);
+    let billing = billing_mode(&events);
     Some(MeterReading {
         tokens,
         cost_micros: (priced > 0).then_some(cost),
@@ -238,7 +294,7 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
 ///
 /// Metered wins over plan: a session that billed one request per token is not
 /// covered, whatever the rest of it says.
-fn billing_mode(events: &[&UsageEvent]) -> BillingMode {
+fn billing_mode(events: &[UsageEvent]) -> BillingMode {
     if events.iter().any(|e| e.billing == BillingMode::Metered) {
         return BillingMode::Metered;
     }
@@ -866,6 +922,25 @@ mod tests {
         let mut e = event("claude-opus-4-1", 100, 0, 10);
         e.ts = Timestamp::from_ms(ms);
         e
+    }
+
+    /// The trap the archive avoids in SQL and the meter used to walk into: a
+    /// streaming request is written once per chunk, so summing rows charges a
+    /// session twice for one turn.
+    #[test]
+    fn a_streamed_request_is_counted_once() {
+        let mut first = event("claude-opus-4-5", 10, 1_000, 5);
+        first.counters.cache_write_5m = Some(200);
+        let mut last = first.clone();
+        last.counters.output = Some(120);
+        last.ts = Timestamp::from_ms(1_000);
+
+        let once = fold_events(&[last.clone()], &prices()).expect("one row");
+        let streamed = fold_events(&[first, last], &prices()).expect("same row twice");
+
+        assert_eq!(streamed.tokens, once.tokens);
+        assert_eq!(streamed.cost_micros, once.cost_micros);
+        assert_eq!(streamed.tokens, 10 + 1_000 + 200 + 120);
     }
 
     #[test]
