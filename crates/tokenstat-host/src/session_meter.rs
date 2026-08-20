@@ -36,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use tokenstat_core::model::{BillingMode, Counters, EventId};
+use tokenstat_core::model::{BillingMode, Counters, EventId, SourceId};
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
     antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, opencode, pi,
@@ -250,11 +250,23 @@ pub(crate) fn fold(events: &[&UsageEvent], prices: &PriceTable) -> Option<MeterR
         .map(|e| e.model.clone())
         .unwrap_or_default();
 
-    let context_used = events
-        .iter()
-        .rev()
-        .map(|e| e.counters.input_total())
-        .find(|&n| n > 0);
+    // Hermes keeps one running total per session+model+task, not a per-turn
+    // prompt, and it persists no live context figure at all: the `124K / 200K`
+    // its own `/usage` prints is in-session state that never reaches `state.db`.
+    // The "last event's input_total" below is therefore the whole session's
+    // cumulative prompt (input + cache_read ≈ its "Prompt tokens (total)") for
+    // Hermes, which makes a context bar read as hundreds of percent. Withhold it
+    // rather than show a number that is meaningless as a context fill.
+    let rollup_source = events.iter().any(|e| e.source == SourceId::Hermes);
+    let context_used = if rollup_source {
+        None
+    } else {
+        events
+            .iter()
+            .rev()
+            .map(|e| e.counters.input_total())
+            .find(|&n| n > 0)
+    };
     let lookup = display_usage_model_id(&model);
     let published = prices
         .catalog()
@@ -997,6 +1009,21 @@ mod tests {
         assert_eq!(reading.context_used, Some(6_000));
         assert_eq!(reading.context_window, Some(200_000));
         assert!(reading.tokens > 6_000, "lifetime tokens still accumulate");
+    }
+
+    #[test]
+    fn hermes_rollup_rows_do_not_feed_a_context_bar() {
+        // Hermes stores one running total per session+model+task, so its last
+        // row's input_total is the whole session's cumulative prompt (input +
+        // cache_read ≈ its "Prompt tokens (total)"), not the live context. The
+        // in-session `124K / 200K` it prints is never persisted, so there is no
+        // honest bar to draw: withhold `context_used` rather than show hundreds
+        // of percent. Tokens and cost still accumulate from the same rows.
+        let mut e = event("grok-composer-2.5-fast", 328_000, 4_962_304, 44_969);
+        e.source = SourceId::Hermes;
+        let reading = fold_events(&[e], &prices()).expect("reading");
+        assert_eq!(reading.context_used, None);
+        assert_eq!(reading.tokens, 328_000 + 4_962_304 + 44_969);
     }
 
     #[test]
