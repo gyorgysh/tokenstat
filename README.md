@@ -29,7 +29,7 @@ machine by default. Sync to a public profile is opt in.
 ## Highlights
 
 - **Local first**: counters stay on your machine. Conversation text never reaches the archive
-- **Many sources**: Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, plus Cursor fetch
+- **Many sources**: Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, plus Cursor fetch
 - **One schema**: daily, weekly, monthly, and per-model views across every tool
 - **Activity heatmap**: rolling calendar ramped on daily list-rate value, with streaks, busiest day, and a purple-to-cyan ramp
 - **Model catalog**: context window, capabilities, and public benchmark scores per model
@@ -40,7 +40,7 @@ machine by default. Sync to a public profile is opt in.
 
 | Kind | Tools |
 | --- | --- |
-| On disk | Claude Code (with rollup recovery), Codex, Grok, OpenCode, Cline, Antigravity CLI, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code |
+| On disk | Claude Code (with rollup recovery), Codex, Grok, OpenCode, Cline, Antigravity CLI, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness |
 | Remote fetch | Cursor (keychain or pasted token, 30 minute cache) |
 | IDE sync | Antigravity IDE (app open, then `tokenstat fetch`) |
 

@@ -16,3 +16,5 @@ anyhow.workspace = true
 tokenstat-sync.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true
+# The DeepSeek Harness compresses its sessions; redaction has to read them.
+zstd.workspace = true

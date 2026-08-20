@@ -1,0 +1,1 @@
+{"data":{"message":{"id":"id_00000","role":"assistant","source":{"kind":"model","model":"deepseek-v4-flash","provider":"deepseek-official"}},"step":1,"turn":1,"usage":{"cacheReadTokens":0,"inputTokens":13050,"outputTokens":69,"reasoningTokens":47}},"seq":89,"time":1787182700415,"type":"assistant/message"}

@@ -72,6 +72,8 @@ const ID_FIELDS: &[&str] = &[
     // Pi keeps the event id and its parent at the top level.
     "id",
     "parentId",
+    // The DeepSeek Harness nests its message id.
+    "data.message.id",
 ];
 
 /// Keys a Pi fixture may keep.
@@ -106,11 +108,34 @@ const PI_ALLOW: &[&str] = &[
     "message.usage.cost.total",
 ];
 
+/// Keys a DeepSeek Harness fixture may keep.
+///
+/// The session header is dropped whole (see `keeps`), so `cwd` never reaches a
+/// fixture. What remains is the finished assistant message: its counters, the
+/// model that produced them, and the ids that give a turn its identity.
+const DSH_ALLOW: &[&str] = &[
+    "type",
+    "seq",
+    "time",
+    "data.turn",
+    "data.step",
+    "data.message.role",
+    "data.message.id",
+    "data.message.source.kind",
+    "data.message.source.provider",
+    "data.message.source.model",
+    "data.usage.inputTokens",
+    "data.usage.outputTokens",
+    "data.usage.cacheReadTokens",
+    "data.usage.reasoningTokens",
+];
+
 /// Which tool's logs are being redacted.
 #[derive(Clone, Copy, PartialEq)]
 enum Profile {
     ClaudeCode,
     Pi,
+    Dsh,
 }
 
 impl Profile {
@@ -118,7 +143,8 @@ impl Profile {
         match name {
             "claude" | "claude_code" => Ok(Self::ClaudeCode),
             "pi" => Ok(Self::Pi),
-            other => anyhow::bail!("unknown redaction profile: {other} (claude_code, pi)"),
+            "dsh" => Ok(Self::Dsh),
+            other => anyhow::bail!("unknown redaction profile: {other} (claude_code, pi, dsh)"),
         }
     }
 
@@ -126,6 +152,7 @@ impl Profile {
         match self {
             Self::ClaudeCode => CLAUDE_ALLOW,
             Self::Pi => PI_ALLOW,
+            Self::Dsh => DSH_ALLOW,
         }
     }
 
@@ -142,6 +169,10 @@ impl Profile {
                         .and_then(Value::as_object)
                         .is_some_and(|m| m.contains_key("usage"))
             }
+            // The finished message only. `assistant/chunk` repeats the same
+            // counters, and a fixture carrying both would teach the parser's
+            // test that double counting is correct.
+            Self::Dsh => obj.get("type").and_then(Value::as_str) == Some("assistant/message"),
         }
     }
 }
@@ -245,7 +276,12 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
             .filter_map(Result::ok)
             .filter(|e| e.file_type().is_file())
             .map(|e| e.into_path())
-            .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+            .filter(|p| {
+                p.extension().is_some_and(|x| x == "jsonl")
+                    || p.file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.ends_with(".jsonl.zstd"))
+            })
             .collect()
     } else {
         vec![input.to_path_buf()]
@@ -258,7 +294,15 @@ fn redact(input: &Path, out_dir: &Path, max_files: usize, profile: Profile) -> R
     let mut written = 0;
 
     for (n, path) in files.iter().enumerate() {
-        let contents = std::fs::read_to_string(path)?;
+        // The harness compresses its sessions. A fixture stays plain text, so
+        // it can be read in a diff and so the guard in `tests/fixtures.rs` can
+        // check it without a decoder.
+        let contents = if path.extension().is_some_and(|x| x == "zstd") {
+            let bytes = std::fs::read(path)?;
+            String::from_utf8_lossy(&zstd::decode_all(&bytes[..])?).into_owned()
+        } else {
+            std::fs::read_to_string(path)?
+        };
         let mut kept = String::new();
         for line in contents.lines() {
             let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -366,8 +410,15 @@ fn filter_object(
 }
 
 /// A string leaf may be kept only if it is a known shape.
+///
+/// The separator check is what keeps a path from ever reaching a fixture. It
+/// does not apply to `type`, whose values are the tool's own vocabulary and
+/// are sometimes written with a slash in them ("assistant/message"). That
+/// exception is narrow on purpose: one field, and one whose values are a fixed
+/// set the tool defines rather than anything a person typed.
 fn is_safe_string(path: &str, s: &str) -> bool {
-    if s.len() > 64 || s.contains('/') || s.contains('\\') {
+    let separators = s.contains('/') || s.contains('\\');
+    if s.len() > 64 || (separators && path != "type") {
         return false;
     }
     matches!(
@@ -380,6 +431,11 @@ fn is_safe_string(path: &str, s: &str) -> bool {
             | "message.type"
             | "message.stop_reason"
             | "message.usage.service_tier"
+            // The DeepSeek Harness nests what the others keep at the top.
+            | "data.message.role"
+            | "data.message.source.kind"
+            | "data.message.source.provider"
+            | "data.message.source.model"
     )
 }
 

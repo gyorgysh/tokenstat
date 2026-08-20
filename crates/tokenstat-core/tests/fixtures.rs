@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use tokenstat_core::sources::{claude_code, pi};
+use tokenstat_core::sources::{claude_code, dsh, pi};
 
 fn fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -169,6 +169,33 @@ const PI_ALLOWED_KEYS: &[&str] = &[
     "total",
 ];
 
+/// Keys any committed DeepSeek Harness fixture may contain.
+///
+/// Its own list for the same reason Pi has one: this tool nests its counters
+/// under `data`, and a shared list would have to allow both spellings
+/// everywhere, which is how a key that is safe in one tool gets waved through
+/// in another.
+const DSH_ALLOWED_KEYS: &[&str] = &[
+    "type",
+    "seq",
+    "time",
+    "data",
+    "turn",
+    "step",
+    "message",
+    "role",
+    "id",
+    "source",
+    "kind",
+    "provider",
+    "model",
+    "usage",
+    "inputTokens",
+    "outputTokens",
+    "cacheReadTokens",
+    "reasoningTokens",
+];
+
 /// Which allowlist a fixture is held to, by the directory it sits in.
 ///
 /// An unknown directory gets the strictest list rather than a free pass, so
@@ -177,6 +204,8 @@ const PI_ALLOWED_KEYS: &[&str] = &[
 fn allowlist_for(path: &Path) -> &'static [&'static str] {
     if path.components().any(|c| c.as_os_str() == "pi") {
         PI_ALLOWED_KEYS
+    } else if path.components().any(|c| c.as_os_str() == "dsh") {
+        DSH_ALLOWED_KEYS
     } else {
         ALLOWED_KEYS
     }
@@ -272,6 +301,53 @@ fn pi_fixtures_parse_into_events() {
                 "reasoning {reasoning} exceeds output {output}, so it is not inside it"
             );
         }
+    }
+}
+
+#[test]
+fn dsh_fixtures_parse_into_events() {
+    let dir = fixtures_root().join("dsh");
+    if !dir.is_dir() {
+        return;
+    }
+    let mut events = Vec::new();
+    for path in walkdir::WalkDir::new(&dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+    {
+        let contents = std::fs::read_to_string(path.path()).unwrap();
+        // The committed fixture is plain text; the real file is zstd. This is
+        // the reading half either way.
+        let out = dsh::parse_text(path.path(), &dir, &contents);
+        assert!(
+            out.warnings.is_empty(),
+            "{}: unexpected warnings {:?}",
+            path.path().display(),
+            out.warnings
+        );
+        events.extend(out.events);
+    }
+    assert!(!events.is_empty(), "fixtures produced no events");
+
+    let unique: HashSet<_> = events.iter().map(|e| e.id).collect();
+    assert_eq!(unique.len(), events.len(), "two turns share an id");
+
+    for e in &events {
+        // Reasoning is inside output for this vendor, so it can never exceed
+        // it, and cache read is beside input rather than part of it.
+        if let (Some(reasoning), Some(output)) =
+            (e.extras.reasoning_within_output, e.counters.output)
+        {
+            assert!(
+                reasoning <= output,
+                "reasoning {reasoning} exceeds output {output}"
+            );
+        }
+        assert_eq!(
+            e.counters.cache_write_5m, None,
+            "this vendor reports no cache write, so it must not claim a zero"
+        );
     }
 }
 

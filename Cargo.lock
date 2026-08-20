@@ -3301,6 +3301,7 @@ dependencies = [
  "serde_json",
  "tokenstat-sync",
  "walkdir",
+ "zstd",
 ]
 
 [[package]]

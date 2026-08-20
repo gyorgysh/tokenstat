@@ -8,8 +8,8 @@ use crate::error::{CoreError, Warning};
 use crate::model::SourceId;
 use crate::sources::claude_stats::Reconciliation;
 use crate::sources::{
-    antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, grok,
-    hermes, kilo, openclaw, opencode, pi, zed,
+    antigravity_cache, antigravity_cli, claude_code, claude_stats, cline, codex, copilot, dsh,
+    grok, hermes, kilo, openclaw, opencode, pi, zed,
 };
 use crate::store::Store;
 use crate::watermark;
@@ -57,6 +57,7 @@ from_parsed!(
     copilot::ParseOutput,
     pi::ParseOutput,
     hermes::ParseOutput,
+    dsh::ParseOutput,
 );
 
 impl FileOutcome {
@@ -336,6 +337,19 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
                     pi::parse_file(p, &sessions, text).into()
                 })
             })
+            .collect();
+        absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
+    }
+
+    // DeepSeek Harness: zstd JSONL, one file per session. Read through the
+    // database path rather than the text one, because the parser has to
+    // decompress before there is any text to hand it. See `sources::dsh`.
+    if let Some(sessions) = dsh::discover(&home) {
+        let files = dsh::shards(&sessions);
+        report.files_found += files.len() as u64;
+        let parsed: Vec<_> = files
+            .par_iter()
+            .map(|path| read_db_shard(path, &marks, |p| dsh::parse_file(p, &sessions).into()))
             .collect();
         absorb(&mut report, &mut all_events, &mut marks_to_store, parsed);
     }

@@ -41,6 +41,8 @@ pub enum SourceId {
     /// Kilo Code's CLI. An OpenCode fork, so the same database shape under its
     /// own name, and counted as its own tool because it is one.
     Kilo,
+    /// DeepSeek Harness. Compressed JSONL sessions, one folder per session.
+    Dsh,
 }
 
 impl SourceId {
@@ -61,6 +63,7 @@ impl SourceId {
             SourceId::Pi => "pi",
             SourceId::Hermes => "hermes",
             SourceId::Kilo => "kilo",
+            SourceId::Dsh => "dsh",
         }
     }
 
@@ -81,6 +84,7 @@ impl SourceId {
             SourceId::Pi => "Pi",
             SourceId::Hermes => "Hermes Agent",
             SourceId::Kilo => "Kilo Code",
+            SourceId::Dsh => "DeepSeek Harness",
         }
     }
 
@@ -129,6 +133,7 @@ impl SourceId {
             "pi" => Some(Self::Pi),
             "hermes" => Some(Self::Hermes),
             "kilo" => Some(Self::Kilo),
+            "dsh" => Some(Self::Dsh),
             _ => None,
         }
     }

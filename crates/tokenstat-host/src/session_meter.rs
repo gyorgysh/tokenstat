@@ -39,7 +39,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokenstat_core::model::BillingMode;
 use tokenstat_core::pricing::{EquivalentValue, PriceTable, display_usage_model_id};
 use tokenstat_core::sources::{
-    antigravity_cli, claude_code, codex, grok, hermes, kilo, opencode, pi,
+    antigravity_cli, claude_code, codex, dsh, grok, hermes, kilo, opencode, pi,
 };
 use tokenstat_core::{Catalog, UsageEvent};
 
@@ -79,6 +79,7 @@ pub(crate) fn reading(command: &str, cwd: &str, started_at_ms: u64) -> Option<Me
         "kilo" => kilo_events(cwd, started_at_ms)?,
         "hermes" => hermes_events(cwd, started_at_ms)?,
         "pi" => pi_events(cwd)?,
+        "dsh" => dsh_events(cwd)?,
         "antigravity" => antigravity_events(cwd)?,
         _ => return None,
     };
@@ -270,6 +271,7 @@ pub(crate) fn can_meter(command: &str) -> bool {
         "kilo" => kilo::discover(&home).is_some(),
         "hermes" => hermes::discover(&home).is_some(),
         "pi" => pi::discover(&home).is_some(),
+        "dsh" => dsh::discover(&home).is_some(),
         "antigravity" => antigravity_cli::discover(&home).is_some(),
         _ => false,
     }
@@ -289,6 +291,7 @@ fn harness_name(command: &str) -> Option<&'static str> {
         "kilo" | "kilocode" => Some("kilo"),
         "hermes" => Some("hermes"),
         "pi" => Some("pi"),
+        "dsh" => Some("dsh"),
         "agy" => Some("antigravity"),
         _ => None,
     }
@@ -485,7 +488,34 @@ fn pi_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
     })
 }
 
-/// How Pi spells a folder as a directory name.
+/// The DeepSeek Harness transcript for this folder, newest session first.
+///
+/// Its sessions live one folder deeper than Pi's (`<encoded>/session-<uuid>/`)
+/// and the file is compressed, so the parser opens it rather than being handed
+/// text. Small enough to decompress on a poll: a long session is tens of
+/// kilobytes.
+fn dsh_events(cwd: &str) -> Option<Arc<Vec<UsageEvent>>> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let root = dsh::discover(&home)?;
+    let dir = root.join(pi_dir_name(cwd));
+    let path = resolve_log("dsh", cwd, || {
+        let files = std::fs::read_dir(&dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("session.jsonl.zstd"))
+            .filter(|p| p.is_file())
+            .collect();
+        newest_first(files).into_iter().next()
+    })?;
+    let root_for_parse = root.clone();
+    let events = cached_db_events(&path, cwd, move |p| {
+        dsh::parse_file(p, &root_for_parse).events
+    })?;
+    (!events.is_empty()).then_some(events)
+}
+
+/// How Pi and the DeepSeek Harness spell a folder as a directory name. The two
+/// encode it the same way; only the depth below it differs.
 fn pi_dir_name(cwd: &str) -> String {
     format!("--{}--", cwd.trim_matches('/').replace('/', "-"))
 }
@@ -1065,6 +1095,15 @@ mod tests {
         assert_eq!(pi_dir_name("/Users/x/git/"), "--Users-x-git--");
     }
 
+    /// The harness that shares Pi's folder encoding must keep sharing it.
+    #[test]
+    fn the_deepseek_harness_spells_a_folder_the_same_way() {
+        assert_eq!(
+            pi_dir_name("/Users/gyorgy/git/tokenstat"),
+            "--Users-gyorgy-git-tokenstat--"
+        );
+    }
+
     #[test]
     fn unsupported_harnesses_have_no_reading() {
         assert_eq!(harness_name("zsh"), None);
@@ -1085,6 +1124,7 @@ mod tests {
         assert_eq!(harness_name("kilocode"), Some("kilo"));
         assert_eq!(harness_name("hermes"), Some("hermes"));
         assert_eq!(harness_name("pi"), Some("pi"));
+        assert_eq!(harness_name("dsh"), Some("dsh"));
         assert_eq!(harness_name("agy"), Some("antigravity"));
     }
 
