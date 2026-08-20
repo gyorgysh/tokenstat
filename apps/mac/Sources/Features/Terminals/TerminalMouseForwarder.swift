@@ -39,9 +39,22 @@ import SwiftTerm
 enum TerminalMouseForwarder {
     private static var monitor: Any?
 
-    /// Buttons whose press this monitor swallowed. The release follows the
-    /// press, whatever the pointer is over by then.
-    private static var captured: Set<Int> = []
+    /// The terminal a captured press belongs to.
+    ///
+    /// Weak, because this is a static that outlives any one session: a strong
+    /// reference here would keep a closed terminal's view alive.
+    private final class Capture {
+        weak var view: TerminalDropView?
+        init(_ view: TerminalDropView) { self.view = view }
+    }
+
+    /// Buttons whose press this monitor swallowed, and where each one went.
+    ///
+    /// The whole gesture belongs to the view that took the press. Deciding a
+    /// release by where the pointer is *now* loses it whenever somebody drags
+    /// out of the terminal before letting go, which is how anybody selects to
+    /// the edge, and the program is left with a button still held down.
+    private static var captured: [Int: Capture] = [:]
 
     /// Install the monitor. Safe to call more than once.
     static func install() {
@@ -59,17 +72,33 @@ enum TerminalMouseForwarder {
         let button = event.buttonNumber
         switch event.type {
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            guard captured.remove(button) != nil else { return event }
-            forward(event, isUp: true, isDrag: false)
+            guard let capture = captured.removeValue(forKey: button) else { return event }
+            // Swallowed either way: AppKit never saw this button go down, so
+            // handing it the release is the half a click that wedges a window.
+            if let view = capture.view {
+                forward(event, to: view, isUp: true, isDrag: false)
+            }
             return nil
         case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-            guard captured.contains(button) else { return event }
-            forward(event, isUp: false, isDrag: true)
+            guard let capture = captured[button] else { return event }
+            // Same rule as the release: the press was taken, so the drag is
+            // not AppKit's to receive, whether or not the view is still there.
+            if let view = capture.view {
+                forward(event, to: view, isUp: false, isDrag: true)
+            }
             return nil
         default:
-            guard reportsMouse(event) != nil else { return event }
-            captured.insert(button)
-            forward(event, isUp: false, isDrag: false)
+            guard let view = reportsMouse(event) else {
+                // This press is AppKit's. Anything still held for this button
+                // is from a gesture whose release went somewhere this monitor
+                // could not see, over another app or another space, and
+                // keeping it would swallow the release of *this* press and
+                // leave the window in mouse-down tracking.
+                captured.removeValue(forKey: button)
+                return event
+            }
+            captured[button] = Capture(view)
+            forward(event, to: view, isUp: false, isDrag: false)
             return nil
         }
     }
@@ -93,16 +122,22 @@ enum TerminalMouseForwarder {
         return view
     }
 
-    /// Send the SGR bytes for one event, if this mode reports it at all.
+    /// Send the SGR bytes for one event to the view that captured its press.
+    ///
+    /// The view is passed in rather than found again. A gesture that started
+    /// on a terminal stays that terminal's for as long as the button is down,
+    /// however far the pointer has travelled since.
     ///
     /// A mode that does not report drags or releases still swallows them:
     /// they belong to a press this monitor already took, and handing one half
     /// of a click to AppKit is what leaves a window stuck.
-    private static func forward(_ event: NSEvent, isUp: Bool, isDrag: Bool) {
-        guard let view = reportsMouse(event),
-              let terminal = view.terminal,
-              let session = view.session
-        else { return }
+    private static func forward(
+        _ event: NSEvent,
+        to view: TerminalDropView,
+        isUp: Bool,
+        isDrag: Bool
+    ) {
+        guard let terminal = view.terminal, let session = view.session else { return }
 
         switch terminal.mouseMode {
         case .off:

@@ -719,12 +719,19 @@ fn read_document_shard(
 /// calls it unchanged for the rest of the day. The live meter already hit this
 /// and fixed it (`session_meter::store_mtime`, where an OpenCode 2 session
 /// reported `0% ctx · $0.00 · 0k` for its whole life); the archive scan had the
-/// same hole for every SQLite source.
+/// same hole for every SQLite source. That one is a cache and can afford to be
+/// over-eager. This one is the watermark itself, so it cannot.
 ///
-/// Both halves have to fold the sidecars in. The size is summed because a
-/// checkpoint moves bytes from the WAL into the database while the total stays
-/// close, and the mtime is the newest of the three because that is the only one
-/// that moves on a plain write.
+/// **`-wal` only, never `-shm`.** The write-ahead log moves when somebody
+/// writes, which is the thing this needs to notice. The shared-memory index
+/// moves when somebody *reads*, including when this scan opens the database to
+/// parse it, so folding it in made every scan invalidate the mark it had just
+/// stored: 52 databases on this machine, some of them megabytes, re-parsed on
+/// every run forever, with the watermark doing nothing at all.
+///
+/// The size is summed for the same reason it is taken at all: a checkpoint
+/// moves bytes out of the log and into the database, and a mark that watched
+/// only one of the two would call that no change.
 fn store_stat(path: &std::path::Path) -> Option<(u64, i64)> {
     let ms = |t: std::time::SystemTime| {
         t.duration_since(std::time::UNIX_EPOCH)
@@ -735,12 +742,9 @@ fn store_stat(path: &std::path::Path) -> Option<(u64, i64)> {
     let meta = std::fs::metadata(path).ok()?;
     let mut size = meta.len();
     let mut mtime_ms = meta.modified().ok().map(ms).unwrap_or(0);
-    for suffix in ["-wal", "-shm"] {
-        let mut name = path.as_os_str().to_os_string();
-        name.push(suffix);
-        let Ok(side) = std::fs::metadata(std::path::PathBuf::from(name)) else {
-            continue;
-        };
+    let mut wal = path.as_os_str().to_os_string();
+    wal.push("-wal");
+    if let Ok(side) = std::fs::metadata(std::path::PathBuf::from(wal)) {
         size = size.saturating_add(side.len());
         if let Ok(modified) = side.modified() {
             mtime_ms = mtime_ms.max(ms(modified));
@@ -919,6 +923,32 @@ mod tests {
             watermark::classify(Some(&mark), grown, mtime),
             watermark::Change::Unchanged,
             "a source with new rows in its WAL must be re-read"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Reading a database must not change its own watermark.
+    ///
+    /// SQLite touches the shared-memory index when a reader takes a lock, so a
+    /// mark that included `-shm` was invalidated by the very scan that wrote
+    /// it and every database was re-parsed on every run.
+    #[test]
+    fn reading_a_store_does_not_move_its_mark() {
+        let dir = std::env::temp_dir().join(format!("tokenstat-shmmark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+        std::fs::write(&db, b"main").unwrap();
+        std::fs::write(dir.join("state.db-wal"), b"log").unwrap();
+        let before = store_stat(&db).unwrap();
+
+        // What a reader does: the index moves, the log does not.
+        std::fs::write(dir.join("state.db-shm"), b"a reader took a lock").unwrap();
+
+        assert_eq!(
+            store_stat(&db).unwrap(),
+            before,
+            "a read must not look like a write"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
