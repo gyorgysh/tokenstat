@@ -4,6 +4,27 @@ Every released version of tokenstat: the CLI, the macOS app, the iOS client, the
 host daemon, and the MCP server, which all ship together under one version
 number. Newest first.
 
+## [0.6.8] - 2026-08-21
+
+### Fixed
+
+- A live session's tokens and cost are counted once per request. A harness
+  that rewrites a request as it streams was being added up chunk by chunk, so
+  a session read about twice what the tool itself reports.
+- The context bar stays empty for a tool that only records a session running
+  total, rather than filling to hundreds of percent. Tokens and cost for those
+  sessions are unaffected.
+- A terminal no longer repaints and loses its scroll position when a notice
+  appears. The live notices float over the bottom of the terminal instead of
+  taking height from it, the dropped-output pill can be dismissed, and the
+  paused pill waits until output has genuinely stalled.
+- "Needs attention" goes away when the question does. It used to sit there
+  until the agent printed enough to push the prompt out of view, and opening
+  the session now clears it as well.
+- The plans screen no longer shows an error about a purchase nobody made,
+  left behind by a transaction the App Store re-sent while the phone was
+  offline or signed out.
+
 ## [0.6.7] - 2026-08-20
 
 ### New
