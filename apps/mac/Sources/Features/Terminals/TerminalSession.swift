@@ -267,6 +267,10 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
                 Self.frameScheduler.setFocused(id)
                 // Coming to the front should not wait out a background delay.
                 wake()
+                // Putting this session on screen is the person answering the
+                // call. The badge is there to get them here, so it has done
+                // its job: see `acknowledgeAttention`.
+                acknowledgeAttention()
             } else {
                 Self.frameScheduler.clearFocused(id)
             }
@@ -1224,6 +1228,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     /// transcript writes, and answers with one word. That is a far better
     /// answer than this side can compute, so once it arrives the local timer
     /// is cancelled and never runs again for this session.
+    /// Whether the person has already seen this call for attention.
+    private var attentionAcknowledged = false
+
     private func applyActivity(
         _ activity: String?,
         cpuPercent: Double?,
@@ -1243,8 +1250,12 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         let memory = memoryMb.map { ($0).rounded() }
         if self.cpuPercent != cpu { self.cpuPercent = cpu }
         if self.memoryMb != memory { self.memoryMb = memory }
+        let waiting = !(attention?.isEmpty ?? true)
+        // The episode ends when the host stops reporting attention, and only
+        // then can the next prompt raise the badge again.
+        if !waiting { attentionAcknowledged = false }
         let next: SessionState
-        if attention != nil, !(attention?.isEmpty ?? true) {
+        if waiting, !attentionAcknowledged {
             next = .needsAttention
         } else if activity == "working" {
             next = .working
@@ -1254,6 +1265,18 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
             return
         }
         if state != next { state = next }
+    }
+
+    /// Dismiss the current call for attention.
+    ///
+    /// The badge asks the person to come and look. Once they have, it has
+    /// nothing left to say, and a row that keeps flagging a prompt the person
+    /// is reading is noise. The dismissal covers this episode only: the host
+    /// reporting no attention clears it, so the next prompt lights the row
+    /// again.
+    func acknowledgeAttention() {
+        attentionAcknowledged = true
+        if state == .needsAttention { state = .idle }
     }
 
     /// Take the host's token meter.

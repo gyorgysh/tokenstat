@@ -589,8 +589,13 @@ const PERMISSION_MARKERS: &[&str] = &[
 ];
 
 /// Look at the live pty tail for a permission prompt. In memory only.
+///
+/// Only output printed since the last keystroke counts: see
+/// `tail_since_input_for_pid`. A prompt the person has already answered is
+/// still in the buffer, and treating it as live is what left rows stuck on
+/// Needs attention until the agent happened to print enough to push it out.
 fn permission_prompt_for(pid: u32) -> Option<Attention> {
-    let bytes = tokenstat_pty::manager().tail_for_pid(pid, 8 * 1024)?;
+    let bytes = tokenstat_pty::manager().tail_since_input_for_pid(pid, 8 * 1024)?;
     let tail = String::from_utf8_lossy(&bytes);
     permission_prompt_in(&tail).then_some(Attention::Permission)
 }

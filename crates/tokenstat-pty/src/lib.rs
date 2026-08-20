@@ -197,6 +197,18 @@ impl Buffer {
     }
 }
 
+/// The last `max` bytes of everything printed after offset `mark`.
+///
+/// `earliest` is the offset of the first byte still held, so a mark older than
+/// the window means the whole window counts. Pure, so the rule can be tested
+/// without a pty.
+fn tail_since(data: &[u8], earliest: u64, mark: u64, max: usize) -> Vec<u8> {
+    let start = mark.saturating_sub(earliest).min(data.len() as u64) as usize;
+    let since = &data[start..];
+    let n = since.len().min(max);
+    since[since.len() - n..].to_vec()
+}
+
 struct Session {
     info: Mutex<SessionInfo>,
     buffer: Arc<Mutex<Buffer>>,
@@ -208,6 +220,13 @@ struct Session {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     alive: Arc<AtomicBool>,
     exit_code: Arc<AtomicI32>,
+    /// Output offset at the last keystroke sent to this session.
+    ///
+    /// Everything before it is what the program had already printed when the
+    /// person answered, so a reader asking "is this session waiting on me"
+    /// has to start here rather than at the end of the buffer. See
+    /// `tail_since_input_for_pid`.
+    input_mark: Arc<AtomicU64>,
     last_activity: Arc<Mutex<Option<u64>>>,
     /// Front ends currently showing this session, by opaque client id.
     viewers: Mutex<HashMap<String, Viewer>>,
@@ -485,6 +504,7 @@ impl Manager {
             child: Mutex::new(child),
             alive,
             exit_code,
+            input_mark: Arc::new(AtomicU64::new(0)),
             last_activity,
             viewers: Mutex::new(HashMap::new()),
             read_offsets: Mutex::new(HashMap::new()),
@@ -689,6 +709,14 @@ impl Manager {
         let mut w = s.writer.lock().unwrap_or_else(PoisonError::into_inner);
         w.write_all(bytes)?;
         w.flush()?;
+        // Remember where the output stood when this keystroke went in, so a
+        // question the person has just answered stops counting as one.
+        let total = s
+            .buffer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .total;
+        s.input_mark.store(total, Ordering::Relaxed);
         Ok(())
     }
 
@@ -926,11 +954,17 @@ impl Manager {
         Ok(self.snapshot(&s))
     }
 
-    /// Last bytes of output for the session whose child is `pid`.
+    /// Output the session has printed since the person last typed into it.
     ///
-    /// The activity sampler uses this to look for a permission prompt. The
-    /// bytes stay in memory: they are not logged and not written to the store.
-    pub fn tail_for_pid(&self, pid: u32, max: usize) -> Option<Vec<u8>> {
+    /// The activity sampler uses this to look for a permission prompt. It
+    /// starts at the last keystroke rather than at the end of the buffer
+    /// because a prompt scrolls out of a byte window only when enough new
+    /// output arrives to push it out: a question answered in a session that
+    /// then went quiet stayed in the tail, and the row kept asking for
+    /// attention nobody owed it. Answered means answered, whatever the
+    /// buffer still holds. The bytes stay in memory: they are not logged and
+    /// not written to the store.
+    pub fn tail_since_input_for_pid(&self, pid: u32, max: usize) -> Option<Vec<u8>> {
         if max == 0 {
             return None;
         }
@@ -945,8 +979,8 @@ impl Manager {
                 continue;
             }
             let buf = s.buffer.lock().unwrap_or_else(PoisonError::into_inner);
-            let n = buf.data.len().min(max);
-            return Some(buf.data[buf.data.len() - n..].to_vec());
+            let mark = s.input_mark.load(Ordering::Relaxed);
+            return Some(tail_since(&buf.data, buf.earliest(), mark, max));
         }
         None
     }
@@ -1631,6 +1665,24 @@ fn parse_env(stdout: &str) -> Option<HashMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tail_since_starts_at_the_last_keystroke() {
+        let data = b"Do you want to proceed?\nrunning the command\n";
+        // Nothing typed yet: the question is live.
+        let all = tail_since(data, 0, 0, 8 * 1024);
+        assert_eq!(all, data);
+        // Answered after the question printed: only what came next counts,
+        // even though the question is still in the buffer.
+        let after = tail_since(data, 0, 24, 8 * 1024);
+        assert_eq!(after, b"running the command\n");
+        // A mark older than the window still yields the whole window, and a
+        // mark at the end yields nothing at all.
+        assert_eq!(tail_since(data, 100, 4, 8 * 1024), data);
+        assert!(tail_since(data, 0, data.len() as u64, 8 * 1024).is_empty());
+        // The cap takes from the end.
+        assert_eq!(tail_since(data, 0, 0, 4), b"and\n");
+    }
 
     fn wait_for(mut f: impl FnMut() -> bool) -> bool {
         for _ in 0..200 {
