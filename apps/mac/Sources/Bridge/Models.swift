@@ -1577,10 +1577,15 @@ struct RunRecord: Codable, Sendable, Identifiable {
     var exitCode: Int?
     var status: String
     var transcriptPath: String
+    /// The workflow run this is a step of, when it is one. Absent for a run
+    /// somebody scheduled or started, which is the only kind worth a
+    /// notification: see `RunNotifications`.
+    var parentRunID: String?
 
     enum CodingKeys: String, CodingKey {
         case id, jobId, name, backend, workspaceID = "workspaceId"
         case startedAtMs, endedAtMs, exitCode, status, transcriptPath
+        case parentRunID = "parentRunId"
     }
 
     var startedAt: Date { Date(timeIntervalSince1970: Double(startedAtMs) / 1000) }

@@ -1257,6 +1257,9 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
         let next: SessionState
         if waiting, !attentionAcknowledged {
             next = .needsAttention
+            // On the way in, not on every poll: the host repeats the attention
+            // four times a second for as long as the question stands.
+            if state != .needsAttention { announceAttention() }
         } else if activity == "working" {
             next = .working
         } else if activity != nil {
@@ -1277,6 +1280,22 @@ final class TerminalSession: TerminalViewDelegate, Identifiable {
     func acknowledgeAttention() {
         attentionAcknowledged = true
         if state == .needsAttention { state = .idle }
+        RunNotifications.shared.attentionHandled(sessionID: id)
+    }
+
+    /// Tell the person an agent is waiting on them, unless they are already
+    /// here. A banner about the terminal somebody is looking at is noise, and
+    /// the badge beside it has said the same thing already.
+    private func announceAttention() {
+        guard !isFocused || !NSApp.isActive else { return }
+        RunNotifications.shared.attention(sessionID: id, name: attentionName)
+    }
+
+    /// What to call this session in a notification: what the program asked to
+    /// be called, or the command that started it. Never a path.
+    private var attentionName: String {
+        if let title, !title.isEmpty { return title }
+        return command
     }
 
     /// Take the host's token meter.

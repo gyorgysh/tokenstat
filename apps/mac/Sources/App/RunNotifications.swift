@@ -134,9 +134,17 @@ final class RunNotifications {
     }
 
     /// Agent runs, as of this refresh.
+    ///
+    /// A workflow node starts an ordinary automation run, so a five-step
+    /// workflow used to say "Run finished" five times on its way to saying it
+    /// once more for itself. A step is machinery under something the person
+    /// started, and machinery does not report to them: the workflow speaks for
+    /// its own steps.
     func settle(automations runs: [RunRecord]) {
         settle(
-            runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: $0.exitCode) },
+            runs
+                .filter { $0.parentRunID == nil }
+                .map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: $0.exitCode) },
             from: .automations
         )
     }
@@ -188,6 +196,36 @@ final class RunNotifications {
                 continue
             }
         }
+    }
+
+    /// An agent in a terminal stopped to ask its person something.
+    ///
+    /// The one notification that is worth interrupting somebody for: a run
+    /// that finished can be read whenever, a question is holding the work up.
+    /// It was also the one the app never sent, because the local notifier only
+    /// ever watched automations and workflows, and a permission prompt in a
+    /// terminal is neither.
+    ///
+    /// Nothing about the session travels: the name is the folder and the
+    /// harness, which is what the sidebar already shows.
+    func attention(sessionID: String, name: String) {
+        guard isOn else { return }
+        post(
+            "session.\(sessionID)",
+            title: "Waiting for you",
+            body: "\(name) is asking a question."
+        )
+    }
+
+    /// Take that notification back when the person arrives at the terminal.
+    ///
+    /// They answered the call by walking over to it. A banner still sitting in
+    /// Notification Centre about a question they are looking at is the same
+    /// nagging as a pill that will not go away.
+    func attentionHandled(sessionID: String) {
+        let identifier = "run.session.\(sessionID).Waiting for you"
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [identifier])
     }
 
     private func post(_ runID: String, title: String, body: String) {

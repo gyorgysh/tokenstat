@@ -920,7 +920,10 @@ impl Store {
             .prompt_override
             .as_deref()
             .map(|over| expand(over, &run.input, workspace_path, outputs));
-        let started = automations::shared().start_now(id, override_prompt.as_deref())?;
+        // Stamped with the workflow run, so the step does not announce itself
+        // as a job somebody scheduled. See `RunRecord::parent_run_id`.
+        let started =
+            automations::shared().start_now(id, override_prompt.as_deref(), Some(&run.id))?;
         loop {
             if self.is_killed(&run.id) {
                 let _ = automations::shared().kill_run(&started.id);

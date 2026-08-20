@@ -649,6 +649,15 @@ pub struct RunRecord {
     pub transcript_path: String,
     /// The live pty, kept so a run can be stopped before its budget.
     pub pty_id: Option<String>,
+    /// The workflow run this one is a step of, when it is one.
+    ///
+    /// A workflow node starts an ordinary automation run, so every step
+    /// finishing looked exactly like a job somebody scheduled: the Mac said
+    /// "Run finished" once per step and again for the workflow itself, and a
+    /// phone got a push for each. A step is machinery under a thing the person
+    /// started, and machinery does not report to them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_run_id: Option<String>,
 }
 
 /// How long a run may live, and how many may run at once.
@@ -685,6 +694,8 @@ struct Pending {
     job: Automation,
     run_id: String,
     transcript_path: PathBuf,
+    /// See `RunRecord::parent_run_id`.
+    parent_run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -995,6 +1006,7 @@ impl Store {
         self: &Arc<Store>,
         id: &str,
         prompt_override: Option<&str>,
+        parent_run_id: Option<&str>,
     ) -> Result<RunRecord, String> {
         let mut snapshot = {
             let jobs = self.jobs.lock().unwrap_or_else(PoisonError::into_inner);
@@ -1020,6 +1032,7 @@ impl Store {
             job: snapshot.clone(),
             run_id: run_id.clone(),
             transcript_path,
+            parent_run_id: parent_run_id.map(str::to_string),
         };
         match self.spawn_pending(pending, workspace.id) {
             Ok((run, budget)) => {
@@ -1147,6 +1160,7 @@ impl Store {
             job: job.clone(),
             run_id: run_id.clone(),
             transcript_path: transcript_path.clone(),
+            parent_run_id: None,
         };
 
         if self.try_take_slot() {
@@ -1172,6 +1186,7 @@ impl Store {
                 status: "queued".into(),
                 transcript_path: transcript_path.display().to_string(),
                 pty_id: None,
+                parent_run_id: pending.parent_run_id.clone(),
             };
             self.waiting
                 .lock()
@@ -1252,6 +1267,7 @@ impl Store {
             status: "running".into(),
             transcript_path: pending.transcript_path.display().to_string(),
             pty_id: Some(info.id.clone()),
+            parent_run_id: pending.parent_run_id.clone(),
         };
 
         if self.is_killed(&pending.run_id) {
@@ -1553,7 +1569,13 @@ impl Store {
         // The Mac notifies itself locally from the app, so this is for a
         // phone with the app closed. Fire and forget: a run that finished is
         // finished whether or not Apple was reachable.
-        if status != "stopped" {
+        // A workflow step is not news either: the workflow itself says how it
+        // went when it ends, and a five-node workflow otherwise buzzed a phone
+        // five times on the way there. See `RunRecord::parent_run_id`.
+        let is_step = self
+            .get_run(run_id)
+            .is_some_and(|run| run.parent_run_id.is_some());
+        if status != "stopped" && !is_step {
             tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::for_exit(
                 status, exit_code,
             ));
@@ -2064,6 +2086,7 @@ mod tests {
             status: "running".into(),
             transcript_path: transcript_path.display().to_string(),
             pty_id: None,
+            parent_run_id: None,
         };
         store.push_run(run).unwrap();
 
@@ -2127,6 +2150,7 @@ mod tests {
                 status: "running".into(),
                 transcript_path: dir.join("run.txt").display().to_string(),
                 pty_id: None,
+                parent_run_id: None,
             })
             .unwrap();
         store.finish_run("run-persist", Some(0), "ok");
@@ -2155,6 +2179,7 @@ mod tests {
             status: "running".into(),
             transcript_path: transcript_path.display().to_string(),
             pty_id: None,
+            parent_run_id: None,
         };
         store.push_run(run).unwrap();
 
@@ -2255,6 +2280,7 @@ mod tests {
                 status: "ok".into(),
                 transcript_path: raw_path.display().to_string(),
                 pty_id: None,
+                parent_run_id: None,
             })
             .unwrap();
         let (text, next) = store.transcript("run-grok", 0).unwrap();
@@ -2294,6 +2320,7 @@ mod tests {
                 status: "interrupted".into(),
                 transcript_path: raw_path.display().to_string(),
                 pty_id: None,
+                parent_run_id: None,
             })
             .unwrap();
         let (text, _) = store.transcript("run-old", 0).unwrap();
@@ -2325,6 +2352,7 @@ mod tests {
                 status: "ok".into(),
                 transcript_path: raw_path.display().to_string(),
                 pty_id: None,
+                parent_run_id: None,
             })
             .unwrap();
         let (text, _) = store.transcript("run-stale", 0).unwrap();
@@ -2462,6 +2490,7 @@ mod tests {
                 status: "ok".into(),
                 transcript_path: dir.join("run.txt").display().to_string(),
                 pty_id: None,
+                parent_run_id: None,
             })
             .unwrap();
         store
@@ -2477,6 +2506,7 @@ mod tests {
                 status: "running".into(),
                 transcript_path: dir.join("run.txt").display().to_string(),
                 pty_id: Some("pty-late".into()),
+                parent_run_id: None,
             })
             .unwrap();
         let row = store
@@ -2563,7 +2593,7 @@ mod tests {
                 last_run_id: None,
             })
             .unwrap();
-        let run = store.start_now(&job.id, None).unwrap();
+        let run = store.start_now(&job.id, None, None).unwrap();
         let deadline = Instant::now() + Duration::from_secs(8);
         loop {
             let row = store.get_run(&run.id).unwrap();
@@ -2614,6 +2644,7 @@ mod tests {
                 } else {
                     "printf OVERRIDE"
                 }),
+                None,
             )
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(8);
