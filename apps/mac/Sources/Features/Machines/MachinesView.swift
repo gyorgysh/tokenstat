@@ -54,6 +54,7 @@ struct MachinesView: View {
                     if !Bridge.isHosted {
                         hostSetup
                     }
+                    sshAccess
                     if model.remoteReachAllowed {
                         remoteReadyContent
                     } else {
@@ -141,6 +142,27 @@ struct MachinesView: View {
             }
             .frame(width: 500)
         }
+    }
+
+    private var sshAccess: some View {
+        NavigationLink {
+            SSHConnectionsView()
+        } label: {
+            HStack(spacing: Theme.Space.m) {
+                Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("SSH hosts").font(.headline)
+                    Text("Saved servers, keys and command snippets")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+            }
+            .padding(Theme.Space.m)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        }
+        .buttonStyle(.plain)
     }
 
     /// The full pairing screen: approvals, this machine, peers, add, e2e.

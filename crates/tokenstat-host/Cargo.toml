@@ -60,3 +60,4 @@ jiff.workspace = true
 reqwest.workspace = true
 russh.workspace = true
 tokio.workspace = true
+rand.workspace = true

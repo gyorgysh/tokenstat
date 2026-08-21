@@ -57,6 +57,13 @@ struct SSHSessionRead: Codable, Sendable, Hashable {
     var error: String?
 }
 
+struct SSHKeyMaterial: Codable, Sendable, Hashable {
+    var algorithm: String
+    var publicKey: String
+    var fingerprint: String
+    var privateKey: String
+}
+
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
     var since: String?

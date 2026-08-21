@@ -1706,6 +1706,17 @@ extension Bridge {
         try await background("ssh.key.list", as: [SSHKeyRecord].self)
     }
 
+    static func generateSSHKey() async throws -> SSHKeyMaterial {
+        try await background("ssh.key.generate", as: SSHKeyMaterial.self)
+    }
+
+    static func inspectSSHKey(pem: String, passphrase: String?) async throws -> SSHKeyMaterial {
+        try await background(
+            "ssh.key.inspect", ["pem": pem, "passphrase": passphrase as Any],
+            as: SSHKeyMaterial.self
+        )
+    }
+
     static func saveSSHKey(_ key: SSHKeyRecord) async throws -> SSHKeyRecord {
         try await background("ssh.key.save", try payload(key), as: SSHKeyRecord.self)
     }

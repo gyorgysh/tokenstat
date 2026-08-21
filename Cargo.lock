@@ -3629,6 +3629,7 @@ dependencies = [
  "directories",
  "getrandom 0.4.3",
  "jiff",
+ "rand",
  "reqwest",
  "russh",
  "serde",

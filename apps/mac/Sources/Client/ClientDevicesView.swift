@@ -33,6 +33,22 @@ struct ClientDevicesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                NavigationLink {
+                    SSHConnectionsView()
+                } label: {
+                    HStack(spacing: Theme.Space.m) {
+                        Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("SSH hosts").font(ClientType.label.weight(.semibold))
+                            Text("Connect to a saved server").font(ClientType.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                    }
+                    .padding(Theme.Space.m)
+                    .cardSurface()
+                }
+                .buttonStyle(.plain)
                 if machines.isEmpty {
                     if account.isLoading {
                         ClientWireframe.Rows(count: 3)

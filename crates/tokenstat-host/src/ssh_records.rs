@@ -189,6 +189,8 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             Ok(json!({"removed": removed}))
         }
         "ssh.key.list" => serde_json::to_value(&store.keys).map_err(|e| e.to_string()),
+        "ssh.key.generate" => generate_key(),
+        "ssh.key.inspect" => inspect_key(params),
         "ssh.key.save" => {
             let mut item: SshKey = serde_json::from_str(params).map_err(|e| e.to_string())?;
             required(&item.label, "label")?;
@@ -230,6 +232,38 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         }
         _ => Err(format!("unknown method: {method}")),
     }
+}
+
+fn generate_key() -> Result<Value, String> {
+    let key = russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+        .map_err(|e| e.to_string())?;
+    key_material(&key)
+}
+
+fn inspect_key(params: &str) -> Result<Value, String> {
+    #[derive(Deserialize)]
+    struct Params {
+        pem: String,
+        #[serde(default)]
+        passphrase: Option<String>,
+    }
+    let p: Params = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    let key = russh::keys::decode_secret_key(&p.pem, p.passphrase.as_deref())
+        .map_err(|e| format!("read private key: {e}"))?;
+    key_material(&key)
+}
+
+fn key_material(key: &russh::keys::PrivateKey) -> Result<Value, String> {
+    let private_key = key
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .map_err(|e| e.to_string())?;
+    let public = key.public_key();
+    Ok(json!({
+        "algorithm": public.algorithm().to_string(),
+        "publicKey": public.to_openssh().map_err(|e| e.to_string())?,
+        "fingerprint": public.fingerprint(russh::keys::HashAlg::Sha256).to_string(),
+        "privateKey": private_key.as_str(),
+    }))
 }
 
 fn upsert<T, F>(items: &mut Vec<T>, item: T, key: F)
