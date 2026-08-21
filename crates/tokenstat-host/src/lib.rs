@@ -77,6 +77,7 @@ pub mod remote;
 pub(crate) mod remote_proxy;
 #[cfg(feature = "local-host")]
 pub(crate) mod remote_stream;
+pub mod screen_policy;
 pub mod server;
 pub mod session;
 #[cfg(feature = "local-host")]

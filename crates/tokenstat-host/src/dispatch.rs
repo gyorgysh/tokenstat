@@ -2242,6 +2242,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     if let Some(answer) = crate::cloud_import::call(method, params) {
         return Some(answer);
     }
+    if let Some(answer) = crate::screen_policy::call(method, params) {
+        return Some(answer);
+    }
     if let Some(answer) = crate::ssh_client::call(method, params) {
         return Some(answer);
     }

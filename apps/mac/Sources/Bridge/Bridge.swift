@@ -1766,6 +1766,19 @@ extension Bridge {
         try await background("ssh.provider.aws.import", ["profile": profile as Any, "region": region as Any, "username": username], as: SSHHostImport.self)
     }
 
+    static func screenPermissions() async throws -> [ScreenPermission] {
+        try await background("screen.policy.list", as: [ScreenPermission].self)
+    }
+
+    static func setScreenPermission(peerID: String, view: Bool, control: Bool) async throws {
+        struct Saved: Codable, Sendable { var saved: Bool }
+        _ = try await background("screen.policy.set", ["peerID": peerID, "view": view, "control": control], as: Saved.self)
+    }
+
+    static func issueScreenCapability(peerID: String, control: Bool, tier: String) async throws -> ScreenCapability {
+        try await background("screen.capability.issue", ["peerID": peerID, "control": control, "tier": tier], as: ScreenCapability.self)
+    }
+
     static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {
         try await background("ssh.vault.create", ["tier": tier], as: SSHVaultRecovery.self)
     }

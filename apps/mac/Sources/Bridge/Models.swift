@@ -70,6 +70,8 @@ struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
 struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable { var id: String; var version: UInt64; var plaintext: String }
 struct SSHVaultRecords: Codable, Sendable, Hashable { var records: [SSHVaultRecord] }
 struct SSHHostImport: Codable, Sendable, Hashable { var imported: Int; var hosts: [SSHHost] }
+struct ScreenPermission: Codable, Sendable, Hashable, Identifiable { var peerID: String; var view: Bool; var control: Bool; var id: String { peerID } }
+struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var expiresAt: UInt64; var control: Bool }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
