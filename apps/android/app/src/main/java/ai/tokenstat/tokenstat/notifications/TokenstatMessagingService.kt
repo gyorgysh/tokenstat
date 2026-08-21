@@ -50,7 +50,7 @@ class TokenstatMessagingService : FirebaseMessagingService() {
         manager.notify(
             message.messageId?.hashCode() ?: body.hashCode(),
             NotificationCompat.Builder(this, CHANNEL)
-                .setSmallIcon(R.drawable.app_icon)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setAutoCancel(true)

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 package ai.tokenstat.tokenstat.ui
 
-import android.net.Uri
 import android.app.Activity
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,16 +24,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
 import java.text.NumberFormat
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -67,6 +72,7 @@ private fun LoadingScreen() = Box(Modifier.fillMaxSize(), contentAlignment = Ali
 private fun LoginScreen(model: AppViewModel, error: String?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var loginError by remember { mutableStateOf<String?>(null) }
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
@@ -75,15 +81,19 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
         Text("tokenstat", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Text("Your AI coding activity, wherever your machines are.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (error != null) {
-            Spacer(Modifier.height(20.dp)); Text(error, color = MaterialTheme.colorScheme.error)
+        val shown = loginError ?: error
+        if (shown != null) {
+            Spacer(Modifier.height(20.dp)); Text(shown, color = MaterialTheme.colorScheme.error)
         }
         Spacer(Modifier.height(28.dp))
         Button(onClick = {
             scope.launch {
-                runCatching { model.beginLogin() }.onSuccess { url ->
-                    CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(url))
-                }
+                runCatching { model.beginLogin() }
+                    .onSuccess { url ->
+                        loginError = null
+                        CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+                    }
+                    .onFailure { loginError = it.message ?: "Starting sign-in failed." }
             }
         }, modifier = Modifier.fillMaxWidth()) { Text("Sign in") }
         TextButton(onClick = model::refresh) { Text("I already signed in") }
@@ -95,7 +105,12 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
 private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
     var accountOpen by remember { mutableStateOf(false) }
-    val expanded = LocalConfiguration.current.screenWidthDp >= 840
+    // The real window width, not the rounded Configuration value: the rail
+    // appears exactly when the window is wide enough to carry both panes.
+    val density = LocalDensity.current
+    val expanded = with(density) {
+        LocalWindowInfo.current.containerSize.width.toDp() >= 840.dp
+    }
 
     Scaffold(
         topBar = {
@@ -149,7 +164,9 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
 private fun HomeScreen(state: ClientState) {
     val calendar = state.home
     val rows = calendar?.get("rows") as? JsonArray
-    val total = calendar?.long("total") ?: 0
+    val cells = rows.orEmpty().flatMap { row ->
+        (row as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
+    }
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -159,38 +176,109 @@ private fun HomeScreen(state: ClientState) {
             Text(greeting(state.account), style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard("Account value", money(total), Modifier.weight(1f))
-                MetricCard("Active days", "${calendar?.int("activeDays") ?: 0}", Modifier.weight(1f))
+                MetricCard("Today", money(spendSince(cells, calendar?.string("last"), 1)), Modifier.weight(1f))
+                MetricCard("This week", money(spendSince(cells, calendar?.string("last"), 7)), Modifier.weight(1f))
             }
         }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Activity", style = MaterialTheme.typography.titleMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Activity", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "${calendar?.int("activeDays") ?: 0} active days",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
-                    if (rows == null) Text("No synced activity yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else Heatmap(rows)
+                    if (cells.isEmpty()) Text("No synced activity yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else Heatmap(rows!!, calendar?.get("months") as? JsonArray ?: JsonArray(emptyList()))
                 }
             }
         }
         item { Text("Plan limits", style = MaterialTheme.typography.titleMedium) }
         if (state.limits.isEmpty()) item {
             EmptyCard("No provider reading yet", "Limits appear after one of your hosts shares a reading.")
-        } else items(state.limits) { item -> JsonSummaryCard(item.jsonObject) }
+        } else items(state.limits) { item -> LimitCard(item.jsonObject) }
         state.error?.let { item { ErrorCard(it) } }
     }
 }
 
+/// Spend across the trailing `days` ending on `last`, the way the Apple
+/// client's Today and This week tiles read the same grid.
+private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long {
+    if (last == null) return 0
+    val window = cells.mapNotNull { it.string("date") }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .sortedDescending()
+        .take(days)
+        .toSet()
+    return cells.filter { it.string("date") in window }.sumOf { it.long("value") ?: 0L }
+}
+
 @Composable
-private fun Heatmap(rows: JsonArray) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        rows.forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                (row as? JsonArray)?.forEach { cell ->
-                    val value = (cell as? JsonObject)?.long("value") ?: 0L
-                    val alpha = when { value == 0L -> .10f; value < 50_000 -> .30f; value < 500_000 -> .55f; else -> .95f }
-                    Box(Modifier.size(8.dp).background(Accent.copy(alpha), RoundedCornerShape(2.dp)))
+private fun Heatmap(rows: JsonArray, months: JsonArray) {
+    // The Apple client draws a fixed cell and scrolls the year, opening on
+    // the most recent week. Fitting 53 weeks to a phone width shrinks a day
+    // below anything a finger can hit, so the same answer is copied here.
+    val cell = 15.dp
+    val gap = 3.dp
+    val step = cell + gap
+    // Seven rows, Monday first; a row's length is the number of weeks.
+    val weeks = (rows.firstOrNull() as? JsonArray)?.size ?: rows.size
+    val gridWidth = step * weeks - gap
+    val scroll = rememberScrollState()
+    LaunchedEffect(rows) {
+        // Open on the latest week, which is the part anybody wants first.
+        // maxValue is zero until the grid has been laid out, so follow it.
+        snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
+    }
+    Row {
+        Column(Modifier.width(16.dp)) {
+            Spacer(Modifier.height(14.dp))
+            listOf("M", "", "W", "", "F", "", "").forEach { letter ->
+                Box(Modifier.height(cell), contentAlignment = Alignment.CenterStart) {
+                    Text(letter, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
+            }
+        }
+        Column(Modifier.horizontalScroll(scroll)) {
+            Box(Modifier.height(14.dp).width(gridWidth)) {
+                // The core sends [column, name] pairs, the same marks the
+                // Apple client offsets across its grid.
+                months.forEach { month ->
+                    val entry = (month as? JsonArray) ?: return@forEach
+                    val column = entry.firstOrNull()?.jsonPrimitive?.intOrNull ?: return@forEach
+                    val name = entry.getOrNull(1)?.jsonPrimitive?.contentOrNull ?: return@forEach
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.offset(x = step * column),
+                    )
+                }
+            }
+            rows.forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    ((row as? JsonArray) ?: JsonArray(emptyList())).forEachIndexed { _, day ->
+                        // A null cell is outside the rendered range, not an
+                        // idle day: it leaves a hole rather than a square.
+                        val value = (day as? JsonObject)
+                        val level = value?.int("level")?.coerceIn(0, 4)
+                            ?: when (val v = value?.long("value") ?: 0L) {
+                                0L -> 0; in 1..49_999 -> 1; in 50_000..499_999 -> 2; else -> 3
+                            }
+                        var alpha = when (level) {
+                            0 -> .10f; 1 -> .30f; 2 -> .52f; 3 -> .74f; else -> 1f
+                        }
+                        if (day is JsonObject && day.bool("locked")) alpha *= .28f
+                        Box(Modifier.size(cell).background(Accent.copy(alpha), RoundedCornerShape(3.dp)))
+                    }
+                }
+                Spacer(Modifier.height(gap))
             }
         }
     }
@@ -199,12 +287,60 @@ private fun Heatmap(rows: JsonArray) {
 @Composable
 private fun InsightsScreen(state: ClientState) {
     val report = state.insights as? JsonObject
-    val buckets = (report?.get("buckets") ?: report?.get("rows")) as? JsonArray ?: JsonArray(emptyList())
+    val buckets = ((report?.get("rows") ?: report?.get("buckets")) as? JsonArray)
+        ?.filterIsInstance<JsonObject>() ?: emptyList()
+    val total = buckets.sumOf { it.long("valueMicros") ?: 0L }
+    val peak = buckets.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 0L
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Models", style = MaterialTheme.typography.headlineSmall) }
-        if (buckets.isEmpty()) item { EmptyCard("No breakdown yet", "Model activity appears after your machines sync.") }
-        items(buckets) { JsonSummaryCard(it.jsonObject) }
+        if (buckets.isEmpty()) {
+            item { EmptyCard("No breakdown yet", "Model activity appears after your machines sync.") }
+        } else {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(money(total), style = MaterialTheme.typography.headlineSmall, color = Accent)
+                        Text("at list rates, across every device", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            items(buckets) { row ->
+                val value = row.long("valueMicros") ?: 0L
+                val share = if (peak > 0) (value.toFloat() / peak).coerceIn(0f, 1f) else 0f
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(row.string("key") ?: "Model", fontWeight = FontWeight.Medium, maxLines = 1)
+                                Text(
+                                    "${tokens(row["counters"]?.jsonObject?.long("total"))} tokens · ${row.long("events") ?: 0} events",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(money(value), color = Accent)
+                        }
+                        LinearProgressIndicator(
+                            progress = { share },
+                            modifier = Modifier.fillMaxWidth(),
+                            trackColor = Accent.copy(alpha = .12f),
+                        )
+                    }
+                }
+            }
+        }
     }
+}
+
+/// Compact token counts, the way the Apple client renders them beside a model
+/// name: "1.6M" is a size, the full ten digits is a wall.
+private fun tokens(count: Long?): String = when {
+    count == null || count <= 0 -> "0"
+    count >= 1_000_000_000 -> "%.1fB".format(count / 1_000_000_000.0)
+    count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
+    count >= 1_000 -> "%.1fK".format(count / 1_000.0)
+    else -> count.toString()
 }
 
 @Composable
@@ -220,7 +356,12 @@ private fun DevicesScreen(state: ClientState) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(value.string("label") ?: value.string("id") ?: "Device", fontWeight = FontWeight.SemiBold)
-                        Text(value.string("platform") ?: value.string("lastSeenAt") ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        val platform = value.string("platform")
+                        val lastSeen = value.string("lastSeenAt")
+                        Text(
+                            listOfNotNull(platform, lastSeen).joinToString(" · "),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     Box(Modifier.size(10.dp).background(if (value.bool("online")) Color(0xFF34D399) else Color.Gray, RoundedCornerShape(5.dp)))
                 }
@@ -239,6 +380,9 @@ private fun WorkspacesScreen(model: AppViewModel, state: ClientState, expanded: 
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(host) {
         val key = host?.string("publicIdentity") ?: host?.string("id") ?: return@LaunchedEffect
+        // The folders still on screen belong to the previous host; showing
+        // them beside the new host's name is one lie waiting to be clicked.
+        folders = JsonArray(emptyList())
         runCatching { model.workspaces(key) }
             .onSuccess { folders = it; error = null }
             .onFailure { error = it.message }
@@ -265,13 +409,17 @@ private fun WorkspaceList(
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Workspaces", style = MaterialTheme.typography.headlineSmall) }
         item {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                hosts.take(3).forEachIndexed { index, machine ->
-                    SegmentedButton(
-                        selected = selectedHost == machine,
-                        onClick = { onHost(machine) },
-                        shape = SegmentedButtonDefaults.itemShape(index, hosts.take(3).size),
-                    ) { Text(machine.string("label") ?: "Host", maxLines = 1) }
+            // A fourth machine must not become unreachable just because a
+            // segmented row was drawn for three, so the row scrolls.
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                SingleChoiceSegmentedButtonRow {
+                    hosts.forEachIndexed { index, machine ->
+                        SegmentedButton(
+                            selected = selectedHost == machine,
+                            onClick = { onHost(machine) },
+                            shape = SegmentedButtonDefaults.itemShape(index, hosts.size),
+                        ) { Text(machine.string("label") ?: "Host", maxLines = 1) }
+                    }
                 }
             }
         }
@@ -290,12 +438,14 @@ private fun WorkspaceList(
     }
 }
 
-private data class WorkspacePart(val label: String, val method: String, val icon: ImageVector)
+private data class WorkspacePart(val label: String, val method: String, val icon: ImageVector, val kind: String? = null)
 private val workspaceParts = listOf(
     WorkspacePart("Sessions", "pty.list", Icons.Default.Terminal),
     WorkspacePart("Changes", "workspace.status", Icons.Default.Difference),
     WorkspacePart("Tasks", "todo.list", Icons.Default.Checklist),
-    WorkspacePart("Notes", "todo.list", Icons.Default.Notes),
+    // Notes share the todo board's method; the Apple client filters the same
+    // answer down to note cards, so the tab is not a second Tasks.
+    WorkspacePart("Notes", "todo.list", Icons.AutoMirrored.Filled.Notes, kind = "note"),
     WorkspacePart("Workflows", "workflow.list", Icons.Default.AccountTree),
     WorkspacePart("Automations", "automation.list", Icons.Default.Bolt),
     WorkspacePart("Files", "workspace.tree", Icons.Default.FolderOpen),
@@ -314,7 +464,7 @@ private fun WorkspaceDetail(
     val workspace = folder.string("id") ?: ""
     Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, "Back") }
+            if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             Column { Text(folder.string("name") ?: "Workspace", style = MaterialTheme.typography.headlineSmall); Text(title) }
         }
         Spacer(Modifier.height(12.dp))
@@ -334,7 +484,17 @@ private fun WorkspaceDetail(
                                 }
                             }
                             runCatching { model.workspaceSection(peer, part.method, params) }
-                                .onSuccess { result = it; error = null }
+                                .onSuccess { element ->
+                                    result = part.kind
+                                        ?.let { kind ->
+                                            (element as? JsonArray)?.filter { item ->
+                                                item.jsonObject.string("kind") == kind
+                                            }
+                                        }
+                                        ?.let(::JsonArray)
+                                        ?: element
+                                    error = null
+                                }
                                 .onFailure { error = it.message }
                         }
                     }, modifier = Modifier.weight(1f)) {
@@ -368,6 +528,11 @@ private fun AccountDialog(state: ClientState, model: AppViewModel, onDismiss: ()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${state.account?.string("tier")?.replaceFirstChar(Char::uppercase) ?: "Free"} plan")
                 Text("${(state.account?.get("machines") as? JsonArray)?.size ?: 0} linked devices")
+                if (billingState.loading && billingState.products.isEmpty()) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), color = Accent)
+                    }
+                }
                 billingState.products.forEach { product ->
                     OutlinedButton(
                         onClick = { (context as? Activity)?.let { billing.purchase(it, product) } },
@@ -386,18 +551,53 @@ private fun AccountDialog(state: ClientState, model: AppViewModel, onDismiss: ()
 @Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) = Card(modifier) {
     Column(Modifier.padding(16.dp)) { Text(value, style = MaterialTheme.typography.headlineMedium, color = Accent); Text(label) }
 }
+
+/// One provider reading with its windows, the shape `usage.limits` actually
+/// returns: `windows[{label, percent, resetsAtMs}]` under a `source`. The
+/// generic row card this replaces could not reach any of it.
+@Composable
+private fun LimitCard(reading: JsonObject) {
+    val windows = reading["windows"] as? JsonArray ?: JsonArray(emptyList())
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    reading.string("source") ?: "Provider",
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (reading.bool("stale")) Text(
+                    "stale",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            reading.string("plan")?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            if (windows.isEmpty()) {
+                Text(reading.string("note") ?: "No window data in this reading.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                windows.forEach { window ->
+                    val value = window.jsonObject
+                    val percent = value.doubleOrNull("percent") ?: 0.0
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(value.string("label") ?: "", modifier = Modifier.width(72.dp), maxLines = 1)
+                        LinearProgressIndicator(
+                            progress = { (percent / 100.0).coerceIn(0.0, 1.0).toFloat() },
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("${percent.roundToInt()}%", modifier = Modifier.width(40.dp))
+                    }
+                }
+                reading.string("note")?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+        }
+    }
+}
 @Composable private fun EmptyCard(title: String, message: String) = Card(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(16.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 @Composable private fun ErrorCard(message: String) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
     Text(message, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
-}
-@Composable private fun JsonSummaryCard(value: JsonObject) = Card(Modifier.fillMaxWidth()) {
-    ListItem(
-        headlineContent = { Text(value.string("label") ?: value.string("name") ?: value.string("source") ?: "Usage") },
-        supportingContent = { Text(value.string("resetAt") ?: value.string("date") ?: "") },
-        trailingContent = { Text(value.string("percent") ?: value.string("value") ?: value.string("valueMicros") ?: "") },
-    )
 }
 
 private fun greeting(account: JsonObject?): String {
@@ -408,4 +608,5 @@ private fun money(micros: Long): String = NumberFormat.getCurrencyInstance().for
 private fun JsonObject.string(key: String): String? = this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
 private fun JsonObject.int(key: String): Int? = this[key]?.jsonPrimitive?.intOrNull
+private fun JsonObject.doubleOrNull(key: String): Double? = this[key]?.jsonPrimitive?.doubleOrNull
 private fun JsonObject.bool(key: String): Boolean = this[key]?.jsonPrimitive?.booleanOrNull == true
