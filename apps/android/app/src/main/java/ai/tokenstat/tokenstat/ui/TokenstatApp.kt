@@ -91,6 +91,7 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
     var accountOpen by remember { mutableStateOf(false) }
