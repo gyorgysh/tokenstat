@@ -36,6 +36,7 @@ struct SSHConnectionsView: View {
     @State private var terminal: SSHLiveTerminal?
     @State private var vaultRecovery: String?
     @State private var vaultStatus: SSHVaultStatus?
+    @State private var importingDigitalOcean = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,12 +83,18 @@ struct SSHConnectionsView: View {
                     switch section { case .hosts: addingHost = true; case .keys: addingKey = true; case .snippets: addingSnippet = true }
                 }
             }
+            if vaultTier != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    ToolbarIconButton(systemImage: "cloud", help: "Import cloud servers") { importingDigitalOcean = true }
+                }
+            }
         }
         .task { await model.load() }
         .task { vaultStatus = try? await Bridge.sshVaultStatus() }
         .sheet(isPresented: $addingHost) { SSHHostForm(model: model) }
         .sheet(isPresented: $addingKey) { SSHKeyForm(model: model) }
         .sheet(isPresented: $addingSnippet) { SSHSnippetForm(model: model) }
+        .sheet(isPresented: $importingDigitalOcean) { DigitalOceanImportForm(model: model) }
         .sheet(item: $connecting) { host in SSHConnectForm(host: host, model: model) { terminal = $0 } }
         #if os(macOS)
         .sheet(item: $terminal) { SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480) }
@@ -99,6 +106,30 @@ struct SSHConnectionsView: View {
     private func deleteHosts(_ offsets: IndexSet) { for i in offsets { let id = model.hosts[i].id; Task { try? await Bridge.deleteSSHHost(id: id); await model.load() } } }
     private func deleteKeys(_ offsets: IndexSet) { for i in offsets { let key = model.keys[i]; SSHSecretStore.delete(reference: key.secretRef); Task { try? await Bridge.deleteSSHKey(id: key.id); await model.load() } } }
     private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { try? await Bridge.deleteSSHSnippet(id: id); await model.load() } } }
+}
+
+private struct DigitalOceanImportForm: View {
+    @Environment(\.dismiss) private var dismiss
+    let model: SSHConnectionsModel
+    @State private var token = ""
+    @State private var username = "root"
+    @State private var error: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                SecureField("Read-only API token", text: $token)
+                TextField("SSH username", text: $username)
+                Text("Only the Droplets list is read. The token is used once and is not saved.").font(.caption).foregroundStyle(.secondary)
+                if let error { Text(error).foregroundStyle(Theme.danger) }
+            }
+            .navigationTitle("Import DigitalOcean")
+            .toolbar { Button("Import", .download) { Task { await run() } }.disabled(token.isEmpty || username.isEmpty) }
+        }.frame(minWidth: 440, minHeight: 260)
+    }
+    private func run() async {
+        do { _ = try await Bridge.importDigitalOcean(token: token, username: username); await model.load(); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
 }
 
 private struct SSHVaultBanner: View {

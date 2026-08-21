@@ -69,6 +69,7 @@ struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
 struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
 struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable { var id: String; var version: UInt64; var plaintext: String }
 struct SSHVaultRecords: Codable, Sendable, Hashable { var records: [SSHVaultRecord] }
+struct SSHHostImport: Codable, Sendable, Hashable { var imported: Int; var hosts: [SSHHost] }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
