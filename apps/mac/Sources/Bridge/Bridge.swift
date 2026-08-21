@@ -1690,6 +1690,50 @@ private struct PtyDetachAck: Codable, Sendable { let detached: Bool }
 /// handshake anywhere in this app, and why an iPad client will not need one
 /// either. See `docs/remote-transport.md`.
 extension Bridge {
+    static func sshHosts() async throws -> [SSHHost] {
+        try await background("ssh.host.list", as: [SSHHost].self)
+    }
+
+    static func saveSSHHost(_ host: SSHHost) async throws -> SSHHost {
+        try await background("ssh.host.save", try payload(host), as: SSHHost.self)
+    }
+
+    static func deleteSSHHost(id: String) async throws {
+        _ = try await background("ssh.host.delete", ["id": id], as: Removed.self)
+    }
+
+    static func sshKeys() async throws -> [SSHKeyRecord] {
+        try await background("ssh.key.list", as: [SSHKeyRecord].self)
+    }
+
+    static func saveSSHKey(_ key: SSHKeyRecord) async throws -> SSHKeyRecord {
+        try await background("ssh.key.save", try payload(key), as: SSHKeyRecord.self)
+    }
+
+    static func deleteSSHKey(id: String) async throws {
+        _ = try await background("ssh.key.delete", ["id": id], as: Removed.self)
+    }
+
+    static func sshSnippets() async throws -> [SSHSnippet] {
+        try await background("ssh.snippet.list", as: [SSHSnippet].self)
+    }
+
+    static func saveSSHSnippet(_ snippet: SSHSnippet) async throws -> SSHSnippet {
+        try await background("ssh.snippet.save", try payload(snippet), as: SSHSnippet.self)
+    }
+
+    static func deleteSSHSnippet(id: String) async throws {
+        _ = try await background("ssh.snippet.delete", ["id": id], as: Removed.self)
+    }
+
+    private static func payload<T: Encodable>(_ value: T) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(value)
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw BridgeError.decoding(method: "encode", underlying: "value is not an object")
+        }
+        return object
+    }
+
     static func machineIdentity() async throws -> MachineIdentity {
         try await background("machine.identity", as: MachineIdentity.self)
     }

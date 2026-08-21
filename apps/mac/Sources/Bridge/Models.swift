@@ -8,6 +8,45 @@
 import Foundation
 import SwiftUI
 
+// MARK: - SSH connections
+
+struct SSHProviderReference: Codable, Sendable, Hashable {
+    var kind: String
+    var resourceID: String
+    var region: String?
+}
+
+struct SSHHost: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var label: String
+    var hostname: String
+    var port: Int
+    var username: String
+    var credentialID: String?
+    var jumpHostID: String?
+    var tags: [String]
+    var provider: SSHProviderReference?
+    var hostKeys: [String]
+}
+
+struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var label: String
+    var algorithm: String
+    var publicKey: String
+    /// Reference into Keychain/ssh-agent. This is never private key material.
+    var secretRef: String
+    var hardwareBacked: Bool
+}
+
+struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var command: String
+    var tags: [String]
+    var hostIDs: [String]
+}
+
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
     var since: String?
