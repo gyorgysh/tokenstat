@@ -49,6 +49,10 @@ android {
         }
     }
     buildFeatures { compose = true; buildConfig = true }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     packaging { jniLibs.useLegacyPackaging = false }
     sourceSets["main"].jniLibs.srcDir(layout.buildDirectory.dir("rust-jni"))
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated-assets"))
