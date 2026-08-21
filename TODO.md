@@ -8,7 +8,7 @@ clippy, and relevant client build pass. The final milestone reviews the whole
 - [x] Slice 2: cross-platform SSH engine, host-key pinning, authentication callbacks, terminal sessions
 - [x] Slice 3: SSH Hosts, Keys, and Snippets interface on Mac and iPhone/iPad
 - [x] Slice 4: zero-knowledge vault crypto, recovery, record sync API, and paid entitlement
-- [ ] Slice 5: remote `tokenstat-hostd` packaging, CLI installer, service setup, workspace enrollment
+- [x] Slice 5: remote `tokenstat-hostd` packaging, CLI installer, service setup, workspace enrollment
 - [ ] Slice 6: DigitalOcean read-only import
 - [ ] Slice 7: AWS read-only EC2 import
 - [ ] Slice 8: screen capability token and host permission policy

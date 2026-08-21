@@ -13,6 +13,7 @@
 
 #![forbid(unsafe_code)]
 
+mod host_install;
 mod interactive;
 mod render;
 mod schedule;
@@ -297,6 +298,18 @@ enum Command {
         /// API origin: `sandbox`, `prod`, or an absolute http(s) URL
         #[arg(long, value_name = "URL|sandbox|prod")]
         host: Option<String>,
+    },
+    /// Install and manage the always-on backend for remote workspaces
+    Host {
+        /// Write and activate the launchd or systemd user service
+        #[arg(long)]
+        install: bool,
+        /// Path to tokenstat-hostd (defaults to a sibling of this CLI)
+        #[arg(long, value_name = "PATH")]
+        binary: Option<std::path::PathBuf>,
+        /// Friendly device name shown during enrollment
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
     },
     /// Forget the tokenstat.ai sync token for a host (no server call)
     Logout {
@@ -589,6 +602,15 @@ fn main() -> Result<()> {
         return render::schedule(*install, *every, *sync_every, *no_sync);
     }
 
+    if let Command::Host {
+        install,
+        binary,
+        name,
+    } = &command
+    {
+        return host_install::run(*install, binary.as_deref(), name.as_deref(), cli.json);
+    }
+
     if let Command::Interactive = command {
         if cli.json {
             // `--json interactive` must stay machine-readable, never take over
@@ -633,6 +655,7 @@ fn main() -> Result<()> {
         | Command::Login { .. }
         | Command::Logout { .. }
         | Command::Device { .. }
+        | Command::Host { .. }
         | Command::Sync { .. }
         | Command::Mcp => unreachable!("handled above"),
         Command::Daily(w) => {
