@@ -76,6 +76,8 @@ getrandom = "0.4"
 x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
 snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-curve25519", "use-chacha20poly1305", "use-blake2", "use-getrandom", "std"] }
 tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+russh = { version = "0.63", default-features = false, features = ["ring", "rsa"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util"] }
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }

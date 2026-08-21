@@ -47,6 +47,16 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
     var hostIDs: [String]
 }
 
+struct SSHSessionHandle: Codable, Sendable, Hashable { var id: String }
+struct SSHHostFingerprint: Codable, Sendable, Hashable { var fingerprint: String }
+struct SSHSessionRead: Codable, Sendable, Hashable {
+    var data: [UInt8]
+    var nextOffset: UInt64
+    var dropped: Bool
+    var closed: Bool
+    var error: String?
+}
+
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
     var since: String?

@@ -2239,6 +2239,9 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+    if let Some(answer) = crate::ssh_client::call(method, params) {
+        return Some(answer);
+    }
     if let Some(answer) = crate::ssh_records::call(method, params) {
         return Some(answer);
     }

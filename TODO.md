@@ -5,7 +5,7 @@ clippy, and relevant client build pass. The final milestone reviews the whole
 `v0.6.8..HEAD` range rather than only the last commit.
 
 - [x] Slice 1: persisted SSH host/key-reference/snippet contracts and Apple bridge types
-- [ ] Slice 2: cross-platform SSH engine, host-key pinning, authentication callbacks, terminal sessions
+- [x] Slice 2: cross-platform SSH engine, host-key pinning, authentication callbacks, terminal sessions
 - [ ] Slice 3: SSH Hosts, Keys, and Snippets interface on Mac and iPhone/iPad
 - [ ] Slice 4: zero-knowledge vault crypto, recovery, record sync API, and paid entitlement
 - [ ] Slice 5: remote `tokenstat-hostd` packaging, CLI installer, service setup, workspace enrollment

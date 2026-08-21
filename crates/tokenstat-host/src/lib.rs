@@ -80,6 +80,7 @@ pub mod server;
 pub mod session;
 #[cfg(feature = "local-host")]
 mod session_meter;
+pub mod ssh_client;
 pub mod ssh_records;
 #[cfg(all(unix, feature = "local-host"))]
 mod sync_scheduler;

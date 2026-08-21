@@ -58,3 +58,5 @@ serde_json.workspace = true
 directories.workspace = true
 jiff.workspace = true
 reqwest.workspace = true
+russh.workspace = true
+tokio.workspace = true

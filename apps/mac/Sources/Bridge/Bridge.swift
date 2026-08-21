@@ -1726,6 +1726,64 @@ extension Bridge {
         _ = try await background("ssh.snippet.delete", ["id": id], as: Removed.self)
     }
 
+    static func probeSSHHost(_ host: SSHHost) async throws -> SSHHostFingerprint {
+        try await background("ssh.host.probe", [
+            "hostname": host.hostname, "port": host.port, "username": host.username,
+            "hostKeys": host.hostKeys,
+        ], as: SSHHostFingerprint.self)
+    }
+
+    static func openSSHWithPassword(
+        _ host: SSHHost, password: String, rows: Int, cols: Int
+    ) async throws -> SSHSessionHandle {
+        try await background("ssh.session.open", [
+            "hostname": host.hostname, "port": host.port, "username": host.username,
+            "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
+            "auth": ["kind": "password", "password": password],
+        ], as: SSHSessionHandle.self)
+    }
+
+    static func openSSHWithKey(
+        _ host: SSHHost, pem: String, passphrase: String?, rows: Int, cols: Int
+    ) async throws -> SSHSessionHandle {
+        try await background("ssh.session.open", [
+            "hostname": host.hostname, "port": host.port, "username": host.username,
+            "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
+            "auth": ["kind": "privateKey", "pem": pem, "passphrase": passphrase as Any],
+        ], as: SSHSessionHandle.self)
+    }
+
+    static func openSSHWithAgent(
+        _ host: SSHHost, fingerprint: String, rows: Int, cols: Int
+    ) async throws -> SSHSessionHandle {
+        try await background("ssh.session.open", [
+            "hostname": host.hostname, "port": host.port, "username": host.username,
+            "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
+            "auth": ["kind": "agent", "fingerprint": fingerprint],
+        ], as: SSHSessionHandle.self)
+    }
+
+    static func readSSHSession(id: String, offset: UInt64) async throws -> SSHSessionRead {
+        try await background("ssh.session.read", ["id": id, "offset": offset], as: SSHSessionRead.self)
+    }
+
+    static func writeSSHSession(id: String, data: [UInt8]) async throws {
+        struct Accepted: Codable, Sendable { var accepted: Bool }
+        _ = try await background("ssh.session.write", ["id": id, "data": data], as: Accepted.self)
+    }
+
+    static func resizeSSHSession(id: String, rows: Int, cols: Int) async throws {
+        struct Accepted: Codable, Sendable { var accepted: Bool }
+        _ = try await background(
+            "ssh.session.resize", ["id": id, "rows": rows, "cols": cols], as: Accepted.self
+        )
+    }
+
+    static func closeSSHSession(id: String) async {
+        struct Closed: Codable, Sendable { var closed: Bool }
+        _ = try? await background("ssh.session.close", ["id": id], as: Closed.self)
+    }
+
     private static func payload<T: Encodable>(_ value: T) throws -> [String: Any] {
         let data = try JSONEncoder().encode(value)
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
