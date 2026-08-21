@@ -659,6 +659,50 @@ pub fn apple_renewal(
     Ok(raw)
 }
 
+/// Bind a verified Google Play purchase token to the signed-in account.
+///
+/// Verification and acknowledgement belong to the account service, which has
+/// the Play Developer API credential. The client supplies only the opaque
+/// purchase token and the immutable catalog identifiers returned by Billing.
+pub fn google_activate(
+    host_flag: Option<&str>,
+    package_name: &str,
+    product_id: &str,
+    purchase_token: &str,
+) -> Result<Value, ProfileError> {
+    let host = resolve_api_host(host_flag)?;
+    let token =
+        keychain::load_token(&host)?.ok_or_else(|| ProfileError::Message(NOT_LOGGED_IN.into()))?;
+    let client = http_client()?;
+    let resp = client
+        .post(format!("{host}/api/v1/billing/google/activate"))
+        .header("authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "packageName": package_name,
+            "productId": product_id,
+            "purchaseToken": purchase_token,
+        }))
+        .send()?;
+    let status = resp.status();
+    let text = limited_text(resp)?;
+    if status.as_u16() == 401 {
+        return Err(ProfileError::Message(TOKEN_REVOKED.into()));
+    }
+    if !status.is_success() {
+        let detail = serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("message")
+                    .and_then(|m| m.as_str())
+                    .or_else(|| v.get("error").and_then(|e| e.as_str()))
+                    .map(str::to_string)
+            })
+            .unwrap_or(text);
+        return Err(ProfileError::Message(detail));
+    }
+    Ok(serde_json::from_str(&text)?)
+}
+
 /// Register this machine's remote-reach identity on its account record.
 ///
 /// Called by the host daemon when "Reach machines from anywhere" is on: the
@@ -1633,12 +1677,8 @@ pub fn cli_sync_schedule_active() -> bool {
     }
     #[cfg(target_os = "windows")]
     {
-        directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .map(|dirs| {
-                dirs.data_local_dir()
-                    .join("schedule/ai.tokenstat.sync.vbs")
-                    .is_file()
-            })
+        tokenstat_paths::data_local_dir()
+            .map(|dirs| dirs.join("schedule/ai.tokenstat.sync.vbs").is_file())
             .unwrap_or(false)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -1658,10 +1698,9 @@ impl Drop for SyncLock {
 }
 
 fn try_sync_lock() -> Result<Option<SyncLock>, ProfileError> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
+    let dir = tokenstat_paths::data_dir()
         .ok_or_else(|| ProfileError::Message("no tokenstat data directory".into()))?;
-    let dir = dirs.data_dir();
-    std::fs::create_dir_all(dir)?;
+    std::fs::create_dir_all(&dir)?;
     let path = dir.join("sync.lock");
     match std::fs::OpenOptions::new()
         .write(true)

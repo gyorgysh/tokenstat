@@ -288,9 +288,9 @@ pub fn windows_hidden_vbs(exe: &str, unit: Unit) -> String {
 
 /// Directory for the per-unit `.vbs` helpers Task Scheduler invokes.
 pub fn windows_helper_dir() -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .context("locating the tokenstat data directory")?;
-    Ok(dirs.data_local_dir().join("schedule"))
+    Ok(tokenstat_paths::data_local_dir()
+        .context("locating the tokenstat data directory")?
+        .join("schedule"))
 }
 
 pub fn windows_helper_path(unit: Unit) -> Result<PathBuf> {

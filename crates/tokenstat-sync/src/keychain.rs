@@ -85,9 +85,10 @@ fn legacy_keychain_delete(host: &str) -> Result<(), KeychainError> {
 }
 
 fn creds_path(host: &str) -> Result<std::path::PathBuf, KeychainError> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .ok_or_else(|| KeychainError::Unavailable("no data directory".into()))?;
-    let dir = dirs.data_dir().join("credentials").join("sync");
+    let dir = tokenstat_paths::data_dir()
+        .ok_or_else(|| KeychainError::Unavailable("no data directory".into()))?
+        .join("credentials")
+        .join("sync");
     std::fs::create_dir_all(&dir)?;
     #[cfg(unix)]
     {

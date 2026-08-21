@@ -72,9 +72,9 @@ struct Request {
 /// In the data directory rather than a temp dir so it survives a reboot's
 /// cleanup and so the archive and its socket are found the same way.
 pub fn default_socket_path() -> Result<PathBuf, String> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .ok_or("no data directory on this platform")?;
-    Ok(dirs.data_dir().join("host.sock"))
+    Ok(tokenstat_paths::data_dir()
+        .ok_or("no data directory on this platform")?
+        .join("host.sock"))
 }
 
 /// Bind the socket, replacing a stale one left by a crash.

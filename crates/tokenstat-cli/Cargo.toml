@@ -21,6 +21,7 @@ tokenstat-core.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-sync.workspace = true
 tokenstat-mcp.workspace = true
+tokenstat-paths.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 anstream.workspace = true

@@ -36,9 +36,7 @@ pub struct AuthStatus {
 }
 
 fn data_dir() -> Result<PathBuf, CredsError> {
-    directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .map(|d| d.data_dir().to_path_buf())
-        .ok_or(CredsError::NoDataDir)
+    tokenstat_paths::data_dir().ok_or(CredsError::NoDataDir)
 }
 
 fn creds_dir() -> Result<PathBuf, CredsError> {

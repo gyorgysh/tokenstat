@@ -28,6 +28,8 @@
 //! codegen step in the build.
 
 pub mod abi;
+#[cfg(target_os = "android")]
+mod android;
 pub mod api;
 
 /// Version of the wire contract. Re-exported so a C consumer has one place to

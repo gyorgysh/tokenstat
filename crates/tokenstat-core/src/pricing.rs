@@ -69,9 +69,10 @@ pub struct PriceTable {
 impl PriceTable {
     /// Default on-disk location under the tokenstat data directory.
     pub fn default_path() -> Result<PathBuf, CoreError> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .ok_or(CoreError::NoDataDir)?;
-        Ok(dirs.data_dir().join("pricing").join("current.json"))
+        Ok(tokenstat_paths::data_dir()
+            .ok_or(CoreError::NoDataDir)?
+            .join("pricing")
+            .join("current.json"))
     }
 
     /// Load the local snapshot. Missing or unreadable becomes an empty table

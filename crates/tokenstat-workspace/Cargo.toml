@@ -18,4 +18,5 @@ description = "Workspace folders, git state, and the changes in them"
 serde.workspace = true
 serde_json.workspace = true
 directories.workspace = true
+tokenstat-paths.workspace = true
 thiserror.workspace = true

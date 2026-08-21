@@ -280,11 +280,15 @@ pub fn machine_label() -> String {
     // iOS / iPadOS have no scutil, and a sandboxed app cannot spawn `hostname`
     // at all. The family is the honest answer from here; the app replaces it
     // with the model's own name at launch. See `ClientDeviceName` in the client.
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     {
-        return "iPhone".into();
+        return if cfg!(target_os = "android") {
+            "Android".into()
+        } else {
+            "iPhone".into()
+        };
     }
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     {
         std::process::Command::new("hostname")
             .output()
@@ -375,6 +379,7 @@ impl Platform {
         match self.os.as_str() {
             "macos" => "macOS",
             "ios" => "iOS",
+            "android" => "Android",
             "linux" => "Linux",
             "windows" => "Windows",
             other => other,
@@ -514,12 +519,9 @@ pub fn identity_dir() -> Result<PathBuf, IdentityError> {
 pub fn identity_dir_path() -> Result<PathBuf, IdentityError> {
     match std::env::var_os("TOKENSTAT_IDENTITY_DIR") {
         Some(explicit) => Ok(PathBuf::from(explicit)),
-        None => Ok(
-            directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-                .ok_or(IdentityError::NoDataDir)?
-                .data_dir()
-                .join("identity"),
-        ),
+        None => Ok(tokenstat_paths::data_dir()
+            .ok_or(IdentityError::NoDataDir)?
+            .join("identity")),
     }
 }
 

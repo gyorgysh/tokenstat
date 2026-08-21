@@ -707,6 +707,7 @@ struct AccountBilling: Codable, Sendable, Hashable {
     var appAccountToken: String?
 
     var isApple: Bool { provider == "apple" }
+    var isGooglePlay: Bool { provider == "google_play" }
     var isPaddle: Bool { provider == "paddle" }
     var isLive: Bool {
         switch status {

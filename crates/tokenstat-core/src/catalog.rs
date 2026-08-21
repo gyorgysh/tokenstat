@@ -462,9 +462,7 @@ impl Plans {
 }
 
 fn data_dir() -> Result<PathBuf, CoreError> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .ok_or(CoreError::NoDataDir)?;
-    Ok(dirs.data_dir().to_path_buf())
+    tokenstat_paths::data_dir().ok_or(CoreError::NoDataDir)
 }
 
 /// The family stem of a model id: the leaf, minus its last version step.

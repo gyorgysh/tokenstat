@@ -153,8 +153,8 @@ impl Board {
     }
 
     pub fn load() -> Board {
-        let path = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .map(|d| d.data_dir().join("todo.json"))
+        let path = tokenstat_paths::data_dir()
+            .map(|d| d.join("todo.json"))
             .unwrap_or_else(|| PathBuf::from("todo.json"));
         let cards = std::fs::read_to_string(&path)
             .ok()

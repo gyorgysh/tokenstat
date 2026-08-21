@@ -751,9 +751,7 @@ impl Store {
     }
 
     pub fn load() -> Store {
-        let dir = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .map(|d| d.data_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+        let dir = tokenstat_paths::data_dir().unwrap_or_else(|| PathBuf::from("."));
         let path = dir.join("automations.json");
         let file = std::fs::read_to_string(&path)
             .ok()

@@ -99,9 +99,7 @@ struct SaltFile {
 }
 
 fn data_dir() -> Result<PathBuf, ConfigError> {
-    directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .map(|d| d.data_dir().to_path_buf())
-        .ok_or(ConfigError::NoDataDir)
+    tokenstat_paths::data_dir().ok_or(ConfigError::NoDataDir)
 }
 
 pub fn config_path() -> Result<PathBuf, ConfigError> {

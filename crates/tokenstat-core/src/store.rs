@@ -195,9 +195,9 @@ pub struct Totals {
 impl Store {
     /// Default location, following platform conventions.
     pub fn default_path() -> Result<PathBuf, CoreError> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .ok_or(CoreError::NoDataDir)?;
-        Ok(dirs.data_dir().join("tokenstat.db"))
+        Ok(tokenstat_paths::data_dir()
+            .ok_or(CoreError::NoDataDir)?
+            .join("tokenstat.db"))
     }
 
     pub fn open(path: &Path) -> Result<Self, CoreError> {

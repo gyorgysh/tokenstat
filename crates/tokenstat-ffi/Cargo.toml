@@ -13,7 +13,7 @@ description = "C ABI bridge exposing the tokenstat core to native front ends"
 [lib]
 # staticlib for linking into an Apple app bundle, rlib so the crate's own tests
 # can call the Rust side directly.
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 # Passed straight through to the host. The iOS and simulator slices of the
 # xcframework build with `--no-default-features`, which is what takes terminals,
@@ -31,3 +31,8 @@ tokenstat-host = { workspace = true }
 # send them anywhere. Nothing network-shaped may move down into core to make a
 # call here more convenient.
 serde_json.workspace = true
+tokenstat-identity.workspace = true
+tokenstat-paths.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

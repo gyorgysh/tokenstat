@@ -22,12 +22,7 @@ use crate::model::{
 
 /// Directory where sync writes IDE session JSONL files.
 pub fn cache_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("ai", "tokenstat", "tokenstat").map(|d| {
-        d.data_dir()
-            .join("cache")
-            .join("antigravity")
-            .join("sessions")
-    })
+    tokenstat_paths::data_dir().map(|d| d.join("cache").join("antigravity").join("sessions"))
 }
 
 /// Locate the IDE cache when present.

@@ -23,7 +23,7 @@ cd "$ROOT"
 # tokenstat-identity is here because it decides *who may connect*. A crate that
 # could also open the connection would be a place for that decision to leak out
 # of, and the remote transport that does open one lives above it.
-GUARDED=(tokenstat-core tokenstat-mcp tokenstat-highlight tokenstat-identity)
+GUARDED=(tokenstat-core tokenstat-mcp tokenstat-highlight tokenstat-identity tokenstat-paths)
 
 # Anything that can open a socket or speak HTTP. Matched against crate names in
 # the resolved tree.

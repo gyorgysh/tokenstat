@@ -81,9 +81,9 @@ pub struct Registry {
 
 impl Registry {
     pub fn default_path() -> Result<PathBuf, RegistryError> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-            .ok_or(RegistryError::NoDataDir)?;
-        Ok(dirs.data_dir().join("workspaces.json"))
+        Ok(tokenstat_paths::data_dir()
+            .ok_or(RegistryError::NoDataDir)?
+            .join("workspaces.json"))
     }
 
     /// Load, treating a missing file as an empty registry.

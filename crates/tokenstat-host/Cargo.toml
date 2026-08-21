@@ -51,6 +51,7 @@ tokenstat-pty = { workspace = true, optional = true }
 tokenstat-highlight.workspace = true
 tokenstat-identity.workspace = true
 tokenstat-remote.workspace = true
+tokenstat-paths.workspace = true
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true

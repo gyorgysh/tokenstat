@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 directories.workspace = true
+tokenstat-paths.workspace = true
 blake3.workspace = true
 getrandom.workspace = true
 x25519-dalek = { workspace = true }

@@ -77,3 +77,9 @@ desktop.ini
 /apps/*/DerivedData*/
 xcuserdata/
 *.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+
+# Android app. Credentials and local SDK selection never enter the repository.
+/apps/android/.gradle/
+/apps/android/app/google-services.json
+/apps/android/local.properties
+/apps/android/*.jks

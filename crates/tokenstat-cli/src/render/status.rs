@@ -537,10 +537,7 @@ pub fn statusline(
 ///
 /// Failures are silent: a statusline must never print errors or block.
 fn spawn_background_scan() {
-    let Ok(dirs) = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .ok_or(())
-        .map(|d| d.data_dir().to_path_buf())
-    else {
+    let Ok(dirs) = tokenstat_paths::data_dir().ok_or(()) else {
         return;
     };
     let lock_path = dirs.join("scan.lock");

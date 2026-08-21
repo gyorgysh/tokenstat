@@ -1117,9 +1117,9 @@ fn replace_executable(src: &Path, dest: &Path) -> Result<(), UpdateError> {
 }
 
 fn stamp_path() -> Result<PathBuf, UpdateError> {
-    let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")
-        .ok_or_else(|| UpdateError::Message("no data directory".into()))?;
-    let dir = dirs.data_dir().join("cache");
+    let dir = tokenstat_paths::data_dir()
+        .ok_or_else(|| UpdateError::Message("no data directory".into()))?
+        .join("cache");
     fs::create_dir_all(&dir)?;
     Ok(dir.join("update-check.stamp"))
 }

@@ -111,8 +111,7 @@ pub mod cache {
     use super::ProviderLimits;
 
     fn path() -> Option<PathBuf> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")?;
-        Some(dirs.data_dir().join("limits-cache.json"))
+        Some(tokenstat_paths::data_dir()?.join("limits-cache.json"))
     }
 
     /// Everything remembered, keyed by source id. A missing or unreadable file

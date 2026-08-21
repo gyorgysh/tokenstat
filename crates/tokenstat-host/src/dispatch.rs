@@ -480,6 +480,14 @@ struct AppleRenewalParams {
     signed_renewal_info: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleActivateParams {
+    package_name: String,
+    product_id: String,
+    purchase_token: String,
+}
+
 fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
     let b = raw.get("billing")?;
     if b.is_null() {
@@ -1198,6 +1206,31 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 ));
             }
             tokenstat_sync::apple_renewal(None, &p.signed_renewal_info).envelope()?;
+            crate::account_activity::invalidate();
+            let s = tokenstat_sync::sync_status(None).envelope()?;
+            serde_json::to_value(account_dto_from_status(s)).envelope()
+        }
+
+        // Google Play purchase verification happens on the account service.
+        // The Android client cannot safely hold a Play Developer credential.
+        "account.googleActivate" => {
+            let p: GoogleActivateParams = serde_json::from_str(params.trim()).envelope()?;
+            if p.package_name != "ai.tokenstat.tokenstat"
+                || p.product_id.trim().is_empty()
+                || p.purchase_token.trim().is_empty()
+            {
+                return Err(DispatchError::new(
+                    "invalid",
+                    "packageName, productId and purchaseToken are required",
+                ));
+            }
+            tokenstat_sync::google_activate(
+                None,
+                &p.package_name,
+                &p.product_id,
+                &p.purchase_token,
+            )
+            .envelope()?;
             crate::account_activity::invalidate();
             let s = tokenstat_sync::sync_status(None).envelope()?;
             serde_json::to_value(account_dto_from_status(s)).envelope()
@@ -4135,6 +4168,24 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{method} returned non-JSON: {out} ({e})"));
             assert!(v["ok"].is_boolean(), "{method}: {out}");
         }
+    }
+
+    #[test]
+    fn google_activation_rejects_an_unrelated_android_package_before_network() {
+        let mut s = session();
+        let out = call(
+            &mut s,
+            "account.googleActivate",
+            &json!({
+                "packageName": "example.impostor",
+                "productId": "ai.tokenstat.supporter.yearly",
+                "purchaseToken": "not-sent"
+            })
+            .to_string(),
+        );
+        let value: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(value["ok"], false, "{out}");
+        assert_eq!(value["error"]["code"], "invalid", "{out}");
     }
 
     #[test]

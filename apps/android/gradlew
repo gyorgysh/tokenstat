@@ -1,0 +1,17 @@
+#!/bin/sh
+# SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+set -eu
+
+VERSION=8.13
+DIST="${GRADLE_USER_HOME:-$HOME/.gradle}/tokenstat/gradle-$VERSION"
+if command -v gradle >/dev/null 2>&1; then
+  exec gradle "$@"
+fi
+if [ ! -x "$DIST/bin/gradle" ]; then
+  ARCHIVE="$DIST-bin.zip"
+  mkdir -p "$(dirname "$DIST")"
+  curl -fL "https://services.gradle.org/distributions/gradle-$VERSION-bin.zip" -o "$ARCHIVE"
+  unzip -q "$ARCHIVE" -d "$(dirname "$DIST")"
+  rm -f "$ARCHIVE"
+fi
+exec "$DIST/bin/gradle" "$@"

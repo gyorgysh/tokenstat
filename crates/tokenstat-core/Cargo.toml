@@ -22,6 +22,7 @@ rusqlite.workspace = true
 walkdir.workspace = true
 rayon.workspace = true
 directories.workspace = true
+tokenstat-paths.workspace = true
 zstd.workspace = true
 sha2 = { workspace = true }
 hmac = { workspace = true }

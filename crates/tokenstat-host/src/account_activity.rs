@@ -192,8 +192,7 @@ mod stored {
     }
 
     fn path() -> Option<PathBuf> {
-        let dirs = directories::ProjectDirs::from("ai", "tokenstat", "tokenstat")?;
-        Some(dirs.data_dir().join("account-series.json"))
+        Some(tokenstat_paths::data_dir()?.join("account-series.json"))
     }
 
     /// Whether a file this old is still worth opening on.
