@@ -1754,6 +1754,22 @@ extension Bridge {
         ], as: SSHSessionHandle.self)
     }
 
+    static func sshVaultStatus() async throws -> SSHVaultStatus {
+        try await background("ssh.vault.status", [:], as: SSHVaultStatus.self)
+    }
+
+    static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {
+        try await background("ssh.vault.create", ["tier": tier], as: SSHVaultRecovery.self)
+    }
+
+    static func unlockSSHVault(recovery: String, tier: String) async throws -> SSHVaultUnlock {
+        try await background("ssh.vault.unlock", ["recovery": recovery, "tier": tier], as: SSHVaultUnlock.self)
+    }
+
+    static func sshVaultRecords(recovery: String, tier: String) async throws -> [SSHVaultRecord] {
+        try await background("ssh.vault.record.list", ["recovery": recovery, "tier": tier], as: SSHVaultRecords.self).records
+    }
+
     static func openSSHWithKey(
         _ host: SSHHost, pem: String, passphrase: String?, rows: Int, cols: Int
     ) async throws -> SSHSessionHandle {

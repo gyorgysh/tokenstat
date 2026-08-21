@@ -34,7 +34,7 @@ struct ClientDevicesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 NavigationLink {
-                    SSHConnectionsView()
+                    SSHConnectionsView(vaultTier: account.account?.tier)
                 } label: {
                     HStack(spacing: Theme.Space.m) {
                         Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)

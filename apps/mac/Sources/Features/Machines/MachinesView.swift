@@ -146,7 +146,7 @@ struct MachinesView: View {
 
     private var sshAccess: some View {
         NavigationLink {
-            SSHConnectionsView()
+            SSHConnectionsView(vaultTier: model.remoteReachAllowed ? "patron" : nil)
         } label: {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)

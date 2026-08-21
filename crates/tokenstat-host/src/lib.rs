@@ -88,6 +88,7 @@ mod sync_scheduler;
 mod todo;
 #[cfg(feature = "local-host")]
 pub(crate) mod transcript;
+pub mod vault;
 #[cfg(feature = "local-host")]
 pub mod workflows;
 #[cfg(feature = "local-host")]

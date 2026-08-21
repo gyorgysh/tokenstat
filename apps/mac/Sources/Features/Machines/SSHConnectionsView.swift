@@ -25,6 +25,7 @@ final class SSHConnectionsModel {
 }
 
 struct SSHConnectionsView: View {
+    var vaultTier: String?
     private enum Section: String, CaseIterable { case hosts = "Hosts", keys = "Keys", snippets = "Snippets" }
     @State private var model = SSHConnectionsModel()
     @State private var section = Section.hosts
@@ -33,9 +34,14 @@ struct SSHConnectionsView: View {
     @State private var addingSnippet = false
     @State private var connecting: SSHHost?
     @State private var terminal: SSHLiveTerminal?
+    @State private var vaultRecovery: String?
+    @State private var vaultStatus: SSHVaultStatus?
 
     var body: some View {
         VStack(spacing: 0) {
+            if let vaultTier {
+                SSHVaultBanner(tier: vaultTier, status: $vaultStatus, recovery: $vaultRecovery)
+            }
             Picker("SSH library", selection: $section) {
                 ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
@@ -78,6 +84,7 @@ struct SSHConnectionsView: View {
             }
         }
         .task { await model.load() }
+        .task { vaultStatus = try? await Bridge.sshVaultStatus() }
         .sheet(isPresented: $addingHost) { SSHHostForm(model: model) }
         .sheet(isPresented: $addingKey) { SSHKeyForm(model: model) }
         .sheet(isPresented: $addingSnippet) { SSHSnippetForm(model: model) }
@@ -92,6 +99,31 @@ struct SSHConnectionsView: View {
     private func deleteHosts(_ offsets: IndexSet) { for i in offsets { let id = model.hosts[i].id; Task { try? await Bridge.deleteSSHHost(id: id); await model.load() } } }
     private func deleteKeys(_ offsets: IndexSet) { for i in offsets { let key = model.keys[i]; SSHSecretStore.delete(reference: key.secretRef); Task { try? await Bridge.deleteSSHKey(id: key.id); await model.load() } } }
     private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { try? await Bridge.deleteSSHSnippet(id: id); await model.load() } } }
+}
+
+private struct SSHVaultBanner: View {
+    let tier: String
+    @Binding var status: SSHVaultStatus?
+    @Binding var recovery: String?
+    @State private var error: String?
+    var body: some View {
+        GroupBox {
+            if let recovery {
+                Text("Write down these 24 recovery words. tokenstat cannot restore them.")
+                Text(recovery).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            } else if status?.created == true {
+                Label("Encrypted vault ready · \(status?.recordCount ?? 0) records", systemImage: "lock.shield.fill")
+            } else {
+                HStack { Text("Sync encrypted SSH secrets across your devices."); Spacer(); Button("Create vault", .create) { Task { await create() } } }
+            }
+            if let error { Text(error).foregroundStyle(Theme.danger) }
+        }
+        .padding(.horizontal)
+    }
+    private func create() async {
+        do { let made = try await Bridge.createSSHVault(tier: tier); recovery = made.recovery; status = try await Bridge.sshVaultStatus() }
+        catch { self.error = error.localizedDescription }
+    }
 }
 
 private struct SSHHostForm: View {

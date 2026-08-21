@@ -79,6 +79,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 russh = { version = "0.63", default-features = false, features = ["ring", "rsa"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util"] }
 rand = "0.10"
+chacha20poly1305 = "0.10"
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }

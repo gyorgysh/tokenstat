@@ -2245,6 +2245,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     if let Some(answer) = crate::ssh_records::call(method, params) {
         return Some(answer);
     }
+    if let Some(answer) = crate::vault::call(method, params) {
+        return Some(answer);
+    }
     // Identity and the peer list. Sessionless because the Machines screen is
     // where somebody goes when something is wrong, and an archive that will not
     // open must not take it away from them.
