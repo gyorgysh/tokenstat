@@ -1762,6 +1762,10 @@ extension Bridge {
         try await background("ssh.provider.digitalOcean.import", ["token": token, "username": username], as: SSHHostImport.self)
     }
 
+    static func importAWS(profile: String?, region: String?, username: String) async throws -> SSHHostImport {
+        try await background("ssh.provider.aws.import", ["profile": profile as Any, "region": region as Any, "username": username], as: SSHHostImport.self)
+    }
+
     static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {
         try await background("ssh.vault.create", ["tier": tier], as: SSHVaultRecovery.self)
     }

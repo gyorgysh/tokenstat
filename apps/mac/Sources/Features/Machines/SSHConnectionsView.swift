@@ -94,7 +94,7 @@ struct SSHConnectionsView: View {
         .sheet(isPresented: $addingHost) { SSHHostForm(model: model) }
         .sheet(isPresented: $addingKey) { SSHKeyForm(model: model) }
         .sheet(isPresented: $addingSnippet) { SSHSnippetForm(model: model) }
-        .sheet(isPresented: $importingDigitalOcean) { DigitalOceanImportForm(model: model) }
+        .sheet(isPresented: $importingDigitalOcean) { CloudImportForm(model: model) }
         .sheet(item: $connecting) { host in SSHConnectForm(host: host, model: model) { terminal = $0 } }
         #if os(macOS)
         .sheet(item: $terminal) { SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480) }
@@ -108,26 +108,36 @@ struct SSHConnectionsView: View {
     private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { try? await Bridge.deleteSSHSnippet(id: id); await model.load() } } }
 }
 
-private struct DigitalOceanImportForm: View {
+private struct CloudImportForm: View {
+    private enum Provider: String, CaseIterable { case digitalOcean = "DigitalOcean", aws = "AWS" }
     @Environment(\.dismiss) private var dismiss
     let model: SSHConnectionsModel
     @State private var token = ""
     @State private var username = "root"
+    @State private var provider = Provider.digitalOcean
+    @State private var profile = "default"
+    @State private var region = ""
     @State private var error: String?
     var body: some View {
         NavigationStack {
             Form {
-                SecureField("Read-only API token", text: $token)
+                Picker("Provider", selection: $provider) { ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                if provider == .digitalOcean { SecureField("Read-only API token", text: $token) }
+                else { TextField("AWS CLI profile", text: $profile); TextField("Region (optional)", text: $region) }
                 TextField("SSH username", text: $username)
-                Text("Only the Droplets list is read. The token is used once and is not saved.").font(.caption).foregroundStyle(.secondary)
+                Text(provider == .digitalOcean ? "Only the Droplets list is read. The token is used once and is not saved." : "Uses your existing AWS CLI profile and only calls describe-instances. AWS keys never enter tokenstat.").font(.caption).foregroundStyle(.secondary)
                 if let error { Text(error).foregroundStyle(Theme.danger) }
             }
-            .navigationTitle("Import DigitalOcean")
-            .toolbar { Button("Import", .download) { Task { await run() } }.disabled(token.isEmpty || username.isEmpty) }
+            .navigationTitle("Import cloud servers")
+            .toolbar { Button("Import", .download) { Task { await run() } }.disabled((provider == .digitalOcean && token.isEmpty) || username.isEmpty) }
         }.frame(minWidth: 440, minHeight: 260)
     }
     private func run() async {
-        do { _ = try await Bridge.importDigitalOcean(token: token, username: username); await model.load(); dismiss() }
+        do {
+            if provider == .digitalOcean { _ = try await Bridge.importDigitalOcean(token: token, username: username) }
+            else { _ = try await Bridge.importAWS(profile: profile.isEmpty ? nil : profile, region: region.isEmpty ? nil : region, username: username) }
+            await model.load(); dismiss()
+        }
         catch { self.error = error.localizedDescription }
     }
 }

@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
         "ssh.provider.digitalOcean.import" => Some(import_digital_ocean(params)),
+        "ssh.provider.aws.import" => Some(import_aws(params)),
         _ => None,
     }
 }
@@ -89,6 +90,85 @@ fn save_hosts(hosts: impl Iterator<Item = Value>) -> Result<Value, String> {
     Ok(json!({"imported": imported.len(), "hosts": imported}))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AwsParams {
+    #[serde(default)]
+    profile: Option<String>,
+    #[serde(default)]
+    region: Option<String>,
+    #[serde(default = "ec2_user")]
+    username: String,
+}
+fn ec2_user() -> String {
+    "ec2-user".into()
+}
+
+fn import_aws(params: &str) -> Result<Value, String> {
+    let p: AwsParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    let mut command = std::process::Command::new("aws");
+    command.args(["ec2", "describe-instances", "--output", "json"]);
+    if let Some(profile) = &p.profile {
+        command.args(["--profile", profile]);
+    }
+    if let Some(region) = &p.region {
+        command.args(["--region", region]);
+    }
+    let output = command.output().map_err(|_| {
+        "AWS CLI is not installed. Install it and run `aws configure` first.".to_string()
+    })?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| format!("AWS response was invalid: {e}"))?;
+    save_hosts(aws_hosts(&value, &p).into_iter())
+}
+
+fn aws_hosts(value: &Value, p: &AwsParams) -> Vec<Value> {
+    let mut hosts = Vec::new();
+    for reservation in value
+        .get("Reservations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        for instance in reservation
+            .get("Instances")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if instance.pointer("/State/Name").and_then(Value::as_str) == Some("terminated") {
+                continue;
+            }
+            let Some(address) = instance
+                .get("PublicIpAddress")
+                .or_else(|| instance.get("PrivateIpAddress"))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let id = instance
+                .get("InstanceId")
+                .and_then(Value::as_str)
+                .unwrap_or(address);
+            let name = instance
+                .get("Tags")
+                .and_then(Value::as_array)
+                .and_then(|tags| {
+                    tags.iter()
+                        .find(|t| t.get("Key").and_then(Value::as_str) == Some("Name"))
+                })
+                .and_then(|t| t.get("Value"))
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            hosts.push(json!({"id":"", "label":name, "hostname":address, "port":22, "username":p.username, "tags":["aws", "ec2"], "provider":{"kind":"aws", "resourceID":id, "region":p.region}, "hostKeys":[]}));
+        }
+    }
+    hosts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +177,20 @@ mod tests {
         let page: DropletPage = serde_json::from_value(json!({"droplets":[{"id":7,"name":"web","region":{"slug":"fra1"},"networks":{"v4":[{"ip_address":"203.0.113.7","type":"public"}]}}]})).unwrap();
         assert_eq!(page.droplets.len(), 1);
         assert_eq!(page.droplets[0].name, "web");
+    }
+    #[test]
+    fn normalizes_running_ec2_instances() {
+        let value = json!({"Reservations":[{"Instances":[{"InstanceId":"i-1","PublicIpAddress":"203.0.113.9","State":{"Name":"running"},"Tags":[{"Key":"Name","Value":"web"}]},{"InstanceId":"i-2","State":{"Name":"terminated"}}]}]});
+        let hosts = aws_hosts(
+            &value,
+            &AwsParams {
+                profile: None,
+                region: Some("eu-west-1".into()),
+                username: ec2_user(),
+            },
+        );
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0]["label"], "web");
+        assert_eq!(hosts[0]["provider"]["resourceID"], "i-1");
     }
 }
