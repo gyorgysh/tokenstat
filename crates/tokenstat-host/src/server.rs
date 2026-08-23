@@ -1,4 +1,6 @@
-//! Unix socket transport for [`crate::dispatch`].
+//! Local socket transport for [`crate::dispatch`].
+//!
+//! Unix: a filesystem socket. Windows: a named pipe. Framing is the same.
 //!
 //! # Framing
 //!
@@ -45,11 +47,15 @@ use crate::session::Session;
 
 /// Inbound request line budget. Editor saves can be multi-megabyte JSON.
 /// Matches the remote message scale without allowing multi-GB DoS lines.
-#[cfg(unix)]
 const MAX_REQUEST_LINE: usize = 32 * 1024 * 1024;
-/// Concurrent unix-socket clients. The Mac app caps itself at 16; leave headroom.
-#[cfg(unix)]
+/// Concurrent local clients. The Mac app caps itself at 16; leave headroom.
 const MAX_CONNECTIONS: usize = 64;
+
+#[cfg(windows)]
+#[path = "pipe_server.rs"]
+mod pipe_server;
+#[cfg(windows)]
+pub use pipe_server::{bind, connect, serve};
 
 #[cfg(unix)]
 fn live_connections() -> &'static AtomicUsize {
@@ -67,11 +73,39 @@ struct Request {
     params: Value,
 }
 
-/// Default socket path, beside the archive it serves.
+/// Windows named pipes live in a global namespace. The last component is the
+/// user, so two sessions on one machine do not share a listener. Anything that
+/// is not a safe pipe character becomes `_`.
 ///
-/// In the data directory rather than a temp dir so it survives a reboot's
-/// cleanup and so the archive and its socket are found the same way.
+/// Compiled on every OS so the unit tests can cover it without a Windows
+/// runner. Production unix builds never call it.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+pub(crate) fn sanitize_pipe_component(raw: &str) -> String {
+    let mut safe = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+            safe.push(c);
+        } else {
+            safe.push('_');
+        }
+    }
+    if safe.is_empty() {
+        safe.push_str("user");
+    }
+    safe
+}
+
+/// Default local endpoint, beside the archive it serves.
+///
+/// Unix: a socket file in the data directory. Windows: a named pipe in the
+/// global pipe namespace, scoped to the current user so two sessions on one
+/// machine do not share a listener.
 pub fn default_socket_path() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        return Ok(PathBuf::from(pipe_server::default_pipe_name()));
+    }
+    #[cfg(not(windows))]
     Ok(tokenstat_paths::data_dir()
         .ok_or("no data directory on this platform")?
         .join("host.sock"))
@@ -407,10 +441,11 @@ fn with_id(envelope: String, id: Value) -> String {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::session::OpenParams;
+    use std::path::Path;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
@@ -431,6 +466,27 @@ mod tests {
             timezone: Some("UTC".into()),
         })
         .unwrap()
+    }
+
+    #[test]
+    fn pipe_component_strips_separators() {
+        assert_eq!(sanitize_pipe_component("Ada Lovelace"), "Ada_Lovelace");
+        assert_eq!(sanitize_pipe_component(""), "user");
+        assert_eq!(sanitize_pipe_component("ok.user-1"), "ok.user-1");
+        assert_eq!(sanitize_pipe_component(r"evil\..\pipe"), "evil_.._pipe");
+    }
+
+    #[test]
+    fn the_default_endpoint_is_local() {
+        let path = default_socket_path().expect("a data directory");
+        let s = path.to_string_lossy();
+        #[cfg(windows)]
+        {
+            let lower = s.to_ascii_lowercase();
+            assert!(lower.starts_with(r"\\.\pipe\ai.tokenstat.hostd."), "{s}");
+        }
+        #[cfg(not(windows))]
+        assert!(s.ends_with("host.sock"), "{s}");
     }
 
     #[test]
@@ -476,6 +532,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_stale_socket_file_is_replaced_rather_than_fatal() {
         // A daemon killed with SIGKILL leaves the socket file behind. Refusing
@@ -487,6 +544,7 @@ mod tests {
         drop(listener);
     }
 
+    #[cfg(unix)]
     #[test]
     fn an_over_long_path_is_refused_with_a_readable_reason() {
         // The kernel calls this "SUN_LEN", which tells a user nothing. A deep
@@ -496,6 +554,7 @@ mod tests {
         assert!(e.contains("unix socket cannot exceed"), "{e}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_live_socket_is_not_stolen() {
         let dir = temp_dir("live");
@@ -509,6 +568,7 @@ mod tests {
         drop(first);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_full_round_trip_over_a_real_socket() {
         let dir = temp_dir("roundtrip");

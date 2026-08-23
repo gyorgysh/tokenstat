@@ -158,6 +158,14 @@ publishes as a prerelease. Release signing and environment setup are
 maintainer-only; contributors do not need those secrets. GitHub asks for one
 `release` environment approval after the builds and before signing or publishing.
 
+### Preview builds
+
+Unsigned `-dev` artifacts, without a GitHub Release. Workflow file:
+`.github/workflows/preview.yml`. How to trigger it, what it produces, and how
+to run Windows `tokenstat-hostd` are in [`docs/preview-builds.md`](docs/preview-builds.md).
+
+Preview is not a required check. `ci.yml` remains the merge gate.
+
 ### Self-update
 
 `tokenstat update` downloads the matching asset from GitHub Releases, verifies

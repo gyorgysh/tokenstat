@@ -95,6 +95,10 @@ schedule with `--no-schedule` (Unix) or `TOKENSTAT_NO_SCHEDULE=1`.
 Release builds are published on [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases)
 for macOS (Apple silicon and Intel), Windows, and Linux.
 
+Unsigned `-dev` artifacts for testers (no GitHub Release) come from the
+[Preview](https://github.com/gyorgysh/tokenstat/actions/workflows/preview.yml)
+workflow. See [`docs/preview-builds.md`](docs/preview-builds.md).
+
 The Mac app ships beside them as a signed and notarized `.dmg`: open it and drag
 tokenstat into Applications. After that it keeps itself current. It fetches each
 release, checks the download against the release checksums and against the

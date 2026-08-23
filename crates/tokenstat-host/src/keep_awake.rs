@@ -8,10 +8,12 @@
 
 //! System-sleep assertion for inbound remote workspace work.
 //!
-//! `hostd` is a launchd user agent. Always-on host is what sets
-//! `KeepAlive` and `RunAtLoad`. Neither is a sleep lock.
-//! `ProcessType=Interactive` is the scheduler class so a live terminal
-//! is not throttled. It is also not a sleep lock.
+//! `hostd` is a launchd user agent on macOS and a per-user scheduled
+//! task on Windows. Always-on host is what sets `KeepAlive` /
+//! `RunAtLoad`, or the matching Task Scheduler restart policy. Neither
+//! is a sleep lock. `ProcessType=Interactive` is the macOS scheduler
+//! class so a live terminal is not throttled. It is also not a sleep
+//! lock.
 //!
 //! The Mac app being closed must leave the laptop free to sleep, unless
 //! Always-on host is on. A tunnel that is merely present, a sync, a
@@ -20,7 +22,8 @@
 //! workspace or a terminal on this machine, or for the life of hostd when
 //! Always-on host is on.
 //!
-//! The assertion is `PreventUserIdleSystemSleep`. Closing the lid is still
+//! The assertion is `PreventUserIdleSystemSleep` on macOS and
+//! `PowerRequestSystemRequired` on Windows. Closing the lid is still
 //! the user's choice. Nothing here calls `pmset` or holds a Keepresso lease.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,7 +41,8 @@ pub(crate) const GRACE_MS: i64 = 120_000;
 struct Inner {
     streams: u32,
     grace_until_ms: i64,
-    assertion: Option<u32>,
+    /// macOS IOPM id, or a Windows POWER_REQUEST handle truncated to u64.
+    assertion: Option<u64>,
 }
 
 struct State {
@@ -285,25 +289,34 @@ fn drop_assertion(inner: &mut Inner) {
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
-fn create_assertion() -> Option<u32> {
-    macos::create()
+fn create_assertion() -> Option<u64> {
+    macos::create().map(u64::from)
 }
 
-#[cfg(not(all(target_os = "macos", not(test))))]
-fn create_assertion() -> Option<u32> {
-    // Tests, and every OS that is not macOS, must not touch IOPM. A
-    // unit test that parsed a request would otherwise keep the build
+#[cfg(all(windows, not(test)))]
+fn create_assertion() -> Option<u64> {
+    windows::create()
+}
+
+#[cfg(not(any(all(target_os = "macos", not(test)), all(windows, not(test)))))]
+fn create_assertion() -> Option<u64> {
+    // Tests, and OSes without a sleep assertion, must not pin the build
     // machine awake.
     None
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
-fn release_assertion(id: u32) {
-    macos::release(id);
+fn release_assertion(id: u64) {
+    macos::release(id as u32);
 }
 
-#[cfg(not(all(target_os = "macos", not(test))))]
-fn release_assertion(_id: u32) {}
+#[cfg(all(windows, not(test)))]
+fn release_assertion(id: u64) {
+    windows::release(id);
+}
+
+#[cfg(not(any(all(target_os = "macos", not(test)), all(windows, not(test)))))]
+fn release_assertion(_id: u64) {}
 
 #[cfg(all(target_os = "macos", not(test)))]
 mod macos {
@@ -370,6 +383,50 @@ mod macos {
     pub(super) fn release(id: u32) {
         unsafe {
             let _ = IOPMAssertionRelease(id);
+        }
+    }
+}
+
+#[cfg(all(windows, not(test)))]
+mod windows {
+    use std::sync::OnceLock;
+
+    use crate::win32::{self, ReasonContext};
+
+    fn reason_wide() -> &'static [u16] {
+        static CELL: OnceLock<Vec<u16>> = OnceLock::new();
+        CELL.get_or_init(|| {
+            "tokenstat remote workspace session\0"
+                .encode_utf16()
+                .collect()
+        })
+    }
+
+    pub(super) fn create() -> Option<u64> {
+        let mut context = ReasonContext {
+            version: win32::POWER_REQUEST_CONTEXT_VERSION,
+            flags: win32::POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+            simple_reason_string: reason_wide().as_ptr(),
+        };
+        let handle = unsafe { win32::PowerCreateRequest(&mut context) };
+        if handle.is_null() || handle == win32::INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let ok = unsafe { win32::PowerSetRequest(handle, win32::POWER_REQUEST_SYSTEM_REQUIRED) };
+        if ok == 0 {
+            unsafe {
+                win32::CloseHandle(handle);
+            }
+            return None;
+        }
+        Some(handle as usize as u64)
+    }
+
+    pub(super) fn release(id: u64) {
+        let handle = id as usize as win32::Handle;
+        unsafe {
+            let _ = win32::PowerClearRequest(handle, win32::POWER_REQUEST_SYSTEM_REQUIRED);
+            let _ = win32::CloseHandle(handle);
         }
     }
 }

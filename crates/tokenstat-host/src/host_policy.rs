@@ -6,18 +6,19 @@
 // "tokenstat" and the tokenstat marks are trademarks of pueev OU and are not
 // licensed with the code. See TRADEMARK.md.
 
-//! Whether this Mac stays a host after the app quits.
+//! Whether this machine stays a host after the app quits.
 //!
-//! Always-on selects launchd `KeepAlive` and `RunAtLoad`. Off by default
-//! when this machine has an internal battery, on when it does not.
-//! ProcessType stays Interactive either way. Background throttles
-//! terminals and is not a sleep lock.
+//! Always-on selects launchd `KeepAlive` and `RunAtLoad` on macOS, and
+//! logon-start plus restart on the per-user scheduled task on Windows.
+//! Off by default when this machine has an internal battery, on when it
+//! does not. ProcessType stays Interactive on macOS either way.
+//! Background throttles terminals and is not a sleep lock.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
-#[cfg(all(unix, not(test)))]
+#[cfg(not(test))]
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ use serde_json::{Value, json};
 use crate::keep_awake;
 
 /// How long hostd waits after the last app lock disappears before exiting.
-#[cfg(all(unix, not(test)))]
+#[cfg(not(test))]
 const OWNER_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,7 +42,7 @@ struct HostSettingsFile {
     always_on: Option<bool>,
 }
 
-/// Pure default: a battery Mac sleeps unless somebody asked it to stay a host.
+/// Pure default: a battery machine sleeps unless somebody asked it to stay a host.
 pub fn default_always_on(has_internal_battery: bool) -> bool {
     !has_internal_battery
 }
@@ -49,7 +50,7 @@ pub fn default_always_on(has_internal_battery: bool) -> bool {
 /// Whether inbound workspace / pty work should be accepted right now.
 ///
 /// Always-on hosts regardless of the lid and regardless of the app. Otherwise
-/// this Mac is a host only while Tokenstat is open and the lid is open.
+/// this machine is a host only while Tokenstat is open and the lid is open.
 pub fn hosting_active(always_on: bool, lid_closed: bool, owner_present: bool) -> bool {
     always_on || (owner_present && !lid_closed)
 }
@@ -141,7 +142,7 @@ fn battery_override() -> &'static Mutex<Option<bool>> {
 
 /// Whether this machine has an internal battery.
 ///
-/// Used only to pick the first default. A MacBook on AC is still a laptop.
+/// Used only to pick the first default. A laptop on AC is still a laptop.
 pub fn has_internal_battery() -> bool {
     #[cfg(test)]
     {
@@ -174,15 +175,24 @@ fn detect_internal_battery() -> bool {
     macos::has_smart_battery()
 }
 
-#[cfg(not(all(target_os = "macos", not(test))))]
+#[cfg(all(windows, not(test)))]
+fn detect_internal_battery() -> bool {
+    crate::win32::has_system_battery()
+}
+
+#[cfg(not(any(all(target_os = "macos", not(test)), all(windows, not(test)))))]
 fn detect_internal_battery() -> bool {
     false
 }
 
-/// Where the Mac app holds a shared lock for the life of the process.
+/// Where the desktop app holds a shared lock for the life of the process.
+///
+/// Sibling of the archive, not of the local endpoint, so a Windows named pipe
+/// path cannot be mistaken for a lock file.
 pub fn owner_lock_path() -> Result<PathBuf, String> {
-    let socket = crate::server::default_socket_path()?;
-    Ok(socket.with_file_name("host-owner.lock"))
+    Ok(tokenstat_paths::data_dir()
+        .ok_or("no data directory on this platform")?
+        .join("host-owner.lock"))
 }
 
 /// True when at least one Tokenstat app is holding the owner lock.
@@ -213,7 +223,23 @@ pub(crate) fn owner_present_at(path: &Path) -> bool {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub(crate) fn owner_present_at(path: &Path) -> bool {
+    use std::fs::OpenOptions;
+
+    let file = match OpenOptions::new().read(true).write(true).open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    if crate::win32::try_lock_exclusive(&file, false) {
+        crate::win32::unlock(&file);
+        false
+    } else {
+        true
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn owner_present_at(_path: &Path) -> bool {
     false
 }
@@ -276,10 +302,10 @@ fn apply_now() {
     apply_hosting(hosting_active_now());
 }
 
-/// True when the installed launch agent would start this process again
+/// True when the installed supervisor would start this process again
 /// after a clean exit. A stale KeepAlive=true plus `exit(0)` is a loop.
 #[cfg(all(unix, not(test)))]
-fn launch_agent_restarts_on_clean_exit() -> bool {
+fn supervisor_restarts_on_clean_exit() -> bool {
     let Some(home) = std::env::var_os("HOME") else {
         return true;
     };
@@ -298,16 +324,22 @@ pub(crate) fn plist_restarts_on_clean_exit(text: &str) -> bool {
     rest.trim_start().starts_with("<true")
 }
 
+/// Task Scheduler only restarts the helper when Always-on is on, and the
+/// watch thread does not exit in that case. Exiting is therefore safe.
+#[cfg(all(windows, not(test)))]
+fn supervisor_restarts_on_clean_exit() -> bool {
+    false
+}
+
 /// Watch the owner lock and the lid. Only the hostd process calls this.
 ///
 /// The in-process bridge must not: an exit here would take the app with it.
 /// Tests get a no-op: the watch thread exits the process when Always-on is
-/// off and the app lock is gone, which is every unit test. Windows has no
-/// unix socket server, so it never starts this runtime.
-#[cfg(all(unix, test))]
+/// off and the app lock is gone, which is every unit test.
+#[cfg(test)]
 pub fn start_runtime() {}
 
-#[cfg(all(unix, not(test)))]
+#[cfg(not(test))]
 pub fn start_runtime() {
     apply_now();
     let _ = std::thread::Builder::new()
@@ -315,7 +347,7 @@ pub fn start_runtime() {
         .spawn(watch);
 }
 
-#[cfg(all(unix, not(test)))]
+#[cfg(not(test))]
 fn watch() {
     let mut gone_since: Option<Instant> = None;
     loop {
@@ -332,7 +364,7 @@ fn watch() {
         match gone_since {
             None => gone_since = Some(Instant::now()),
             Some(started) if started.elapsed() >= OWNER_GRACE => {
-                if launch_agent_restarts_on_clean_exit() {
+                if supervisor_restarts_on_clean_exit() {
                     // KeepAlive is still true. exit(0) would bounce us.
                     // Stay up, hosting already inactive.
                     gone_since = None;
@@ -348,7 +380,7 @@ fn watch() {
     }
 }
 
-/// Whether an inbound remote line is work this Mac should refuse.
+/// Whether an inbound remote line is work this machine should refuse.
 pub fn should_refuse_inbound(line: &str) -> bool {
     should_refuse_inbound_with(always_on(), lid_closed(), owner_present(), line)
 }
@@ -386,10 +418,18 @@ pub fn refuse_inbound(line: &str) -> String {
         "ok": false,
         "error": {
             "code": "host_asleep",
-            "message": "This Mac is asleep."
+            "message": asleep_message(),
         }
     })
     .to_string()
+}
+
+fn asleep_message() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "This Mac is asleep."
+    } else {
+        "This machine is asleep."
+    }
 }
 
 /// Answer a `host.policy` / `host.setPolicy` method, or `None` when it is not one.
@@ -588,6 +628,6 @@ mod tests {
         assert_eq!(out["ok"], false);
         assert_eq!(out["id"], 9);
         assert_eq!(out["error"]["code"], "host_asleep");
-        assert_eq!(out["error"]["message"], "This Mac is asleep.");
+        assert_eq!(out["error"]["message"], asleep_message());
     }
 }

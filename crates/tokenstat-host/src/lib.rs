@@ -18,8 +18,8 @@
 //!
 //! - [`dispatch::call`] in process, which is what the C ABI in `tokenstat-ffi`
 //!   wraps for the Mac app today.
-//! - [`server`] over a unix socket, which is the same dispatch with a different
-//!   way in.
+//! - [`server`] over a local socket (unix) or named pipe (Windows), which is
+//!   the same dispatch with a different way in.
 //! - [`remote`] over an authenticated, encrypted connection to another machine,
 //!   which is that seam now attached. See `docs/remote-transport.md`.
 //!
@@ -90,13 +90,16 @@ pub mod session;
 mod session_meter;
 pub mod ssh_client;
 pub mod ssh_records;
-#[cfg(all(unix, feature = "local-host"))]
+#[cfg(feature = "local-host")]
 mod sync_scheduler;
+
 #[cfg(feature = "local-host")]
 mod todo;
 #[cfg(feature = "local-host")]
 pub(crate) mod transcript;
 pub mod vault;
+#[cfg(windows)]
+pub(crate) mod win32;
 #[cfg(feature = "local-host")]
 pub mod workflows;
 #[cfg(feature = "local-host")]

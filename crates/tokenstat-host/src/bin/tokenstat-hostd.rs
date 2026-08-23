@@ -8,17 +8,16 @@
 
 //! The tokenstat host daemon.
 //!
-//! Serves the same dispatch the in-process bridge does, over a unix socket, so
-//! a client that is not in this process (an iPad today's plan aside, another
-//! app, a script) can ask the same questions.
+//! Serves the same dispatch the in-process bridge does, over a unix socket
+//! (macOS, Linux) or a named pipe (Windows), so a client that is not in this
+//! process can ask the same questions.
 //!
-//! Runs in the foreground and logs to stderr. Lifetime belongs to launchd, not
-//! to this binary: a daemon that forks itself is one that launchd cannot see,
-//! restart, or stop.
+//! Runs in the foreground and logs to stderr. Lifetime belongs to launchd or
+//! the Windows scheduled task, not to this binary: a daemon that forks itself
+//! is one the supervisor cannot see, restart, or stop.
 
 use std::process::ExitCode;
 
-#[cfg(unix)]
 use tokenstat_host::{Session, ownership, server};
 
 fn main() -> ExitCode {
@@ -31,15 +30,14 @@ fn main() -> ExitCode {
     }
 }
 
-#[cfg(unix)]
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
     let mut socket = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--socket" | "-s" => {
-                socket = Some(args.next().ok_or("--socket needs a path")?);
+            "--socket" | "-s" | "--pipe" => {
+                socket = Some(args.next().ok_or("--socket / --pipe needs a path")?);
             }
             "--help" | "-h" => {
                 println!("{USAGE}");
@@ -92,16 +90,15 @@ fn run() -> Result<(), String> {
 /// give the machine back when the installed host arrives.
 ///
 /// The startup check only covers one order of events. Reboot, a `launchctl
-/// kickstart`, or simply opening the app is enough to bring the installed host
-/// up behind a development one, and from that moment the two are fighting over
-/// the same tunnel credential again.
+/// kickstart`, a scheduled-task start, or simply opening the app is enough
+/// to bring the installed host up behind a development one, and from that
+/// moment the two are fighting over the same tunnel credential again.
 ///
 /// Exiting rather than standing down in place. This process is by definition
 /// the one nobody installed: nothing restarts it, the terminals it owns are a
 /// test session's, and leaving it half alive would mean two daemons answering
 /// two sockets with one archive between them. A loud exit is easier to
 /// understand than a daemon that quietly stopped doing half its job.
-#[cfg(unix)]
 fn watch_for_the_installed_host() {
     let Ok(identity) = tokenstat_identity::MachineIdentity::load_or_create() else {
         return;
@@ -123,11 +120,22 @@ fn watch_for_the_installed_host() {
 }
 
 #[cfg(windows)]
-fn run() -> Result<(), String> {
-    Err("tokenstat-hostd's local socket transport is not available on Windows".into())
-}
+const USAGE: &str = "\
+tokenstat host daemon. Serves the local archive over a named pipe.
 
-#[cfg(unix)]
+Usage: tokenstat-hostd [--pipe <name>]
+
+Options:
+  -s, --socket <name>  Same as --pipe
+      --pipe <name>    Listen here instead of \\\\.\\pipe\\ai.tokenstat.hostd.<user>
+  -h, --help           Print this
+  -V, --version        Print the version
+
+Runs in the foreground. Use a per-user scheduled task to keep it alive.
+See scripts/install-host-task.ps1.
+";
+
+#[cfg(not(windows))]
 const USAGE: &str = "\
 tokenstat host daemon. Serves the local archive over a unix socket.
 
@@ -135,6 +143,7 @@ Usage: tokenstat-hostd [--socket <path>]
 
 Options:
   -s, --socket <path>  Listen here instead of the default under the data dir
+      --pipe <path>    Same as --socket
   -h, --help           Print this
   -V, --version        Print the version
 

@@ -19,7 +19,7 @@ cd "$ROOT"
 FORBIDDEN_PATHS='(\.xcodeproj/|\.xcworkspace/|/Vendor/|\.xcframework/|(^|/)DerivedData[^/]*/|(^|/)target/)'
 
 # Extensions that are build output rather than source.
-FORBIDDEN_EXTS='\.(a|o|so|dylib|dll|exe|rlib|rmeta|pdb|zip|tar|gz|dmg|pkg)$'
+FORBIDDEN_EXTS='\.(a|o|so|dylib|dll|exe|rlib|rmeta|pdb|zip|tar|gz|dmg|pkg|msix|appx)$'
 
 # A source file this big is not a source file. Fixtures and images are checked
 # by eye when added; this is a backstop against a binary nobody noticed.
