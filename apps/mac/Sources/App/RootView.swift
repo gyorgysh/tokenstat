@@ -125,6 +125,77 @@ struct RootView: View {
     @State private var launch = LaunchState()
 
     var body: some View {
+        // Split the modifier chain. A single expression here is too much
+        // for the Release type checker (it times out and fails the build).
+        liveSession
+            // View menu shortcuts post here so a focused editor cannot swallow ⌘B
+            // as "bold". Toolbar items live on the NavigationSplitView above.
+            .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
+                guard launch.hostReady else { return }
+                toggleLeftSidebar()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
+                guard launch.hostReady, route.hasInspector else { return }
+                toggleRightSidebar()
+            }
+            // A folder can leave the list from anywhere: Remove in this window,
+            // a peer going away, another machine dropping off the tunnel. The
+            // route must not keep naming it, or the sidebar lights no row while
+            // the pane shows a different folder, and a scoped board keeps a scope
+            // no `onChange(of: route)` will ever clear.
+            .onChange(of: workspaces.folders.map(\.id)) { _, ids in
+                guard let id = route.workspaceID, !ids.contains(id) else { return }
+                lastSection[id] = nil
+                expandedWorkspaces.remove(id)
+                if let next = workspaces.selectedID, ids.contains(next) {
+                    selectWorkspace(next)
+                } else {
+                    navigate(to: .global(.home))
+                }
+            }
+            .onChange(of: todo.selectionGeneration) { _, _ in
+                guard todo.selectedCardID != nil else { return }
+                isInspectorPresented = true
+                if !inspectorFits {
+                    isOverlayVisible = true
+                    overlayHeldByPress = true
+                }
+            }
+            // The network came back: refresh what the offline stretch starved.
+            // A banner brought them back, or they came back on their own. Either
+            // way the terminal on screen has been seen, so its call for attention
+            // is answered and the notification goes with it.
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            ) { _ in
+                terminals.acknowledgeVisibleAttention()
+            }
+            // This is the connectionBack hook. Do it now, not on the next
+            // 30-second retry tick.
+            .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
+                // The counters were evidence about a network that no longer
+                // exists. Without this the warning card stays up after the
+                // internet is back, until some call happens to succeed.
+                connection.reset()
+                Task {
+                    await account.load()
+                    await home.refreshIfStale()
+                    await appUpdate.checkAndInstall()
+                }
+                Task { await workspaces.loadRemote() }
+                Task { await Bridge.nudgeTunnel(reconnect: true) }
+            }
+            // Waking from sleep is the same story as the network coming back: the
+            // machine's egress is only just arriving, so the tunnel supervisor
+            // should reconnect now rather than wait out a backoff sized for a
+            // laptop that was off.
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+                Task { await Bridge.nudgeTunnel() }
+            }
+    }
+
+    /// Splash or chrome, plus window geometry and the pointer peeks.
+    private var sizedWindow: some View {
         // Do not keep NavigationSplitView in the tree under the splash. Even at
         // opacity 0 it still installs the system sidebar toggle on the window
         // toolbar. Mount the chrome only after the host is ready; traffic
@@ -199,15 +270,11 @@ struct RootView: View {
         // Track which screen the window is on so the display fit and the
         // window frame follow it.
         .background {
-            #if os(macOS)
             WindowScreenObserver(
                 contentWidth: $windowContentWidth,
                 isFullScreen: $isFullScreen,
                 titlebarInset: $titlebarInset
             )
-            #else
-            Color.clear
-            #endif
         }
         .overlay {
             DayDetailPopover(
@@ -217,11 +284,9 @@ struct RootView: View {
                 windowSize: windowSize
             )
         }
-        #if os(macOS)
         .sheet(isPresented: $workspaces.isAddSheetPresented) {
             AddWorkspaceSheet(model: workspaces)
         }
-        #endif
         // The window size for the hover popover, which needs to be placed
         // against the window rather than the pane it floats over.
         //
@@ -245,209 +310,146 @@ struct RootView: View {
                     }
             }
         }
-        // Insights is not the first screen. Loading it at launch used to fire
-        // eight archive queries that all take the session lock and queue
-        // behind (and in front of) Home's own work. Load on first visit.
-        .task(id: route) {
-            guard route.isGlobal(.insights) else { return }
-            await model.load()
-        }
-        // Returning to Home after work elsewhere: quiet re-read if the last
-        // load is older than the stale window (see HomeModel.refreshIfStale).
-        .onChange(of: route) { _, next in
-            // A float belongs to the screen it was opened over. Carrying one
-            // across a navigation is how somebody who clicked a workspace ends
-            // up with a pane over it that they never asked for.
-            isOverlayVisible = false
-            overlayHeldByPress = false
-            applyScope(from: next)
-            guard next.isGlobal(.home) else { return }
-            Task { await home.refreshIfStale() }
-        }
-        #if os(macOS)
-        .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
-            syncRouteToFront(front)
-        }
-        #endif
-        // After the heatmap is up, warm secondary surfaces so Machines /
-        // remote workspaces / agent tiles are a cache hit on first click.
-        // Never starts before archive ready, so Home keeps the host first.
-        .task(id: home.isArchiveReady) {
-            guard home.isArchiveReady else { return }
-            await warmSecondarySurfaces()
-        }
-        // Live automations belong on the workspace sidebar, so the run list
-        // has to stay current even when the Automations screen is not open.
-        .task {
-            await automations.load()
-            while !Task.isCancelled {
-                let interval: Duration = automations.runs.contains(where: \.isRunning)
-                    ? .seconds(2)
-                    : .seconds(12)
-                try? await Task.sleep(for: interval)
+    }
+
+    /// Periodic loads and peer events. Kept off `body` so Release can type-check.
+    private var liveSession: some View {
+        sizedWindow
+            // Insights is not the first screen. Loading it at launch used to fire
+            // eight archive queries that all take the session lock and queue
+            // behind (and in front of) Home's own work. Load on first visit.
+            .task(id: route) {
+                guard route.isGlobal(.insights) else { return }
+                await model.load()
+            }
+            // Returning to Home after work elsewhere: quiet re-read if the last
+            // load is older than the stale window (see HomeModel.refreshIfStale).
+            .onChange(of: route) { _, next in
+                // A float belongs to the screen it was opened over. Carrying one
+                // across a navigation is how somebody who clicked a workspace ends
+                // up with a pane over it that they never asked for.
+                isOverlayVisible = false
+                overlayHeldByPress = false
+                applyScope(from: next)
+                guard next.isGlobal(.home) else { return }
+                Task { await home.refreshIfStale() }
+            }
+            .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
+                syncRouteToFront(front)
+            }
+            // After the heatmap is up, warm secondary surfaces so Machines /
+            // remote workspaces / agent tiles are a cache hit on first click.
+            // Never starts before archive ready, so Home keeps the host first.
+            .task(id: home.isArchiveReady) {
+                guard home.isArchiveReady else { return }
+                await warmSecondarySurfaces()
+            }
+            // Live automations belong on the workspace sidebar, so the run list
+            // has to stay current even when the Automations screen is not open.
+            .task {
+                await automations.load()
+                while !Task.isCancelled {
+                    let interval: Duration = automations.runs.contains(where: \.isRunning)
+                        ? .seconds(2)
+                        : .seconds(12)
+                    try? await Task.sleep(for: interval)
+                    guard !Task.isCancelled else { return }
+                    await automations.refreshList()
+                }
+            }
+            .task {
+                await workflows.load()
+                while !Task.isCancelled {
+                    let interval: Duration = workflows.runs.contains(where: \.isLive)
+                        ? .seconds(2)
+                        : .seconds(12)
+                    try? await Task.sleep(for: interval)
+                    guard !Task.isCancelled else { return }
+                    await workflows.refreshList()
+                }
+            }
+            // The board's counts, loaded whether or not anyone has opened it: a
+            // count that only appears after a visit to the screen it counts is not
+            // a count anybody can rely on.
+            //
+            // Cards only, and silent. The full load also fetches backends and the
+            // queue config, which the sidebar has no use for, and it reports its
+            // failures into the board's own error banner, where a background tick
+            // has no business writing.
+            .task {
+                await todo.load()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(60))
+                    guard !Task.isCancelled else { return }
+                    await todo.refreshCounts()
+                }
+            }
+            // Sidebar footer needs the handle, but not on the first frame. A short
+            // yield lets Home's archive calls claim the host first.
+            .task {
+                try? await Task.sleep(for: .milliseconds(400))
                 guard !Task.isCancelled else { return }
-                await automations.refreshList()
-            }
-        }
-        .task {
-            await workflows.load()
-            while !Task.isCancelled {
-                let interval: Duration = workflows.runs.contains(where: \.isLive)
-                    ? .seconds(2)
-                    : .seconds(12)
-                try? await Task.sleep(for: interval)
-                guard !Task.isCancelled else { return }
-                await workflows.refreshList()
-            }
-        }
-        // The board's counts, loaded whether or not anyone has opened it: a
-        // count that only appears after a visit to the screen it counts is not
-        // a count anybody can rely on.
-        //
-        // Cards only, and silent. The full load also fetches backends and the
-        // queue config, which the sidebar has no use for, and it reports its
-        // failures into the board's own error banner, where a background tick
-        // has no business writing.
-        .task {
-            await todo.load()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard !Task.isCancelled else { return }
-                await todo.refreshCounts()
-            }
-        }
-        // Sidebar footer needs the handle, but not on the first frame. A short
-        // yield lets Home's archive calls claim the host first.
-        .task {
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled else { return }
-            await account.load()
-        }
-        // Update check talks to the network and is not part of first paint.
-        .task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            await appUpdate.checkAndInstall()
-        }
-        .task {
-            // Local folder names for the sidebar first. Git status is part of
-            // that call, but it is still cheaper than also dialling peers.
-            await workspaces.loadLocal()
-            // Remote peers wait for the post-heatmap warm (or the 600ms
-            // fallback below) so a cold Home does not compete with dials.
-            try? await Task.sleep(for: .milliseconds(600))
-            guard !Task.isCancelled else { return }
-            if !home.isArchiveReady {
-                await workspaces.loadRemote()
-            }
-            // Other machines on their own slow schedule. Local folders refresh
-            // from the file watcher, which must not dial anybody.
-            await workspaces.watchPeers()
-        }
-        // A machine that just connected should not wait for the 60-second peer
-        // sweep to show its folders.
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
-            if let key = note.object as? String {
-                // An explicit Connect undoes a previous Disconnect; the sweep
-                // notification (same object) is simply an extra reload.
-                workspaces.reconnect(peer: key)
-            } else {
-                Task { await workspaces.loadRemote() }
-            }
-        }
-        // An explicit Disconnect drops the peer's folders now instead of
-        // waiting for the failure sweep to notice.
-        .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
-            if let key = note.object as? String {
-                workspaces.disconnect(peer: key)
-            }
-        }
-        #if os(macOS)
-        .task {
-            // Terminals are not on the first screen. A short yield keeps the
-            // host free for Home's archive answers.
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled else { return }
-            await terminals.load()
-            // Sessions can start on this machine from a remote window or an
-            // automation; the sidebar has to learn about them without an app
-            // restart.
-            await terminals.watch()
-        }
-        // The File menu's Add Workspace. The menu has no model, so it posts and
-        // this acts.
-        .task {
-            for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
-                workspaces.requestAdd()
-            }
-        }
-        // Host bring-up lives in `LaunchState.prepare` (splash). No second
-        // ensureHosted here: that would race the splash and reinstall thrash.
-        #endif
-        // View menu shortcuts post here so a focused editor cannot swallow ⌘B
-        // as "bold". Toolbar items live on the NavigationSplitView above.
-        .onReceive(NotificationCenter.default.publisher(for: .toggleLeftSidebar)) { _ in
-            guard launch.hostReady else { return }
-            toggleLeftSidebar()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleRightSidebar)) { _ in
-            guard launch.hostReady, route.hasInspector else { return }
-            toggleRightSidebar()
-        }
-        // A folder can leave the list from anywhere: Remove in this window,
-        // a peer going away, another machine dropping off the tunnel. The
-        // route must not keep naming it, or the sidebar lights no row while
-        // the pane shows a different folder, and a scoped board keeps a scope
-        // no `onChange(of: route)` will ever clear.
-        .onChange(of: workspaces.folders.map(\.id)) { _, ids in
-            guard let id = route.workspaceID, !ids.contains(id) else { return }
-            lastSection[id] = nil
-            expandedWorkspaces.remove(id)
-            if let next = workspaces.selectedID, ids.contains(next) {
-                selectWorkspace(next)
-            } else {
-                navigate(to: .global(.home))
-            }
-        }
-        .onChange(of: todo.selectionGeneration) { _, _ in
-            guard todo.selectedCardID != nil else { return }
-            isInspectorPresented = true
-            if !inspectorFits {
-                isOverlayVisible = true
-                overlayHeldByPress = true
-            }
-        }
-        // The network came back: refresh what the offline stretch starved.
-        // A banner brought them back, or they came back on their own. Either
-        // way the terminal on screen has been seen, so its call for attention
-        // is answered and the notification goes with it.
-        .onReceive(
-            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-        ) { _ in
-            terminals.acknowledgeVisibleAttention()
-        }
-        // This is the connectionBack hook. Do it now, not on the next
-        // 30-second retry tick.
-        .onReceive(NotificationCenter.default.publisher(for: .connectivityRestored)) { _ in
-            // The counters were evidence about a network that no longer
-            // exists. Without this the warning card stays up after the
-            // internet is back, until some call happens to succeed.
-            connection.reset()
-            Task {
                 await account.load()
-                await home.refreshIfStale()
+            }
+            // Update check talks to the network and is not part of first paint.
+            .task {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
                 await appUpdate.checkAndInstall()
             }
-            Task { await workspaces.loadRemote() }
-            Task { await Bridge.nudgeTunnel(reconnect: true) }
-        }
-        // Waking from sleep is the same story as the network coming back: the
-        // machine's egress is only just arriving, so the tunnel supervisor
-        // should reconnect now rather than wait out a backoff sized for a
-        // laptop that was off.
-        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-            Task { await Bridge.nudgeTunnel() }
-        }
+            .task {
+                // Local folder names for the sidebar first. Git status is part of
+                // that call, but it is still cheaper than also dialling peers.
+                await workspaces.loadLocal()
+                // Remote peers wait for the post-heatmap warm (or the 600ms
+                // fallback below) so a cold Home does not compete with dials.
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+                if !home.isArchiveReady {
+                    await workspaces.loadRemote()
+                }
+                // Other machines on their own slow schedule. Local folders refresh
+                // from the file watcher, which must not dial anybody.
+                await workspaces.watchPeers()
+            }
+            // A machine that just connected should not wait for the 60-second peer
+            // sweep to show its folders.
+            .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidConnect)) { note in
+                if let key = note.object as? String {
+                    // An explicit Connect undoes a previous Disconnect; the sweep
+                    // notification (same object) is simply an extra reload.
+                    workspaces.reconnect(peer: key)
+                } else {
+                    Task { await workspaces.loadRemote() }
+                }
+            }
+            // An explicit Disconnect drops the peer's folders now instead of
+            // waiting for the failure sweep to notice.
+            .onReceive(NotificationCenter.default.publisher(for: .remotePeerDidDisconnect)) { note in
+                if let key = note.object as? String {
+                    workspaces.disconnect(peer: key)
+                }
+            }
+            .task {
+                // Terminals are not on the first screen. A short yield keeps the
+                // host free for Home's archive answers.
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled else { return }
+                await terminals.load()
+                // Sessions can start on this machine from a remote window or an
+                // automation; the sidebar has to learn about them without an app
+                // restart.
+                await terminals.watch()
+            }
+            // The File menu's Add Workspace. The menu has no model, so it posts and
+            // this acts.
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .addWorkspaceRequested) {
+                    workspaces.requestAdd()
+                }
+            }
+            // Host bring-up lives in `LaunchState.prepare` (splash). No second
+            // ensureHosted here: that would race the splash and reinstall thrash.
     }
 
     /// Shared chrome: NavigationSplitView.
