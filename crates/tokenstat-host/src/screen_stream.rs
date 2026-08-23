@@ -19,6 +19,9 @@ pub const MAX_VIDEO_BYTES: usize = 1_048_576;
 /// Keyboard and pointer batches are tiny. The bound prevents an authorized
 /// controller bug from turning the input path into an allocation primitive.
 pub const MAX_INPUT_BYTES: usize = 4_096;
+/// Display inventory and other session description JSON is small and replaces
+/// the previous value rather than accumulating at the viewer.
+pub const MAX_METADATA_BYTES: usize = 64 * 1024;
 /// At most a few compressed pictures wait for a viewer. Latency matters more
 /// than preserving obsolete frames in an interactive screen session.
 pub const MAX_QUEUED_VIDEO_BYTES: usize = 3 * MAX_VIDEO_BYTES;
@@ -29,6 +32,7 @@ pub enum FrameKind {
     Video = 1,
     Input = 2,
     End = 3,
+    Metadata = 4,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +53,7 @@ impl Frame {
             FrameKind::Video => MAX_VIDEO_BYTES,
             FrameKind::Input => MAX_INPUT_BYTES,
             FrameKind::End => 0,
+            FrameKind::Metadata => MAX_METADATA_BYTES,
         };
         if self.payload.len() > limit {
             return Err(format!(
@@ -87,6 +92,7 @@ impl Frame {
             1 => FrameKind::Video,
             2 => FrameKind::Input,
             3 => FrameKind::End,
+            4 => FrameKind::Metadata,
             other => return Err(format!("unknown screen frame kind {other}")),
         };
         let sequence = u64::from_be_bytes(bytes[8..16].try_into().unwrap());
@@ -205,6 +211,20 @@ mod tests {
     #[test]
     fn frame_round_trips_without_json_or_base64() {
         let frame = video(42, 128, true);
+        assert_eq!(Frame::decode(&frame.encode().unwrap()).unwrap(), frame);
+    }
+
+    #[test]
+    fn bounded_metadata_round_trips_independently_of_video() {
+        let frame = Frame {
+            kind: FrameKind::Metadata,
+            sequence: 0,
+            timestamp_us: 0,
+            width: 0,
+            height: 0,
+            independent: true,
+            payload: br#"{"type":"displays"}"#.to_vec(),
+        };
         assert_eq!(Frame::decode(&frame.encode().unwrap()).unwrap(), frame);
     }
 

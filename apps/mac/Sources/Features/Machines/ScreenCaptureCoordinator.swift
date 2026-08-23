@@ -13,12 +13,13 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
 
     private let lock = NSLock()
     private var active: [String: ScreenCaptureSession] = [:]
-    private var encoder: ScreenVideoEncoder?
+    private var encoders: [String: ScreenVideoEncoder] = [:]
     private var task: Task<Void, Never>?
     private var frameTask: Task<Void, Never>?
-    private var frameContinuation: AsyncStream<Data>.Continuation?
-    private var pressure = 0
-    private var clearFrames = 0
+    private var frameContinuation: AsyncStream<(String, Data)>.Continuation?
+    private var pressure: [String: Int] = [:]
+    private var clearFrames: [String: Int] = [:]
+    private var clipboardChangeCount = -1
 
     private init() {}
 
@@ -26,10 +27,10 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard task == nil else { return }
-        let (frames, continuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .bufferingNewest(3))
+        let (frames, continuation) = AsyncStream.makeStream(of: (String, Data).self, bufferingPolicy: .bufferingNewest(12))
         frameContinuation = continuation
         frameTask = Task.detached(priority: .userInitiated) { [weak self] in
-            for await frame in frames { await self?.push(frame) }
+            for await (id, frame) in frames { await self?.push(frame, to: id) }
         }
         task = Task.detached(priority: .utility) { [weak self] in
             await self?.run()
@@ -41,11 +42,18 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
             do {
                 let sessions = try await Bridge.screenCaptureSessions()
                 try await adopt(sessions)
-                for session in sessions where session.control {
+                for session in sessions {
                     if let input = try? await Bridge.screenCaptureInput(id: session.id) {
-                        ScreenInput.apply(input)
+                        if let display = ScreenInput.displaySelection(input) {
+                            try? await encoder(for: session.id)?.selectDisplay(display)
+                        } else if let clipboard = ScreenInput.clipboard(input) {
+                            await applyClipboard(clipboard)
+                        } else if session.control {
+                            ScreenInput.apply(input, displayID: encoder(for: session.id)?.displayID)
+                        }
                     }
                 }
+                await publishClipboard(to: sessions.map(\.id))
             } catch {
                 // hostd may be restarting or no session may exist yet.
             }
@@ -54,35 +62,62 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
     }
 
     private func adopt(_ sessions: [ScreenCaptureSession]) async throws {
-        let (needsEncoder, existing) = lock.withLock {
+        let (added, removed) = lock.withLock {
+            let previous = Set(active.keys)
             active = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
-            return (!active.isEmpty, encoder)
+            let current = Set(active.keys)
+            return (current.subtracting(previous), previous.subtracting(current))
         }
 
-        if needsEncoder, existing == nil {
+        for id in removed {
+            lock.withLock { encoders.removeValue(forKey: id) }?.stop()
+            pressure[id] = nil; clearFrames[id] = nil
+        }
+        for id in added {
             let created = ScreenVideoEncoder { [weak self] frame in
-                self?.frameContinuation?.yield(frame)
+                self?.frameContinuation?.yield((id, frame))
             }
             try await created.start()
-            lock.withLock { encoder = created }
-        } else if !needsEncoder, let existing {
-            existing.stop()
-            lock.withLock { encoder = nil }
+            lock.withLock { encoders[id] = created }
         }
     }
 
-    private func push(_ frame: Data) async {
-        let (ids, encoder) = lock.withLock { (Array(active.keys), self.encoder) }
-        var congested = false
-        for id in ids {
-            if let result = try? await Bridge.screenCapturePush(id: id, frame: frame), !result.accepted { congested = true }
+    private func encoder(for id: String) -> ScreenVideoEncoder? { lock.withLock { encoders[id] } }
+
+    private func publishClipboard(to ids: [String]) async {
+        guard !ids.isEmpty else { return }
+        let update: (String, String)? = await MainActor.run {
+            let board = NSPasteboard.general
+            guard board.changeCount != clipboardChangeCount else { return nil }
+            clipboardChangeCount = board.changeCount
+            guard let text = board.string(forType: .string), text.utf8.count <= 4_096 else { return nil }
+            return (UUID().uuidString, text)
         }
+        guard let update,
+              let payload = try? JSONSerialization.data(withJSONObject: ["type": "clipboard", "id": update.0, "text": update.1]) else { return }
+        let frame = ScreenWire.metadata(payload)
+        for id in ids { frameContinuation?.yield((id, frame)) }
+    }
+
+    private func applyClipboard(_ text: String) async {
+        await MainActor.run {
+            let board = NSPasteboard.general
+            guard board.string(forType: .string) != text else { return }
+            board.clearContents()
+            board.setString(text, forType: .string)
+            clipboardChangeCount = board.changeCount
+        }
+    }
+
+    private func push(_ frame: Data, to id: String) async {
+        let encoder = encoder(for: id)
+        let congested = if let result = try? await Bridge.screenCapturePush(id: id, frame: frame) { !result.accepted } else { true }
         if congested {
-            pressure += 1; clearFrames = 0
-            if pressure == 3 { await encoder?.setQuality(0.7) }
+            pressure[id, default: 0] += 1; clearFrames[id] = 0
+            if pressure[id] == 3 { await encoder?.setQuality(0.7) }
         } else {
-            pressure = 0; clearFrames += 1
-            if clearFrames == 300 { await encoder?.setQuality(1) }
+            pressure[id] = 0; clearFrames[id, default: 0] += 1
+            if clearFrames[id] == 300 { await encoder?.setQuality(1) }
         }
     }
 }
@@ -98,15 +133,23 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     private var sourceWidth = 0
     private var sourceHeight = 0
     private var configuration: SCStreamConfiguration?
+    private(set) var displayID: CGDirectDisplayID?
 
     init(output: @escaping @Sendable (Data) -> Void) { self.output = output }
 
-    func start() async throws {
+    func start(displayID requestedID: CGDirectDisplayID? = nil) async throws {
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw ScreenCaptureError.permission
         }
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first else { throw ScreenCaptureError.noDisplay }
+        guard let display = requestedID.flatMap({ id in content.displays.first { $0.displayID == id } }) ?? content.displays.first else { throw ScreenCaptureError.noDisplay }
+        displayID = display.displayID
+        let displays = content.displays.enumerated().map { index, item in
+            ["id": item.displayID, "name": item.displayID == CGMainDisplayID() ? "Main display" : "Display \(index + 1)", "width": item.width, "height": item.height] as [String: Any]
+        }
+        if let metadata = try? JSONSerialization.data(withJSONObject: ["type": "displays", "selected": display.displayID, "displays": displays]) {
+            output(ScreenWire.metadata(metadata))
+        }
         let scale = min(1, 1920 / CGFloat(display.width))
         sourceWidth = display.width
         sourceHeight = display.height
@@ -129,9 +172,16 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         try await stream.startCapture()
     }
 
+    func selectDisplay(_ id: CGDirectDisplayID) async throws {
+        guard id != displayID else { return }
+        stop()
+        try await start(displayID: id)
+    }
+
     func stop() {
         let stream = stream
         self.stream = nil
+        displayID = nil
         Task { try? await stream?.stopCapture() }
         if let compression { VTCompressionSessionInvalidate(compression) }
         compression = nil
@@ -228,12 +278,18 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
 }
 
 private enum ScreenWire {
+    static func metadata(_ payload: Data) -> Data {
+        frame(kind: 4, sequence: 0, timestamp: 0, width: 0, height: 0, independent: true, payload: payload)
+    }
     static func video(sequence: UInt64, timestamp: CMTime, width: UInt16, height: UInt16, keyframe: Bool, payload: Data) -> Data {
-        var data = Data("TSCR".utf8)
-        data.append(contentsOf: [1, 1, keyframe ? 1 : 0, 0])
-        data.appendBigEndian(sequence)
         let micros = timestamp.isNumeric ? UInt64(max(0, CMTimeGetSeconds(timestamp) * 1_000_000)) : 0
-        data.appendBigEndian(micros)
+        return frame(kind: 1, sequence: sequence, timestamp: micros, width: width, height: height, independent: keyframe, payload: payload)
+    }
+    private static func frame(kind: UInt8, sequence: UInt64, timestamp: UInt64, width: UInt16, height: UInt16, independent: Bool, payload: Data) -> Data {
+        var data = Data("TSCR".utf8)
+        data.append(contentsOf: [1, kind, independent ? 1 : 0, 0])
+        data.appendBigEndian(sequence)
+        data.appendBigEndian(timestamp)
         data.appendBigEndian(width)
         data.appendBigEndian(height)
         data.appendBigEndian(UInt32(payload.count))
@@ -243,13 +299,23 @@ private enum ScreenWire {
 }
 
 private enum ScreenInput {
-    struct Event: Decodable { var type: String; var x: Double?; var y: Double?; var button: Int?; var down: Bool?; var keyCode: UInt16?; var flags: UInt64?; var text: String? }
-    static func apply(_ data: Data) {
+    struct Event: Decodable { var type: String; var x: Double?; var y: Double?; var id: UInt32?; var button: Int?; var down: Bool?; var keyCode: UInt16?; var flags: UInt64?; var text: String? }
+    static func displaySelection(_ data: Data) -> CGDirectDisplayID? {
+        guard let event = try? JSONDecoder().decode(Event.self, from: data), event.type == "display" else { return nil }
+        return event.id
+    }
+    static func clipboard(_ data: Data) -> String? {
+        guard let event = try? JSONDecoder().decode(Event.self, from: data), event.type == "clipboard",
+              let text = event.text, text.utf8.count <= 4_096 else { return nil }
+        return text
+    }
+    static func apply(_ data: Data, displayID: CGDirectDisplayID?) {
         guard AXIsProcessTrusted(), let event = try? JSONDecoder().decode(Event.self, from: data) else { return }
-        let display = CGMainDisplayID()
+        let display = displayID ?? CGMainDisplayID()
+        let bounds = CGDisplayBounds(display)
         let point = CGPoint(
-            x: (event.x ?? 0) * Double(CGDisplayPixelsWide(display)),
-            y: (event.y ?? 0) * Double(CGDisplayPixelsHigh(display))
+            x: bounds.minX + (event.x ?? 0) * bounds.width,
+            y: bounds.minY + (event.y ?? 0) * bounds.height
         )
         let source = CGEventSource(stateID: .hidSystemState)
         let cg: CGEvent?

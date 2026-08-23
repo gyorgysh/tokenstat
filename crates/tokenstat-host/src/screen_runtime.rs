@@ -76,7 +76,11 @@ pub(crate) fn queue_input(id: &str, payload: Vec<u8>) -> Result<(), String> {
         .cloned()
         .ok_or("screen capture session is no longer active")?;
     let mut held = session.lock().map_err(|_| "capture session poisoned")?;
-    if !held.control {
+    let session_command = serde_json::from_slice::<Value>(&payload)
+        .ok()
+        .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
+        .is_some_and(|kind| matches!(kind.as_str(), "display" | "clipboard"));
+    if !held.control && !session_command {
         return Err("this screen session is view-only".into());
     }
     if held.input.len() >= 64 {
@@ -123,8 +127,8 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let p: PushParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let bytes = crate::base64::decode(&p.frame)?;
                 let frame = Frame::decode(&bytes)?;
-                if frame.kind != FrameKind::Video {
-                    return Err("capture helper may push only video frames".into());
+                if !matches!(frame.kind, FrameKind::Video | FrameKind::Metadata) {
+                    return Err("capture helper may push only video or metadata frames".into());
                 }
                 let session = sessions()
                     .lock()
@@ -176,5 +180,6 @@ mod tests {
     fn view_only_session_rejects_control_input() {
         let receiver = create("view-only".into(), "phone".into(), false).unwrap();
         assert!(queue_input(&receiver.id, vec![1]).is_err());
+        assert!(queue_input(&receiver.id, br#"{"type":"display","id":2}"#.to_vec()).is_ok());
     }
 }

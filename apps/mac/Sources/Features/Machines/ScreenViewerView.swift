@@ -2,6 +2,11 @@
 
 import AVFoundation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 /// Legend screen viewer. H.264 is decoded entirely at this endpoint by the
 /// system display layer; the relay and account service see encrypted bytes.
@@ -31,6 +36,19 @@ struct ScreenViewerView: View {
         }
         .navigationTitle(name)
         .toolbar {
+            if model.displays.count > 1 {
+                ToolbarItem {
+                    Picker("Display", selection: Binding(
+                        get: { model.selectedDisplay ?? 0 },
+                        set: { model.selectDisplay($0) }
+                    )) {
+                        ForEach(model.displays) { display in
+                            Text(display.name).tag(display.id)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
             ToolbarItem {
                 Toggle(isOn: $controlling) { Label("Control", systemImage: "cursorarrow.motionlines") }
                     .disabled(model.state == .streaming)
@@ -75,10 +93,13 @@ private final class ScreenViewerModel {
     var state: State = .idle
     var message = "Connecting…"
     var aspectRatio: CGFloat = 16 / 9
+    var displays: [ScreenDisplay] = []
+    var selectedDisplay: UInt32?
     let decoder = ScreenH264Decoder()
     private var session: ScreenViewerSession?
     private var task: Task<Void, Never>?
     private var pointerIsDown = false
+    private var clipboardChangeCount = -1
 
     func start(peer: String, tier: String?, control: Bool) async {
         stop()
@@ -120,6 +141,16 @@ private final class ScreenViewerModel {
         while !Task.isCancelled {
             do {
                 let read = try await Bridge.screenViewerRead(id: id)
+                if let encoded = read.metadata, let data = Data(base64Encoded: encoded),
+                   let metadata = try? JSONDecoder().decode(ScreenMetadata.self, from: data)
+                {
+                    if metadata.type == "displays", let values = metadata.displays {
+                        displays = values
+                        selectedDisplay = metadata.selected
+                    } else if metadata.type == "clipboard", let text = metadata.text {
+                        applyClipboard(text)
+                    }
+                }
                 if let encoded = read.frame, let data = Data(base64Encoded: encoded),
                    let frame = ScreenEncodedFrame(data)
                 {
@@ -131,6 +162,7 @@ private final class ScreenViewerModel {
                     message = read.error ?? "The screen session ended."
                     return
                 }
+                syncClipboard()
             } catch {
                 state = .failed
                 message = error.localizedDescription
@@ -153,10 +185,53 @@ private final class ScreenViewerModel {
         send(["type":"pointer", "x":x, "y":y, "down":false] as [String: Any])
     }
     func sendText(_ text: String) { send(["type":"text", "text":text]) }
+    func selectDisplay(_ id: UInt32) {
+        guard displays.contains(where: { $0.id == id }) else { return }
+        selectedDisplay = id
+        decoder.reset()
+        send(["type":"display", "id":id] as [String: Any])
+    }
+    private func syncClipboard() {
+        let value: (Int, String?)
+        #if os(macOS)
+        value = (NSPasteboard.general.changeCount, NSPasteboard.general.string(forType: .string))
+        #else
+        value = (UIPasteboard.general.changeCount, UIPasteboard.general.string)
+        #endif
+        guard value.0 != clipboardChangeCount else { return }
+        clipboardChangeCount = value.0
+        guard let text = value.1, text.utf8.count <= 4_096 else { return }
+        send(["type":"clipboard", "text":text])
+    }
+    private func applyClipboard(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        clipboardChangeCount = NSPasteboard.general.changeCount
+        #else
+        UIPasteboard.general.string = text
+        clipboardChangeCount = UIPasteboard.general.changeCount
+        #endif
+    }
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         Task { try? await Bridge.screenViewerInput(id: id, data: data) }
     }
+}
+
+private struct ScreenDisplay: Codable, Hashable, Identifiable {
+    let id: UInt32
+    let name: String
+    let width: Int
+    let height: Int
+}
+
+private struct ScreenMetadata: Codable {
+    let type: String
+    let selected: UInt32?
+    let displays: [ScreenDisplay]?
+    let id: String?
+    let text: String?
 }
 
 private struct ScreenEncodedFrame {
