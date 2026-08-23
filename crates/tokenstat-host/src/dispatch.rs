@@ -2355,6 +2355,12 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
                     // The disk image itself, so the app can offer the download
                     // rather than the release page it is one click inside.
                     "dmgUrl": check.app_dmg_url,
+                    // Windows desktop zip. Distinct from the CLI's
+                    // target-triple zip. Unsigned preview builds skip
+                    // Authenticode in the app, the way a local Mac build
+                    // skips Developer ID.
+                    "winZipUrl": check.app_win_url,
+                    "winZipName": check.app_win_name,
                 })
             })
             .map_err(|e| e.to_string()),
@@ -2366,6 +2372,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
         // Apple's own tools and knowledge of where the running bundle lives,
         // neither of which a daemon should be guessing at.
         "app.updateDownload" => tokenstat_sync::download_app_image()
+            .map(|path| json!({"path": path.display().to_string()}))
+            .map_err(|e| e.to_string()),
+
+        // Same contract as `app.updateDownload`, for the Windows zip.
+        "app.updateDownloadWin" => tokenstat_sync::download_windows_app_archive()
             .map(|path| json!({"path": path.display().to_string()}))
             .map_err(|e| e.to_string()),
 

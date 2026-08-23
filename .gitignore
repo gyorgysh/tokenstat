@@ -20,13 +20,14 @@ credentials.json
 /crates/tokenstat-core/pricing/
 
 # Internal working notes. Research, design rationale, and session handover.
+# The whole docs/ directory, with no exceptions. A `!` un-ignore is how two
+# files leaked onto GitHub. Do not add one. tools/ is unused local scratch.
 /roadmap.md
 /WORKLOG.md
 /CLAUDE.md
 /TODO.md
-/docs/*
-!/docs/remote-access-ux-vault-plan.md
-!/docs/preview-builds.md
+/docs/
+/tools/
 
 # Coverage and profiling
 /coverage/
@@ -77,6 +78,11 @@ desktop.ini
 # way. Never committed.
 /apps/*/build/
 /apps/*/DerivedData*/
+/apps/windows/bin/
+/apps/windows/obj/
+/apps/windows/.vs/
+/apps/windows/*.user
+/apps/windows/*.suo
 # Gradle puts each module's build output inside the module, so the Android
 # app's is one level deeper than the Xcode one above.
 /apps/android/**/build/

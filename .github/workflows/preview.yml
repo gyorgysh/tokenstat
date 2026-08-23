@@ -77,35 +77,33 @@ jobs:
           shared-key: preview-windows
           save-if: false
 
-      - name: Build CLI and hostd
-        run: |
-          cargo build --release --locked -p tokenstat-cli
-          cargo build --release --locked -p tokenstat-host --bin tokenstat-hostd
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
-      - name: Package
+      - name: Build unsigned Windows app
         id: package
-        shell: bash
         env:
           VERSION: ${{ needs.version.outputs.version }}
+        shell: pwsh
         run: |
-          set -euo pipefail
-          name="tokenstat-${VERSION}-windows-x64-dev"
-          mkdir -p "dist/${name}"
-          cp target/release/tokenstat.exe "dist/${name}/"
-          cp target/release/tokenstat-hostd.exe "dist/${name}/"
-          cp README.md LICENSE "dist/${name}/" 2>/dev/null || cp README.md "dist/${name}/"
-          cargo run --release --locked -p xtask -- notices \
-            "dist/${name}/THIRD-PARTY-NOTICES.md" tokenstat-cli
-          printf '%s\n' "$VERSION" > "dist/${name}/PREVIEW.txt"
-          printf 'unsigned development build. not a release.\n' >> "dist/${name}/PREVIEW.txt"
-          cd dist
-          7z a "${name}.zip" "${name}" > /dev/null
-          if command -v sha256sum > /dev/null; then
-            sha256sum "${name}.zip" > "${name}.zip.sha256"
-          else
-            shasum -a 256 "${name}.zip" > "${name}.zip.sha256"
-          fi
-          echo "asset=${name}.zip" >> "$GITHUB_OUTPUT"
+          $ErrorActionPreference = "Stop"
+          $base = (Select-String -Path Cargo.toml -Pattern '^version\s*=' |
+            Select-Object -First 1).Line.Split('"')[1]
+          scripts/build-windows-app.ps1 -Version $base `
+            -InformationalVersion $env:VERSION -Rid win-x64 -Out dist
+          $name = "tokenstat-$($env:VERSION)-windows-x64"
+          $preview = @(
+            $env:VERSION
+            "unsigned development build. not a release."
+          ) -join "`n"
+          Set-Content -Path "dist/$name/PREVIEW.txt" -Value $preview
+          Push-Location dist
+          7z a "$name.zip" $name | Out-Null
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$name.zip.sha256" -Value "$hash  $name.zip"
+          Pop-Location
+          "asset=$name.zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - uses: actions/upload-artifact@v7
         with:

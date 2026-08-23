@@ -2,39 +2,44 @@
 
 # tokenstat
 
-Unified token usage for AI coding agents and LLM tools.
+Monitor AI work, everywhere
 
 [![CI](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml/badge.svg)](https://github.com/gyorgysh/tokenstat/actions/workflows/ci.yml)
 [![License: source-available](https://img.shields.io/badge/license-source--available-blue)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/gyorgysh/tokenstat)](https://github.com/gyorgysh/tokenstat/releases)
 [![website](https://img.shields.io/badge/website-tokenstat.ai-9F68C7)](https://tokenstat.ai)
 
-[Install](#install) · [Usage](#usage) · [Privacy](#privacy) · [Contributing](CONTRIBUTING.md)
+[Install](#install) · [CLI](#command-line) · [Privacy](#privacy) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
-`tokenstat` is the CLI for [tokenstat.ai](https://tokenstat.ai). It reads the
-local session logs your tools already write, normalizes counters into one schema,
-and reports spend by model, project, tool, and time. Everything runs on your
-machine by default. Sync to a public profile is opt in.
+tokenstat is a local-first app for the AI coding tools you already use. It reads
+their local records, shows tokens, models, projects, sessions, and estimated
+API value in one place, then lets you work with those machines from the desktop
+app or an optional synced account.
+
+The Mac and Windows apps, the iPhone and Android clients, the CLI, and the MCP
+server all share one core. The website at [tokenstat.ai](https://tokenstat.ai)
+is a separate project. This repository is everything that runs on your machine.
 
 <p align="center">
   <img src="assets/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
 </p>
 
 <p align="center">
-  See what a synced profile looks like: <a href="https://tokenstat.ai/gyorgy"><strong>tokenstat.ai/gyorgy</strong></a>
+  A synced profile, if you want one: <a href="https://tokenstat.ai/gyorgy"><strong>tokenstat.ai/gyorgy</strong></a>
 </p>
 
 ## Highlights
 
-- **Local first**: counters stay on your machine. Conversation text never reaches the archive
-- **Many sources**: Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, plus Cursor fetch
-- **One schema**: daily, weekly, monthly, and per-model views across every tool
-- **Activity heatmap**: rolling calendar ramped on daily list-rate value, with streaks, busiest day, and a purple-to-cyan ramp
-- **Model catalog**: context window, capabilities, and public benchmark scores per model
-- **Optional sync**: sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
-- **Self-update**: verified GitHub Releases with rollback if the new binary cannot run
+- **Local first.** Counters stay on your machine. Conversation text never reaches the archive
+- **Desktop apps.** Home, Insights, Devices, workspaces, tasks, notes, workflows, and automations, over one host daemon
+- **Mac and Windows.** The Mac app is a signed disk image. The Windows app is a zip: double-click `Tokenstat.exe` to install for this user
+- **Phone clients.** iPhone and Android read the same archive, with a terminal onto a machine you already run
+- **Many sources.** Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, plus Cursor fetch
+- **One schema.** Daily, weekly, monthly, and per-model views across every tool
+- **MCP.** Agents can ask their own spend over stdio, no hosted server
+- **Optional sync.** Sealed aggregates to `tokenstat.ai/<handle>` when you link an account ([live example](https://tokenstat.ai/gyorgy))
 
 ## Supported sources
 
@@ -48,9 +53,6 @@ Plan quota for Antigravity is reported separately and is never turned into fake 
 
 ## Architecture
 
-The website is a separate project. This repository is the CLI, shared core, and
-MCP server.
-
 <p align="center">
   <img src="assets/flow.svg" alt="Local logs feed a terminal, opt-in sync sends only aggregate counters, and a public profile page renders them" width="900">
 </p>
@@ -61,21 +63,48 @@ crates/
   tokenstat-cli/    Command line front end.
   tokenstat-sync/   The only crate that talks to the network.
   tokenstat-mcp/    MCP server over the core facade.
+  tokenstat-host/   Protocol, session, dispatch, unix socket or Windows named pipe.
+  tokenstat-ffi/    C ABI over the host. JSON in, JSON out.
+apps/
+  mac/              SwiftUI app (macOS, iOS, iPadOS).
+  windows/          WinUI 3 app. Unpackaged, per-user install, named-pipe hostd.
+  android/          Kotlin/Compose client over the FFI.
 ```
 
 Keeping logic in `tokenstat-core` means every front end shares one implementation.
 The split is also what makes the privacy claim structural: the crate that reads
 your logs has no way to send them anywhere, because it does not link a network
-stack at all.
+stack at all. Front ends call one function, `tokenstat-host::dispatch`.
 
 ## Install
 
-Website one-liners (recommended). They download the matching GitHub Release
-binary into a user-writable path (`~/.local/bin` on macOS/Linux,
-`%LOCALAPPDATA%\tokenstat` on Windows), verify `SHA256SUMS`, and run
-`tokenstat setup` (scan, hourly schedule, and an account prompt on a TTY).
-Self-update (`tokenstat update`) needs that user-writable path; system prefixes
-like `/usr/local/bin` are refused.
+Release builds are on [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases)
+and at [tokenstat.ai](https://tokenstat.ai).
+
+### macOS app
+
+Download the disk image, open it, and drag tokenstat into Applications. After
+that it keeps itself current. It fetches each release, checks the download
+against the release checksums and against the signature macOS itself would
+check, installs it, and then offers a relaunch. It never restarts on its own.
+
+### Windows app
+
+Download `tokenstat-<version>-windows-x64.zip`, unzip, and double-click
+`Tokenstat.exe`. It copies itself to `%LOCALAPPDATA%\Programs\tokenstat`, writes
+a Start Menu shortcut, and registers Add/Remove Programs. After that it updates
+itself the same way: checksums, and a publisher check once the running build is
+signed. Do not put the CLI in the same folder as the app. Windows paths are
+case-insensitive.
+
+### Command line
+
+Website one-liners download the matching GitHub Release binary into a
+user-writable path (`~/.local/bin` on macOS/Linux, `%LOCALAPPDATA%\tokenstat`
+on Windows), verify `SHA256SUMS`, and run `tokenstat setup` (scan, hourly
+schedule, and an account prompt on a TTY). Self-update (`tokenstat update`)
+needs that user-writable path. System prefixes like `/usr/local/bin` are
+refused.
 
 ```bash
 # macOS / Linux
@@ -88,22 +117,8 @@ irm https://tokenstat.ai/install.ps1 | iex
 ```
 
 The scripts in this repo ([`scripts/install.sh`](scripts/install.sh),
-[`scripts/install.ps1`](scripts/install.ps1)) are the source of truth. The
-website should proxy or copy them so the one-liners stay in sync. Opt out of the
-schedule with `--no-schedule` (Unix) or `TOKENSTAT_NO_SCHEDULE=1`.
-
-Release builds are published on [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases)
-for macOS (Apple silicon and Intel), Windows, and Linux.
-
-Unsigned `-dev` artifacts for testers (no GitHub Release) come from the
-[Preview](https://github.com/gyorgysh/tokenstat/actions/workflows/preview.yml)
-workflow. See [`docs/preview-builds.md`](docs/preview-builds.md).
-
-The Mac app ships beside them as a signed and notarized `.dmg`: open it and drag
-tokenstat into Applications. After that it keeps itself current. It fetches each
-release, checks the download against the release checksums and against the
-signature macOS itself would check, installs it, and then offers a relaunch. It
-never restarts on its own.
+[`scripts/install.ps1`](scripts/install.ps1)) are the source of truth. Opt out
+of the schedule with `--no-schedule` (Unix) or `TOKENSTAT_NO_SCHEDULE=1`.
 
 ```bash
 tokenstat setup             # scan, schedule, and offer to connect an account
@@ -161,7 +176,8 @@ $env:TOKENSTAT_PURGE="1"; $env:TOKENSTAT_YES="1"; irm https://tokenstat.ai/unins
 See [`scripts/uninstall.sh`](scripts/uninstall.sh) and
 [`scripts/uninstall.ps1`](scripts/uninstall.ps1). They remove the schedule
 first, then the binary. The archive is left alone unless you pass
-`--purge` / `TOKENSTAT_PURGE=1`.
+`--purge` / `TOKENSTAT_PURGE=1`. The Windows app also appears in
+Settings → Apps, which runs `Tokenstat.exe --uninstall`.
 
 | Platform | Data directory |
 | --- | --- |
@@ -172,7 +188,7 @@ first, then the binary. The archive is left alone unless you pass
 Removing the local install does not delete a hosted profile. Export or delete the
 account from the website settings if you made one.
 
-## Usage
+## Command line
 
 ```bash
 tokenstat scan
@@ -271,11 +287,15 @@ cargo test --all-features
 cargo build --release
 ```
 
+The Mac app is generated from `apps/mac/project.yml`. The Windows app is
+`apps/windows/`. The Android app is `apps/android/`. Each tree has its own
+README for the extra tooling that build needs.
+
 ## Privacy
 
-Everything happens on your machine. `tokenstat` reads your local session logs,
+Everything happens on your machine. tokenstat reads your local session logs,
 extracts token counters, and discards the rest. Only aggregate numbers are ever
-eligible for sync, and the source is open so you can confirm it.
+eligible for sync, and the source is published so you can confirm it.
 
 - Session logs contain prompts and code. Counting tokens means opening those
   files. The guarantee is the **boundary**: conversation text is dropped at the
@@ -289,7 +309,7 @@ eligible for sync, and the source is open so you can confirm it.
   read it. What it can see, and what the account directory then shows your own
   account, is connection metadata: which machines are reachable, when they
   talked, and how much. The machine's connection key and the name you gave it
-  are registered with your account only while remote reach is on; the sync
+  are registered with your account only while remote reach is on. The sync
   envelope never carries either.
 
 The core library cannot link a network stack, enforced in CI.

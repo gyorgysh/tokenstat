@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# Fail if a build artifact or a large binary has been committed.
+# Fail if a build artifact, a large binary, or an internal note has been
+# committed. Internal notes are docs/, tools/, WORKLOG.md, CLAUDE.md,
+# TODO.md, and roadmap.md. .gitignore is not enough: a `!` un-ignore under
+# /docs/ already put two files on GitHub.
 #
 # `.gitignore` is not enough, and this exists because it already failed once. A
 # commit built while checked out at an older revision uses *that* revision's
@@ -43,6 +46,17 @@ if [ -n "$offenders" ]; then
     failed=1
 fi
 
+# Internal notes. Gitignored, and this is the backstop when a `!` un-ignore
+# or an old checkout's rules put them on the index anyway. Two files under
+# docs/ already leaked that way.
+INTERNAL_PATHS='^(docs/|tools/|WORKLOG\.md|CLAUDE\.md|TODO\.md|roadmap\.md)'
+offenders="$(printf '%s\n' "$tracked" | grep -E "$INTERNAL_PATHS" || true)"
+if [ -n "$offenders" ]; then
+    echo "error: internal notes are tracked:" >&2
+    printf '%s\n' "$offenders" | while IFS= read -r f; do printf '  %s\n' "$f" >&2; done
+    failed=1
+fi
+
 # Checked against the committed blob rather than the working file, so a file
 # that is large in HEAD is caught even if it is small on disk right now.
 big="$(git ls-files -z \
@@ -64,4 +78,4 @@ MSG
     exit 1
 fi
 
-echo "ok: no build artifacts or large binaries are tracked"
+echo "ok: no build artifacts, large binaries, or internal notes are tracked"

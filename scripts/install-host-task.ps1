@@ -8,9 +8,10 @@
 # User task rather than a service: it runs as you, reads your logs, and has no
 # business existing before you log in or running as SYSTEM.
 #
-# Until the WinUI app holds host-owner.lock, a laptop default (alwaysOn false)
-# stops the helper a few seconds after start. Set alwaysOn true in host.json
-# while testing the helper on its own.
+# The WinUI app holds host-owner.lock while it is open. A laptop default
+# (alwaysOn false) then stops the helper after quit. Set alwaysOn true in
+# host.json to keep the helper up with the window closed, or while testing
+# hostd on its own.
 #
 # Usage:
 #   scripts/install-host-task.ps1 [[-Bin] path-to-tokenstat-hostd.exe]

@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep in lockstep with workspace Cargo.toml. CI may override. -->
+    <TokenstatVersion Condition="'$(TokenstatVersion)' == ''">0.6.8</TokenstatVersion>
+    <Version>$(TokenstatVersion)</Version>
+    <AssemblyVersion>$(TokenstatVersion).0</AssemblyVersion>
+    <FileVersion>$(TokenstatVersion).0</FileVersion>
+    <InformationalVersion Condition="'$(InformationalVersion)' == ''">$(TokenstatVersion)</InformationalVersion>
+    <Company>pueev OÜ</Company>
+    <Authors>Gyorgy</Authors>
+    <Copyright>© pueev OÜ. All rights reserved.</Copyright>
+    <Product>tokenstat</Product>
+    <AssemblyTitle>tokenstat</AssemblyTitle>
+    <Description>Unified token usage for AI coding agents and LLM tools.</Description>
+    <Trademark>tokenstat</Trademark>
+    <PackageProjectUrl>https://tokenstat.ai</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/gyorgysh/tokenstat</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+</Project>

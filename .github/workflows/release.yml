@@ -205,6 +205,49 @@ jobs:
           path: dist/Tokenstat-app-unsigned.zip
           retention-days: 7
 
+  # Windows desktop app, unsigned. Authenticode is not in this workflow.
+  # Preview is unsigned on purpose. A later signed cut pins the publisher
+  # from the running binary, the way the Mac installer reads Developer ID.
+  windows-app:
+    name: build the windows app
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-windows-app
+          save-if: false
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build unsigned Tokenstat.exe
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          scripts/build-windows-app.ps1 -Version $env:VERSION -Rid win-x64 -Out dist
+          $name = "tokenstat-$($env:VERSION)-windows-x64"
+          Push-Location dist
+          7z a "$name.zip" $name | Out-Null
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "$name.zip.sha256" -Value "$hash  $name.zip"
+          Pop-Location
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-app
+          path: |
+            dist/tokenstat-${{ needs.verify.outputs.version }}-windows-x64.zip
+            dist/tokenstat-${{ needs.verify.outputs.version }}-windows-x64.zip.sha256
+          retention-days: 7
+
   android:
     name: publish android internal track
     needs: verify
@@ -261,7 +304,7 @@ jobs:
 
   publish:
     name: publish github release
-    needs: [verify, build, app]
+    needs: [verify, build, app, windows-app]
     runs-on: macos-latest
     environment: release
     permissions:

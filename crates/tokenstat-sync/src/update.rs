@@ -58,6 +58,15 @@ pub struct UpdateCheck {
     /// a different kind of thing: the CLI updates itself in place, and an
     /// application replaces itself by being dragged into Applications.
     pub app_dmg_url: Option<String>,
+    /// Windows desktop app zip name, key in `SHA256SUMS`.
+    ///
+    /// Distinct from the CLI zip (`tokenstat-<ver>-x86_64-pc-windows-msvc.zip`).
+    /// Matched as `tokenstat-<ver>-windows-x64.zip` or `windows-arm64`.
+    pub app_win_name: Option<String>,
+    /// Windows desktop app zip, when the release carries one.
+    pub app_win_url: Option<String>,
+    /// API url for the Windows app zip, used with a token on a private repo.
+    pub app_win_api_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +228,9 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
             sums_api_url: None,
             app_dmg_name: None,
             app_dmg_url: None,
+            app_win_name: None,
+            app_win_url: None,
+            app_win_api_url: None,
         });
     }
     if !resp.status().is_success() {
@@ -246,6 +258,10 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
     // Matched by extension rather than an exact name, so the image can be
     // renamed without an installed build losing the ability to find a new one.
     let image = release.assets.iter().find(|a| a.name.ends_with(".dmg"));
+    let win = release
+        .assets
+        .iter()
+        .find(|a| is_windows_app_zip(&a.name, windows_app_arch()));
     Ok(UpdateCheck {
         current,
         latest,
@@ -265,7 +281,34 @@ pub fn check_latest() -> Result<UpdateCheck, UpdateError> {
         // ability to point at a new one.
         app_dmg_name: image.map(|a| a.name.clone()),
         app_dmg_url: image.map(|a| a.browser_download_url.clone()),
+        app_win_name: win.map(|a| a.name.clone()),
+        app_win_url: win.map(|a| a.browser_download_url.clone()),
+        app_win_api_url: win
+            .map(|a| a.url.clone())
+            .filter(|u: &String| !u.is_empty()),
     })
+}
+
+/// Arch token used in Windows app zip names (`windows-x64`, `windows-arm64`).
+pub fn windows_app_arch() -> &'static str {
+    #[cfg(target_arch = "aarch64")]
+    {
+        "arm64"
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        "x64"
+    }
+}
+
+/// True for the desktop app zip, false for the CLI's target-triple zip.
+pub fn is_windows_app_zip(name: &str, arch: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if !lower.ends_with(".zip") || lower.ends_with(".sha256") {
+        return false;
+    }
+    let needle = format!("-windows-{arch}");
+    lower.contains(&needle)
 }
 
 /// Download the release's disk image and prove it is the published one.
@@ -301,6 +344,52 @@ pub fn download_app_image() -> Result<PathBuf, UpdateError> {
 
     let client = client()?;
     let bytes = download_asset(&client, url, None)?;
+    let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
+    let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
+        .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
+    let actual = hex_sha256(&bytes);
+    if actual != expected {
+        return Err(UpdateError::Message(format!(
+            "checksum mismatch for {name}: expected {expected}, got {actual}"
+        )));
+    }
+
+    let path = tempfile_dir()?.join(name);
+    fs::write(&path, &bytes)?;
+    Ok(path)
+}
+
+/// Download the Windows desktop app zip and prove it is the published one.
+///
+/// Same split as [`download_app_image`]: this crate fetches and checksums, the
+/// app checks Authenticode (when the running build is signed) and replaces
+/// files. Preview builds are unsigned, so the app skips Authenticode there
+/// the way a local Mac build skips Developer ID.
+pub fn download_windows_app_archive() -> Result<PathBuf, UpdateError> {
+    let check = check_latest()?;
+    if !check.newer {
+        return Err(UpdateError::Message(format!(
+            "already up to date ({})",
+            check.current
+        )));
+    }
+    let url = check.app_win_url.as_deref().ok_or_else(|| {
+        UpdateError::Message(format!(
+            "release v{} has no Windows app download",
+            check.latest
+        ))
+    })?;
+    let name = check
+        .app_win_name
+        .as_deref()
+        .unwrap_or("tokenstat-windows.zip");
+    let sums_url = check
+        .sums_url
+        .as_deref()
+        .ok_or_else(|| UpdateError::Message("release is missing SHA256SUMS".into()))?;
+
+    let client = client()?;
+    let bytes = download_asset(&client, url, check.app_win_api_url.as_deref())?;
     let sums_bytes = download_asset(&client, sums_url, check.sums_api_url.as_deref())?;
     let expected = expected_sha256(&String::from_utf8_lossy(&sums_bytes), name)
         .ok_or_else(|| UpdateError::Message(format!("SHA256SUMS has no entry for {name}")))?;
@@ -1172,6 +1261,31 @@ mod tests {
             expected_sha256(sums, "tokenstat-0.1.0-aarch64-apple-darwin.tar.gz").as_deref(),
             Some("abc123")
         );
+    }
+
+    #[test]
+    fn windows_app_zip_is_not_the_cli_zip() {
+        assert!(is_windows_app_zip("tokenstat-0.6.8-windows-x64.zip", "x64"));
+        assert!(is_windows_app_zip(
+            "tokenstat-0.6.8-dev.12.abc1234-windows-x64.zip",
+            "x64"
+        ));
+        assert!(is_windows_app_zip(
+            "tokenstat-0.6.8-windows-arm64.zip",
+            "arm64"
+        ));
+        assert!(!is_windows_app_zip(
+            "tokenstat-0.6.8-x86_64-pc-windows-msvc.zip",
+            "x64"
+        ));
+        assert!(!is_windows_app_zip(
+            "tokenstat-0.6.8-windows-x64.zip.sha256",
+            "x64"
+        ));
+        assert!(!is_windows_app_zip(
+            "tokenstat-0.6.8-windows-x64.zip",
+            "arm64"
+        ));
     }
 
     /// Write an executable shell script standing in for a candidate binary.

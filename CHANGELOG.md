@@ -1,8 +1,17 @@
 # Changelog
 
-Every released version of tokenstat: the CLI, the macOS app, the iOS client, the
-host daemon, and the MCP server, which all ship together under one version
-number. Newest first.
+Every released version of tokenstat: the CLI, the macOS app, the Windows app,
+the iOS client, the host daemon, and the MCP server, which all ship together
+under one version number. Newest first.
+
+## [Unreleased]
+
+### New
+
+- A Windows desktop app. Unzip and double-click Tokenstat.exe: it installs for
+  this user, adds a Start Menu shortcut, and then keeps itself current from
+  GitHub Releases. The download is checked against SHA256SUMS. Authenticode is
+  required only once a signed build is already installed.
 
 ## [0.6.8] - 2026-08-21
 
