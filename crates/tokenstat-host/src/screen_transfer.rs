@@ -2,11 +2,11 @@
 
 //! Resumable files attached to an authorized screen relationship.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -17,15 +17,14 @@ const MAX_FILE_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 
 #[derive(Clone)]
 struct Transfer {
-    peer: String,
     temporary: PathBuf,
     destination: PathBuf,
     size: u64,
     digest: String,
 }
 
-fn transfers() -> &'static Mutex<HashMap<String, Transfer>> {
-    static VALUE: OnceLock<Mutex<HashMap<String, Transfer>>> = OnceLock::new();
+fn transfers() -> &'static Mutex<HashMap<String, Arc<Mutex<Transfer>>>> {
+    static VALUE: OnceLock<Mutex<HashMap<String, Arc<Mutex<Transfer>>>>> = OnceLock::new();
     VALUE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -78,6 +77,10 @@ fn remote_peer() -> Result<String, String> {
         .ok_or("file transfer must arrive over an authenticated remote connection")?;
     crate::screen_policy::verify_transfer_peer(&peer)?;
     Ok(peer)
+}
+
+fn transfer_key(peer: &str, id: &str) -> String {
+    format!("{peer}\0{id}")
 }
 
 #[derive(Deserialize)]
@@ -181,40 +184,50 @@ fn open(params: &str) -> Result<Value, String> {
             .open(&temporary)
             .map_err(|e| e.to_string())?;
     }
-    transfers()
+    let offered = Transfer {
+        temporary,
+        destination,
+        size: p.size,
+        digest: p.digest.to_ascii_lowercase(),
+    };
+    let mut registry = transfers()
         .lock()
-        .map_err(|_| "transfer registry poisoned")?
-        .insert(
-            p.id.clone(),
-            Transfer {
-                peer,
-                temporary,
-                destination,
-                size: p.size,
-                digest: p.digest.to_ascii_lowercase(),
-            },
-        );
+        .map_err(|_| "transfer registry poisoned")?;
+    match registry.entry(transfer_key(&peer, &p.id)) {
+        Entry::Vacant(entry) => {
+            entry.insert(Arc::new(Mutex::new(offered)));
+        }
+        Entry::Occupied(entry) => {
+            let existing = entry.get().lock().map_err(|_| "transfer poisoned")?;
+            if existing.temporary != offered.temporary
+                || existing.destination != offered.destination
+                || existing.size != offered.size
+                || existing.digest != offered.digest
+            {
+                return Err("transfer id is already open for a different file".into());
+            }
+        }
+    }
     Ok(json!({"id":p.id,"offset":offset,"chunkBytes":CHUNK_BYTES}))
 }
 
-fn transfer(id: &str) -> Result<Transfer, String> {
+fn transfer(id: &str) -> Result<(String, Arc<Mutex<Transfer>>), String> {
     safe_id(id)?;
     let peer = remote_peer()?;
+    let key = transfer_key(&peer, id);
     let value = transfers()
         .lock()
         .map_err(|_| "transfer registry poisoned")?
-        .get(id)
+        .get(&key)
         .cloned()
         .ok_or("transfer is not open")?;
-    if value.peer != peer {
-        return Err("transfer belongs to a different peer".into());
-    }
-    Ok(value)
+    Ok((key, value))
 }
 
 fn chunk(params: &str) -> Result<Value, String> {
     let p: ChunkParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    let transfer = transfer(&p.id)?;
+    let (_, transfer) = transfer(&p.id)?;
+    let transfer = transfer.lock().map_err(|_| "transfer poisoned")?;
     let bytes = crate::base64::decode(&p.data)?;
     if bytes.is_empty() || bytes.len() > CHUNK_BYTES {
         return Err("file chunk is empty or exceeds 256 KiB".into());
@@ -236,7 +249,8 @@ fn chunk(params: &str) -> Result<Value, String> {
 
 fn finish(params: &str) -> Result<Value, String> {
     let p: IdParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    let transfer = transfer(&p.id)?;
+    let (key, transfer) = transfer(&p.id)?;
+    let transfer = transfer.lock().map_err(|_| "transfer poisoned")?;
     if fs::metadata(&transfer.temporary)
         .map_err(|e| e.to_string())?
         .len()
@@ -249,11 +263,13 @@ fn finish(params: &str) -> Result<Value, String> {
     }
     fs::hard_link(&transfer.temporary, &transfer.destination).map_err(|e| e.to_string())?;
     fs::remove_file(&transfer.temporary).map_err(|e| e.to_string())?;
+    let destination = transfer.destination.clone();
+    drop(transfer);
     transfers()
         .lock()
         .map_err(|_| "transfer registry poisoned")?
-        .remove(&p.id);
-    Ok(json!({"saved":true,"path":transfer.destination}))
+        .remove(&key);
+    Ok(json!({"saved":true,"path":destination}))
 }
 
 fn digest_file(path: &Path) -> Result<String, String> {
@@ -272,12 +288,15 @@ fn digest_file(path: &Path) -> Result<String, String> {
 
 fn cancel(params: &str) -> Result<Value, String> {
     let p: IdParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    let transfer = transfer(&p.id)?;
+    let (key, transfer) = transfer(&p.id)?;
+    let transfer = transfer.lock().map_err(|_| "transfer poisoned")?;
+    let temporary = transfer.temporary.clone();
+    drop(transfer);
     transfers()
         .lock()
         .map_err(|_| "transfer registry poisoned")?
-        .remove(&p.id);
-    let removed = match fs::remove_file(&transfer.temporary) {
+        .remove(&key);
+    let removed = match fs::remove_file(&temporary) {
         Ok(()) => true,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
         Err(e) => return Err(e.to_string()),
@@ -299,6 +318,14 @@ mod tests {
     fn ids_are_safe_for_temporary_names() {
         assert!(safe_id("7f8a-transfer-1").is_ok());
         assert!(safe_id("../../escape").is_err());
+    }
+
+    #[test]
+    fn transfer_ids_are_scoped_to_the_authenticated_peer() {
+        assert_ne!(
+            transfer_key("phone-a", "same"),
+            transfer_key("phone-b", "same")
+        );
     }
 
     #[test]

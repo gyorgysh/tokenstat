@@ -35,16 +35,16 @@ struct VaultRecord {
 #[serde(rename_all = "camelCase")]
 struct RecoveryParams {
     recovery: String,
-    #[serde(default)]
-    tier: String,
+    #[serde(default, rename = "tier")]
+    _tier: String,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PutParams {
     recovery: String,
-    #[serde(default)]
-    tier: String,
+    #[serde(default, rename = "tier")]
+    _tier: String,
     id: String,
     plaintext: String,
 }
@@ -70,6 +70,11 @@ fn paid(tier: &str) -> Result<(), String> {
     } else {
         Err("SSH vault sync requires a paid plan".into())
     }
+}
+
+fn verify_paid_account() -> Result<(), String> {
+    let status = tokenstat_sync::sync_status(None).map_err(|e| e.to_string())?;
+    paid(status.tier.as_deref().unwrap_or(""))
 }
 
 fn key(recovery: &str) -> [u8; 32] {
@@ -166,8 +171,8 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 )
             }
             "ssh.vault.create" => {
-                let p: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                paid(p.get("tier").and_then(Value::as_str).unwrap_or(""))?;
+                let _: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                verify_paid_account()?;
                 let mut store = read()?;
                 if !store.verifier.is_empty() {
                     return Err("vault already exists".into());
@@ -179,7 +184,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             "ssh.vault.unlock" => {
                 let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                paid(&p.tier)?;
+                verify_paid_account()?;
                 let store = read()?;
                 if store.verifier != verifier(&p.recovery) {
                     return Err("wrong recovery phrase".into());
@@ -188,7 +193,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             "ssh.vault.record.list" => {
                 let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                paid(&p.tier)?;
+                verify_paid_account()?;
                 let store = read()?;
                 if store.verifier != verifier(&p.recovery) {
                     return Err("wrong recovery phrase".into());
@@ -198,7 +203,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             "ssh.vault.record.put" => {
                 let p: PutParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                paid(&p.tier)?;
+                verify_paid_account()?;
                 let mut store = read()?;
                 if store.verifier != verifier(&p.recovery) {
                     return Err("wrong recovery phrase".into());

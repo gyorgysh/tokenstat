@@ -26,6 +26,21 @@ fn sessions() -> &'static Mutex<HashMap<String, Arc<Mutex<CaptureSession>>>> {
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// End sessions whose grant was removed or reduced. Dropping the sender wakes
+/// the capture pump, which then closes both halves of the encrypted stream.
+pub(crate) fn revoke_peer(peer: &str, view: bool, control: bool) -> Result<(), String> {
+    let mut held = sessions()
+        .lock()
+        .map_err(|_| "screen capture registry poisoned")?;
+    held.retain(|_, session| {
+        let Ok(session) = session.lock() else {
+            return false;
+        };
+        session.peer != peer || (view && (!session.control || control))
+    });
+    Ok(())
+}
+
 pub(crate) struct CaptureReceiver {
     pub id: String,
     receiver: Receiver<Vec<u8>>,
@@ -187,5 +202,16 @@ mod tests {
         let receiver = create("view-only".into(), "phone".into(), false).unwrap();
         assert!(queue_input(&receiver.id, vec![1]).is_err());
         assert!(queue_input(&receiver.id, br#"{"type":"display","id":2}"#.to_vec()).is_ok());
+    }
+
+    #[test]
+    fn reducing_a_grant_ends_affected_live_sessions() {
+        let view = create("view-grant".into(), "phone".into(), false).unwrap();
+        let control = create("control-grant".into(), "phone".into(), true).unwrap();
+        revoke_peer("phone", true, false).unwrap();
+        assert!(sessions().lock().unwrap().contains_key(&view.id));
+        assert!(!sessions().lock().unwrap().contains_key(&control.id));
+        revoke_peer("phone", false, false).unwrap();
+        assert!(!sessions().lock().unwrap().contains_key(&view.id));
     }
 }

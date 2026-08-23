@@ -98,6 +98,15 @@ fn token_hash(token: &[u8]) -> String {
 /// Verify a capability against the peer authenticated by the Noise session.
 /// Callers must obtain `peer_id` from the transport, never from request JSON.
 pub(crate) fn verify_capability(peer_id: &str, token: &str, control: bool) -> Result<(), String> {
+    verify_legend_account()?;
+    let permission = load()?
+        .permissions
+        .into_iter()
+        .find(|value| value.peer_id == peer_id)
+        .ok_or("This device no longer has screen access")?;
+    if !permission.view || (control && !permission.control) {
+        return Err("This device no longer has the requested screen permission".into());
+    }
     let mut held = capabilities()
         .lock()
         .map_err(|_| "capability lock poisoned")?;
@@ -140,9 +149,15 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     }
     Some((|| match method {
         "screen.policy.list" => {
+            if crate::request_context::remote_peer().is_some() {
+                return Err("screen policy settings are local-only".into());
+            }
             Ok(serde_json::to_value(load()?.permissions).map_err(|e| e.to_string())?)
         }
         "screen.policy.set" => {
+            if crate::request_context::remote_peer().is_some() {
+                return Err("screen policy settings are local-only".into());
+            }
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             if p.control && !p.view {
                 return Err("control permission requires view permission".into());
@@ -150,11 +165,16 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             let mut store = load()?;
             store.permissions.retain(|v| v.peer_id != p.peer_id);
             store.permissions.push(ScreenPermission {
-                peer_id: p.peer_id,
+                peer_id: p.peer_id.clone(),
                 view: p.view,
                 control: p.control,
             });
             save(&store)?;
+            capabilities()
+                .lock()
+                .map_err(|_| "capability lock poisoned")?
+                .retain(|_, capability| capability.peer_id != p.peer_id);
+            crate::screen_runtime::revoke_peer(&p.peer_id, p.view, p.control)?;
             Ok(json!({"saved":true}))
         }
         "screen.capability.issue" => {
@@ -249,5 +269,20 @@ mod tests {
         rand::rng().fill_bytes(&mut b);
         assert_ne!(token_hash(&a), token_hash(&b));
         assert_eq!(token_hash(&a).len(), 64);
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_change_its_own_policy() {
+        crate::request_context::with_remote_peer("phone", || {
+            assert!(call("screen.policy.list", "{}").unwrap().is_err());
+            assert!(
+                call(
+                    "screen.policy.set",
+                    r#"{"peerId":"phone","view":true,"control":true}"#
+                )
+                .unwrap()
+                .is_err()
+            );
+        });
     }
 }
