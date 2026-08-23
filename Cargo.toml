@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.8"
+version = "0.6.9"
 edition = "2024"
 rust-version = "1.85"
 authors = ["tokenstat contributors"]
@@ -47,7 +47,7 @@ tokenstat-pty = { path = "crates/tokenstat-pty", version = "0.6.1" }
 tokenstat-highlight = { path = "crates/tokenstat-highlight", version = "0.6.1" }
 tokenstat-identity = { path = "crates/tokenstat-identity", version = "0.6.1" }
 tokenstat-remote = { path = "crates/tokenstat-remote", version = "0.6.1" }
-tokenstat-paths = { path = "crates/tokenstat-paths", version = "0.6.8" }
+tokenstat-paths = { path = "crates/tokenstat-paths", version = "0.6.9" }
 
 # Core. Deliberately no network stack here: the privacy guarantee is that the
 # crate reading your logs cannot send them anywhere.

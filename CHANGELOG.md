@@ -6,12 +6,31 @@ under one version number. Newest first.
 
 ## [Unreleased]
 
+## [0.6.9] - 2026-08-24
+
 ### New
 
 - A Windows desktop app. Unzip and double-click Tokenstat.exe: it installs for
   this user, adds a Start Menu shortcut, and then keeps itself current from
   GitHub Releases. The download is checked against SHA256SUMS. Authenticode is
   required only once a signed build is already installed.
+- An Android client. Pair it to an account the way the iPhone does, then use
+  this Mac from the phone: terminals, folders, and the rest of the remote
+  surface.
+- SSH from the Mac. Save hosts, open a session, keep credentials in an
+  encrypted vault that can follow the account, and import machines from AWS
+  and DigitalOcean.
+- Share this Mac's screen with another Apple device on the account. Switch
+  displays, send the system audio, copy both ways, and send a file without
+  leaving the session.
+- Install the host as a service on a machine that has no desktop session, so
+  it answers after a reboot the same way Always-on host does on a Mac mini.
+
+### Fixed
+
+- Opening the Mac app on a recent macOS beta no longer aborts while the
+  window is first laid out. The splash used to animate the split view in, and
+  AppKit refused the extra constraint pass.
 
 ## [0.6.8] - 2026-08-21
 
