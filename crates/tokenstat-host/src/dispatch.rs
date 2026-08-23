@@ -2816,17 +2816,18 @@ fn client_proxy_unlisten(params: &str) -> Result<Value, String> {
 /// The scheduler's door into the same pass a front end triggers, so there is
 /// one place that decides what a reading is and one place that sends it. See
 /// `sync_scheduler::post_limits` for why this cannot wait for somebody to open
-/// a window.
-#[cfg(all(unix, feature = "local-host"))]
+/// a window. Windows hostd runs the same scheduler as macOS, so this cannot
+/// stay unix-only.
+#[cfg(feature = "local-host")]
 pub(crate) fn refresh_plan_limits() {
     let _ = usage_limits();
 }
 
 /// Ask every vendor what is left of its plan.
 ///
-/// On a host (Mac): live vendor reads, optional post to the account when the
-/// opt-in switch is on (P2). On a client (phone): GET the account store, which
-/// is what hosts posted.
+/// On a host (Mac and Windows): live vendor reads, optional post to the
+/// account when the opt-in switch is on (P2). On a client (phone): GET the
+/// account store, which is what hosts posted.
 ///
 /// One refresh at a time, and that lock is the only thing this serializes
 /// against. The session used to provide the same guarantee by accident, and it
