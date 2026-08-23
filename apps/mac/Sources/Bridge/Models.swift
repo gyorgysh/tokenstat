@@ -75,8 +75,13 @@ struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var ex
 struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable { var id: String; var peerID: String; var control: Bool; var dropped: UInt64 }
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
 struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String? }
-struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool }
+struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool; var transport: String }
 struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var audio: String?; var metadata: String?; var active: Bool; var dropped: UInt64; var error: String? }
+struct ScreenTransferDestination: Codable, Sendable, Hashable { var path: String? }
+struct ScreenTransferOpen: Codable, Sendable, Hashable { var id: String; var offset: UInt64; var chunkBytes: Int }
+struct ScreenTransferChunk: Codable, Sendable, Hashable { var offset: UInt64 }
+struct ScreenTransferSaved: Codable, Sendable, Hashable { var saved: Bool; var path: String }
+struct ScreenTransferCancelled: Codable, Sendable, Hashable { var cancelled: Bool; var removed: Bool }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {

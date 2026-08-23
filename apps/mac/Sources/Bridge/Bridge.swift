@@ -1792,6 +1792,11 @@ extension Bridge {
         return result.data.flatMap { Data(base64Encoded: $0) }
     }
 
+    static func screenCaptureClose(id: String) async {
+        struct Closed: Codable, Sendable { var closed: Bool }
+        _ = try? await background("screen.capture.close", ["id": id], patience: Patience.interactive, as: Closed.self)
+    }
+
     static func screenViewerOpen(peer: String, capability: String, control: Bool) async throws -> ScreenViewerSession {
         try await background("screen.viewer.open", ["peer": peer, "capability": capability, "control": control], patience: Patience.standard, as: ScreenViewerSession.self)
     }
@@ -1808,6 +1813,14 @@ extension Bridge {
     static func screenViewerClose(id: String) async {
         struct Closed: Codable, Sendable { var closed: Bool }
         _ = try? await background("screen.viewer.close", ["id": id], patience: Patience.interactive, as: Closed.self)
+    }
+
+    static func screenTransferDestination() async throws -> ScreenTransferDestination {
+        try await background("screen.transfer.destination.get", as: ScreenTransferDestination.self)
+    }
+
+    static func setScreenTransferDestination(_ path: String) async throws -> ScreenTransferDestination {
+        try await background("screen.transfer.destination.set", ["path": path], as: ScreenTransferDestination.self)
     }
 
     static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {

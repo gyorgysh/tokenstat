@@ -60,6 +60,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 walkdir = "2"
 rayon = "1"
 directories = "6"
+tempfile = "3"
 zstd = "0.13"
 
 # Sync (the only crate allowed to link a network stack)

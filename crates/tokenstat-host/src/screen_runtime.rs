@@ -129,10 +129,11 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let frame = Frame::decode(&bytes)?;
                 if !matches!(
                     frame.kind,
-                    FrameKind::Video | FrameKind::Metadata | FrameKind::Audio
+                    FrameKind::Video | FrameKind::Metadata | FrameKind::Audio | FrameKind::Error
                 ) {
                     return Err(
-                        "capture helper may push only video, audio, or metadata frames".into(),
+                        "capture helper may push only video, audio, error, or metadata frames"
+                            .into(),
                     );
                 }
                 let session = sessions()

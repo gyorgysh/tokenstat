@@ -640,6 +640,11 @@ impl Server {
         Ok(self.listener.local_addr()?.to_string())
     }
 
+    pub fn set_nonblocking(&self, value: bool) -> Result<(), RemoteError> {
+        self.listener.set_nonblocking(value)?;
+        Ok(())
+    }
+
     /// Accept one connection and authenticate it.
     ///
     /// Returns `Err(Refused)` for a peer that may not be served, which the

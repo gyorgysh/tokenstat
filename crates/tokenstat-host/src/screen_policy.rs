@@ -74,6 +74,20 @@ fn verify_legend_account() -> Result<(), String> {
     let status = tokenstat_sync::sync_status(None).map_err(|e| e.to_string())?;
     legend(status.tier.as_deref().unwrap_or(""))
 }
+
+pub(crate) fn verify_transfer_peer(peer_id: &str) -> Result<(), String> {
+    verify_legend_account()?;
+    let permission = load()?
+        .permissions
+        .into_iter()
+        .find(|value| value.peer_id == peer_id)
+        .ok_or("This device has not been allowed to transfer files")?;
+    if permission.view {
+        Ok(())
+    } else {
+        Err("This device does not have screen access".into())
+    }
+}
 fn token_hash(token: &[u8]) -> String {
     Sha256::digest(token)
         .iter()
@@ -183,8 +197,33 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             verify_capability(&p.peer_id, &p.token, p.control)?;
             Ok(json!({"allowed":true}))
         }
+        "screen.direct.candidate" => direct_candidate(),
         _ => Err(format!("unknown screen method: {method}")),
     })())
+}
+
+fn direct_candidate() -> Result<Value, String> {
+    let peer = crate::request_context::remote_peer()
+        .ok_or("direct candidate must be requested by an authenticated peer")?;
+    verify_transfer_peer(&peer)?;
+    #[cfg(feature = "local-host")]
+    {
+        let output = std::process::Command::new("hostname")
+            .output()
+            .map_err(|error| error.to_string())?;
+        let mut host = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
+        host = host.trim().trim_end_matches(".local").to_string();
+        if host.is_empty()
+            || !host
+                .bytes()
+                .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'-' | b'.'))
+        {
+            return Err("this host has no usable local-network name".into());
+        }
+        Ok(json!({"address":format!("{host}.local:7878")}))
+    }
+    #[cfg(not(feature = "local-host"))]
+    Err("this device does not accept direct screen connections".into())
 }
 
 #[cfg(test)]

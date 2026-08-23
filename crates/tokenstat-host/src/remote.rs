@@ -103,6 +103,12 @@ fn tunnel_running() -> &'static AtomicBool {
     &RUNNING
 }
 
+#[cfg(feature = "local-host")]
+fn direct_running() -> &'static AtomicBool {
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    &RUNNING
+}
+
 /// The one multiplexed tunnel session the daemon keeps, if remote reach is on.
 fn tunnel_session() -> &'static Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>> {
     static SESSION: OnceLock<Mutex<Option<Arc<tokenstat_remote::tunnel::TunnelSession>>>> =
@@ -199,6 +205,53 @@ pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
     // Remote reach is one switch and one transport: the tunnel. Everything
     // between machines rides it, so there is nothing to bind or advertise.
     start_tunnel_if_enabled(session, &settings);
+    #[cfg(feature = "local-host")]
+    start_direct_if_enabled();
+}
+
+#[cfg(feature = "local-host")]
+fn start_direct_if_enabled() {
+    if !load_settings().tunnel || direct_running().swap(true, Ordering::AcqRel) {
+        return;
+    }
+    std::thread::spawn(|| {
+        let identity = match MachineIdentity::load_or_create() {
+            Ok(value) => value,
+            Err(_) => {
+                direct_running().store(false, Ordering::Release);
+                return;
+            }
+        };
+        let server = match tokenstat_remote::Server::bind("0.0.0.0:7878", &identity) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("remote: direct listener unavailable: {error}");
+                direct_running().store(false, Ordering::Release);
+                return;
+            }
+        };
+        let _ = server.set_nonblocking(true);
+        while direct_running().load(Ordering::Acquire) {
+            match server.accept() {
+                Ok(Ok(connection)) => {
+                    if let Ok(session) = session_for_serving() {
+                        std::thread::spawn(move || serve_peer(connection, &session));
+                    }
+                }
+                Ok(Err(refused)) => report(&refused),
+                Err(tokenstat_remote::RemoteError::Io(error))
+                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    std::thread::sleep(Duration::from_millis(100))
+                }
+                Err(error) => {
+                    eprintln!("remote: direct accept failed: {error}");
+                    break;
+                }
+            }
+        }
+        direct_running().store(false, Ordering::Release);
+    });
 }
 
 fn account_token() -> Result<String, String> {
@@ -1292,6 +1345,12 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
 /// has an address, through the tunnel otherwise. The same ladder `call_peer`
 /// climbs, exposed so a stream can claim its own connection.
 pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, String> {
+    dial_peer_routed(peer_hex).map(|value| value.0)
+}
+
+pub(crate) fn dial_peer_routed(
+    peer_hex: &str,
+) -> Result<(tokenstat_remote::Connection, &'static str), String> {
     let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
     let store = PeerStore::load().map_err(|e| e.to_string())?;
     let peer = store
@@ -1307,14 +1366,41 @@ pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, 
         ));
     }
     let label = peer.label.clone();
+    let address = peer.address.clone();
     drop(store);
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
-    // One transport: the tunnel. Direct dialing depended on the other
-    // machine's network, ports and NAT, which is exactly the class of failure
-    // this product stopped trying to solve. The address on the peer record is
-    // ignored.
-    tunnel_dial(&settings(), key, &identity, &label, "no direct address")
+    let direct = address
+        .as_deref()
+        .ok_or_else(|| "no direct address".to_string())
+        .and_then(|address| {
+            tokenstat_remote::dial(address, &identity, Some(key), &label)
+                .map_err(|error| error.to_string())
+        });
+    match direct {
+        Ok(connection) => Ok((connection, "direct")),
+        Err(error) => tunnel_dial(&settings(), key, &identity, &label, error)
+            .map(|connection| (connection, "relay")),
+    }
+}
+
+pub(crate) fn remember_direct_address(peer_hex: &str, address: &str) -> Result<(), String> {
+    let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
+    let mut store = PeerStore::load().map_err(|e| e.to_string())?;
+    let peer = store
+        .get(&key)
+        .ok_or("that machine is not in this one's peer list")?
+        .clone();
+    if !store.is_approved(&key) {
+        return Err("that machine is not approved".into());
+    }
+    store.add_approved(
+        &key,
+        &peer.label,
+        Some(address),
+        &jiff::Timestamp::now().to_string(),
+    );
+    store.save().map_err(|e| e.to_string())
 }
 
 fn settings() -> RemoteSettings {
@@ -1721,9 +1807,13 @@ fn serve(params: &str) -> Result<Value, String> {
     save_settings(&settings)?;
     if p.tunnel == Some(false) {
         stop_tunnel();
+        #[cfg(feature = "local-host")]
+        direct_running().store(false, Ordering::Release);
     }
     if settings.tunnel {
         start_tunnel_if_enabled(session_for_serving()?, &settings);
+        #[cfg(feature = "local-host")]
+        start_direct_if_enabled();
     }
     Ok(json!({"tunnel": settings.tunnel}))
 }

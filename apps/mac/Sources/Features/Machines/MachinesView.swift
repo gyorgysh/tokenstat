@@ -6,6 +6,9 @@
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// This machine, who may reach it, and who it can reach.
 ///
@@ -1033,6 +1036,7 @@ private struct ScreenPermissionCard: View {
     let peers: [Peer]
     @State private var permissions: [String: ScreenPermission] = [:]
     @State private var error: String?
+    @State private var transferDestination: String?
 
     var body: some View {
         if !peers.isEmpty {
@@ -1050,6 +1054,26 @@ private struct ScreenPermissionCard: View {
                                 .disabled(permissions[peer.key]?.view != true)
                         }
                     }
+                    #if os(macOS)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Incoming files").font(.callout.weight(.medium))
+                            Text(transferDestination ?? "Choose a destination before receiving files")
+                                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                        Spacer()
+                        Button("Choose folder", .reveal) { chooseTransferDestination() }
+                    }
+                    HStack {
+                        Button("Screen Recording settings", .settings) {
+                            openPrivacy("Privacy_ScreenCapture")
+                        }
+                        Button("Accessibility settings", .settings) {
+                            openPrivacy("Privacy_Accessibility")
+                        }
+                        Spacer()
+                    }
+                    #endif
                     if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
                 }
             }
@@ -1076,9 +1100,31 @@ private struct ScreenPermissionCard: View {
         do {
             let values = try await Bridge.screenPermissions()
             permissions = Dictionary(uniqueKeysWithValues: values.map { ($0.peerID, $0) })
+            transferDestination = try? await Bridge.screenTransferDestination().path
             error = nil
         } catch { self.error = error.localizedDescription }
     }
+
+    #if os(macOS)
+    private func chooseTransferDestination() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task {
+            do {
+                transferDestination = try await Bridge.setScreenTransferDestination(url.path).path
+                error = nil
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func openPrivacy(_ pane: String) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
+        NSWorkspace.shared.open(url)
+    }
+    #endif
 }
 
 /// The presence light before a machine's name: solid when reachable, blinking

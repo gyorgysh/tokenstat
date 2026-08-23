@@ -86,6 +86,11 @@ fn open(params: &str) -> Result<Value, String> {
         return Err("screen viewer methods are local-only".into());
     }
     let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+    if let Ok(candidate) = crate::remote::call_peer_result(&p.peer, "screen.direct.candidate", "{}")
+        && let Some(address) = candidate.get("address").and_then(Value::as_str)
+    {
+        let _ = crate::remote::remember_direct_address(&p.peer, address);
+    }
     let answer = crate::remote::call_peer_result(
         &p.peer,
         "stream.open",
@@ -95,7 +100,7 @@ fn open(params: &str) -> Result<Value, String> {
         .get("token")
         .and_then(Value::as_str)
         .ok_or("screen stream returned no claim token")?;
-    let mut connection = crate::remote::dial_peer(&p.peer)?;
+    let (mut connection, transport) = crate::remote::dial_peer_routed(&p.peer)?;
     connection
         .send(json!({"stream":token}).to_string().as_bytes())
         .map_err(|e| e.to_string())?;
@@ -145,6 +150,13 @@ fn open(params: &str) -> Result<Value, String> {
                             viewer.changed.notify_all();
                         }
                     }
+                    Ok(frame) if frame.kind == FrameKind::Error => {
+                        if let Ok(mut state) = viewer.state.lock() {
+                            state.error = String::from_utf8(frame.payload).ok();
+                            viewer.changed.notify_all();
+                        }
+                        break;
+                    }
                     Ok(_) => {}
                     Err(error) => {
                         if let Ok(mut state) = viewer.state.lock() {
@@ -168,7 +180,7 @@ fn open(params: &str) -> Result<Value, String> {
             viewer.changed.notify_all();
         }
     });
-    Ok(json!({"id":id, "control":p.control}))
+    Ok(json!({"id":id, "control":p.control, "transport":transport}))
 }
 
 fn lookup(id: &str) -> Result<Arc<Viewer>, String> {

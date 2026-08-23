@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import AVFoundation
+import CryptoKit
 import SwiftUI
+import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #else
@@ -17,6 +19,7 @@ struct ScreenViewerView: View {
     @State private var model = ScreenViewerModel()
     @State private var controlling = false
     @State private var muted = false
+    @State private var importingFile = false
 
     var body: some View {
         ZStack {
@@ -36,6 +39,13 @@ struct ScreenViewerView: View {
             }
         }
         .navigationTitle(name)
+        .safeAreaInset(edge: .top) {
+            HStack(spacing: 6) {
+                Circle().fill(model.transport == "direct" ? Color.green : Color.orange).frame(width: 7, height: 7)
+                Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
+            }
+            .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
+        }
         .toolbar {
             if model.displays.count > 1 {
                 ToolbarItem {
@@ -51,6 +61,13 @@ struct ScreenViewerView: View {
                 }
             }
             ToolbarItem {
+                if model.transferProgress == nil {
+                    Button("Send file", .upload) { importingFile = true }
+                } else {
+                    Button("Cancel transfer", .stop) { model.cancelTransfer() }
+                }
+            }
+            ToolbarItem {
                 Toggle(isOn: $muted) { Label("Mute", systemImage: muted ? "speaker.slash" : "speaker.wave.2") }
                     .onChange(of: muted) { _, value in model.audio.muted = value }
             }
@@ -61,6 +78,15 @@ struct ScreenViewerView: View {
         }
         .task { await start() }
         .onDisappear { model.stop() }
+        .fileImporter(isPresented: $importingFile, allowedContentTypes: [.data]) { result in
+            guard case let .success(url) = result else { return }
+            model.sendFile(url)
+        }
+        .overlay(alignment: .bottom) {
+            if let progress = model.transferProgress {
+                ProgressView(value: progress).padding().background(.ultraThinMaterial, in: Capsule())
+            }
+        }
     }
 
     private func start() async { await model.start(peer: peer, tier: tier, control: controlling) }
@@ -85,7 +111,7 @@ struct ScreenViewerView: View {
                 .focusable(controlling)
                 .onKeyPress { press in
                     guard controlling, !press.characters.isEmpty else { return .ignored }
-                    model.sendText(press.characters)
+                    model.sendText(press.characters, flags: press.modifiers.screenFlags)
                     return .handled
                 }
         }
@@ -100,17 +126,36 @@ private final class ScreenViewerModel {
     var aspectRatio: CGFloat = 16 / 9
     var displays: [ScreenDisplay] = []
     var selectedDisplay: UInt32?
+    var transferProgress: Double?
+    var transport = "relay"
     let decoder = ScreenH264Decoder()
     let audio = ScreenAudioPlayer()
     private var session: ScreenViewerSession?
     private var task: Task<Void, Never>?
     private var pointerIsDown = false
+    private var peer = ""
+    private var transferTask: Task<Void, Never>?
     private var clipboardChangeCount = -1
+    private var requestedTier: String?
+    private var requestedControl = false
+    private var reconnectAttempts = 0
+    private var stopped = false
 
     func start(peer: String, tier: String?, control: Bool) async {
         stop()
+        stopped = false
+        self.peer = peer
+        requestedTier = tier
+        requestedControl = control
+        reconnectAttempts = 0
         state = .connecting
         message = "Connecting…"
+        await connect()
+    }
+
+    private func connect() async {
+        let tier = requestedTier
+        let control = requestedControl
         guard tier?.lowercased() == "legend" else {
             state = .failed
             message = "Screen access requires the Legend plan."
@@ -126,15 +171,18 @@ private final class ScreenViewerModel {
             )
             let session = try await Bridge.screenViewerOpen(peer: peer, capability: capability.token, control: control)
             self.session = session
+            transport = session.transport
             state = .streaming
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
-            state = .failed
-            message = error.localizedDescription
+            let reason = error.localizedDescription
+            if actionable(reason) { state = .failed; message = reason }
+            else { reconnect(after: reason) }
         }
     }
 
     func stop() {
+        stopped = true
         task?.cancel()
         task = nil
         if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
@@ -142,6 +190,8 @@ private final class ScreenViewerModel {
         pointerIsDown = false
         decoder.reset()
         audio.reset()
+        transferTask?.cancel()
+        transferTask = nil
     }
 
     private func readLoop(_ id: String) async {
@@ -161,6 +211,7 @@ private final class ScreenViewerModel {
                 if let encoded = read.frame, let data = Data(base64Encoded: encoded),
                    let frame = ScreenEncodedFrame(data)
                 {
+                    reconnectAttempts = 0
                     aspectRatio = CGFloat(frame.width) / CGFloat(max(1, frame.height))
                     decoder.decode(frame)
                 }
@@ -168,17 +219,46 @@ private final class ScreenViewerModel {
                     audio.play(data)
                 }
                 if !read.active {
-                    state = .failed
-                    message = read.error ?? "The screen session ended."
+                    let reason = read.error ?? "The screen session ended."
+                    if actionable(reason) { state = .failed; message = reason }
+                    else { reconnect(after: reason) }
                     return
                 }
                 syncClipboard()
             } catch {
-                state = .failed
-                message = error.localizedDescription
+                reconnect(after: error.localizedDescription)
                 return
             }
         }
+    }
+
+    private func reconnect(after reason: String) {
+        guard !stopped else { return }
+        if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
+        session = nil
+        decoder.reset(); audio.reset()
+        reconnectAttempts += 1
+        guard reconnectAttempts <= 3 else {
+            state = .failed
+            message = "Connection could not recover. \(reason)"
+            return
+        }
+        state = .connecting
+        message = "Connection interrupted. Reconnecting…"
+        let delay = reconnectAttempts
+        task = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await self?.connect()
+        }
+    }
+
+    private func actionable(_ reason: String) -> Bool {
+        let value = reason.lowercased()
+        return value.contains("screen recording") || value.contains("accessibility")
+            || value.contains("permission") || value.contains("not been allowed")
+            || value.contains("does not have screen access") || value.contains("legend plan")
+            || value.contains("no display") || value.contains("videotoolbox")
     }
 
     func movePointer(x: CGFloat, y: CGFloat) {
@@ -194,7 +274,7 @@ private final class ScreenViewerModel {
         pointerIsDown = false
         send(["type":"pointer", "x":x, "y":y, "down":false] as [String: Any])
     }
-    func sendText(_ text: String) { send(["type":"text", "text":text]) }
+    func sendText(_ text: String, flags: UInt64) { send(["type":"text", "text":text, "flags":flags] as [String: Any]) }
     func selectDisplay(_ id: UInt32) {
         guard displays.contains(where: { $0.id == id }) else { return }
         selectedDisplay = id
@@ -226,6 +306,57 @@ private final class ScreenViewerModel {
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         Task { try? await Bridge.screenViewerInput(id: id, data: data) }
+    }
+
+    func sendFile(_ url: URL) {
+        guard transferTask == nil, !peer.isEmpty else { return }
+        transferTask = Task { [weak self] in
+            await self?.transfer(url)
+            self?.transferTask = nil
+        }
+    }
+
+    func cancelTransfer() { transferTask?.cancel() }
+
+    private func transfer(_ url: URL) async {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        var id = ""
+        do {
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            var digest = SHA256()
+            var size: UInt64 = 0
+            while let data = try handle.read(upToCount: 256 * 1024), !data.isEmpty {
+                try Task.checkCancellation()
+                digest.update(data: data); size += UInt64(data.count)
+            }
+            let hash = digest.finalize().map { String(format: "%02x", $0) }.joined()
+            let resumeKey = Data("\(url.lastPathComponent)\u{0}\(size)\u{0}\(hash)".utf8)
+            id = SHA256.hash(data: resumeKey).map { String(format: "%02x", $0) }.joined()
+            let opened = try await Bridge.onPeer(peer, "screen.transfer.open", [
+                "id": id, "name": url.lastPathComponent, "size": size, "digest": hash,
+            ], as: ScreenTransferOpen.self)
+            try handle.seek(toOffset: opened.offset)
+            var offset = opened.offset
+            transferProgress = size == 0 ? 1 : Double(offset) / Double(size)
+            while let data = try handle.read(upToCount: min(opened.chunkBytes, 256 * 1024)), !data.isEmpty {
+                try Task.checkCancellation()
+                let answer = try await Bridge.onPeer(peer, "screen.transfer.chunk", [
+                    "id": id, "offset": offset, "data": data.base64EncodedString(),
+                ], as: ScreenTransferChunk.self)
+                offset = answer.offset
+                transferProgress = size == 0 ? 1 : Double(offset) / Double(size)
+            }
+            _ = try await Bridge.onPeer(peer, "screen.transfer.finish", ["id": id], as: ScreenTransferSaved.self)
+            transferProgress = nil
+        } catch is CancellationError {
+            _ = try? await Bridge.onPeer(peer, "screen.transfer.cancel", ["id": id], as: ScreenTransferCancelled.self)
+            transferProgress = nil
+        } catch {
+            transferProgress = nil
+            message = error.localizedDescription
+        }
     }
 }
 
@@ -289,6 +420,18 @@ private struct ScreenMetadata: Codable {
     let displays: [ScreenDisplay]?
     let id: String?
     let text: String?
+}
+
+private extension EventModifiers {
+    var screenFlags: UInt64 {
+        var value: UInt64 = 0
+        if contains(.capsLock) { value |= 1 << 16 }
+        if contains(.shift) { value |= 1 << 17 }
+        if contains(.control) { value |= 1 << 18 }
+        if contains(.option) { value |= 1 << 19 }
+        if contains(.command) { value |= 1 << 20 }
+        return value
+    }
 }
 
 private struct ScreenEncodedFrame {

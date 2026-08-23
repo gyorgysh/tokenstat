@@ -35,6 +35,7 @@ pub enum FrameKind {
     End = 3,
     Metadata = 4,
     Audio = 5,
+    Error = 6,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,6 +58,7 @@ impl Frame {
             FrameKind::End => 0,
             FrameKind::Metadata => MAX_METADATA_BYTES,
             FrameKind::Audio => MAX_AUDIO_BYTES,
+            FrameKind::Error => MAX_METADATA_BYTES,
         };
         if self.payload.len() > limit {
             return Err(format!(
@@ -97,6 +99,7 @@ impl Frame {
             3 => FrameKind::End,
             4 => FrameKind::Metadata,
             5 => FrameKind::Audio,
+            6 => FrameKind::Error,
             other => return Err(format!("unknown screen frame kind {other}")),
         };
         let sequence = u64::from_be_bytes(bytes[8..16].try_into().unwrap());

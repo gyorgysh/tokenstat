@@ -77,8 +77,12 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
             let created = ScreenVideoEncoder { [weak self] frame in
                 self?.frameContinuation?.yield((id, frame))
             }
-            try await created.start()
-            lock.withLock { encoders[id] = created }
+            do {
+                try await created.start()
+                lock.withLock { encoders[id] = created }
+            } catch {
+                await fail(id, error: error)
+            }
         }
     }
 
@@ -119,6 +123,11 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
             pressure[id] = 0; clearFrames[id, default: 0] += 1
             if clearFrames[id] == 300 { await encoder?.setQuality(1) }
         }
+    }
+
+    private func fail(_ id: String, error: Error) async {
+        _ = try? await Bridge.screenCapturePush(id: id, frame: ScreenWire.error(Data(error.localizedDescription.utf8)))
+        await Bridge.screenCaptureClose(id: id)
     }
 }
 
@@ -293,6 +302,9 @@ private enum ScreenWire {
     static func audio(_ payload: Data) -> Data {
         frame(kind: 5, sequence: 0, timestamp: 0, width: 0, height: 0, independent: true, payload: payload)
     }
+    static func error(_ payload: Data) -> Data {
+        frame(kind: 6, sequence: 0, timestamp: 0, width: 0, height: 0, independent: true, payload: payload)
+    }
     static func video(sequence: UInt64, timestamp: CMTime, width: UInt16, height: UInt16, keyframe: Bool, payload: Data) -> Data {
         let micros = timestamp.isNumeric ? UInt64(max(0, CMTimeGetSeconds(timestamp) * 1_000_000)) : 0
         return frame(kind: 1, sequence: sequence, timestamp: micros, width: width, height: height, independent: keyframe, payload: payload)
@@ -385,6 +397,7 @@ private enum ScreenInput {
             guard let text = event.text else { return }
             let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true)
             down?.keyboardSetUnicodeString(stringLength: text.utf16.count, unicodeString: Array(text.utf16))
+            if let flags = event.flags { down?.flags = CGEventFlags(rawValue: flags) }
             down?.post(tap: .cghidEventTap)
             cg = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false)
         default: cg = nil
