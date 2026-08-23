@@ -48,17 +48,15 @@ struct ScreenViewerView: View {
                 .contentShape(Rectangle())
                 .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                     guard controlling else { return }
-                    model.sendPointer(
+                    model.movePointer(
                         x: value.location.x / max(1, geometry.size.width),
-                        y: value.location.y / max(1, geometry.size.height),
-                        down: true
+                        y: value.location.y / max(1, geometry.size.height)
                     )
                 }.onEnded { value in
                     guard controlling else { return }
-                    model.sendPointer(
+                    model.releasePointer(
                         x: value.location.x / max(1, geometry.size.width),
-                        y: value.location.y / max(1, geometry.size.height),
-                        down: false
+                        y: value.location.y / max(1, geometry.size.height)
                     )
                 })
                 .focusable(controlling)
@@ -80,6 +78,7 @@ private final class ScreenViewerModel {
     let decoder = ScreenH264Decoder()
     private var session: ScreenViewerSession?
     private var task: Task<Void, Never>?
+    private var pointerIsDown = false
 
     func start(peer: String, tier: String?, control: Bool) async {
         stop()
@@ -113,6 +112,7 @@ private final class ScreenViewerModel {
         task = nil
         if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
         session = nil
+        pointerIsDown = false
         decoder.reset()
     }
 
@@ -139,8 +139,18 @@ private final class ScreenViewerModel {
         }
     }
 
-    func sendPointer(x: CGFloat, y: CGFloat, down: Bool) {
-        send(["type":"pointer", "x":x, "y":y, "down":down] as [String: Any])
+    func movePointer(x: CGFloat, y: CGFloat) {
+        if pointerIsDown {
+            send(["type":"move", "x":x, "y":y] as [String: Any])
+        } else {
+            pointerIsDown = true
+            send(["type":"pointer", "x":x, "y":y, "down":true] as [String: Any])
+        }
+    }
+    func releasePointer(x: CGFloat, y: CGFloat) {
+        guard pointerIsDown else { return }
+        pointerIsDown = false
+        send(["type":"pointer", "x":x, "y":y, "down":false] as [String: Any])
     }
     func sendText(_ text: String) { send(["type":"text", "text":text]) }
     private func send(_ value: [String: Any]) {

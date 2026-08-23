@@ -2,6 +2,7 @@
 
 //! Headless installation of the remote workspace host.
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -123,6 +124,7 @@ fn install_service(binary: &Path, service: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn atomic_write(path: &Path, body: &[u8]) -> Result<()> {
     let temp = path.with_extension("tmp");
     fs::write(&temp, body).with_context(|| format!("write {}", temp.display()))?;
@@ -130,6 +132,7 @@ fn atomic_write(path: &Path, body: &[u8]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn home_dir() -> Result<PathBuf> {
     Ok(directories::BaseDirs::new()
         .context("home directory unavailable")?

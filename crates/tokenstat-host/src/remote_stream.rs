@@ -97,10 +97,12 @@ fn pump_screen(connection: Connection, id: String, peer: String, control: bool) 
         Err(_) => return,
     };
     let (reader, writer) = connection.split();
+    let reader = Arc::new(reader);
     let input_id = id.clone();
+    let input_reader = Arc::clone(&reader);
     let input = std::thread::spawn(move || {
         loop {
-            match reader.read(crate::screen_stream::MAX_INPUT_BYTES + 32) {
+            match input_reader.read(crate::screen_stream::MAX_INPUT_BYTES + 32) {
                 Ok(bytes) if bytes.is_empty() => break,
                 Ok(bytes) => {
                     let Ok(frame) = crate::screen_stream::Frame::decode(&bytes) else {
@@ -121,6 +123,11 @@ fn pump_screen(connection: Connection, id: String, peer: String, control: bool) 
             break;
         }
     }
+    // Ending capture must also wake the input half. Closing only the writer
+    // leaves its sibling reader polling forever when the viewer is still
+    // connected but no longer sending input, and this join then leaks the
+    // screen pump and its capture session.
+    reader.close();
     writer.close();
     let _ = input.join();
 }
