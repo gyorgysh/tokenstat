@@ -2242,6 +2242,10 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     if let Some(answer) = crate::cloud_import::call(method, params) {
         return Some(answer);
     }
+    #[cfg(feature = "local-host")]
+    if let Some(answer) = crate::screen_runtime::call(method, params) {
+        return Some(answer);
+    }
     if let Some(answer) = crate::screen_policy::call(method, params) {
         return Some(answer);
     }
@@ -2992,7 +2996,7 @@ fn pty_id(params: &str) -> Result<PtyIdParams, String> {
 #[cfg(feature = "local-host")]
 fn stream_open(params: &str) -> Result<Value, String> {
     let p: StreamOpenParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
-    let kind = match p.kind.as_str() {
+    let (kind, screen_id) = match p.kind.as_str() {
         "proxy" => {
             let host = p.host.unwrap_or_else(|| "127.0.0.1".to_string());
             // The proxy bridges to the far machine's own loopback: the point
@@ -3002,7 +3006,7 @@ fn stream_open(params: &str) -> Result<Value, String> {
                 return Err("proxy target must be on the far machine's own loopback".into());
             }
             let port = p.port.ok_or("proxy stream needs a port")?;
-            crate::remote_stream::StreamKind::Proxy { host, port }
+            (crate::remote_stream::StreamKind::Proxy { host, port }, None)
         }
         "pty.subscribe" => {
             let session = p.id.ok_or("pty.subscribe needs a session id")?;
@@ -3010,12 +3014,32 @@ fn stream_open(params: &str) -> Result<Value, String> {
             tokenstat_pty::manager()
                 .info(&session)
                 .map_err(|e| e.to_string())?;
-            crate::remote_stream::StreamKind::PtySubscribe { session }
+            (
+                crate::remote_stream::StreamKind::PtySubscribe { session },
+                None,
+            )
+        }
+        "screen.video" => {
+            let peer = crate::request_context::remote_peer()
+                .ok_or("screen.video must arrive over an authenticated remote connection")?;
+            let capability = p.capability.ok_or("screen.video needs a capability")?;
+            crate::screen_policy::verify_capability(&peer, &capability, p.control)?;
+            let mut random = [0u8; 12];
+            getrandom::fill(&mut random).map_err(|e| e.to_string())?;
+            let id = format!("screen-{}", tokenstat_identity::hex(&random));
+            (
+                crate::remote_stream::StreamKind::Screen {
+                    id: id.clone(),
+                    peer,
+                    control: p.control,
+                },
+                Some(id),
+            )
         }
         other => return Err(format!("unknown stream kind {other}")),
     };
     let token = crate::remote_stream::open(kind)?;
-    Ok(json!({"token": token}))
+    Ok(json!({"token": token, "sessionID": screen_id}))
 }
 
 /// `proxy.listen`: bind a loopback port on this machine and bridge every
@@ -3190,6 +3214,9 @@ struct StreamOpenParams {
     id: Option<String>,
     host: Option<String>,
     port: Option<u16>,
+    capability: Option<String>,
+    #[serde(default)]
+    control: bool,
 }
 
 #[cfg(feature = "local-host")]

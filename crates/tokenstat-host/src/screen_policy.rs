@@ -76,6 +76,22 @@ fn token_hash(token: &[u8]) -> String {
         .collect()
 }
 
+/// Verify a capability against the peer authenticated by the Noise session.
+/// Callers must obtain `peer_id` from the transport, never from request JSON.
+pub(crate) fn verify_capability(peer_id: &str, token: &str, control: bool) -> Result<(), String> {
+    let mut held = capabilities()
+        .lock()
+        .map_err(|_| "capability lock poisoned")?;
+    held.retain(|_, value| value.expires_at >= now());
+    let cap = held
+        .get(token)
+        .ok_or("screen capability is invalid or expired")?;
+    if cap.peer_id != peer_id || (control && !cap.control) {
+        return Err("screen capability does not grant this request".into());
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetParams {
@@ -151,16 +167,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         }
         "screen.capability.verify" => {
             let p: VerifyParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let mut held = capabilities()
-                .lock()
-                .map_err(|_| "capability lock poisoned")?;
-            held.retain(|_, v| v.expires_at >= now());
-            let cap = held
-                .get(&p.token)
-                .ok_or("screen capability is invalid or expired")?;
-            if cap.peer_id != p.peer_id || (p.control && !cap.control) {
-                return Err("screen capability does not grant this request".into());
-            }
+            verify_capability(&p.peer_id, &p.token, p.control)?;
             Ok(json!({"allowed":true}))
         }
         _ => Err(format!("unknown screen method: {method}")),

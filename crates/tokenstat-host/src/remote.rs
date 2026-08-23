@@ -1033,7 +1033,7 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
         return;
     }
     let line = String::from_utf8_lossy(&first).to_string();
-    let response = respond_remote(&line, session);
+    let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
     if connection.send(response.as_bytes()).is_err() {
         return;
     }
@@ -1050,7 +1050,7 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
             return;
         }
         let line = String::from_utf8_lossy(&request).to_string();
-        let response = respond_remote(&line, session);
+        let response = respond_remote(&line, session, &tokenstat_identity::hex(&peer));
         if connection.send(response.as_bytes()).is_err() {
             return;
         }
@@ -1062,12 +1062,12 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
 /// The method table is still only in `dispatch`. This is the one place a
 /// remote request is known to be inbound, which is the only time the Mac
 /// should stay awake for a closed app.
-fn respond_remote(line: &str, session: &Mutex<Session>) -> String {
+fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
     if crate::host_policy::should_refuse_inbound(line) {
         return crate::host_policy::refuse_inbound(line);
     }
     crate::keep_awake::note_inbound(line);
-    crate::server::respond(line, session)
+    crate::request_context::with_remote_peer(peer, || crate::server::respond(line, session))
 }
 
 // MARK: - Reaching another machine

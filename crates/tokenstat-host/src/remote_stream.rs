@@ -41,6 +41,12 @@ pub(crate) enum StreamKind {
     Proxy { host: String, port: u16 },
     /// Push a far machine's terminal session output to the local daemon.
     PtySubscribe { session: String },
+    /// Encoded pictures to a viewer and optional input back to this Mac.
+    Screen {
+        id: String,
+        peer: String,
+        control: bool,
+    },
 }
 
 struct PendingStream {
@@ -77,9 +83,46 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
         match kind {
             StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port),
             StreamKind::PtySubscribe { session } => pump_pty_subscribe(connection, &session),
+            StreamKind::Screen { id, peer, control } => pump_screen(connection, id, peer, control),
         }
     });
     Ok(answer)
+}
+
+/// Host half of a screen channel. Video arrives from the device-local macOS
+/// helper; input returns to that helper only when the capability grants it.
+fn pump_screen(connection: Connection, id: String, peer: String, control: bool) {
+    let capture = match crate::screen_runtime::create(id.clone(), peer, control) {
+        Ok(capture) => capture,
+        Err(_) => return,
+    };
+    let (reader, writer) = connection.split();
+    let input_id = id.clone();
+    let input = std::thread::spawn(move || {
+        loop {
+            match reader.read(crate::screen_stream::MAX_INPUT_BYTES + 32) {
+                Ok(bytes) if bytes.is_empty() => break,
+                Ok(bytes) => {
+                    let Ok(frame) = crate::screen_stream::Frame::decode(&bytes) else {
+                        break;
+                    };
+                    if frame.kind != crate::screen_stream::FrameKind::Input
+                        || crate::screen_runtime::queue_input(&input_id, frame.payload).is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    while let Ok(frame) = capture.receive() {
+        if writer.write(&frame).is_err() {
+            break;
+        }
+    }
+    writer.close();
+    let _ = input.join();
 }
 
 /// Claim a reservation. Called from the serve path when a fresh connection's
