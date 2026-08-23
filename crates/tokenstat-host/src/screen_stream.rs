@@ -22,6 +22,7 @@ pub const MAX_INPUT_BYTES: usize = 4_096;
 /// Display inventory and other session description JSON is small and replaces
 /// the previous value rather than accumulating at the viewer.
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
+pub const MAX_AUDIO_BYTES: usize = 64 * 1024;
 /// At most a few compressed pictures wait for a viewer. Latency matters more
 /// than preserving obsolete frames in an interactive screen session.
 pub const MAX_QUEUED_VIDEO_BYTES: usize = 3 * MAX_VIDEO_BYTES;
@@ -33,6 +34,7 @@ pub enum FrameKind {
     Input = 2,
     End = 3,
     Metadata = 4,
+    Audio = 5,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,6 +56,7 @@ impl Frame {
             FrameKind::Input => MAX_INPUT_BYTES,
             FrameKind::End => 0,
             FrameKind::Metadata => MAX_METADATA_BYTES,
+            FrameKind::Audio => MAX_AUDIO_BYTES,
         };
         if self.payload.len() > limit {
             return Err(format!(
@@ -93,6 +96,7 @@ impl Frame {
             2 => FrameKind::Input,
             3 => FrameKind::End,
             4 => FrameKind::Metadata,
+            5 => FrameKind::Audio,
             other => return Err(format!("unknown screen frame kind {other}")),
         };
         let sequence = u64::from_be_bytes(bytes[8..16].try_into().unwrap());

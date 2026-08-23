@@ -163,11 +163,16 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         config.queueDepth = 3
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
+        config.capturesAudio = true
+        config.sampleRate = 48_000
+        config.channelCount = 2
+        config.excludesCurrentProcessAudio = true
         configuration = config
 
         try makeCompression()
         let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
         self.stream = stream
         try await stream.startCapture()
     }
@@ -232,6 +237,10 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        if type == .audio {
+            if let payload = ScreenAudioPCM.encode(sampleBuffer) { output(ScreenWire.audio(payload)) }
+            return
+        }
         guard type == .screen, sampleBuffer.isValid,
               CMSampleBufferDataIsReady(sampleBuffer),
               let image = CMSampleBufferGetImageBuffer(sampleBuffer),
@@ -281,6 +290,9 @@ private enum ScreenWire {
     static func metadata(_ payload: Data) -> Data {
         frame(kind: 4, sequence: 0, timestamp: 0, width: 0, height: 0, independent: true, payload: payload)
     }
+    static func audio(_ payload: Data) -> Data {
+        frame(kind: 5, sequence: 0, timestamp: 0, width: 0, height: 0, independent: true, payload: payload)
+    }
     static func video(sequence: UInt64, timestamp: CMTime, width: UInt16, height: UInt16, keyframe: Bool, payload: Data) -> Data {
         let micros = timestamp.isNumeric ? UInt64(max(0, CMTimeGetSeconds(timestamp) * 1_000_000)) : 0
         return frame(kind: 1, sequence: sequence, timestamp: micros, width: width, height: height, independent: keyframe, payload: payload)
@@ -295,6 +307,46 @@ private enum ScreenWire {
         data.appendBigEndian(UInt32(payload.count))
         data.append(payload)
         return data
+    }
+}
+
+private enum ScreenAudioPCM {
+    static func encode(_ sample: CMSampleBuffer) -> Data? {
+        guard sample.isValid, CMSampleBufferDataIsReady(sample),
+              let description = CMSampleBufferGetFormatDescription(sample),
+              let basic = CMAudioFormatDescriptionGetStreamBasicDescription(description),
+              basic.pointee.mFormatID == kAudioFormatLinearPCM,
+              basic.pointee.mBitsPerChannel == 32,
+              basic.pointee.mFormatFlags & kAudioFormatFlagIsFloat != 0 else { return nil }
+        let channels = Int(basic.pointee.mChannelsPerFrame)
+        let frames = CMSampleBufferGetNumSamples(sample)
+        guard channels > 0, channels <= 8, frames > 0,
+              frames * channels * MemoryLayout<Int16>.size <= 64 * 1024 else { return nil }
+        let list = AudioBufferList.allocate(maximumBuffers: channels)
+        defer { free(list.unsafeMutablePointer) }
+        var block: CMBlockBuffer?
+        var needed = 0
+        guard CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sample, bufferListSizeNeededOut: &needed, bufferListOut: list.unsafeMutablePointer,
+            bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: channels),
+            blockBufferAllocator: kCFAllocatorDefault, blockBufferMemoryAllocator: kCFAllocatorDefault,
+            flags: 0, blockBufferOut: &block
+        ) == noErr else { return nil }
+        let nonInterleaved = basic.pointee.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        var payload = Data("TAUD".utf8)
+        payload.append(contentsOf: [1, UInt8(channels), 0, 0])
+        payload.appendBigEndian(UInt32(basic.pointee.mSampleRate))
+        payload.appendBigEndian(UInt32(frames))
+        for frame in 0..<frames {
+            for channel in 0..<channels {
+                let buffer = list[nonInterleaved ? channel : 0]
+                guard let bytes = buffer.mData?.assumingMemoryBound(to: Float.self) else { return nil }
+                let value = bytes[nonInterleaved ? frame : frame * channels + channel]
+                var encoded = Int16(max(-1, min(1, value)) * Float(Int16.max)).littleEndian
+                Swift.withUnsafeBytes(of: &encoded) { payload.append(contentsOf: $0) }
+            }
+        }
+        return payload
     }
 }
 

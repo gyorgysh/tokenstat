@@ -76,7 +76,7 @@ struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable { var id:
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
 struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String? }
 struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool }
-struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var metadata: String?; var active: Bool; var dropped: UInt64; var error: String? }
+struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var audio: String?; var metadata: String?; var active: Bool; var dropped: UInt64; var error: String? }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {

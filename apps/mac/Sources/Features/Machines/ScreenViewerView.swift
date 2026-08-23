@@ -16,6 +16,7 @@ struct ScreenViewerView: View {
     let tier: String?
     @State private var model = ScreenViewerModel()
     @State private var controlling = false
+    @State private var muted = false
 
     var body: some View {
         ZStack {
@@ -48,6 +49,10 @@ struct ScreenViewerView: View {
                     }
                     .pickerStyle(.menu)
                 }
+            }
+            ToolbarItem {
+                Toggle(isOn: $muted) { Label("Mute", systemImage: muted ? "speaker.slash" : "speaker.wave.2") }
+                    .onChange(of: muted) { _, value in model.audio.muted = value }
             }
             ToolbarItem {
                 Toggle(isOn: $controlling) { Label("Control", systemImage: "cursorarrow.motionlines") }
@@ -96,6 +101,7 @@ private final class ScreenViewerModel {
     var displays: [ScreenDisplay] = []
     var selectedDisplay: UInt32?
     let decoder = ScreenH264Decoder()
+    let audio = ScreenAudioPlayer()
     private var session: ScreenViewerSession?
     private var task: Task<Void, Never>?
     private var pointerIsDown = false
@@ -135,6 +141,7 @@ private final class ScreenViewerModel {
         session = nil
         pointerIsDown = false
         decoder.reset()
+        audio.reset()
     }
 
     private func readLoop(_ id: String) async {
@@ -156,6 +163,9 @@ private final class ScreenViewerModel {
                 {
                     aspectRatio = CGFloat(frame.width) / CGFloat(max(1, frame.height))
                     decoder.decode(frame)
+                }
+                if let encoded = read.audio, let data = Data(base64Encoded: encoded) {
+                    audio.play(data)
                 }
                 if !read.active {
                     state = .failed
@@ -216,6 +226,53 @@ private final class ScreenViewerModel {
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         Task { try? await Bridge.screenViewerInput(id: id, data: data) }
+    }
+}
+
+@MainActor
+private final class ScreenAudioPlayer {
+    var muted = false { didSet { if muted { player.stop() } } }
+    private let engine = AVAudioEngine()
+    private let player = AVAudioPlayerNode()
+    private var configured = false
+
+    func reset() {
+        player.stop()
+        engine.stop()
+    }
+
+    func play(_ data: Data) {
+        guard !muted, data.count >= 16, String(data: data.prefix(4), encoding: .utf8) == "TAUD",
+              data[4] == 1 else { return }
+        let channels = AVAudioChannelCount(data[5])
+        let rate: UInt32 = data.integer(at: 8)
+        let frames: UInt32 = data.integer(at: 12)
+        let samples = Int(frames) * Int(channels)
+        guard channels > 0, channels <= 8, rate > 0,
+              data.count == 16 + samples * MemoryLayout<Int16>.size,
+              let format = AVAudioFormat(standardFormatWithSampleRate: Double(rate), channels: channels),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
+              let output = buffer.floatChannelData else { return }
+        buffer.frameLength = AVAudioFrameCount(frames)
+        data.withUnsafeBytes { raw in
+            let input = raw.baseAddress!.advanced(by: 16).assumingMemoryBound(to: Int16.self)
+            for frame in 0..<Int(frames) {
+                for channel in 0..<Int(channels) {
+                    output[channel][frame] = Float(Int16(littleEndian: input[frame * Int(channels) + channel])) / Float(Int16.max)
+                }
+            }
+        }
+        if !configured {
+            engine.attach(player)
+            engine.connect(player, to: engine.mainMixerNode, format: format)
+            try? engine.start()
+            player.play()
+            configured = true
+        } else if !player.isPlaying {
+            try? engine.start()
+            player.play()
+        }
+        player.scheduleBuffer(buffer)
     }
 }
 

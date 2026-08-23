@@ -127,8 +127,13 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let p: PushParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let bytes = crate::base64::decode(&p.frame)?;
                 let frame = Frame::decode(&bytes)?;
-                if !matches!(frame.kind, FrameKind::Video | FrameKind::Metadata) {
-                    return Err("capture helper may push only video or metadata frames".into());
+                if !matches!(
+                    frame.kind,
+                    FrameKind::Video | FrameKind::Metadata | FrameKind::Audio
+                ) {
+                    return Err(
+                        "capture helper may push only video, audio, or metadata frames".into(),
+                    );
                 }
                 let session = sessions()
                     .lock()

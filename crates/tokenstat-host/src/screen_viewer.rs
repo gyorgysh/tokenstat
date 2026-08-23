@@ -11,7 +11,8 @@ use serde_json::{Value, json};
 use tokenstat_remote::StreamWriter;
 
 use crate::screen_stream::{
-    Frame, FrameKind, MAX_INPUT_BYTES, MAX_METADATA_BYTES, MAX_VIDEO_BYTES, VideoQueue,
+    Frame, FrameKind, MAX_AUDIO_BYTES, MAX_INPUT_BYTES, MAX_METADATA_BYTES, MAX_VIDEO_BYTES,
+    VideoQueue,
 };
 
 struct Viewer {
@@ -26,6 +27,7 @@ struct ViewerState {
     error: Option<String>,
     input_sequence: u64,
     metadata: Option<Vec<u8>>,
+    audio: std::collections::VecDeque<Vec<u8>>,
 }
 
 fn viewers() -> &'static Mutex<HashMap<String, Arc<Viewer>>> {
@@ -109,6 +111,7 @@ fn open(params: &str) -> Result<Value, String> {
             error: None,
             input_sequence: 0,
             metadata: None,
+            audio: std::collections::VecDeque::new(),
         }),
         changed: Condvar::new(),
     });
@@ -118,7 +121,7 @@ fn open(params: &str) -> Result<Value, String> {
         .insert(id.clone(), Arc::clone(&viewer));
     std::thread::spawn(move || {
         loop {
-            match reader.read(MAX_VIDEO_BYTES.max(MAX_METADATA_BYTES) + 32) {
+            match reader.read(MAX_VIDEO_BYTES.max(MAX_METADATA_BYTES).max(MAX_AUDIO_BYTES) + 32) {
                 Ok(bytes) if bytes.is_empty() => break,
                 Ok(bytes) => match Frame::decode(&bytes) {
                     Ok(frame) if frame.kind == FrameKind::Video => {
@@ -130,6 +133,15 @@ fn open(params: &str) -> Result<Value, String> {
                     Ok(frame) if frame.kind == FrameKind::Metadata => {
                         if let Ok(mut state) = viewer.state.lock() {
                             state.metadata = Some(frame.payload);
+                            viewer.changed.notify_all();
+                        }
+                    }
+                    Ok(frame) if frame.kind == FrameKind::Audio => {
+                        if let Ok(mut state) = viewer.state.lock() {
+                            if state.audio.len() == 4 {
+                                state.audio.pop_front();
+                            }
+                            state.audio.push_back(frame.payload);
                             viewer.changed.notify_all();
                         }
                     }
@@ -184,13 +196,17 @@ fn read(params: &str) -> Result<Value, String> {
         .metadata
         .take()
         .map(|bytes| crate::base64::encode(&bytes));
+    let audio = state
+        .audio
+        .pop_front()
+        .map(|bytes| crate::base64::encode(&bytes));
     let frame = state
         .frames
         .pop()
         .and_then(|frame| frame.encode().ok())
         .map(|bytes| crate::base64::encode(&bytes));
     Ok(
-        json!({"frame":frame, "metadata":metadata, "active":state.active, "dropped":dropped, "error":state.error}),
+        json!({"frame":frame, "audio":audio, "metadata":metadata, "active":state.active, "dropped":dropped, "error":state.error}),
     )
 }
 
