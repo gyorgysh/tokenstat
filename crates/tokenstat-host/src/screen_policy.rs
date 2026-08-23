@@ -178,6 +178,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             crate::screen_runtime::revoke_peer(&p.peer_id, p.view, p.control)?;
             Ok(json!({"saved":true}))
         }
+        "screen.access.request" => {
+            if crate::request_context::remote_peer().is_some() {
+                return Err("screen access requests are sent from the requesting device".into());
+            }
+            let sent = tokenstat_sync::push::notify(tokenstat_sync::push::Reason::ScreenAccess)
+                .map_err(|e| e.to_string())?;
+            Ok(json!({"sent": sent.devices, "enabled": sent.enabled, "signedIn": sent.signed_in}))
+        }
         "screen.capability.issue" => {
             let p: IssueParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             verify_legend_account()?;

@@ -24,7 +24,9 @@ credentials.json
 /WORKLOG.md
 /CLAUDE.md
 /TODO.md
-/docs/
+/docs/*
+!/docs/remote-access-ux-vault-plan.md
+!/docs/preview-builds.md
 
 # Coverage and profiling
 /coverage/

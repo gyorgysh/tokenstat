@@ -81,6 +81,8 @@ russh = { version = "0.63", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util"] }
 rand = "0.10"
 chacha20poly1305 = "0.10"
+bip39 = { version = "2.2", default-features = false, features = ["std", "rand"] }
+hkdf = "0.13"
 
 # CLI
 clap = { version = "4", features = ["derive", "wrap_help"] }

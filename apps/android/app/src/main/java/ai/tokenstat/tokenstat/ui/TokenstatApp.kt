@@ -47,6 +47,7 @@ private enum class Destination(val label: String, val icon: ImageVector) {
     Workspaces("Workspaces", Icons.Default.Folder),
     Insights("Insights", Icons.Default.BarChart),
     Devices("Devices", Icons.Default.Computer),
+    SSH("SSH", Icons.Default.Terminal),
 }
 
 @Composable
@@ -153,6 +154,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     Destination.Workspaces -> WorkspacesScreen(model, state, expanded)
                     Destination.Insights -> InsightsScreen(state)
                     Destination.Devices -> DevicesScreen(state)
+                    Destination.SSH -> AndroidSSHScreen(model, state)
                 }
             }
         }
@@ -368,6 +370,138 @@ private fun DevicesScreen(state: ClientState) {
             }
         }
     }
+}
+
+@Composable
+@OptIn(ExperimentalMaterial3Api::class)
+private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
+    val scope = rememberCoroutineScope()
+    val tabs = listOf("Hosts", "Keys", "Snippets")
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var hosts by remember { mutableStateOf(JsonArray(emptyList())) }
+    var keys by remember { mutableStateOf(JsonArray(emptyList())) }
+    var snippets by remember { mutableStateOf(JsonArray(emptyList())) }
+    var vault by remember { mutableStateOf<JsonObject?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var addHost by remember { mutableStateOf(false) }
+    var addSnippet by remember { mutableStateOf(false) }
+    var vaultSetup by remember { mutableStateOf(false) }
+    var recoveryWords by remember { mutableStateOf<String?>(null) }
+    val tier = state.account?.string("tier")?.lowercase()
+    val vaultAllowed = tier in setOf("supporter", "patron", "legend")
+
+    suspend fun load() {
+        runCatching {
+            hosts = model.core("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
+            keys = model.core("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
+            snippets = model.core("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
+            if (vaultAllowed) vault = model.core("ssh.vault.status") as? JsonObject
+        }.onFailure { error = it.message }
+    }
+    LaunchedEffect(Unit) { load() }
+
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text("SSH", style = MaterialTheme.typography.headlineSmall)
+            if (vaultAllowed) {
+                Spacer(Modifier.height(10.dp))
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.EnhancedEncryption, null, tint = Accent)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(if (vault?.bool("created") == true) "Encrypted vault ready" else "Encrypted cross-device vault", fontWeight = FontWeight.SemiBold)
+                            Text("Only enrolled devices or your 24 recovery words can decrypt it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (vault?.bool("created") != true || vault?.bool("enrolled") != true) {
+                            Button(onClick = { vaultSetup = true }) { Text(if (vault?.bool("created") == true) "Enroll" else "Set up") }
+                        }
+                    }
+                }
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) }
+        }
+        PrimaryTabRow(selectedTabIndex = tab) {
+            tabs.forEachIndexed { index, title -> Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) }) }
+        }
+        val rows = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
+        if (rows.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null, tint = Accent, modifier = Modifier.size(38.dp))
+                    Text("No ${tabs[tab].lowercase()} yet", style = MaterialTheme.typography.titleMedium)
+                    Text(if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(onClick = { if (tab == 0) addHost = true else if (tab == 2) addSnippet = true else error = "Android secure key import is being prepared." }) { Text("Add ${tabs[tab].dropLast(if (tab == 2) 1 else 1).lowercase()}") }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(rows) { value ->
+                    val item = value.jsonObject
+                    ElevatedCard(Modifier.fillMaxWidth()) {
+                        ListItem(
+                            headlineContent = { Text(item.string(if (tab == 0) "label" else if (tab == 1) "label" else "title") ?: "SSH item") },
+                            supportingContent = { Text(if (tab == 0) "${item.string("username") ?: "root"}@${item.string("hostname") ?: ""}" else if (tab == 1) item.string("algorithm") ?: "Key" else item.string("command") ?: "") },
+                            leadingContent = { Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+    if (addHost) SSHHostDialog(onDismiss = { addHost = false }) { body ->
+        scope.launch { runCatching { model.core("ssh.host.save", body); load() }.onFailure { error = it.message }; addHost = false }
+    }
+    if (addSnippet) SSHSnippetDialog(onDismiss = { addSnippet = false }) { body ->
+        scope.launch { runCatching { model.core("ssh.snippet.save", body); load() }.onFailure { error = it.message }; addSnippet = false }
+    }
+    if (vaultSetup) AndroidVaultDialog(
+        existing = vault?.bool("created") == true,
+        onDismiss = { vaultSetup = false },
+        onCreate = {
+            scope.launch { runCatching { model.core("ssh.vault.create", buildJsonObject { put("tier", tier ?: "") }).jsonObject.string("recovery")!! }.onSuccess { recoveryWords = it; load() }.onFailure { error = it.message }; vaultSetup = false }
+        },
+        onRestore = { phrase ->
+            scope.launch { runCatching { model.core("ssh.vault.unlock", buildJsonObject { put("recovery", phrase); put("tier", tier ?: "") }) }.onSuccess { load() }.onFailure { error = it.message }; vaultSetup = false }
+        },
+        onRequest = {
+            scope.launch { runCatching { model.core("ssh.vault.enrollment.request") }.onFailure { error = it.message }; vaultSetup = false }
+        },
+    )
+    recoveryWords?.let { phrase -> RecoveryWordsDialog(phrase) { recoveryWords = null } }
+}
+
+@Composable
+private fun SSHHostDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
+    var label by remember { mutableStateOf("") }; var host by remember { mutableStateOf("") }
+    var user by remember { mutableStateOf("root") }; var directory by remember { mutableStateOf("~") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add SSH host") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(label, { label = it }, label = { Text("Name") }, singleLine = true)
+            OutlinedTextField(host, { host = it }, label = { Text("Address") }, singleLine = true)
+            OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true)
+            OutlinedTextField(directory, { directory = it }, label = { Text("Starting directory") }, singleLine = true)
+            Text("You will verify the host fingerprint and choose a password or saved key before connecting.", style = MaterialTheme.typography.bodySmall)
+        }
+    }, confirmButton = { Button(enabled = label.isNotBlank() && host.isNotBlank() && user.isNotBlank(), onClick = { onSave(buildJsonObject { put("id", ""); put("label", label); put("hostname", host); put("port", 22); put("username", user); put("initialDirectory", directory.ifBlank { "~" }); put("tags", JsonArray(emptyList())); put("hostKeys", JsonArray(emptyList())) }) }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun SSHSnippetDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
+    var title by remember { mutableStateOf("") }; var command by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add snippet") }, text = { Column { OutlinedTextField(title, { title = it }, label = { Text("Name") }); OutlinedTextField(command, { command = it }, label = { Text("Command") }, minLines = 3, textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)) } }, confirmButton = { Button(enabled = title.isNotBlank() && command.isNotBlank(), onClick = { onSave(buildJsonObject { put("id", ""); put("title", title); put("command", command); put("tags", JsonArray(emptyList())); put("hostIDs", JsonArray(emptyList())) }) }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun AndroidVaultDialog(existing: Boolean, onDismiss: () -> Unit, onCreate: () -> Unit, onRestore: (String) -> Unit, onRequest: () -> Unit) {
+    var phrase by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing) "Enroll this device" else "Set up encrypted vault") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("tokenstat cannot reset this vault. If every device and the recovery words are lost, the vault is permanently lost."); OutlinedTextField(phrase, { phrase = it }, label = { Text("24 recovery words") }, minLines = 3) } }, confirmButton = { if (!existing) Button(onClick = onCreate) { Text("Create new") } else Button(onClick = onRequest) { Text("Ask a device") } }, dismissButton = { Row { TextButton(enabled = phrase.trim().split(Regex("\\s+")).size == 24, onClick = { onRestore(phrase) }) { Text("Restore") }; TextButton(onClick = onDismiss) { Text("Cancel") } } })
+}
+
+@Composable
+private fun RecoveryWordsDialog(phrase: String, onDone: () -> Unit) {
+    var confirmed by remember { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = {}, title = { Text("Save your recovery words") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { phrase.split(" ").chunked(3).forEachIndexed { row, words -> Text(words.mapIndexed { index, word -> "${row * 3 + index + 1}. $word" }.joinToString("     "), fontFamily = FontFamily.Monospace) }; Text("Store these offline. Screenshots are not a reliable backup."); Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(confirmed, { confirmed = it }); Text("I stored all 24 words safely") } } }, confirmButton = { Button(enabled = confirmed, onClick = onDone) { Text("Done") } })
 }
 
 @Composable

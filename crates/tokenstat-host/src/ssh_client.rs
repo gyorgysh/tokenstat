@@ -82,6 +82,8 @@ struct OpenParams {
     #[serde(default = "default_port")]
     port: u16,
     username: String,
+    #[serde(default = "default_initial_directory")]
+    initial_directory: String,
     host_keys: Vec<String>,
     #[serde(default = "default_rows")]
     rows: u32,
@@ -89,6 +91,10 @@ struct OpenParams {
     cols: u32,
     #[serde(default)]
     auth: Option<Auth>,
+}
+
+fn default_initial_directory() -> String {
+    "~".into()
 }
 
 #[derive(Deserialize)]
@@ -282,6 +288,14 @@ async fn open(p: OpenParams) -> Result<LiveSession, String> {
         .request_shell(true)
         .await
         .map_err(|e| e.to_string())?;
+    let directory = p.initial_directory.trim();
+    if !directory.is_empty() && directory != "~" {
+        let quoted = directory.replace('\'', "'\"'\"'");
+        channel
+            .data(format!("cd -- '{quoted}'\r").as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let (tx, mut rx) = mpsc::unbounded_channel();
     let output = Arc::new(Mutex::new(Output {
         bytes: Vec::new(),

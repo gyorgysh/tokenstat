@@ -44,6 +44,7 @@ pub mod push;
 pub mod schema;
 pub mod snapshot;
 pub mod update;
+pub mod vault;
 
 use std::time::Duration;
 

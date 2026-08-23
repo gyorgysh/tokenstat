@@ -1740,6 +1740,7 @@ extension Bridge {
     static func probeSSHHost(_ host: SSHHost) async throws -> SSHHostFingerprint {
         try await background("ssh.host.probe", [
             "hostname": host.hostname, "port": host.port, "username": host.username,
+            "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys,
         ], as: SSHHostFingerprint.self)
     }
@@ -1749,6 +1750,7 @@ extension Bridge {
     ) async throws -> SSHSessionHandle {
         try await background("ssh.session.open", [
             "hostname": host.hostname, "port": host.port, "username": host.username,
+            "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
             "auth": ["kind": "password", "password": password],
         ], as: SSHSessionHandle.self)
@@ -1772,11 +1774,15 @@ extension Bridge {
 
     static func setScreenPermission(peerID: String, view: Bool, control: Bool) async throws {
         struct Saved: Codable, Sendable { var saved: Bool }
-        _ = try await background("screen.policy.set", ["peerID": peerID, "view": view, "control": control], as: Saved.self)
+        _ = try await background("screen.policy.set", ["peerId": peerID, "view": view, "control": control], as: Saved.self)
     }
 
     static func issueScreenCapability(peerID: String, control: Bool, tier: String) async throws -> ScreenCapability {
-        try await background("screen.capability.issue", ["peerID": peerID, "control": control, "tier": tier], as: ScreenCapability.self)
+        try await background("screen.capability.issue", ["peerId": peerID, "control": control, "tier": tier], as: ScreenCapability.self)
+    }
+
+    static func requestScreenAccess() async throws -> ScreenAccessRequest {
+        try await background("screen.access.request", as: ScreenAccessRequest.self)
     }
 
     static func screenCaptureSessions() async throws -> [ScreenCaptureSession] {
@@ -1831,8 +1837,36 @@ extension Bridge {
         try await background("ssh.vault.unlock", ["recovery": recovery, "tier": tier], as: SSHVaultUnlock.self)
     }
 
+    static func migrateSSHVault(recovery: String, tier: String) async throws -> SSHVaultRecovery {
+        try await background("ssh.vault.migrate", ["recovery": recovery, "tier": tier], as: SSHVaultRecovery.self)
+    }
+
+    static func rotateSSHVaultRecovery() async throws -> SSHVaultRecovery {
+        try await background("ssh.vault.recovery.rotate", as: SSHVaultRecovery.self)
+    }
+
+    static func requestSSHVaultEnrollment() async throws -> SSHVaultEnrollment {
+        try await background("ssh.vault.enrollment.request", as: SSHVaultEnrollment.self)
+    }
+
+    static func sshVaultEnrollmentRequests() async throws -> [SSHVaultEnrollment] {
+        try await background("ssh.vault.enrollment.list", as: SSHVaultEnrollments.self).requests
+    }
+
+    static func approveSSHVaultEnrollment(_ request: SSHVaultEnrollment) async throws -> SSHVaultEnrollmentResult {
+        try await background("ssh.vault.enrollment.approve", ["requestId": request.id, "machineId": request.machineId, "publicIdentity": request.publicIdentity], as: SSHVaultEnrollmentResult.self)
+    }
+
     static func sshVaultRecords(recovery: String, tier: String) async throws -> [SSHVaultRecord] {
         try await background("ssh.vault.record.list", ["recovery": recovery, "tier": tier], as: SSHVaultRecords.self).records
+    }
+
+    static func putSSHVaultRecord(id: String, plaintext: String, recovery: String = "", tier: String) async throws -> SSHVaultPut {
+        try await background("ssh.vault.record.put", ["id": id, "plaintext": plaintext, "recovery": recovery, "tier": tier], as: SSHVaultPut.self)
+    }
+
+    static func deleteSSHVaultRecord(id: String, recovery: String = "") async throws -> SSHVaultDelete {
+        try await background("ssh.vault.record.delete", ["id": id, "recovery": recovery], as: SSHVaultDelete.self)
     }
 
     static func openSSHWithKey(
@@ -1840,6 +1874,7 @@ extension Bridge {
     ) async throws -> SSHSessionHandle {
         try await background("ssh.session.open", [
             "hostname": host.hostname, "port": host.port, "username": host.username,
+            "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
             "auth": ["kind": "privateKey", "pem": pem, "passphrase": passphrase as Any],
         ], as: SSHSessionHandle.self)
@@ -1850,6 +1885,7 @@ extension Bridge {
     ) async throws -> SSHSessionHandle {
         try await background("ssh.session.open", [
             "hostname": host.hostname, "port": host.port, "username": host.username,
+            "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
             "auth": ["kind": "agent", "fingerprint": fingerprint],
         ], as: SSHSessionHandle.self)

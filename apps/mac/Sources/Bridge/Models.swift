@@ -22,6 +22,7 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
     var hostname: String
     var port: Int
     var username: String
+    var initialDirectory: String?
     var credentialID: String?
     var jumpHostID: String?
     var tags: [String]
@@ -64,15 +65,51 @@ struct SSHKeyMaterial: Codable, Sendable, Hashable {
     var privateKey: String
 }
 
-struct SSHVaultStatus: Codable, Sendable, Hashable { var created: Bool; var recordCount: Int }
+struct SSHVaultStatus: Codable, Sendable, Hashable {
+    var created: Bool
+    var recordCount: Int
+    var legacy: Bool?
+    var enrolled: Bool?
+}
 struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
 struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
-struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable { var id: String; var version: UInt64; var plaintext: String }
+struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var version: UInt64
+    var plaintext: String
+    var deleted: Bool?
+}
+struct SSHVaultPut: Codable, Sendable, Hashable { var id: String; var version: UInt64 }
+struct SSHVaultDelete: Codable, Sendable, Hashable { var id: String; var version: UInt64; var deleted: Bool }
+struct SSHVaultEnrollment: Codable, Sendable, Hashable, Identifiable { var id: String; var machineId: String; var publicIdentity: String; var nonce: String; var expiresAt: String }
+struct SSHVaultEnrollments: Codable, Sendable, Hashable { var requests: [SSHVaultEnrollment] }
+struct SSHVaultEnrollmentResult: Codable, Sendable, Hashable { var enrolled: Bool; var machineId: String }
 struct SSHVaultRecords: Codable, Sendable, Hashable { var records: [SSHVaultRecord] }
 struct SSHHostImport: Codable, Sendable, Hashable { var imported: Int; var hosts: [SSHHost] }
-struct ScreenPermission: Codable, Sendable, Hashable, Identifiable { var peerID: String; var view: Bool; var control: Bool; var id: String { peerID } }
+struct ScreenPermission: Codable, Sendable, Hashable, Identifiable {
+    var peerID: String
+    var view: Bool
+    var control: Bool
+    var id: String { peerID }
+
+    enum CodingKeys: String, CodingKey {
+        case peerID = "peerId"
+        case view, control
+    }
+}
 struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var expiresAt: UInt64; var control: Bool }
-struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable { var id: String; var peerID: String; var control: Bool; var dropped: UInt64 }
+struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var peerID: String
+    var control: Bool
+    var dropped: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case peerID = "peerId"
+        case control, dropped
+    }
+}
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
 struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String? }
 struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool; var transport: String }
@@ -82,6 +119,7 @@ struct ScreenTransferOpen: Codable, Sendable, Hashable { var id: String; var off
 struct ScreenTransferChunk: Codable, Sendable, Hashable { var offset: UInt64 }
 struct ScreenTransferSaved: Codable, Sendable, Hashable { var saved: Bool; var path: String }
 struct ScreenTransferCancelled: Codable, Sendable, Hashable { var cancelled: Bool; var removed: Bool }
+struct ScreenAccessRequest: Codable, Sendable, Hashable { var sent: UInt32; var enabled: Bool; var signedIn: Bool }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {

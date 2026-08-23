@@ -26,6 +26,8 @@ pub struct SshHost {
     #[serde(default = "default_port")]
     pub port: u16,
     pub username: String,
+    #[serde(default = "default_initial_directory")]
+    pub initial_directory: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -89,6 +91,9 @@ struct Store {
 
 fn default_port() -> u16 {
     22
+}
+fn default_initial_directory() -> String {
+    "~".into()
 }
 fn store_version() -> u32 {
     1

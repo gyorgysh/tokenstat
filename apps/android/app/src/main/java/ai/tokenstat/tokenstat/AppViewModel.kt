@@ -95,4 +95,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement =
         CoreClient.remote(peer, method, params)
+
+    suspend fun core(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
+        CoreClient.call(method, params)
 }

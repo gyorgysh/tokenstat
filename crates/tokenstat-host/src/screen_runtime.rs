@@ -134,7 +134,7 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let mut out = Vec::with_capacity(held.len());
                 for (id, session) in held.iter() {
                     let session = session.lock().map_err(|_| "capture session poisoned")?;
-                    out.push(json!({"id": id, "peerID": session.peer, "control": session.control, "dropped": session.dropped}));
+                    out.push(json!({"id": id, "peerId": session.peer, "control": session.control, "dropped": session.dropped}));
                 }
                 Ok(Value::Array(out))
             }

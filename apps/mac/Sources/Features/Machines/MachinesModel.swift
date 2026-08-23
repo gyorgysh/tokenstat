@@ -108,6 +108,11 @@ final class MachinesModel {
         return ["patron", "legend"].contains(tier)
     }
 
+    var vaultTier: String? {
+        guard account?.signedIn == true else { return nil }
+        return account?.tier?.lowercased() ?? "free"
+    }
+
     /// Whether an account machine's workspaces are in the sidebar, which is
     /// what "Connected" means on this screen: not just reachable, but dialled
     /// from here.

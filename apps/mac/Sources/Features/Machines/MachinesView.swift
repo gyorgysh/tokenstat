@@ -28,6 +28,7 @@ struct MachinesView: View {
 @Bindable var model: MachinesModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
+    @State private var showingSSH = false
     @State private var encryptionExpanded = false
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
@@ -145,27 +146,40 @@ struct MachinesView: View {
             }
             .frame(width: 500)
         }
+        #if os(macOS)
+        .sheet(isPresented: $showingSSH) {
+            SSHConnectionsView(vaultTier: model.vaultTier, onClose: { showingSSH = false })
+                .frame(minWidth: 760, idealWidth: 920, minHeight: 560, idealHeight: 680)
+        }
+        #endif
     }
 
     private var sshAccess: some View {
+        #if os(macOS)
+        Button { showingSSH = true } label: { sshAccessLabel }
+            .buttonStyle(.plain)
+        #else
         NavigationLink {
-            SSHConnectionsView(vaultTier: model.remoteReachAllowed ? "patron" : nil)
-        } label: {
-            HStack(spacing: Theme.Space.m) {
-                Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("SSH hosts").font(.headline)
-                    Text("Saved servers, keys and command snippets")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-            }
-            .padding(Theme.Space.m)
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-        }
+            SSHConnectionsView(vaultTier: model.vaultTier)
+        } label: { sshAccessLabel }
         .buttonStyle(.plain)
+        #endif
+    }
+
+    private var sshAccessLabel: some View {
+        HStack(spacing: Theme.Space.m) {
+            Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("SSH hosts").font(.headline)
+                Text("Saved servers, keys and command snippets")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
     }
 
     /// The full pairing screen: approvals, this machine, peers, add, e2e.

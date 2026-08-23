@@ -76,7 +76,7 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
         .map_err(|e| format!("DigitalOcean response was invalid: {e}"))?;
     save_hosts(page.droplets.into_iter().filter_map(|d| {
         let address = d.networks.v4.iter().find(|n| n.kind == "public").or_else(|| d.networks.v4.first())?.ip_address.clone();
-        Some(json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":p.username, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceID":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}))
+        Some(json!({"id":"", "label":d.name, "hostname":address, "port":22, "username":p.username, "initialDirectory":"~", "credentialID":null, "tags":["digitalocean", d.region.slug], "provider":{"kind":"digitalocean", "resourceID":d.id.to_string(), "region":d.region.slug}, "hostKeys":[]}))
     }))
 }
 
@@ -163,7 +163,7 @@ fn aws_hosts(value: &Value, p: &AwsParams) -> Vec<Value> {
                 .and_then(|t| t.get("Value"))
                 .and_then(Value::as_str)
                 .unwrap_or(id);
-            hosts.push(json!({"id":"", "label":name, "hostname":address, "port":22, "username":p.username, "tags":["aws", "ec2"], "provider":{"kind":"aws", "resourceID":id, "region":p.region}, "hostKeys":[]}));
+            hosts.push(json!({"id":"", "label":name, "hostname":address, "port":22, "username":p.username, "initialDirectory":"~", "credentialID":null, "tags":["aws", "ec2"], "provider":{"kind":"aws", "resourceID":id, "region":p.region}, "hostKeys":[]}));
         }
     }
     hosts

@@ -35,8 +35,16 @@ fn setting_path() -> Result<PathBuf, String> {
 }
 
 fn destination() -> Result<PathBuf, String> {
-    let value = fs::read_to_string(setting_path()?)
-        .map_err(|_| "Choose an incoming-file destination on the host first".to_string())?;
+    let setting = setting_path()?;
+    if !setting.exists() {
+        let downloads = directories::UserDirs::new()
+            .and_then(|dirs| dirs.download_dir().map(Path::to_path_buf))
+            .ok_or("Choose an incoming-file destination on the host first")?;
+        let initial = downloads.join("tokenstat");
+        fs::create_dir_all(&initial).map_err(|e| e.to_string())?;
+        fs::write(&setting, initial.to_string_lossy().as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let value = fs::read_to_string(setting).map_err(|e| e.to_string())?;
     let path = PathBuf::from(value.trim())
         .canonicalize()
         .map_err(|e| e.to_string())?;

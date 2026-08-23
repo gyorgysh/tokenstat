@@ -13,6 +13,7 @@ import UIKit
 /// Legend screen viewer. H.264 is decoded entirely at this endpoint by the
 /// system display layer; the relay and account service see encrypted bytes.
 struct ScreenViewerView: View {
+    @Environment(\.dismiss) private var dismiss
     let peer: String
     let name: String
     let tier: String?
@@ -32,7 +33,21 @@ struct ScreenViewerView: View {
                     ProgressView().opacity(model.state == .connecting ? 1 : 0)
                     Text(model.message).foregroundStyle(.white)
                     if model.state == .failed {
+                        VStack(alignment: .leading, spacing: 8) {
+                            readiness("Legend plan", ready: tier?.lowercased() == "legend")
+                            readiness("Signed in and paired", ready: true)
+                            readiness("Host online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
+                            readiness("Per-device screen permission", ready: !model.needsPermission)
+                            readiness(controlling ? "Screen Recording and Accessibility" : "Screen Recording on the host", ready: !model.message.localizedCaseInsensitiveContains("recording"))
+                        }
+                        .padding(Theme.Space.m)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        if model.needsPermission {
+                            Button("Request access", .approve) { Task { await model.requestAccess() } }
+                                .buttonStyle(AccentButtonStyle())
+                        }
                         Button("Try again", .refresh) { Task { await start() } }
+                            .buttonStyle(SecondaryButtonStyle())
                     }
                 }
                 .padding(Theme.Space.l)
@@ -47,6 +62,9 @@ struct ScreenViewerView: View {
             .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
         }
         .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close screen viewer")
+            }
             if model.displays.count > 1 {
                 ToolbarItem {
                     Picker("Display", selection: Binding(
@@ -90,6 +108,12 @@ struct ScreenViewerView: View {
     }
 
     private func start() async { await model.start(peer: peer, tier: tier, control: controlling) }
+
+    private func readiness(_ title: String, ready: Bool) -> some View {
+        Label(title, systemImage: ready ? "checkmark.circle.fill" : "circle")
+            .font(.callout)
+            .foregroundStyle(ready ? Color.green : Color.white.opacity(0.72))
+    }
 
     private var inputSurface: some View {
         GeometryReader { geometry in
@@ -140,6 +164,20 @@ private final class ScreenViewerModel {
     private var requestedControl = false
     private var reconnectAttempts = 0
     private var stopped = false
+    var needsPermission: Bool {
+        let value = message.lowercased()
+        return value.contains("permission") || value.contains("screen access") || value.contains("allowed")
+    }
+
+    func requestAccess() async {
+        do {
+            let result = try await Bridge.requestScreenAccess()
+            if !result.signedIn { message = "Sign in before requesting access." }
+            else if !result.enabled { message = "Notifications are unavailable. Ask the host owner to open Screen access settings." }
+            else if result.sent == 0 { message = "No notification destination is registered. Ask the host owner to open Screen access settings." }
+            else { message = "Request sent. Try again after the host owner approves this device." }
+        } catch { message = error.localizedDescription }
+    }
 
     func start(peer: String, tier: String?, control: Bool) async {
         stop()
@@ -166,7 +204,7 @@ private final class ScreenViewerModel {
             let capability = try await Bridge.onPeer(
                 peer,
                 "screen.capability.issue",
-                ["peerID": identity.key, "control": control, "tier": tier ?? ""],
+                ["peerId": identity.key, "control": control, "tier": tier ?? ""],
                 as: ScreenCapability.self
             )
             let session = try await Bridge.screenViewerOpen(peer: peer, capability: capability.token, control: control)
