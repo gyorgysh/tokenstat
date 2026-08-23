@@ -174,6 +174,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 .lock()
                 .map_err(|_| "capability lock poisoned")?
                 .retain(|_, capability| capability.peer_id != p.peer_id);
+            #[cfg(feature = "local-host")]
             crate::screen_runtime::revoke_peer(&p.peer_id, p.view, p.control)?;
             Ok(json!({"saved":true}))
         }
