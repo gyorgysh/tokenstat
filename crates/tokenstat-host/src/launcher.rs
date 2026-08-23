@@ -377,19 +377,21 @@ fn show_in(dir: &Path, id: &str) -> Result<Value, String> {
 /// machine so every client that asks sees the same list.
 pub(crate) fn catalog() -> Value {
     let path = search_path();
+    #[cfg(not(windows))]
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    #[cfg(not(windows))]
     let shell_args: &[&str] = if shell.ends_with("zsh") {
         &["-il"]
     } else {
         &[]
     };
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = user_home();
     let hidden = load_prefs().hidden.into_iter().collect::<HashSet<_>>();
     let available: Vec<Value> = PROFILES
         .iter()
         .map(|profile| {
             let installed = profile.id == "shell"
-                || profile.command.starts_with('/')
+                || (absolute_command(profile.command) && is_executable(Path::new(profile.command)))
                 || resolve_profile(profile, &path, Path::new(&home)).is_some();
             let mut value = json!({
                 "id": profile.id,
@@ -405,8 +407,18 @@ pub(crate) fn catalog() -> Value {
                 "installCommand": profile.install_command,
             });
             if profile.id == "shell" {
-                value["command"] = json!(shell);
-                value["args"] = json!(shell_args);
+                #[cfg(windows)]
+                {
+                    let comspec = std::env::var("COMSPEC")
+                        .unwrap_or_else(|_| r"C:\Windows\System32\cmd.exe".into());
+                    value["command"] = json!(comspec);
+                    value["args"] = json!(["/K"]);
+                }
+                #[cfg(not(windows))]
+                {
+                    value["command"] = json!(shell);
+                    value["args"] = json!(shell_args);
+                }
             } else if installed {
                 // Absolute path so a click does not need the login PATH to
                 // find the binary. Spawn used to block on `$SHELL -ilc env`
@@ -441,15 +453,25 @@ pub(crate) fn install(id: &str) -> Result<Value, String> {
     // front end never offers this, so the guard is for a stale tile or a
     // remote caller asking twice: reinstalling something that is present is
     // at best pointless and at worst a way to burn a peer's CPU.
-    let home = std::env::var("HOME").unwrap_or_default();
-    if !profile.command.starts_with('/')
+    let home = user_home();
+    if !absolute_command(profile.command)
         && resolve_profile(profile, &search_path(), Path::new(&home)).is_some()
     {
         return Err(format!("{id} is already installed"));
     }
 
-    let mut cmd = std::process::Command::new("/bin/sh");
-    cmd.arg("-c").arg(command);
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("cmd.exe");
+        cmd.args(["/C", command]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = std::process::Command::new("/bin/sh");
+        cmd.arg("-c").arg(command);
+        cmd
+    };
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -779,7 +801,7 @@ pub(crate) fn resolve_command(command: &str) -> Option<String> {
     if let Some(found) = resolve_on_path(command, &path) {
         return Some(found);
     }
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = user_home();
     if home.is_empty() {
         return None;
     }
@@ -792,21 +814,66 @@ pub(crate) fn resolve_command(command: &str) -> Option<String> {
     None
 }
 
+fn user_home() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("HOME").unwrap_or_default()
+    }
+}
+
+fn path_separator() -> char {
+    if cfg!(windows) { ';' } else { ':' }
+}
+
+fn split_path_var(value: &str) -> impl Iterator<Item = String> + '_ {
+    let sep = path_separator();
+    value
+        .split(sep)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+}
+
+fn absolute_command(command: &str) -> bool {
+    Path::new(command).is_absolute() || command.starts_with('/')
+}
+
 /// The search path as one `PATH` value, for a child that must see the same
 /// tools the catalog does (helpers a CLI may re-exec).
 pub(crate) fn search_path_var() -> String {
-    search_path().join(":")
+    let sep = path_separator().to_string();
+    search_path().join(&sep)
 }
 
 /// First executable match for a bare command name on the search path.
 fn resolve_on_path(command: &str, path: &[String]) -> Option<String> {
-    if command.starts_with('/') {
+    if absolute_command(command) {
         return is_executable(Path::new(command)).then(|| command.to_string());
     }
-    path.iter()
-        .map(|dir| Path::new(dir).join(command))
-        .find(|p| is_executable(p))
-        .map(|p| p.display().to_string())
+    for dir in path {
+        let candidate = Path::new(dir).join(command);
+        if is_executable(&candidate) {
+            return Some(candidate.display().to_string());
+        }
+        #[cfg(windows)]
+        {
+            for ext in [".exe", ".cmd", ".bat"] {
+                if command.ends_with(ext) {
+                    continue;
+                }
+                let with_ext = Path::new(dir).join(format!("{command}{ext}"));
+                if is_executable(&with_ext) {
+                    return Some(with_ext.display().to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn is_executable(path: &Path) -> bool {
@@ -831,12 +898,8 @@ fn is_executable(path: &Path) -> bool {
 /// are added explicitly; this under-reports rather than guesses wrong, and the
 /// shell entry keeps the launcher usable either way.
 fn search_path() -> Vec<String> {
-    let mut paths: Vec<String> = std::env::var("PATH")
-        .unwrap_or_default()
-        .split(':')
-        .filter(|p| !p.is_empty())
-        .map(str::to_string)
-        .collect();
+    let mut paths: Vec<String> =
+        split_path_var(&std::env::var("PATH").unwrap_or_default()).collect();
     // The login shell's PATH, resolved once per process and shared with the
     // sessions that will actually run. Same answer for "what can launch" and
     // "what the launched session can find", so a tile and its spawn agree.
@@ -844,34 +907,44 @@ fn search_path() -> Vec<String> {
     // finished would hide harnesses that only exist in the login PATH, and
     // this runs on the launch surface, not on a terminal click.
     if let Some(env) = tokenstat_pty::login_env_ready() {
-        paths.extend(
-            env.path
-                .split(':')
-                .filter(|p| !p.is_empty())
-                .map(str::to_string),
-        );
+        paths.extend(split_path_var(&env.path));
     }
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut conventional = vec![
-        format!("{home}/.local/bin"),
-        format!("{home}/.npm-global/bin"),
-        format!("{home}/.volta/bin"),
-        "/opt/homebrew/bin".into(),
-        "/usr/local/bin".into(),
-        "/usr/bin".into(),
-        "/bin".into(),
-    ];
+    let home = user_home();
+    let mut conventional = conventional_paths(&home);
     paths.append(&mut conventional);
     let mut seen = HashSet::new();
     paths.retain(|p| !p.is_empty() && seen.insert(p.clone()));
     paths
 }
 
+fn conventional_paths(home: &str) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        vec![
+            format!(r"{home}\.local\bin"),
+            format!(r"{home}\AppData\Roaming\npm"),
+            format!(r"{home}\scoop\shims"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            format!("{home}/.local/bin"),
+            format!("{home}/.npm-global/bin"),
+            format!("{home}/.volta/bin"),
+            "/opt/homebrew/bin".into(),
+            "/usr/local/bin".into(),
+            "/usr/bin".into(),
+            "/bin".into(),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         PROFILES, Profile, catalog, command_names, hide_in, install, load_prefs_in,
-        model_arguments, model_environment, resolve_profile, show_in, strip_ansi,
+        model_arguments, model_environment, resolve_profile, show_in, split_path_var, strip_ansi,
     };
     use std::path::Path;
     #[cfg(unix)]
@@ -936,6 +1009,35 @@ mod tests {
         assert!(found.ends_with("preferred/grok"), "{found}");
         let _ = std::fs::remove_dir_all(&home);
         let _ = std::fs::remove_dir_all(&elsewhere);
+    }
+
+    #[test]
+    fn path_lists_split_on_the_platform_separator() {
+        #[cfg(windows)]
+        {
+            let parts: Vec<_> = split_path_var(r"C:\Windows\system32;C:\Windows").collect();
+            assert_eq!(
+                parts,
+                vec![
+                    r"C:\Windows\system32".to_string(),
+                    r"C:\Windows".to_string()
+                ]
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let unix: Vec<_> = split_path_var("/usr/bin:/usr/local/bin").collect();
+            assert_eq!(
+                unix,
+                vec!["/usr/bin".to_string(), "/usr/local/bin".to_string()]
+            );
+            let with_semicolon: Vec<_> = split_path_var("/opt/foo;/opt/bar").collect();
+            assert_eq!(
+                with_semicolon.len(),
+                1,
+                "a semicolon is not a unix PATH separator"
+            );
+        }
     }
 
     /// A profile with no install directory of its own is unchanged: absent

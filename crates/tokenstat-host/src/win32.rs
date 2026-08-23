@@ -108,6 +108,14 @@ unsafe extern "system" {
         template: Handle,
     ) -> Handle;
     pub(crate) fn WaitNamedPipeW(name: *const u16, timeout_ms: Dword) -> Bool;
+    pub(crate) fn PeekNamedPipe(
+        pipe: Handle,
+        buffer: *mut u8,
+        buffer_size: Dword,
+        bytes_read: *mut Dword,
+        bytes_avail: *mut Dword,
+        bytes_left: *mut Dword,
+    ) -> Bool;
     pub(crate) fn GetLastError() -> Dword;
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn CloseHandle(handle: Handle) -> Bool;

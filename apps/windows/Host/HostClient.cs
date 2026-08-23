@@ -154,7 +154,12 @@ internal sealed class HostClient
         var ok = node["ok"]?.GetValue<bool>() ?? false;
         if (ok)
         {
-            return node["result"] ?? new JsonObject();
+            var result = node["result"];
+            if (result is null || result.GetValueKind() == JsonValueKind.Null)
+            {
+                return new JsonObject();
+            }
+            return result;
         }
         var error = node["error"];
         throw new HostException(

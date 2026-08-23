@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -91,7 +92,10 @@ fn create_instance(name: &str, first: bool) -> Result<OwnedHandle, String> {
             open_mode,
             // Byte mode and blocking wait are the zero defaults.
             PIPE_REJECT_REMOTE_CLIENTS,
-            MAX_CONNECTIONS as u32,
+            // One extra instance is the listening handle. Cap at live
+            // connections, not at CreateNamedPipe, so a full set of clients
+            // plus the listener does not take hostd down.
+            MAX_CONNECTIONS as u32 + 1,
             PIPE_BUFFER,
             PIPE_BUFFER,
             0,
@@ -147,13 +151,7 @@ pub fn serve(listener: PipeListener, session: Session) -> Result<(), String> {
     loop {
         if let Err(e) = wait_for_client(&incoming) {
             eprintln!("accept failed: {e}");
-            incoming = match create_instance(&pipe_name, false) {
-                Ok(h) => h,
-                Err(e) => {
-                    eprintln!("pipe instance: {e}");
-                    continue;
-                }
-            };
+            incoming = replace_instance(&pipe_name, incoming);
             continue;
         }
 
@@ -162,31 +160,44 @@ pub fn serve(listener: PipeListener, session: Session) -> Result<(), String> {
         if prev >= MAX_CONNECTIONS {
             live.fetch_sub(1, Ordering::AcqRel);
             let _ = refuse_busy(&incoming);
-            drop(incoming);
-            incoming = match create_instance(&pipe_name, false) {
-                Ok(h) => h,
-                Err(e) => return Err(e),
-            };
+            incoming = replace_instance(&pipe_name, incoming);
             continue;
         }
 
         let connected = incoming;
-        incoming = match create_instance(&pipe_name, false) {
-            Ok(h) => h,
+        match create_instance(&pipe_name, false) {
+            Ok(next) => {
+                incoming = next;
+                let session = Arc::clone(&shared);
+                std::thread::spawn(move || {
+                    let _guard = ConnectionGuard;
+                    if let Err(e) = handle(connected, &session) {
+                        eprintln!("connection ended: {e}");
+                    }
+                });
+            }
             Err(e) => {
                 live.fetch_sub(1, Ordering::AcqRel);
                 let _ = refuse_busy(&connected);
-                return Err(e);
+                eprintln!("pipe instance: {e}");
+                incoming = replace_instance(&pipe_name, connected);
             }
-        };
+        }
+    }
+}
 
-        let session = Arc::clone(&shared);
-        std::thread::spawn(move || {
-            let _guard = ConnectionGuard;
-            if let Err(e) = handle(connected, &session) {
-                eprintln!("connection ended: {e}");
+fn replace_instance(name: &str, current: OwnedHandle) -> OwnedHandle {
+    loop {
+        match create_instance(name, false) {
+            Ok(next) => {
+                drop(current);
+                return next;
             }
-        });
+            Err(e) => {
+                eprintln!("pipe instance: {e}");
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        }
     }
 }
 

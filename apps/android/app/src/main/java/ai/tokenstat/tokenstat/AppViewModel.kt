@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,22 @@ data class ClientState(
     val error: String? = null,
 ) {
     val signedIn: Boolean get() = account?.get("signedIn")?.jsonPrimitive?.content == "true"
+    val canRemote: Boolean
+        get() {
+            val flag = account?.get("canRemote")
+            if (flag != null && flag !is JsonNull) {
+                return flag.jsonPrimitive.content == "true"
+            }
+            val tier = account?.get("tier")?.jsonPrimitive?.content?.lowercase()
+            return tier == "patron" || tier == "legend"
+        }
+    val appAccountToken: String?
+        get() = (account?.get("billing") as? JsonObject)
+            ?.get("appAccountToken")
+            ?.takeUnless { it is JsonNull }
+            ?.jsonPrimitive
+            ?.content
+            ?.takeIf { it.isNotBlank() }
 }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -42,7 +59,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .onSuccess { account ->
                 val accountObject = account.jsonObject
                 mutableState.value = mutableState.value.copy(account = accountObject)
-                if (accountObject["signedIn"]?.jsonPrimitive?.content == "true") loadDashboard()
+                if (accountObject["signedIn"]?.jsonPrimitive?.content == "true") {
+                    PushRegistrar.refresh()
+                    loadDashboard()
+                }
             }
             .onFailure { mutableState.value = mutableState.value.copy(error = it.message) }
         mutableState.value = mutableState.value.copy(loading = false)
@@ -86,8 +106,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun signOut() = viewModelScope.launch {
+        runCatching { PushRegistrar.unregister() }
         runCatching { CoreClient.call("account.logout") }
         mutableState.value = ClientState(loading = false)
+    }
+
+    fun applyAccount(element: JsonElement) {
+        val account = element as? JsonObject ?: return
+        mutableState.value = mutableState.value.copy(account = account)
+        if (account["signedIn"]?.jsonPrimitive?.content == "true") {
+            viewModelScope.launch { loadDashboard() }
+        }
+    }
+
+    suspend fun prepareHost(peer: String, label: String) {
+        CoreClient.call("machine.pair", buildJsonObject {
+            put("key", peer)
+            put("label", label)
+            put("address", "")
+        })
+        CoreClient.call("remote.serve", buildJsonObject { put("tunnel", true) })
     }
 
     suspend fun workspaces(peer: String): JsonArray =

@@ -16,6 +16,17 @@ pub(crate) fn remote_peer() -> Option<String> {
     REMOTE_PEER.with(|peer| peer.borrow().clone())
 }
 
+/// Methods that decrypt vault material, open SSH sessions, or change this
+/// machine's serving policy belong to the local owner. An approved peer is
+/// not that owner.
+pub(crate) fn refuse_remote(what: &str) -> Result<(), String> {
+    if remote_peer().is_some() {
+        Err(format!("{what} are local-only"))
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn with_remote_peer<T>(peer: &str, work: impl FnOnce() -> T) -> T {
     struct Restore(Option<String>);
     impl Drop for Restore {

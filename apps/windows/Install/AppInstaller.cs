@@ -80,17 +80,15 @@ internal static class AppInstaller
             RestartCurrent();
             return;
         }
+        SelfInstall.StopRelatedProcesses();
         var helper = Path.Combine(Path.GetTempPath(), "tokenstat-apply-update.ps1");
         var exe = Path.Combine(dest, "Tokenstat.exe");
         var script = string.Join(Environment.NewLine, new[]
         {
-            "$ErrorActionPreference = 'Stop'",
             $"$dest = '{Escape(dest)}'",
             $"$staging = '{Escape(staging)}'",
             $"$prev = '{Escape(dest.TrimEnd('\\') + ".prev")}'",
             $"$exe = '{Escape(exe)}'",
-            // hostd holds files in dest. A folder rename fails while it is open.
-            "Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($dest) } | Stop-Process -Force -ErrorAction SilentlyContinue",
             "Start-Sleep -Seconds 2",
             "if (Test-Path -LiteralPath $prev) { Remove-Item -LiteralPath $prev -Recurse -Force }",
             "if (Test-Path -LiteralPath $dest) { Rename-Item -LiteralPath $dest -NewName (Split-Path $prev -Leaf) }",

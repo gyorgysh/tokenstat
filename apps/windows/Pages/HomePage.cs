@@ -86,6 +86,10 @@ internal sealed class HomePage : Page
             _root.Children.RemoveAt(2);
         }
 
+        if (calendar is not JsonObject)
+        {
+            calendar = new JsonObject();
+        }
         var notice = Format.Text(calendar, "notice");
         var scope = Format.Text(calendar, "scope", "local");
         _status.Text = string.IsNullOrEmpty(notice)

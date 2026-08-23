@@ -71,6 +71,10 @@ internal static class Format
 
     public static string Text(JsonNode? node, string name, string fallback = "")
     {
+        if (node is not JsonObject)
+        {
+            return fallback;
+        }
         var value = node?[name];
         if (value is null || value.GetValueKind() is JsonValueKind.Null or JsonValueKind.Undefined)
         {

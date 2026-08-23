@@ -7,8 +7,14 @@ use serde_json::{Value, json};
 
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
-        "ssh.provider.digitalOcean.import" => Some(import_digital_ocean(params)),
-        "ssh.provider.aws.import" => Some(import_aws(params)),
+        "ssh.provider.digitalOcean.import" | "ssh.provider.aws.import" => Some((|| {
+            crate::request_context::refuse_remote("SSH cloud import")?;
+            match method {
+                "ssh.provider.digitalOcean.import" => import_digital_ocean(params),
+                "ssh.provider.aws.import" => import_aws(params),
+                _ => unreachable!(),
+            }
+        })()),
         _ => None,
     }
 }
@@ -19,8 +25,6 @@ struct DoParams {
     token: String,
     #[serde(default = "root")]
     username: String,
-    #[serde(default)]
-    endpoint: Option<String>,
 }
 fn root() -> String {
     "root".into()
@@ -57,14 +61,11 @@ fn import_digital_ocean(params: &str) -> Result<Value, String> {
     if p.token.trim().is_empty() {
         return Err("DigitalOcean token is required".into());
     }
-    let endpoint = p
-        .endpoint
-        .unwrap_or_else(|| "https://api.digitalocean.com/v2/droplets?per_page=200".into());
     let response = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())?
-        .get(endpoint)
+        .get("https://api.digitalocean.com/v2/droplets?per_page=200")
         .bearer_auth(p.token)
         .send()
         .map_err(|e| format!("DigitalOcean request failed: {e}"))?;
@@ -192,5 +193,19 @@ mod tests {
         assert_eq!(hosts.len(), 1);
         assert_eq!(hosts[0]["label"], "web");
         assert_eq!(hosts[0]["provider"]["resourceID"], "i-1");
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_import_cloud_hosts() {
+        crate::request_context::with_remote_peer("phone", || {
+            assert!(
+                call(
+                    "ssh.provider.digitalOcean.import",
+                    r#"{"token":"dop_v1_x"}"#
+                )
+                .unwrap()
+                .is_err()
+            );
+        });
     }
 }

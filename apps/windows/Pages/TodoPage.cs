@@ -85,6 +85,10 @@ internal sealed class TodoPage : Page
         var list = new StackPanel { Spacing = Theme.SpaceS };
         foreach (var card in array)
         {
+            if (Format.Text(card, "kind") == "note")
+            {
+                continue;
+            }
             var title = Format.Text(card, "title", "(untitled)");
             var column = Format.Text(card, "column", "");
             var id = Format.Text(card, "id");
@@ -114,6 +118,14 @@ internal sealed class TodoPage : Page
                 line.Children.Add(remove);
             }
             list.Children.Add(line);
+        }
+        if (list.Children.Count == 0)
+        {
+            _root.Children.Add(Chrome.Empty(
+                "No tasks yet",
+                "Add a task to run it with an agent in a folder.",
+                Symbol.AllApps));
+            return;
         }
         _root.Children.Add(Chrome.Card("Tasks", list));
     }

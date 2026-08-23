@@ -79,9 +79,10 @@ internal sealed class AppUpdateModel
                 return;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            Current = Stage.Idle;
+            Current = Stage.Failed;
+            Failure = ex.Message;
             Changed?.Invoke();
             return;
         }

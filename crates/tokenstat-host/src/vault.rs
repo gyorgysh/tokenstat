@@ -328,6 +328,7 @@ fn decrypt_snapshot(
 }
 
 fn read() -> Result<VaultStore, String> {
+    let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
     match fs::read(path()) {
         Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(VaultStore::default()),
@@ -336,6 +337,7 @@ fn read() -> Result<VaultStore, String> {
 }
 
 fn write(store: &VaultStore) -> Result<(), String> {
+    let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
     let path = path();
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -472,7 +474,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         return None;
     }
     Some((|| {
-        let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
+        crate::request_context::refuse_remote("SSH vault methods")?;
         match method {
             "ssh.vault.status" => {
                 let local = read()?;
@@ -749,6 +751,17 @@ mod tests {
         let wrap = wrap_recovery(&vmk, &recovery, &salt).unwrap();
         assert_eq!(unwrap_recovery(&wrap, &recovery, &salt).unwrap(), vmk);
         assert!(unwrap_recovery(&wrap, &generate_recovery(), &salt).is_err());
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_open_the_vault() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = call("ssh.vault.record.list", r#"{"recovery":""}"#)
+                .unwrap()
+                .expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+            assert!(call("ssh.vault.enrollment.approve", "{}").unwrap().is_err());
+        });
     }
 
     #[test]

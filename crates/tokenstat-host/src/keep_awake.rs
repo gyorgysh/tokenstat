@@ -79,7 +79,9 @@ pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("workspace.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
-        "stream.open" => stream_kind == Some("pty.subscribe"),
+        m if m.starts_with("ssh.") => true,
+        m if m.starts_with("screen.transfer.") => true,
+        "stream.open" => matches!(stream_kind, Some("pty.subscribe" | "screen.video")),
         _ => false,
     }
 }
@@ -454,8 +456,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_pty_stream_open_counts() {
+    fn pty_and_screen_stream_opens_count() {
         assert!(counts_as_work("stream.open", Some("pty.subscribe")));
+        assert!(counts_as_work("stream.open", Some("screen.video")));
+        assert!(counts_as_work("screen.transfer.open", None));
+        assert!(counts_as_work("ssh.session.open", None));
         assert!(!counts_as_work("stream.open", Some("proxy")));
         assert!(!counts_as_work("stream.open", None));
     }

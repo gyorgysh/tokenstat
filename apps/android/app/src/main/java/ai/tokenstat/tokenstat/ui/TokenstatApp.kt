@@ -106,6 +106,14 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
 private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
     var accountOpen by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val billing = remember { PlayBillingManager(context) }
+    billing.appAccountToken = state.appAccountToken
+    billing.onActivated = { model.applyAccount(it) }
+    DisposableEffect(billing) {
+        billing.start()
+        onDispose { billing.close() }
+    }
     // The real window width, not the rounded Configuration value: the rail
     // appears exactly when the window is wide enough to carry both panes.
     val density = LocalDensity.current
@@ -151,7 +159,11 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 when (selected) {
                     Destination.Home -> HomeScreen(state)
-                    Destination.Workspaces -> WorkspacesScreen(model, state, expanded)
+                    Destination.Workspaces -> if (state.canRemote) {
+                        WorkspacesScreen(model, state, expanded)
+                    } else {
+                        RemotePaywall { accountOpen = true }
+                    }
                     Destination.Insights -> InsightsScreen(state)
                     Destination.Devices -> DevicesScreen(state)
                     Destination.SSH -> AndroidSSHScreen(model, state)
@@ -159,7 +171,25 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
         }
     }
-    if (accountOpen) AccountDialog(state, model, onDismiss = { accountOpen = false })
+    if (accountOpen) AccountDialog(state, model, billing, onDismiss = { accountOpen = false })
+}
+
+@Composable
+private fun RemotePaywall(onPlans: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Remote is on Patron", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "This phone already shares the account and sees the usage from every device on it. Opening folders and terminals on the computer is a paid feature.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = onPlans) { Text("See plans") }
+    }
 }
 
 @Composable
@@ -513,11 +543,20 @@ private fun WorkspacesScreen(model: AppViewModel, state: ClientState, expanded: 
     var selectedFolder by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(host) {
-        val key = host?.string("publicIdentity") ?: host?.string("id") ?: return@LaunchedEffect
+        val key = host?.string("publicIdentity")
+        if (host != null && key == null) {
+            folders = JsonArray(emptyList())
+            error = "This host has no public identity yet."
+            return@LaunchedEffect
+        }
+        if (key == null) return@LaunchedEffect
         // The folders still on screen belong to the previous host; showing
         // them beside the new host's name is one lie waiting to be clicked.
         folders = JsonArray(emptyList())
-        runCatching { model.workspaces(key) }
+        runCatching {
+            model.prepareHost(key, host?.string("label") ?: "Host")
+            model.workspaces(key)
+        }
             .onSuccess { folders = it; error = null }
             .onFailure { error = it.message }
     }
@@ -594,7 +633,7 @@ private fun WorkspaceDetail(
     var result by remember { mutableStateOf<JsonElement?>(null) }
     var title by remember { mutableStateOf("Sessions") }
     var error by remember { mutableStateOf<String?>(null) }
-    val peer = host.string("publicIdentity") ?: host.string("id") ?: ""
+    val peer = host.string("publicIdentity") ?: ""
     val workspace = folder.string("id") ?: ""
     Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -649,11 +688,14 @@ private fun WorkspaceDetail(
 }
 
 @Composable
-private fun AccountDialog(state: ClientState, model: AppViewModel, onDismiss: () -> Unit) {
+private fun AccountDialog(
+    state: ClientState,
+    model: AppViewModel,
+    billing: PlayBillingManager,
+    onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
-    val billing = remember { PlayBillingManager(context) }
     val billingState by billing.state.collectAsStateWithLifecycle()
-    DisposableEffect(billing) { billing.start(); onDispose { billing.close() } }
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.AccountCircle, null) },

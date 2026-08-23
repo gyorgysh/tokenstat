@@ -172,7 +172,7 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Notes => new ListPage(
                         "todo.list", "Notes", "No notes yet",
                         "Notes share the tasks store on this machine.",
-                        Symbol.OpenFile),
+                        Symbol.OpenFile, kindEquals: "note"),
                     GlobalSection.Workflows => new ListPage(
                         "workflow.list", "Workflows", "No workflows yet",
                         "Design a workflow on a Mac, then it shows up here.",
@@ -190,10 +190,12 @@ public sealed partial class MainWindow : Window
         }
         if (tag.StartsWith("ws:", StringComparison.Ordinal))
         {
-            var parts = tag.Split(':');
-            if (parts.Length >= 3 && Enum.TryParse<WorkspaceSection>(parts[2], out var section))
+            var rest = tag["ws:".Length..];
+            var i = rest.LastIndexOf(':');
+            if (i > 0
+                && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
-                _frame.Content = new WorkspacePage(parts[1], section);
+                _frame.Content = new WorkspacePage(rest[..i], section);
             }
         }
     }

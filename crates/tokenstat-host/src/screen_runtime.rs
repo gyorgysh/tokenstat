@@ -94,7 +94,7 @@ pub(crate) fn queue_input(id: &str, payload: Vec<u8>) -> Result<(), String> {
     let session_command = serde_json::from_slice::<Value>(&payload)
         .ok()
         .and_then(|value| value.get("type").and_then(Value::as_str).map(str::to_owned))
-        .is_some_and(|kind| matches!(kind.as_str(), "display" | "clipboard"));
+        .is_some_and(|kind| kind == "display");
     if !held.control && !session_command {
         return Err("this screen session is view-only".into());
     }
@@ -202,6 +202,10 @@ mod tests {
         let receiver = create("view-only".into(), "phone".into(), false).unwrap();
         assert!(queue_input(&receiver.id, vec![1]).is_err());
         assert!(queue_input(&receiver.id, br#"{"type":"display","id":2}"#.to_vec()).is_ok());
+        assert!(
+            queue_input(&receiver.id, br#"{"type":"clipboard","text":"x"}"#.to_vec()).is_err(),
+            "view-only must not write the host pasteboard"
+        );
     }
 
     #[test]

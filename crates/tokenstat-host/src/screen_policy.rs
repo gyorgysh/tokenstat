@@ -223,7 +223,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         }
         "screen.capability.verify" => {
             let p: VerifyParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            verify_capability(&p.peer_id, &p.token, p.control)?;
+            let peer = match crate::request_context::remote_peer() {
+                Some(authenticated) if authenticated != p.peer_id => {
+                    return Err("screen capability verify must use the authenticated device".into());
+                }
+                Some(authenticated) => authenticated,
+                None => p.peer_id,
+            };
+            verify_capability(&peer, &p.token, p.control)?;
             Ok(json!({"allowed":true}))
         }
         "screen.direct.candidate" => direct_candidate(),
@@ -292,6 +299,19 @@ mod tests {
                 .unwrap()
                 .is_err()
             );
+        });
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_verify_a_capability_as_somebody_else() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = call(
+                "screen.capability.verify",
+                r#"{"peerId":"other","token":"abc","control":true}"#,
+            )
+            .unwrap()
+            .expect_err("must refuse a mismatched peer");
+            assert!(refused.contains("authenticated device"), "{refused}");
         });
     }
 }

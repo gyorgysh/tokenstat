@@ -140,7 +140,10 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("ssh.session.") && method != "ssh.host.probe" {
         return None;
     }
-    Some(call_inner(method, params))
+    Some((|| {
+        crate::request_context::refuse_remote("SSH sessions")?;
+        call_inner(method, params)
+    })())
 }
 
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
@@ -155,17 +158,18 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             if p.host_keys.is_empty() {
                 return Err("Confirm this server's fingerprint before connecting.".into());
             }
+            crate::ssh_records::validate_initial_directory(&p.initial_directory)?;
             let id = new_id()?;
-            let live = runtime()?.block_on(open(p))?;
-            sessions()
-                .lock()
-                .map_err(|e| e.to_string())?
-                .insert(id.clone(), live);
+            let live = runtime()?.block_on(open(p, id.clone()))?;
+            let mut map = sessions().lock().map_err(|e| e.to_string())?;
+            reap_closed(&mut map);
+            map.insert(id.clone(), live);
             Ok(json!({"id": id}))
         }
         "ssh.session.read" => {
             let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            let guard = sessions().lock().map_err(|e| e.to_string())?;
+            let mut guard = sessions().lock().map_err(|e| e.to_string())?;
+            reap_closed(&mut guard);
             let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
             let output = live.output.lock().map_err(|e| e.to_string())?;
             let start = p.offset.saturating_sub(output.base) as usize;
@@ -195,7 +199,8 @@ where
     F: FnOnce(SessionParams) -> Command,
 {
     let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    let guard = sessions().lock().map_err(|e| e.to_string())?;
+    let mut guard = sessions().lock().map_err(|e| e.to_string())?;
+    reap_closed(&mut guard);
     let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
     live.commands
         .send(make(p))
@@ -217,7 +222,12 @@ async fn connect(
         probe,
     };
     let config = Arc::new(client::Config {
-        inactivity_timeout: Some(Duration::from_secs(30)),
+        // Interactive shells sit at a prompt with no traffic. russh's default
+        // 30s inactivity window would drop them. Keepalives hold the TCP
+        // session without treating silence as a hang.
+        inactivity_timeout: Some(Duration::from_secs(30 * 60)),
+        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_max: 6,
         ..Default::default()
     });
     let handle = client::connect(config, (p.hostname.as_str(), p.port), handler)
@@ -238,7 +248,7 @@ async fn probe(p: &OpenParams) -> Result<String, String> {
         .ok_or_else(|| "server offered no host key".into())
 }
 
-async fn open(p: OpenParams) -> Result<LiveSession, String> {
+async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
     let (mut handle, _) = connect(&p, false).await?;
     let authenticated = match p.auth.ok_or("SSH authentication is required")? {
         Auth::Password { password } => handle
@@ -290,6 +300,7 @@ async fn open(p: OpenParams) -> Result<LiveSession, String> {
         .map_err(|e| e.to_string())?;
     let directory = p.initial_directory.trim();
     if !directory.is_empty() && directory != "~" {
+        crate::ssh_records::validate_initial_directory(directory)?;
         let quoted = directory.replace('\'', "'\"'\"'");
         channel
             .data(format!("cd -- '{quoted}'\r").as_bytes())
@@ -321,6 +332,9 @@ async fn open(p: OpenParams) -> Result<LiveSession, String> {
         }
         let _ = handle.disconnect(Disconnect::ByApplication, "closed", "en").await;
         task_output.lock().unwrap_or_else(|e| e.into_inner()).closed = true;
+        if let Ok(mut map) = sessions().lock() {
+            map.remove(&id);
+        }
     });
     Ok(LiveSession {
         commands: tx,
@@ -389,6 +403,15 @@ fn new_id() -> Result<String, String> {
     Ok(format!("ssh_{}", tokenstat_identity::hex(&bytes)))
 }
 
+fn reap_closed(map: &mut HashMap<String, LiveSession>) {
+    map.retain(|_, live| {
+        live.output
+            .lock()
+            .map(|output| !output.closed)
+            .unwrap_or(false)
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,5 +438,18 @@ mod tests {
         assert!(parsed.auth.is_none());
         assert_eq!(parsed.rows, 24);
         assert_eq!(parsed.cols, 80);
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_open_an_ssh_session() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = call(
+                "ssh.session.open",
+                r#"{"hostname":"example.com","username":"root","hostKeys":["x"]}"#,
+            )
+            .unwrap()
+            .expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+        });
     }
 }

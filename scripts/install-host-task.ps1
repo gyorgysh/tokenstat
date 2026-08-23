@@ -50,7 +50,33 @@ $IdentityDir = if ($env:TOKENSTAT_IDENTITY_DIR) {
 $HostJson = Join-Path $IdentityDir "host.json"
 
 function Test-InternalBattery {
-    $null -ne (Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue)
+    # Same test hostd uses (GetSystemPowerStatus). Win32_Battery also
+    # reports a UPS, which would flip the laptop default on a desktop.
+    if (-not ("Tokenstat.Power" -as [type])) {
+        Add-Type -TypeDefinition @"
+using System.Runtime.InteropServices;
+namespace Tokenstat {
+  public static class Power {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SYSTEM_POWER_STATUS {
+      public byte ACLineStatus;
+      public byte BatteryFlag;
+      public byte BatteryLifePercent;
+      public byte SystemStatusFlag;
+      public uint BatteryLifeTime;
+      public uint BatteryFullLifeTime;
+    }
+    [DllImport("kernel32.dll")]
+    public static extern bool GetSystemPowerStatus(out SYSTEM_POWER_STATUS sps);
+  }
+}
+"@
+    }
+    $status = New-Object Tokenstat.Power+SYSTEM_POWER_STATUS
+    if (-not [Tokenstat.Power]::GetSystemPowerStatus([ref]$status)) {
+        return $false
+    }
+    return ($status.BatteryFlag -band 128) -eq 0
 }
 
 $AlwaysOn = $false
@@ -69,7 +95,10 @@ if (Test-Path -LiteralPath $HostJson) {
     $AlwaysOn = -not (Test-InternalBattery)
     New-Item -ItemType Directory -Force -Path $IdentityDir | Out-Null
     $json = if ($AlwaysOn) { "{`n  `"alwaysOn`": true`n}`n" } else { "{`n  `"alwaysOn`": false`n}`n" }
-    Set-Content -LiteralPath $HostJson -Value $json -Encoding utf8
+    # Windows PowerShell 5.1 `utf8` writes a BOM. serde_json rejects it and
+    # hostd then overwrites the file with its own battery default.
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($HostJson, $json, $utf8)
 }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null

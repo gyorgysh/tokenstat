@@ -20,9 +20,17 @@ internal sealed class ListPage : Page
     private readonly string _hint;
     private readonly Symbol _symbol;
     private readonly string _itemKey;
+    private readonly string? _kindEquals;
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
 
-    public ListPage(string method, string title, string empty, string hint, Symbol symbol, string itemKey = "title")
+    public ListPage(
+        string method,
+        string title,
+        string empty,
+        string hint,
+        Symbol symbol,
+        string itemKey = "title",
+        string? kindEquals = null)
     {
         _method = method;
         _title = title;
@@ -30,6 +38,7 @@ internal sealed class ListPage : Page
         _hint = hint;
         _symbol = symbol;
         _itemKey = itemKey;
+        _kindEquals = kindEquals;
         Content = new ScrollViewer
         {
             Padding = new Thickness(Theme.SpaceL),
@@ -66,6 +75,10 @@ internal sealed class ListPage : Page
         var list = new StackPanel { Spacing = Theme.SpaceS };
         foreach (var item in array)
         {
+            if (_kindEquals is not null && Format.Text(item, "kind") != _kindEquals)
+            {
+                continue;
+            }
             var label = Format.Text(item, _itemKey, Format.Text(item, "id", "(item)"));
             var extra = Format.Text(item, "enabled") is { Length: > 0 }
                 ? ""
@@ -75,6 +88,11 @@ internal sealed class ListPage : Page
                 Text = string.IsNullOrEmpty(extra) ? label : $"{label} · {extra}",
                 TextWrapping = TextWrapping.Wrap,
             });
+        }
+        if (list.Children.Count == 0)
+        {
+            _root.Children.Add(Chrome.Empty(_empty, _hint, _symbol));
+            return;
         }
         _root.Children.Add(Chrome.Card(_title, list));
     }

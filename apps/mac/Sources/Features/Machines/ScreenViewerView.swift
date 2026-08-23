@@ -242,7 +242,8 @@ private final class ScreenViewerModel {
                     if metadata.type == "displays", let values = metadata.displays {
                         displays = values
                         selectedDisplay = metadata.selected
-                    } else if metadata.type == "clipboard", let text = metadata.text {
+                    } else if metadata.type == "clipboard", let text = metadata.text,
+                              requestedControl {
                         applyClipboard(text)
                     }
                 }
@@ -262,7 +263,7 @@ private final class ScreenViewerModel {
                     else { reconnect(after: reason) }
                     return
                 }
-                syncClipboard()
+                if requestedControl { syncClipboard() }
             } catch {
                 reconnect(after: error.localizedDescription)
                 return

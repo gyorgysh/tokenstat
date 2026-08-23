@@ -47,13 +47,15 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                         if let display = ScreenInput.displaySelection(input) {
                             try? await encoder(for: session.id)?.selectDisplay(display)
                         } else if let clipboard = ScreenInput.clipboard(input) {
-                            await applyClipboard(clipboard)
+                            if session.control {
+                                await applyClipboard(clipboard)
+                            }
                         } else if session.control {
                             ScreenInput.apply(input, displayID: encoder(for: session.id)?.displayID)
                         }
                     }
                 }
-                await publishClipboard(to: sessions.map(\.id))
+                await publishClipboard(to: sessions.filter(\.control).map(\.id))
             } catch {
                 // hostd may be restarting or no session may exist yet.
             }

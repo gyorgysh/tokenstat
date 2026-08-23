@@ -1796,6 +1796,7 @@ fn validate_tunnel_endpoint(raw: &str) -> Result<String, String> {
 }
 
 fn serve(params: &str) -> Result<Value, String> {
+    crate::request_context::refuse_remote("remote serving settings")?;
     let p: ServeParams = serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
     let mut settings = load_settings();
     if let Some(tunnel) = p.tunnel {
@@ -1854,6 +1855,14 @@ mod tests {
         let params = json!({"peer": "ab".repeat(32), "method": "remote.call", "params": {}});
         let refused = forward(&params.to_string()).expect_err("must refuse");
         assert!(refused.contains("another remote call"), "{refused}");
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_change_tunnel_settings() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = serve(r#"{"tunnel":false}"#).expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+        });
     }
 
     #[test]

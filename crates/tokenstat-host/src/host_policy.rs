@@ -453,6 +453,7 @@ fn policy() -> Result<Value, String> {
 }
 
 fn set_policy(params: &str) -> Result<Value, String> {
+    crate::request_context::refuse_remote("host policy settings")?;
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Params {
@@ -465,7 +466,42 @@ fn set_policy(params: &str) -> Result<Value, String> {
         save(&settings)?;
     }
     apply_now();
+    #[cfg(windows)]
+    reregister_windows_task();
     policy()
+}
+
+/// Keep the logon trigger in step with `alwaysOn`, the way the Mac app
+/// rewrites the launch agent after `host.setPolicy`. Missing script is
+/// fine: a cargo-built hostd has no installer next to it.
+#[cfg(windows)]
+fn reregister_windows_task() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some(dir) = exe.parent() else {
+        return;
+    };
+    let script = dir.join("install-host-task.ps1");
+    if !script.is_file() {
+        return;
+    }
+    let script_path = script.to_string_lossy().into_owned();
+    let exe_path = exe.to_string_lossy().into_owned();
+    let _ = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &script_path,
+            "-Bin",
+            &exe_path,
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
@@ -590,12 +626,31 @@ mod tests {
         ));
         assert!(!refuse(r#"{"id":3,"method":"workspace.list","params":{}}"#));
         assert!(!refuse(r#"{"id":4,"method":"pty.list","params":{}}"#));
+        assert!(refuse(
+            r#"{"id":6,"method":"stream.open","params":{"kind":"screen.video"}}"#
+        ));
+        assert!(refuse(
+            r#"{"id":7,"method":"screen.transfer.open","params":{}}"#
+        ));
+        assert!(refuse(
+            r#"{"id":8,"method":"ssh.session.open","params":{}}"#
+        ));
         assert!(!should_refuse_inbound_with(
             true,
             true,
             false,
             r#"{"id":5,"method":"pty.spawn","params":{}}"#
         ));
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_change_host_policy() {
+        crate::request_context::with_remote_peer("phone", || {
+            let refused = call("host.setPolicy", r#"{"alwaysOn":true}"#)
+                .unwrap()
+                .expect_err("must refuse");
+            assert!(refused.contains("local-only"), "{refused}");
+        });
     }
 
     #[test]

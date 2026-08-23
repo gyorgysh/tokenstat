@@ -150,6 +150,16 @@ fn required(value: &str, field: &str) -> Result<(), String> {
     }
 }
 
+/// `cd -- '{dir}'` is sent as shell text. A CR or LF is Enter, so this has
+/// to reject those rather than quote them.
+pub(crate) fn validate_initial_directory(value: &str) -> Result<(), String> {
+    if value.bytes().any(|byte| matches!(byte, 0 | b'\r' | b'\n')) {
+        Err("starting directory cannot contain a newline".into())
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Deserialize)]
 struct IdParam {
     id: String,
@@ -162,7 +172,10 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     {
         return None;
     }
-    Some(call_inner(method, params))
+    Some((|| {
+        crate::request_context::refuse_remote("SSH records")?;
+        call_inner(method, params)
+    })())
 }
 
 fn call_inner(method: &str, params: &str) -> Result<Value, String> {
@@ -176,6 +189,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             required(&item.label, "label")?;
             required(&item.hostname, "hostname")?;
             required(&item.username, "username")?;
+            validate_initial_directory(&item.initial_directory)?;
             if item.port == 0 {
                 return Err("port must be between 1 and 65535".into());
             }
@@ -337,6 +351,21 @@ mod tests {
         assert!(!text.contains("password"));
         assert_eq!(load_from(&path).unwrap().hosts, store.hosts);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_starting_directory_must_not_carry_a_newline() {
+        assert!(validate_initial_directory("~/src").is_ok());
+        assert!(validate_initial_directory("~/src\nwhoami").is_err());
+        assert!(validate_initial_directory("~/src\rid").is_err());
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_read_or_write_ssh_records() {
+        crate::request_context::with_remote_peer("phone", || {
+            assert!(call("ssh.host.list", "{}").unwrap().is_err());
+            assert!(call("ssh.key.generate", "{}").unwrap().is_err());
+        });
     }
 
     #[test]

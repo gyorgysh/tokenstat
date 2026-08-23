@@ -8,29 +8,19 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import ai.tokenstat.tokenstat.MainActivity
 import ai.tokenstat.tokenstat.R
-import ai.tokenstat.tokenstat.core.CoreClient
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 
 class TokenstatMessagingService : FirebaseMessagingService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
-        serviceScope.launch {
-            runCatching {
-                CoreClient.call("push.register", buildJsonObject {
-                    put("token", token)
-                    put("platform", "android")
-                    put("environment", "production")
-                })
-            }
-        }
+        PushRegistrar.persist(token)
+        serviceScope.launch { PushRegistrar.refresh() }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
