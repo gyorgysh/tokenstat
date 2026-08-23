@@ -49,6 +49,7 @@ pub fn default_pipe_name() -> String {
 }
 
 /// First pipe instance. Further clients get a new instance inside [`serve`].
+#[derive(Debug)]
 pub struct PipeListener {
     name: PathBuf,
     first: OwnedHandle,
