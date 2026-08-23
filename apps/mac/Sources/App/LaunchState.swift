@@ -69,7 +69,11 @@ final class LaunchState {
         }
         guard !Task.isCancelled else { return }
 
-        withAnimation(.easeOut(duration: 0.32)) {
+        // Inserting NavigationSplitView under an animation is what macOS 27
+        // aborts on: the hosted column reports a new min/max during the same
+        // Update Constraints pass, and AppKit calls abort(). withAnimation(nil)
+        // also blocks an ambient transaction from a parent.
+        withAnimation(nil) {
             hostReady = true
         }
     }

@@ -54,7 +54,12 @@ struct RootView: View {
     /// Separate from `isInspectorPresented`, which is what the user asked for.
     /// Conflating them would spend the user's choice on a window resize: narrow
     /// the window once and the pane would stay shut after widening it again.
-    @State private var inspectorFits = true
+    ///
+    /// Starts false. The default window is 1260 wide and the three-column
+    /// edge is 1450, so a true start would mount `.inspector` as a column
+    /// and tear it off on the first measured width. On macOS 27 that
+    /// add/remove runs inside NSSplitView's constraint pass and aborts.
+    @State private var inspectorFits = false
     /// Whether the floating inspector overlay is on screen.
     ///
     /// Written by `watchPointer`, which opens it after a dwell at the edge and
@@ -130,16 +135,24 @@ struct RootView: View {
                 // changes the AppKit titlebar (native bar above content); the
                 // toolbar items stay on the detail column.
                 mainChrome
-                    .transition(.opacity)
             } else {
                 LaunchSplashView()
-                    .transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.32), value: launch.hostReady)
         .environment(\.hostReady, launch.hostReady)
         .task {
             await launch.prepare()
+        }
+        // Width may already be known from the splash observer. Apply it
+        // when the split view appears, because `onChange` of the width
+        // itself will not fire if the value did not move. Hop a turn so
+        // the first constraint pass of the new split view finishes
+        // before we consider adding an inspector column.
+        .onChange(of: launch.hostReady) { _, ready in
+            guard ready else { return }
+            Task { @MainActor in
+                applyWidth(for: windowContentWidth)
+            }
         }
         // Cell frames are reported in this space, and the popover overlay is
         // positioned in the same space, so a frame and its card agree wherever
@@ -452,7 +465,12 @@ struct RootView: View {
                 // Pull DetailChromeBar into the measured titlebar band (same
                 // vertical row as traffic lights). Value comes from AppKit
                 // contentLayoutRect, not a faked compact chrome height.
+                //
+                // macOS 27 aborts if this padding animates, or if it changes
+                // the hosted column's min/max during NSSplitView's own
+                // constraint pass. Keep the inset, do not animate it.
                 .padding(.top, -titlebarInset)
+                .animation(nil, value: titlebarInset)
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
