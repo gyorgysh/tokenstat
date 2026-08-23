@@ -69,6 +69,11 @@ fn legend(tier: &str) -> Result<(), String> {
         Err("Screen access requires the Legend plan".into())
     }
 }
+
+fn verify_legend_account() -> Result<(), String> {
+    let status = tokenstat_sync::sync_status(None).map_err(|e| e.to_string())?;
+    legend(status.tier.as_deref().unwrap_or(""))
+}
 fn token_hash(token: &[u8]) -> String {
     Sha256::digest(token)
         .iter()
@@ -104,7 +109,8 @@ struct SetParams {
 struct IssueParams {
     peer_id: String,
     control: bool,
-    tier: String,
+    #[serde(default)]
+    _tier: String,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,7 +145,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         }
         "screen.capability.issue" => {
             let p: IssueParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            legend(&p.tier)?;
+            verify_legend_account()?;
+            if let Some(authenticated) = crate::request_context::remote_peer()
+                && authenticated != p.peer_id
+            {
+                return Err(
+                    "a screen capability may be issued only to the authenticated device".into(),
+                );
+            }
             let permission = load()?
                 .permissions
                 .into_iter()

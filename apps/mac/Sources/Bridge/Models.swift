@@ -72,6 +72,11 @@ struct SSHVaultRecords: Codable, Sendable, Hashable { var records: [SSHVaultReco
 struct SSHHostImport: Codable, Sendable, Hashable { var imported: Int; var hosts: [SSHHost] }
 struct ScreenPermission: Codable, Sendable, Hashable, Identifiable { var peerID: String; var view: Bool; var control: Bool; var id: String { peerID } }
 struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var expiresAt: UInt64; var control: Bool }
+struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable { var id: String; var peerID: String; var control: Bool; var dropped: UInt64 }
+struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
+struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String? }
+struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool }
+struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var active: Bool; var dropped: UInt64; var error: String? }
 
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {

@@ -127,6 +127,7 @@ pub struct VideoQueue {
     bytes: usize,
     waiting_for_keyframe: bool,
     dropped: u64,
+    last_sequence: Option<u64>,
 }
 
 impl VideoQueue {
@@ -136,6 +137,17 @@ impl VideoQueue {
         }
         if frame.payload.len() > MAX_VIDEO_BYTES {
             return Err("video frame exceeds the bounded queue frame limit".into());
+        }
+        let gap = self
+            .last_sequence
+            .is_some_and(|last| frame.sequence != last.saturating_add(1));
+        self.last_sequence = Some(frame.sequence);
+        if gap && !frame.independent {
+            self.dropped += self.frames.len() as u64 + 1;
+            self.frames.clear();
+            self.bytes = 0;
+            self.waiting_for_keyframe = true;
+            return Ok(false);
         }
         if self.waiting_for_keyframe && !frame.independent {
             self.dropped += 1;
@@ -216,5 +228,15 @@ mod tests {
         assert!(queue.push(video(6, 16, true)).unwrap());
         assert_eq!(queue.pop().unwrap().sequence, 6);
         assert_eq!(queue.dropped(), 5);
+    }
+
+    #[test]
+    fn a_transport_sequence_gap_waits_for_a_new_keyframe() {
+        let mut queue = VideoQueue::default();
+        assert!(queue.push(video(1, 8, true)).unwrap());
+        assert!(!queue.push(video(3, 8, false)).unwrap());
+        assert!(!queue.push(video(4, 8, false)).unwrap());
+        assert!(queue.push(video(5, 8, true)).unwrap());
+        assert_eq!(queue.pop().unwrap().sequence, 5);
     }
 }

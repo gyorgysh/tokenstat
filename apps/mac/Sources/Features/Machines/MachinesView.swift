@@ -174,6 +174,7 @@ struct MachinesView: View {
             waitingForApproval
         }
         thisMachine
+        ScreenPermissionCard(peers: model.known.filter { $0.trust == .approved })
         #if os(macOS)
         alwaysOnHost
         #endif
@@ -1025,6 +1026,58 @@ struct MachinesView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+    }
+}
+
+private struct ScreenPermissionCard: View {
+    let peers: [Peer]
+    @State private var permissions: [String: ScreenPermission] = [:]
+    @State private var error: String?
+
+    var body: some View {
+        if !peers.isEmpty {
+            Card(title: "Screen access", subtitle: "Legend only. Each device is allowed independently.", mark: "mark_device") {
+                VStack(spacing: Theme.Space.s) {
+                    ForEach(peers) { peer in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(peer.label).font(.callout.weight(.medium))
+                                Text(peer.words ?? peer.fingerprint).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle("View", isOn: binding(peer, control: false)).toggleStyle(.switch)
+                            Toggle("Control", isOn: binding(peer, control: true)).toggleStyle(.switch)
+                                .disabled(permissions[peer.key]?.view != true)
+                        }
+                    }
+                    if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func binding(_ peer: Peer, control: Bool) -> Binding<Bool> {
+        Binding {
+            control ? permissions[peer.key]?.control == true : permissions[peer.key]?.view == true
+        } set: { enabled in
+            var permission = permissions[peer.key] ?? ScreenPermission(peerID: peer.key, view: false, control: false)
+            if control { permission.control = enabled; if enabled { permission.view = true } }
+            else { permission.view = enabled; if !enabled { permission.control = false } }
+            permissions[peer.key] = permission
+            Task {
+                do { try await Bridge.setScreenPermission(peerID: peer.key, view: permission.view, control: permission.control) }
+                catch { self.error = error.localizedDescription; await load() }
+            }
+        }
+    }
+
+    private func load() async {
+        do {
+            let values = try await Bridge.screenPermissions()
+            permissions = Dictionary(uniqueKeysWithValues: values.map { ($0.peerID, $0) })
+            error = nil
+        } catch { self.error = error.localizedDescription }
     }
 }
 

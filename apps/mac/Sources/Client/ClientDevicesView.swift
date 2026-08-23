@@ -353,6 +353,7 @@ struct ClientDeviceDetailView: View {
     /// Re-read the account after a rename, so the list behind this screen says
     /// the new name too.
     var onRenamed: () async -> Void = {}
+    @Environment(AccountModel.self) private var account
 
     @State private var renaming = false
     @State private var draft = ""
@@ -378,6 +379,25 @@ struct ClientDeviceDetailView: View {
                 spend
                 reach
                 work
+                if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty {
+                    NavigationLink {
+                        ScreenViewerView(peer: key, name: DeviceCopy.name(current), tier: account.account?.tier)
+                    } label: {
+                        HStack(spacing: Theme.Space.m) {
+                            Image(systemName: "display").foregroundStyle(Theme.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("View screen").font(ClientType.label.weight(.semibold))
+                                Text(account.account?.tier?.lowercased() == "legend" ? "End-to-end encrypted from this device" : "Requires Legend")
+                                    .font(ClientType.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                        }
+                        .padding(Theme.Space.m)
+                        .cardSurface()
+                    }
+                    .buttonStyle(.plain)
+                }
                 identity
                 // The same explanation the Workspaces tab carries, with this
                 // machine's key beside it: somebody reading a device page is

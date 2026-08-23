@@ -1779,6 +1779,37 @@ extension Bridge {
         try await background("screen.capability.issue", ["peerID": peerID, "control": control, "tier": tier], as: ScreenCapability.self)
     }
 
+    static func screenCaptureSessions() async throws -> [ScreenCaptureSession] {
+        try await background("screen.capture.list", patience: Patience.interactive, as: [ScreenCaptureSession].self)
+    }
+
+    static func screenCapturePush(id: String, frame: Data) async throws -> ScreenCapturePush {
+        try await background("screen.capture.push", ["id": id, "frame": frame.base64EncodedString()], patience: Patience.interactive, as: ScreenCapturePush.self)
+    }
+
+    static func screenCaptureInput(id: String) async throws -> Data? {
+        let result = try await background("screen.capture.input", ["id": id], patience: Patience.interactive, as: ScreenCaptureInput.self)
+        return result.data.flatMap { Data(base64Encoded: $0) }
+    }
+
+    static func screenViewerOpen(peer: String, capability: String, control: Bool) async throws -> ScreenViewerSession {
+        try await background("screen.viewer.open", ["peer": peer, "capability": capability, "control": control], patience: Patience.standard, as: ScreenViewerSession.self)
+    }
+
+    static func screenViewerRead(id: String) async throws -> ScreenViewerRead {
+        try await background("screen.viewer.read", ["id": id, "waitMs": 250], patience: Patience.interactive, as: ScreenViewerRead.self)
+    }
+
+    static func screenViewerInput(id: String, data: Data) async throws {
+        struct Sent: Codable, Sendable { var sent: Bool }
+        _ = try await background("screen.viewer.input", ["id": id, "data": data.base64EncodedString()], patience: Patience.interactive, as: Sent.self)
+    }
+
+    static func screenViewerClose(id: String) async {
+        struct Closed: Codable, Sendable { var closed: Bool }
+        _ = try? await background("screen.viewer.close", ["id": id], patience: Patience.interactive, as: Closed.self)
+    }
+
     static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {
         try await background("ssh.vault.create", ["tier": tier], as: SSHVaultRecovery.self)
     }

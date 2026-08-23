@@ -123,6 +123,7 @@ struct TokenstatApp: App {
         #if os(macOS)
         HostOwnerLock.acquire()
         DesktopSyncScheduler.start()
+        ScreenCaptureCoordinator.shared.start()
         #endif
         // Host bring-up is owned by `LaunchState.prepare` (the splash in
         // RootView). A second ensureHosted here would race that path.
