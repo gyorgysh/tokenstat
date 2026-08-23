@@ -19,19 +19,19 @@ internal static class Theme
     public static bool IsDark =>
         Application.Current?.RequestedTheme == ApplicationTheme.Dark;
 
-    public static Color Accent => Hex(IsDark ? 0x8B5CF6 : 0x6A3DFF);
-    public static Color Secondary => Hex(IsDark ? 0xE879F9 : 0xC026D3);
-    public static Color Background => Hex(IsDark ? 0x08070D : 0xFBFBFD);
-    public static Color Sidebar => Hex(IsDark ? 0x12101D : 0xF3F2F8);
-    public static Color Panel => IsDark ? Hex(0x100E1A) : Color.FromArgb(255, 255, 255, 255);
-    public static Color Border => Hex(IsDark ? 0x211D33 : 0xE7E7EE);
-    public static Color RowHighlight => Hex(IsDark ? 0x1B1430 : 0xF0ECFF);
-    public static Color AccentSoft => Hex(IsDark ? 0x1B1430 : 0xF0ECFF);
-    public static Color ControlGlyph => Hex(IsDark ? 0xA8A5B5 : 0x6B6876);
+    public static Color Accent => Hex(IsDark ? 0x8B5CF6u : 0x6A3DFFu);
+    public static Color Secondary => Hex(IsDark ? 0xE879F9u : 0xC026D3u);
+    public static Color Background => Hex(IsDark ? 0x08070Du : 0xFBFBFDu);
+    public static Color Sidebar => Hex(IsDark ? 0x12101Du : 0xF3F2F8u);
+    public static Color Panel => IsDark ? Hex(0x100E1Au) : Color.FromArgb(255, 255, 255, 255);
+    public static Color Border => Hex(IsDark ? 0x211D33u : 0xE7E7EEu);
+    public static Color RowHighlight => Hex(IsDark ? 0x1B1430u : 0xF0ECFFu);
+    public static Color AccentSoft => Hex(IsDark ? 0x1B1430u : 0xF0ECFFu);
+    public static Color ControlGlyph => Hex(IsDark ? 0xA8A5B5u : 0x6B6876u);
     public static Color Success => Accent;
     public static Color Warning => Color.FromArgb(255, 0xE0, 0xA9, 0x3B);
     public static Color Danger => Color.FromArgb(255, 0xD6, 0x45, 0x3F);
-    public static Color StateIdle => Hex(IsDark ? 0x6E6A80 : 0x9A97A6);
+    public static Color StateIdle => Hex(IsDark ? 0x6E6A80u : 0x9A97A6u);
 
     public static Color[] Heat { get; } =
     [
