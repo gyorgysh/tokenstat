@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# Build Tokenstat.app for release, unsigned.
+# Build Tokenstat.app for release.
 #
-# Unsigned on purpose. The Developer ID identity lives on the release
-# environment and never reaches the build matrix, so this produces the bundle
-# and the publish job signs, notarizes and packages it. Running it locally gives
-# the same bundle without needing a certificate.
+# The Developer ID identity lives on the release environment and never reaches
+# the build matrix, so on CI this produces an unsigned bundle and the publish
+# job signs, notarizes and packages it.
+#
+# Locally it signs with Developer ID when this machine has one, because macOS
+# keys a TCC grant to the code signature: an ad-hoc signature changes on every
+# build, so every rebuild silently loses Screen Recording and Accessibility.
+# With no identity present it still builds, unsigned, and says what that costs.
 #
 # Usage:
 #   scripts/build-mac-app.sh [version] [output-dir]
@@ -125,5 +129,31 @@ rm -rf "${OUT:?}/Tokenstat.app"
 # ditto rather than cp: a bundle has symlinks and extended attributes, and cp
 # flattens both.
 ditto "$APP" "$OUT/Tokenstat.app"
+
+# Sign with Developer ID when this machine has the identity.
+#
+# Not cosmetic. macOS keys a TCC grant to the code signature, and the ad-hoc
+# signature this produces otherwise changes on every build, so every rebuild
+# silently loses Screen Recording and Accessibility: the app looks the same and
+# the screen never arrives. A real identity is stable across builds, so the
+# grant survives.
+#
+# CI has no identity and stays unsigned, which is correct: the publish job is
+# the only place that signs, notarizes and staples for release.
+IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
+if [ -n "$IDENTITY" ]; then
+    echo "Signing with $IDENTITY"
+    # Deep, and the helper first: a bundle is verified from the inside out, so
+    # signing the outside over an unsigned nested binary produces a bundle that
+    # fails its own check.
+    codesign --force --options runtime --timestamp=none \
+        --sign "$IDENTITY" "$OUT/Tokenstat.app/Contents/Resources/tokenstat-hostd"
+    codesign --force --options runtime --timestamp=none \
+        --sign "$IDENTITY" "$OUT/Tokenstat.app"
+else
+    echo "No Developer ID identity on this machine: leaving the app unsigned."
+    echo "Screen Recording and Accessibility grants will be lost on each rebuild."
+fi
 
 echo "Wrote $OUT/Tokenstat.app"

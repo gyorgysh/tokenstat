@@ -1048,6 +1048,9 @@ private struct ScreenPermissionCard: View {
     @State private var permissions: [String: ScreenPermission] = [:]
     @State private var error: String?
     @State private var transferDestination: String?
+    #if os(macOS)
+    @State private var access = ScreenAccess()
+    #endif
 
     var body: some View {
         if !peers.isEmpty {
@@ -1075,22 +1078,73 @@ private struct ScreenPermissionCard: View {
                         Spacer()
                         Button("Choose folder", .reveal) { chooseTransferDestination() }
                     }
-                    HStack {
-                        Button("Screen Recording settings", .settings) {
-                            openPrivacy("Privacy_ScreenCapture")
-                        }
-                        Button("Accessibility settings", .settings) {
-                            openPrivacy("Privacy_Accessibility")
-                        }
-                        Spacer()
-                    }
+                    Divider()
+                    permissionRow(.screenRecording, granted: access.screenRecording)
+                    permissionRow(.accessibility, granted: access.accessibility)
+                    // Directly above Always-on host, which is exactly where
+                    // somebody would assume the opposite. Capture runs in this
+                    // app, not in the helper, so a closed app has no screen to
+                    // share however always-on the helper is.
+                    Text("Capture runs in the app, so Tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     #endif
                     if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
                 }
             }
             .task { await load() }
+            #if os(macOS)
+            // A grant made in System Settings never tells the app. Re-reading
+            // when the window comes forward is what makes the card say
+            // "granted" without a relaunch.
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+            ) { _ in access.refresh() }
+            #endif
         }
     }
+
+    #if os(macOS)
+    /// One permission: what it is for, whether it is granted, and a button that
+    /// actually asks rather than pointing at a pane.
+    private func permissionRow(_ kind: ScreenAccess.Kind, granted: Bool) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: Theme.Space.xs) {
+                    Text(kind.title).font(.callout.weight(.medium))
+                    Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle")
+                        .font(.system(size: 11))
+                        .foregroundStyle(granted ? Theme.success : Theme.warning)
+                    Text(granted ? "Granted" : "Not granted")
+                        .font(.caption)
+                        .foregroundStyle(granted ? Theme.success : Theme.warning)
+                }
+                Text(granted ? kind.need : "\(kind.need) \(kind.settingsHint)")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.m)
+            if !granted {
+                Button("Allow", .approve) { ask(kind) }
+                    .buttonStyle(AccentButtonStyle(small: true))
+            }
+        }
+    }
+
+    /// Ask, and open the pane when macOS has already recorded an answer.
+    ///
+    /// The prompt only ever appears once per app, so a refusal cannot be
+    /// re-asked. Falling through to the pane is the only remaining route, and
+    /// the row it needs switching on is named beside the button.
+    private func ask(_ kind: ScreenAccess.Kind) {
+        let granted = switch kind {
+        case .screenRecording: access.requestScreenRecording()
+        case .accessibility: access.requestAccessibility()
+        }
+        if !granted { access.openSettings(kind) }
+    }
+    #endif
 
     private func binding(_ peer: Peer, control: Bool) -> Binding<Bool> {
         Binding {
@@ -1100,6 +1154,15 @@ private struct ScreenPermissionCard: View {
             if control { permission.control = enabled; if enabled { permission.view = true } }
             else { permission.view = enabled; if !enabled { permission.control = false } }
             permissions[peer.key] = permission
+            #if os(macOS)
+            // The moment somebody says what they want is the moment to ask for
+            // what it needs. Waiting until a stream starts meant the viewer on
+            // the other device had already failed before the prompt appeared.
+            if enabled {
+                if permission.view { access.requestScreenRecording() }
+                if permission.control { access.requestAccessibility() }
+            }
+            #endif
             Task {
                 do { try await Bridge.setScreenPermission(peerID: peer.key, view: permission.view, control: permission.control) }
                 catch { self.error = error.localizedDescription; await load() }
@@ -1129,11 +1192,6 @@ private struct ScreenPermissionCard: View {
                 error = nil
             } catch { self.error = error.localizedDescription }
         }
-    }
-
-    private func openPrivacy(_ pane: String) {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
-        NSWorkspace.shared.open(url)
     }
     #endif
 }
