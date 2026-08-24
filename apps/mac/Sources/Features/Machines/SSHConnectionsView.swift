@@ -172,7 +172,7 @@ struct SSHVaultBanner: View {
     }
 }
 
-private struct SSHRecoveryWordsSheet: View {
+struct SSHRecoveryWordsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let recovery: String
     let onConfirmed: () -> Void
@@ -269,7 +269,7 @@ private struct SSHRecoveryWordsSheet: View {
     }
 }
 
-private struct SSHVaultSetupSheet: View {
+struct SSHVaultSetupSheet: View {
     private enum Choice: String, CaseIterable { case create = "Create new", restore = "Recovery words", request = "Ask a device" }
     @Environment(\.dismiss) private var dismiss
     let tier: String
@@ -474,7 +474,9 @@ struct SSHConnectForm: View {
     }
 }
 
-private extension View {
+extension View {
+    /// A sheet in the SSH path: a fixed size on the Mac, the whole screen on
+    /// a phone.
     @ViewBuilder
     func sshSheetFrame(width: CGFloat, height: CGFloat) -> some View {
         #if os(macOS)

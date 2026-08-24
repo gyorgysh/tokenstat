@@ -30,6 +30,8 @@ struct SSHSectionView: View {
     @State private var connecting: SSHHost?
     @State private var terminal: SSHLiveTerminal?
     @State private var expanded: Set<String> = []
+    @State private var vault = SSHVaultModel()
+    @State private var showingVault = false
 
     private var paidVaultTier: String? { SSHLibraryModel.paidTier(for: vaultTier) }
     private var signedInUnpaid: Bool { vaultTier != nil && paidVaultTier == nil }
@@ -37,6 +39,13 @@ struct SSHSectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            // The vault belongs to hosts and keys, not to a fingerprint list,
+            // and only when there is an account to hold one.
+            if vaultTier != nil, section != .knownHosts {
+                SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.bottom, Theme.Space.s)
+            }
             if let error = model.error {
                 InlineBanner(text: error, kind: .danger) { model.error = nil }
                     .padding(.horizontal, Theme.Space.m)
@@ -50,6 +59,13 @@ struct SSHSectionView: View {
         }
         .sheet(item: $terminal) {
             SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480)
+        }
+        .sheet(isPresented: $showingVault) {
+            SSHVaultScreen(vault: vault, tier: vaultTier ?? "", canWrite: paidVaultTier != nil)
+        }
+        .task(id: vaultTier) {
+            guard vaultTier != nil else { return }
+            await vault.refresh()
         }
     }
 

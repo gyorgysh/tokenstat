@@ -101,6 +101,10 @@ ALLOWED = [
     # Whole-row launch into the SSH library. The terminal glyph is already
     # inside the label, and a second one on the button would duplicate it.
     ("Features/Machines/MachinesView.swift", "onNavigate?(.ssh)"),
+    # The vault screen's one decision row. The glyph is the `icon` parameter,
+    # typed as ActionIcon, so the compiler already enforces what this script
+    # checks; it just cannot read a glyph it is handed rather than told.
+    ("Features/Machines/SSHVaultView.swift", "Button(button, icon, action: perform)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),
