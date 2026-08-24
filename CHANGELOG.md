@@ -9,12 +9,22 @@ under one version number. Newest first.
 ### New
 
 - On a phone, an awake computer's detail shows power, CPU, and memory, read over the tunnel and not uploaded with usage. Open work and view screen sit on that same page, so connecting is not only a Mac-to-Mac action.
-- Android puts SSH under Devices, matching iOS, instead of a fifth tab.
+- Control a shared screen from an iPhone or iPad. One finger moves the pointer, tap clicks, two fingers tap for a right click and drag to scroll, long press then drag holds the button down, and pinch zooms in. A row of keys over the keyboard sends escape, tab, the arrows and sticky ctrl, opt, cmd and shift.
+- The SSH library is a screen rather than a stack of small windows: search, folders you can nest, favourites, and recently used servers on top. Editing a server, a key or a snippet happens in place, with room to work.
+- A saved server carries what it needs to connect: which key to use, which server to reach it through, a starting directory, environment variables, a keepalive, and a colour and folder to find it by. Snippets can ask for `{{values}}` when they run, so one snippet covers every server.
+- Import servers from `~/.ssh/config`. tokenstat reads that file and never writes to it, and shows what it found before saving anything.
+- Trusted servers are listed with their fingerprints, and any of them can be forgotten, so a key that changed can be confirmed again rather than quietly accepted.
+- A key shows its fingerprint, and its public half can be copied in one press for pasting into a server's authorized_keys.
+- Android SSH gains search, folders on saved servers, port and starting directory on the add form, and a snippet editor with room for a real command.
 
 ### Fixed
 
+- The app no longer reports "unknown method" when this machine's background helper is older than the app. It checks the helper on launch, replaces it, and says something a person can act on if it cannot.
+- Screen control can actually be turned on. The toggle was disabled as soon as the picture arrived, which was before anybody could reach it, so sessions were always view only.
+- Double clicks, right clicks and scrolling reach the shared Mac, rather than being flattened into a press and a drag.
 - SSH vault setup no longer offers migrate (that path was never in a release). If you did not save the recovery words, or cannot open the vault, you can drop it and create a new one.
 - The unpaid SSH empty state now pitches the vault the same way tasks and notes pitch their screens, with a path to plans.
+- Buttons across the SSH and screen surfaces are one height and line up. A glyph no longer makes a button taller than the one beside it, and destructive actions look like actions rather than links.
 
 ## [0.6.9] - 2026-08-24
 
