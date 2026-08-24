@@ -91,6 +91,21 @@ struct OpenParams {
     cols: u32,
     #[serde(default)]
     auth: Option<Auth>,
+    /// Reach this server through another one.
+    ///
+    /// The client resolves the chain and sends it, credentials and all,
+    /// because only the client can open the platform vault. Boxed because the
+    /// jump host is itself a host and may have a jump host of its own.
+    #[serde(default)]
+    jump: Option<Box<OpenParams>>,
+    /// Environment set before the shell is handed over. Sent as `export`
+    /// lines rather than as SSH env requests, because most servers refuse
+    /// anything outside `AcceptEnv` and refuse it silently.
+    #[serde(default)]
+    env: Vec<crate::ssh_records::EnvPair>,
+    /// Seconds between keepalives. 0 leaves the default alone.
+    #[serde(default)]
+    keepalive_seconds: u32,
 }
 
 fn default_initial_directory() -> String {
@@ -226,14 +241,86 @@ async fn connect(
         // 30s inactivity window would drop them. Keepalives hold the TCP
         // session without treating silence as a hang.
         inactivity_timeout: Some(Duration::from_secs(30 * 60)),
-        keepalive_interval: Some(Duration::from_secs(30)),
+        keepalive_interval: Some(Duration::from_secs(if p.keepalive_seconds == 0 {
+            30
+        } else {
+            p.keepalive_seconds.clamp(5, 300) as u64
+        })),
         keepalive_max: 6,
         ..Default::default()
     });
-    let handle = client::connect(config, (p.hostname.as_str(), p.port), handler)
+    // No jump host: dial the server directly, as before.
+    let Some(jump) = p.jump.as_deref() else {
+        let handle = client::connect(config, (p.hostname.as_str(), p.port), handler)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok((handle, offered));
+    };
+    // Through a jump host: authenticate there, ask it to open a TCP channel to
+    // the real server, and run the second SSH session inside that channel. The
+    // bytes past the jump host are encrypted to the destination, which is the
+    // whole point of doing it this way rather than tunnelling a port.
+    let jump_handle = authenticated_handle(jump).await?;
+    let stream = jump_handle
+        .channel_open_direct_tcpip(p.hostname.as_str(), u32::from(p.port), "127.0.0.1", 0)
+        .await
+        .map_err(|e| format!("open a channel through {}: {e}", jump.hostname))?
+        .into_stream();
+    let handle = client::connect_stream(config, stream, handler)
         .await
         .map_err(|e| e.to_string())?;
     Ok((handle, offered))
+}
+
+/// Connect to one host and authenticate it. Used for the jump host, where the
+/// session exists only to carry somebody else's.
+async fn authenticated_handle(p: &OpenParams) -> Result<client::Handle<HostKeyCheck>, String> {
+    if p.host_keys.is_empty() {
+        return Err(format!(
+            "Confirm the fingerprint of {} before connecting through it.",
+            p.hostname
+        ));
+    }
+    let (mut handle, _) = Box::pin(connect(p, false)).await?;
+    let auth = p
+        .auth
+        .as_ref()
+        .ok_or("the jump host needs its own credential")?;
+    if !authenticate(&mut handle, &p.username, auth)
+        .await?
+        .success()
+    {
+        return Err(format!("{} refused the credential", p.hostname));
+    }
+    Ok(handle)
+}
+
+/// One authentication attempt, whichever kind it is.
+async fn authenticate(
+    handle: &mut client::Handle<HostKeyCheck>,
+    username: &str,
+    auth: &Auth,
+) -> Result<client::AuthResult, String> {
+    match auth {
+        Auth::Password { password } => handle
+            .authenticate_password(username, password.clone())
+            .await
+            .map_err(|e| e.to_string()),
+        Auth::PrivateKey { pem, passphrase } => {
+            let key = russh::keys::decode_secret_key(pem, passphrase.as_deref())
+                .map_err(|e| e.to_string())?;
+            let hash = handle
+                .best_supported_rsa_hash()
+                .await
+                .map_err(|e| e.to_string())?
+                .flatten();
+            handle
+                .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
+                .await
+                .map_err(|e| e.to_string())
+        }
+        Auth::Agent { fingerprint } => authenticate_agent(handle, username, fingerprint).await,
+    }
 }
 
 async fn probe(p: &OpenParams) -> Result<String, String> {
@@ -250,31 +337,8 @@ async fn probe(p: &OpenParams) -> Result<String, String> {
 
 async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
     let (mut handle, _) = connect(&p, false).await?;
-    let authenticated = match p.auth.ok_or("SSH authentication is required")? {
-        Auth::Password { password } => handle
-            .authenticate_password(&p.username, password)
-            .await
-            .map_err(|e| e.to_string())?,
-        Auth::PrivateKey { pem, passphrase } => {
-            let key = russh::keys::decode_secret_key(&pem, passphrase.as_deref())
-                .map_err(|e| e.to_string())?;
-            let hash = handle
-                .best_supported_rsa_hash()
-                .await
-                .map_err(|e| e.to_string())?
-                .flatten();
-            handle
-                .authenticate_publickey(
-                    &p.username,
-                    PrivateKeyWithHashAlg::new(Arc::new(key), hash),
-                )
-                .await
-                .map_err(|e| e.to_string())?
-        }
-        Auth::Agent { fingerprint } => {
-            authenticate_agent(&mut handle, &p.username, &fingerprint).await?
-        }
-    };
+    let auth = p.auth.as_ref().ok_or("SSH authentication is required")?;
+    let authenticated = authenticate(&mut handle, &p.username, auth).await?;
     if !authenticated.success() {
         return Err("SSH authentication was refused".into());
     }
@@ -298,6 +362,15 @@ async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
         .request_shell(true)
         .await
         .map_err(|e| e.to_string())?;
+    for pair in &p.env {
+        crate::ssh_records::validate_shell_text(&pair.name, "environment name")?;
+        crate::ssh_records::validate_shell_text(&pair.value, "environment value")?;
+        let value = pair.value.replace('\'', "'\"'\"'");
+        channel
+            .data(format!("export {}='{}'\r", pair.name, value).as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let directory = p.initial_directory.trim();
     if !directory.is_empty() && directory != "~" {
         crate::ssh_records::validate_initial_directory(directory)?;

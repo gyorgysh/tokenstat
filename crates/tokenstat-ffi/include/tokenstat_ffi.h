@@ -5,7 +5,8 @@
  * not expected to grow, because everything else travels as JSON inside them.
  * If this file and `src/abi.rs` ever disagree, `abi.rs` is correct.
  *
- * Licensed GPL-3.0. See LICENSE at the repository root.
+ * SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+ * Source-available for review, NOT open source. See LICENSE.
  */
 
 #ifndef TOKENSTAT_FFI_H

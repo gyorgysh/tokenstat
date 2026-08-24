@@ -2239,6 +2239,19 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+    // Who is answering, without opening an archive to say it.
+    //
+    // A front end prefers a running daemon, and that daemon outlives the app
+    // that installed it, so an app can end up talking to a helper from an
+    // older release. Every method added since is then "unknown method", which
+    // is true and useless. This is the one call a client can make first to
+    // find out, and it is deliberately cheap: `info` opens the archive.
+    if method == "protocol" {
+        return Some(Ok(json!({
+            "protocolVersion": crate::PROTOCOL_VERSION,
+            "coreVersion": tokenstat_core::VERSION,
+        })));
+    }
     if let Some(answer) = crate::cloud_import::call(method, params) {
         return Some(answer);
     }

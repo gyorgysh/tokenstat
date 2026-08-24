@@ -123,4 +123,9 @@ pub use tokenstat_pty::warm_shell_pool;
 /// A front end should refuse to talk to a host whose major version it does not
 /// recognize, which is what makes the eventual remote transport safe to upgrade
 /// independently at each end.
-pub const PROTOCOL_VERSION: &str = "1";
+///
+/// Bumped whenever methods are added, because a front end that finds a method
+/// missing has no way to tell "this host is old" from "this call is wrong" and
+/// used to print `unknown method: ssh.host.list` at a person. 2 is the SSH
+/// library and screen input work.
+pub const PROTOCOL_VERSION: &str = "2";
