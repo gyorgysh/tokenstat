@@ -21,6 +21,13 @@ enum Route: Hashable {
     case global(GlobalSection)
     /// One folder, one of its sections. The daily question.
     case workspace(id: String, section: WorkspaceSection)
+    /// The SSH library, one of its sections.
+    ///
+    /// Its own case rather than a `GlobalSection`, because a global section is
+    /// one screen and this is four screens plus a folder tree. Keeping it here
+    /// also means every `switch route` in the shell has to answer for it, which
+    /// is how the columns stay honest.
+    case ssh(SSHSection)
 
     var globalSection: GlobalSection? {
         if case let .global(section) = self { return section }
@@ -37,7 +44,14 @@ enum Route: Hashable {
         return nil
     }
 
+    var sshSection: SSHSection? {
+        if case let .ssh(section) = self { return section }
+        return nil
+    }
+
     var isWorkspace: Bool { workspaceID != nil }
+
+    var isSSH: Bool { sshSection != nil }
 
     /// True when this route is that global screen. Reads better at the call
     /// site than unwrapping the optional, and there are a lot of call sites.
@@ -46,7 +60,8 @@ enum Route: Hashable {
     /// Whether the trailing inspector column exists here.
     ///
     /// Account and Notes have nothing to put beside them. Everything else
-    /// has a panel, so the default is yes.
+    /// has a panel, so the default is yes, and every SSH section says yes:
+    /// the list is the content column and the editor is the inspector.
     var hasInspector: Bool {
         globalSection != .account
             && globalSection != .notes
@@ -148,6 +163,72 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// The sections of the SSH library.
+///
+/// Fixed set, fixed order, the same shape a workspace has. Hosts carries an
+/// optional folder because the sidebar nests folders under it and a folder row
+/// is that same screen filtered, not a screen of its own.
+enum SSHSection: Hashable, Identifiable {
+    case hosts(folder: String?)
+    case keys
+    case snippets
+    case knownHosts
+
+    /// The four rows, in order. `hosts` unfiltered, because the folders under
+    /// it are drawn from the model rather than from this list.
+    static var rows: [SSHSection] { [.hosts(folder: nil), .keys, .snippets, .knownHosts] }
+
+    var id: String {
+        switch self {
+        case let .hosts(folder): return "hosts:\(folder ?? "")"
+        case .keys: return "keys"
+        case .snippets: return "snippets"
+        case .knownHosts: return "knownHosts"
+        }
+    }
+
+    /// The row this section lights up. A folder is inside Hosts, so it lights
+    /// Hosts as well as its own row.
+    var row: SSHSection {
+        if case .hosts = self { return .hosts(folder: nil) }
+        return self
+    }
+
+    /// Set when the route is one folder's worth of hosts.
+    var folderID: String? {
+        if case let .hosts(folder) = self { return folder }
+        return nil
+    }
+
+    var label: String {
+        switch self {
+        case .hosts: return "Hosts"
+        case .keys: return "Keys"
+        case .snippets: return "Snippets"
+        case .knownHosts: return "Trusted servers"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .hosts: return "server.rack"
+        case .keys: return "key.fill"
+        case .snippets: return "text.badge.plus"
+        case .knownHosts: return "checkmark.shield"
+        }
+    }
+
+    /// The word an Add button uses. Singular, because it adds one.
+    var addLabel: String {
+        switch self {
+        case .hosts: return "Add host"
+        case .keys: return "Add key"
+        case .snippets: return "Add snippet"
+        case .knownHosts: return "Add server"
+        }
+    }
+}
+
 /// What a screen inside the app can ask the shell for.
 ///
 /// Deliberately smaller than `Route`: a sheet three levels down knows it wants
@@ -155,6 +236,9 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
 /// folder is selected or which section of it is in front.
 enum NavigationRequest: Hashable {
     case global(GlobalSection)
+    /// The SSH library, wherever it was last left. A card on Devices asks for
+    /// "servers", not for "Keys": which section is the shell's business.
+    case ssh
     /// The workspace surface, whichever folder is current.
     case workspaces
     /// That folder's launch grid. A setup hint uses this when the next

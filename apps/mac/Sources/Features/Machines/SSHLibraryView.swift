@@ -54,10 +54,7 @@ struct SSHLibraryView: View {
     @State private var vaultStatus: SSHVaultStatus?
     @State private var expanded: Set<String> = []
 
-    private var paidVaultTier: String? {
-        guard let tier = vaultTier?.lowercased(), ["supporter", "patron", "legend"].contains(tier) else { return nil }
-        return tier
-    }
+    private var paidVaultTier: String? { SSHLibraryModel.paidTier(for: vaultTier) }
 
     private var signedInUnpaid: Bool { vaultTier != nil && paidVaultTier == nil }
 

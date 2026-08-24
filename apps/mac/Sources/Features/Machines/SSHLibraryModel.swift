@@ -29,6 +29,17 @@ final class SSHLibraryModel {
     /// read from it.
     private(set) var vaultTier: String?
 
+    /// The account's tier, filtered down to the ones that may write the vault.
+    ///
+    /// One place rather than one per caller: the sidebar and the library screen
+    /// both have to decide it, and two copies of a plan list is a copy that
+    /// disagrees the first time a plan is renamed.
+    static func paidTier(for tier: String?) -> String? {
+        guard let tier = tier?.lowercased(),
+              ["supporter", "patron", "legend"].contains(tier) else { return nil }
+        return tier
+    }
+
     func load(vaultTier: String? = nil) async {
         self.vaultTier = vaultTier
         do {

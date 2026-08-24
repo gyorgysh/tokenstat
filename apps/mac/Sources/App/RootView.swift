@@ -29,6 +29,10 @@ struct RootView: View {
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
     @State private var machines = MachinesModel()
+    /// The SSH library, owned by the shell rather than by a screen: the
+    /// sidebar draws folders and a host count from it, and the content and
+    /// inspector columns are two views over the same records.
+    @State private var ssh = SSHLibraryModel()
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
     @State private var todo = TodoModel()
@@ -118,6 +122,14 @@ struct RootView: View {
     /// The every-folder group. Shut by default, and remembered: it answers a
     /// question people ask about once a week.
     @AppStorage("sidebar.globalGroupExpanded") private var isGlobalGroupExpanded = false
+    /// The SSH group. Same treatment as the global one: shut by default,
+    /// remembered, because servers are a place people go to deliberately.
+    @AppStorage("sidebar.sshGroupExpanded") private var isSSHGroupExpanded = false
+    /// SSH folders whose hosts are listed under the Hosts row.
+    @State private var expandedSSHFolders: Set<String> = []
+    /// The SSH section last left, so clicking the heading (or coming back from
+    /// Home) returns to what you were doing rather than resetting to Hosts.
+    @State private var lastSSHSection: SSHSection = .hosts(folder: nil)
     /// Workspace id the current drag would land before, or `workspaceDropEnd`.
     @State private var workspaceDropBeforeID: String?
     #endif
@@ -871,6 +883,8 @@ struct RootView: View {
                 EmptyView()
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
+            case .ssh:
+                EmptyView()
             case .global(.insights):
                 InspectorView(model: model) { closeInspector() }
             case .global(.account):
@@ -1204,6 +1218,98 @@ struct RootView: View {
 
     // MARK: - Sidebar
 
+    /// One SSH folder in the sidebar, with its depth in the tree.
+    ///
+    /// Flattened rather than nested, for the reason the library screen already
+    /// flattens: a view that contains itself cannot be typed, and an indent
+    /// reads the same to a person.
+    #if os(macOS)
+    private struct SSHFolderRow: Identifiable {
+        let folder: SSHFolder
+        let depth: Int
+        /// Whether anything is inside it to disclose. A chevron on a leaf is a
+        /// control that does nothing.
+        let hasChildren: Bool
+        var id: String { folder.id }
+    }
+
+    /// The folder tree, visible rows only, honouring what is expanded.
+    ///
+    /// Read from `ssh.folders` rather than `ssh.folders(in:)`: that helper
+    /// hides folders while a search is running, and the search belongs to the
+    /// content column. A sidebar that empties itself while somebody types in
+    /// another column is a sidebar that moved for no reason.
+    private var sshFolderRows: [SSHFolderRow] {
+        func children(of parent: String?) -> [SSHFolder] {
+            ssh.folders
+                .filter { $0.parentID == parent }
+                .sorted { left, right in
+                    if left.sort != right.sort { return left.sort < right.sort }
+                    return left.name.localizedCaseInsensitiveCompare(right.name) == .orderedAscending
+                }
+        }
+        var out: [SSHFolderRow] = []
+        func walk(_ parent: String?, depth: Int) {
+            for folder in children(of: parent) {
+                let kids = children(of: folder.id)
+                out.append(SSHFolderRow(folder: folder, depth: depth, hasChildren: !kids.isEmpty))
+                guard expandedSSHFolders.contains(folder.id) else { continue }
+                walk(folder.id, depth: depth + 1)
+            }
+        }
+        walk(nil, depth: 0)
+        return out
+    }
+
+    /// A folder row: chevron beside the row rather than inside it, the way the
+    /// workspace rows do it. A button inside a button is one target that
+    /// swallows the other.
+    private func sshFolderRow(_ row: SSHFolderRow) -> some View {
+        let isExpanded = expandedSSHFolders.contains(row.folder.id)
+        return HStack(spacing: 0) {
+            if row.hasChildren {
+                Button {
+                    if isExpanded {
+                        expandedSSHFolders.remove(row.folder.id)
+                    } else {
+                        expandedSSHFolders.insert(row.folder.id)
+                    }
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 24)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .help(isExpanded ? "Collapse folder" : "Expand folder")
+                .padding(.leading, CGFloat(row.depth) * 14)
+            } else {
+                Spacer(minLength: 0).frame(width: 18 + CGFloat(row.depth) * 14)
+            }
+
+            SidebarRow(
+                label: row.folder.name,
+                symbol: "folder",
+                trailing: "\(ssh.hosts.filter { $0.folderID == row.folder.id }.count)",
+                isSelected: route.sshSection?.folderID == row.folder.id,
+                indent: 1
+            ) { openSSH(.hosts(folder: row.folder.id)) }
+        }
+    }
+
+    /// The number beside a section row. Trusted servers carries one too: the
+    /// list is the point of that screen.
+    private func sshCount(of section: SSHSection) -> String? {
+        switch section {
+        case .hosts: return "\(ssh.hosts.count)"
+        case .keys: return "\(ssh.keys.count)"
+        case .snippets: return "\(ssh.snippets.count)"
+        case .knownHosts: return "\(ssh.knownHosts.count)"
+        }
+    }
+    #endif
+
     private var sidebar: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -1245,6 +1351,36 @@ struct RootView: View {
                         ) { navigate(to: .global(item)) }
                     }
                 }
+
+                #if os(macOS)
+                // Servers are a place, not a panel that opens over Devices.
+                // Same shape as a workspace: one heading, a fixed set of
+                // sections, folders nesting under the section that owns them.
+                SidebarGroupHeader(
+                    title: "SSH",
+                    count: ssh.hosts.count,
+                    isExpanded: isSSHGroupExpanded
+                ) { isSSHGroupExpanded.toggle() }
+                if isSSHGroupExpanded {
+                    ForEach(SSHSection.rows) { section in
+                        SidebarRow(
+                            label: section.label,
+                            symbol: section.symbol,
+                            trailing: sshCount(of: section),
+                            isSelected: route.sshSection?.row == section
+                        ) { openSSH(section) }
+
+                        // Folders live under Hosts, because that is what they
+                        // hold. A folder row is the Hosts screen filtered, the
+                        // same way a workspace row opens that folder.
+                        if case .hosts = section {
+                            ForEach(sshFolderRows) { row in
+                                sshFolderRow(row)
+                            }
+                        }
+                    }
+                }
+                #endif
 
                 // Folders the user chose. Nothing to do with the archive:
                 // its `project` is a lossy label recovered from a slug and
@@ -1799,6 +1935,12 @@ struct RootView: View {
             MachinesView(model: machines)
         case .global(.account):
             AccountView(model: account)
+        case let .ssh(section):
+            #if os(macOS)
+            SSHSectionPlaceholder(section: section)
+            #else
+            EmptyView()
+            #endif
         case .global(.insights):
             InsightsView(model: model) {
                 // The back arrow exists only for a day that came from Home, so
@@ -1830,6 +1972,15 @@ struct RootView: View {
             connection.setPeerNames(machines.peers)
         }
         guard !Task.isCancelled else { return }
+
+        #if os(macOS)
+        // The SSH library, because the sidebar draws its folders and counts
+        // and a sidebar that fills in after the first click is a sidebar that
+        // moves under the pointer. After Machines, which is where the tier
+        // that may write the vault comes from.
+        await ssh.load(vaultTier: SSHLibraryModel.paidTier(for: machines.vaultTier))
+        guard !Task.isCancelled else { return }
+        #endif
 
         // Remote workspace groups for the sidebar. Local folders already
         // loaded earlier; this is the peer dial pass.
@@ -1997,6 +2148,41 @@ struct RootView: View {
         return value > 0 ? value : nil
     }
 
+    /// Go to an SSH section, and remember it as where SSH was left.
+    ///
+    /// The heading itself is not a destination, so leaving for Home and coming
+    /// back has to land somewhere. It lands on the section you were on, the
+    /// same promise a workspace makes with `lastSection`.
+    #if os(macOS)
+    private func openSSH(_ section: SSHSection) {
+        navigate(to: .ssh(section)) {
+            lastSSHSection = section
+            isSSHGroupExpanded = true
+            // A folder cannot be selected while its parent chain is shut, so
+            // opening one opens the way to it.
+            if let folderID = section.folderID {
+                for ancestor in sshAncestors(of: folderID) { expandedSSHFolders.insert(ancestor) }
+            }
+            isInspectorPresented = true
+        }
+    }
+
+    /// Every folder between this one and the root, itself excluded.
+    private func sshAncestors(of folderID: String) -> [String] {
+        var out: [String] = []
+        var current = ssh.folders.first { $0.id == folderID }?.parentID
+        // Bounded by the folder count, so a parent chain that somehow points
+        // at itself cannot spin here.
+        var guardRail = ssh.folders.count
+        while let id = current, guardRail > 0 {
+            out.append(id)
+            current = ssh.folders.first { $0.id == id }?.parentID
+            guardRail -= 1
+        }
+        return out
+    }
+    #endif
+
     /// Open one of a folder's sections, and put the centre pane on it.
     ///
     /// The scoped screens (Tasks, Workflows, Automations) need nothing here:
@@ -2117,6 +2303,10 @@ struct RootView: View {
         switch request {
         case let .global(section):
             navigate(to: .global(section))
+        case .ssh:
+            #if os(macOS)
+            openSSH(lastSSHSection)
+            #endif
         case .workspaces:
             guard let id = workspaces.selectedID ?? workspaces.folders.first?.id else { return }
             openSection(.sessions, in: id)
@@ -2330,6 +2520,9 @@ private struct SidebarRow: View {
     var symbolSize: CGFloat = 11
     var trailing: String?
     var isSelected: Bool
+    /// How many steps in from the group's own rows this one sits. Nested SSH
+    /// folders use it; everything else is flat and leaves it at zero.
+    var indent: Int = 0
     var action: () -> Void
 
     @State private var isHovering = false
@@ -2337,6 +2530,9 @@ private struct SidebarRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
+                if indent > 0 {
+                    Spacer(minLength: 0).frame(width: CGFloat(indent) * 14)
+                }
                 Image(systemName: symbol)
                     .font(.system(size: DisplayFit.dp(symbolSize)))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
@@ -3237,3 +3433,24 @@ private struct SessionContextBar: View {
 #endif
 
 #endif  // os(macOS), the desktop shell
+
+#if os(macOS)
+/// The content column for an SSH section, until each screen is built.
+///
+/// A placeholder on purpose: the route, the sidebar and every switch that has
+/// to answer for them land first, so the screens that follow are built into a
+/// shell that already works rather than beside one.
+private struct SSHSectionPlaceholder: View {
+    let section: SSHSection
+
+    var body: some View {
+        EmptyState(
+            symbol: section.symbol,
+            title: section.label,
+            message: "This screen moves into the content column next."
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.background)
+    }
+}
+#endif
