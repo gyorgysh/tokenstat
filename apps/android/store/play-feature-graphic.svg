@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
+<svg width="1024" height="500" viewBox="0 0 1024 500" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="tokenstat">
+  <!-- Play feature graphic. House paper and washes, bars centred. No type. -->
+  <defs>
+    <radialGradient id="wash1" cx="0.08" cy="-0.1" r="0.75">
+      <stop offset="0" stop-color="#6a3dff" stop-opacity="0.10"/>
+      <stop offset="0.6" stop-color="#6a3dff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="wash2" cx="1.05" cy="1.1" r="0.8">
+      <stop offset="0" stop-color="#c026d3" stop-opacity="0.09"/>
+      <stop offset="0.6" stop-color="#c026d3" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="500" fill="#fbfbfd"/>
+  <rect width="1024" height="500" fill="url(#wash1)"/>
+  <rect width="1024" height="500" fill="url(#wash2)"/>
+  <g transform="translate(512 250) scale(2.65) translate(-120 -117.5)">
+    <rect x="67.5" y="125" width="30" height="45" rx="8.75" fill="#bfaaff"/>
+    <rect x="105" y="95" width="30" height="75" rx="8.75" fill="#6a3dff"/>
+    <rect x="142.5" y="65" width="30" height="105" rx="8.75" fill="#c026d3"/>
+  </g>
+</svg>

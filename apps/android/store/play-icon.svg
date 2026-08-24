@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="tokenstat">
+  <!-- Play listing source. Full-bleed square. Google Play applies a 30%
+       corner-radius mask and the drop shadow, so this file must stay a
+       square with no baked rounding and no outer shadow. Same glyph as
+       the website appicon: dark paper, two nebula glows, three bars. -->
+  <defs>
+    <radialGradient id="tsGlowA" cx="0.18" cy="0.06" r="0.9">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tsGlowB" cx="0.92" cy="0.14" r="0.8">
+      <stop offset="0" stop-color="#e879f9" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#e879f9" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="64" height="64" fill="#0d0a18"/>
+  <rect width="64" height="64" fill="url(#tsGlowA)"/>
+  <rect width="64" height="64" fill="url(#tsGlowB)"/>
+  <rect x="13.57" y="33.74" width="10.44" height="15.66" rx="3.05" fill="#c3b0ff"/>
+  <rect x="26.78" y="23.30" width="10.44" height="26.10" rx="3.05" fill="#8b5cf6"/>
+  <rect x="39.99" y="12.86" width="10.44" height="36.54" rx="3.05" fill="#e879f9"/>
+</svg>

@@ -19,6 +19,7 @@ pricing seed. A release bundle is written below
 `apps/android/app/build/outputs/bundle/release/`.
 
 Local sign-in and read-only account views work without Firebase configuration.
-Push requires `app/google-services.json`; Play upload and billing also require
-the external setup described in [PLAY_RELEASE.md](PLAY_RELEASE.md). Production
-release is blocked by every unfinished row in [PARITY.md](PARITY.md).
+Push requires `app/google-services.json`. Play upload needs the local upload
+keystore (`scripts/android-play-keystore.sh init`) and the Console steps in
+[PLAY_RELEASE.md](PLAY_RELEASE.md). Production release is blocked by every
+unfinished row in [PARITY.md](PARITY.md).

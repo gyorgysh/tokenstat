@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: LicenseRef-tokenstat-source-available -->
+<svg width="240" height="240" viewBox="0 0 240 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="tokenstat">
+  <!-- iOS dark, as a Play square. Paper is mono. Bars keep brand colour.
+       No baked corners, no hairline, no glow. Play applies the mask. -->
+  <rect width="240" height="240" fill="#171722"/>
+  <rect x="67.5" y="125" width="30" height="45" rx="8.75" fill="#bfaaff"/>
+  <rect x="105" y="95" width="30" height="75" rx="8.75" fill="#6a3dff"/>
+  <rect x="142.5" y="65" width="30" height="105" rx="8.75" fill="#c026d3"/>
+</svg>

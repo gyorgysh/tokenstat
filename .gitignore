@@ -93,4 +93,6 @@ xcuserdata/
 /apps/android/.gradle/
 /apps/android/app/google-services.json
 /apps/android/local.properties
-/apps/android/*.jks
+# Play upload keystore. The real file lives in ~/.tokenstat/android/.
+*.jks
+*.keystore
