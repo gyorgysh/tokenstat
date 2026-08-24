@@ -152,10 +152,14 @@ if [ -n "$IDENTITY" ]; then
     # unsigned nested code fails its own verification, and macOS will not hold
     # a TCC grant against a signature that does not validate, which would leave
     # this step doing nothing at all.
-    codesign --force --options runtime --timestamp=none \
+    # A secure timestamp, not --timestamp=none. Notarization rejects a
+    # signature without one, and a local build that cannot be notarized is a
+    # trap: it looks finished right up to the point somebody tries to ship or
+    # install it on another Mac. It costs one round trip to Apple.
+    codesign --force --options runtime --timestamp \
         --sign "$IDENTITY" "$OUT/Tokenstat.app/Contents/Resources/tokenstat-hostd"
     codesign --verify --strict --verbose=2 "$OUT/Tokenstat.app/Contents/Resources/tokenstat-hostd"
-    codesign --force --deep --options runtime --timestamp=none \
+    codesign --force --deep --options runtime --timestamp \
         --sign "$IDENTITY" "$OUT/Tokenstat.app"
     codesign --verify --deep --strict --verbose=2 "$OUT/Tokenstat.app"
 else
