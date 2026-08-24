@@ -91,6 +91,9 @@ struct SSHConnectionsView: View {
     var vaultTier: String?
     var onClose: (() -> Void)? = nil
     private enum Section: String, CaseIterable { case hosts = "Hosts", keys = "Keys", snippets = "Snippets" }
+    #if !os(macOS)
+    @Environment(ClientStore.self) private var store
+    #endif
     @State private var model = SSHConnectionsModel()
     @State private var section = Section.hosts
     @State private var addingHost = false
@@ -106,9 +109,44 @@ struct SSHConnectionsView: View {
         return tier
     }
 
+    private var signedInUnpaid: Bool { vaultTier != nil && paidVaultTier == nil }
+
+    @ViewBuilder
+    private var vaultUpgrade: some View {
+        #if os(macOS)
+        EmptyState(
+            symbol: "lock.shield",
+            title: "Sync SSH between your devices",
+            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above."
+        ) {
+            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+                .buttonStyle(AccentButtonStyle())
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        .padding(.horizontal)
+        .padding(.top, Theme.Space.s)
+        #else
+        ClientEmptyState(
+            kind: .needsAccount,
+            title: "Sync SSH between your devices",
+            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
+            actionTitle: "See plans",
+            actionIcon: .plans,
+            action: { store.showPaywall = true },
+            art: .vault
+        )
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.top, Theme.Space.s)
+        #endif
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            if let vaultTier {
+            if signedInUnpaid {
+                vaultUpgrade
+            } else if let vaultTier {
                 SSHVaultBanner(tier: vaultTier, canWrite: paidVaultTier != nil, status: $vaultStatus, recovery: $vaultRecovery)
             }
             Picker("SSH library", selection: $section) {
@@ -118,9 +156,13 @@ struct SSHConnectionsView: View {
             .padding()
             if let error = model.error { Text(error).foregroundStyle(Theme.danger).padding(.horizontal) }
             if isCurrentSectionEmpty {
-                EmptyState(symbol: emptySymbol, title: emptyTitle, message: emptyMessage) {
-                    Button(emptyActionTitle, .create) { presentAddSheet() }
-                        .buttonStyle(AccentButtonStyle())
+                if signedInUnpaid {
+                    Spacer(minLength: 0)
+                } else {
+                    EmptyState(symbol: emptySymbol, title: emptyTitle, message: emptyMessage) {
+                        Button(emptyActionTitle, .create) { presentAddSheet() }
+                            .buttonStyle(AccentButtonStyle())
+                    }
                 }
             } else {
                 List {
@@ -167,7 +209,7 @@ struct SSHConnectionsView: View {
                 ToolbarIconButton(systemImage: "cloud", help: "Import cloud servers") { importingDigitalOcean = true }
             }
         }
-        .task { await model.load(vaultTier: vaultTier) }
+        .task { await model.load(vaultTier: paidVaultTier) }
         .task { vaultStatus = try? await Bridge.sshVaultStatus() }
         .sheet(isPresented: $addingHost) { SSHHostForm(model: model, vaultTier: paidVaultTier) }
         .sheet(isPresented: $addingKey) { SSHKeyForm(model: model, vaultTier: paidVaultTier) }
@@ -181,9 +223,9 @@ struct SSHConnectionsView: View {
         #endif
     }
 
-    private func deleteHosts(_ offsets: IndexSet) { for i in offsets { let id = model.hosts[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "host:\(id)") }; try await Bridge.deleteSSHHost(id: id); await model.load(vaultTier: vaultTier) } catch { model.error = error.localizedDescription } } } }
-    private func deleteKeys(_ offsets: IndexSet) { for i in offsets { let key = model.keys[i]; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "key:\(key.id)") }; try await Bridge.deleteSSHKey(id: key.id); SSHSecretStore.delete(reference: key.secretRef); await model.load(vaultTier: vaultTier) } catch { model.error = error.localizedDescription } } } }
-    private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "snippet:\(id)") }; try await Bridge.deleteSSHSnippet(id: id); await model.load(vaultTier: vaultTier) } catch { model.error = error.localizedDescription } } } }
+    private func deleteHosts(_ offsets: IndexSet) { for i in offsets { let id = model.hosts[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "host:\(id)") }; try await Bridge.deleteSSHHost(id: id); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
+    private func deleteKeys(_ offsets: IndexSet) { for i in offsets { let key = model.keys[i]; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "key:\(key.id)") }; try await Bridge.deleteSSHKey(id: key.id); SSHSecretStore.delete(reference: key.secretRef); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
+    private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "snippet:\(id)") }; try await Bridge.deleteSSHSnippet(id: id); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
     private var isCurrentSectionEmpty: Bool { switch section { case .hosts: model.hosts.isEmpty; case .keys: model.keys.isEmpty; case .snippets: model.snippets.isEmpty } }
     private var emptySymbol: String { switch section { case .hosts: "server.rack"; case .keys: "key"; case .snippets: "text.badge.plus" } }
     private var emptyTitle: String { "No \(section.rawValue.lowercased()) yet" }
@@ -270,6 +312,7 @@ private struct SSHVaultBanner: View {
     @State private var showingSetup = false
     @State private var showingRecovery = false
     @State private var confirmingRotation = false
+    @State private var confirmingReset = false
     @State private var enrollmentRequests: [SSHVaultEnrollment] = []
     var body: some View {
         GroupBox {
@@ -278,6 +321,7 @@ private struct SSHVaultBanner: View {
                     Label("Recovery words have not been confirmed", systemImage: "exclamationmark.shield.fill")
                     Spacer()
                     Button("Show words", .reveal) { showingRecovery = true }.buttonStyle(AccentButtonStyle(small: true))
+                    Button("Discard vault", .delete) { confirmingReset = true }.buttonStyle(SecondaryButtonStyle(small: true))
                 }
             } else if status?.created == true {
                 HStack {
@@ -286,24 +330,20 @@ private struct SSHVaultBanner: View {
                     if status?.enrolled == false { Button("Enroll this device", .device) { showingSetup = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
                     else if canWrite { Button("New recovery words", .refresh) { confirmingRotation = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
                     else { Text("Read-only after downgrade").font(.caption).foregroundStyle(.secondary) }
+                    if canWrite { Button("Delete vault", .delete) { confirmingReset = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
                 }
             } else {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(status?.legacy == true ? "A local vault is ready to migrate." : "Sync encrypted SSH secrets across your devices.")
+                        Text("Sync encrypted SSH secrets across your devices.")
                         Text("Only your devices and 24 recovery words can decrypt it.").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if canWrite {
-                        if status?.legacy == true {
-                            Button("Migrate vault", .restore) { showingSetup = true }
-                                .buttonStyle(AccentButtonStyle(small: true))
-                        } else {
-                            Button("Set up vault", .security) { showingSetup = true }
-                                .buttonStyle(AccentButtonStyle(small: true))
-                        }
+                        Button("Set up vault", .security) { showingSetup = true }
+                            .buttonStyle(AccentButtonStyle(small: true))
                     } else {
-                        Text(status?.legacy == true ? "Supporter required to migrate" : "Supporter required to create a vault")
+                        Text("Supporter required to create a vault")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -323,13 +363,19 @@ private struct SSHVaultBanner: View {
             SSHVaultSetupSheet(tier: tier, status: $status, recovery: $recovery)
         }
         .sheet(isPresented: $showingRecovery) {
-            if let recovery { SSHRecoveryWordsSheet(recovery: recovery) { self.recovery = nil } }
+            if let recovery {
+                SSHRecoveryWordsSheet(recovery: recovery, onConfirmed: { self.recovery = nil }, onDiscard: { Task { await resetVault() } })
+            }
         }
         .onChange(of: recovery) { _, value in if value != nil { showingRecovery = true } }
         .confirmationDialog("Replace the current recovery words?", isPresented: $confirmingRotation, titleVisibility: .visible) {
             Button("Generate new recovery words", role: .destructive) { Task { await rotateRecovery() } }
             Button("Cancel", role: .cancel) {}
         } message: { Text("The current words will stop working as soon as the encrypted update succeeds.") }
+        .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Delete vault", role: .destructive) { Task { await resetVault() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") }
         .task(id: status?.enrolled) {
             guard status?.enrolled == true else { return }
             enrollmentRequests = (try? await Bridge.sshVaultEnrollmentRequests()) ?? []
@@ -338,6 +384,16 @@ private struct SSHVaultBanner: View {
     private func rotateRecovery() async {
         do { recovery = try await Bridge.rotateSSHVaultRecovery().recovery; status = try await Bridge.sshVaultStatus() }
         catch { self.error = error.localizedDescription }
+    }
+    private func resetVault() async {
+        do {
+            try await Bridge.resetSSHVault()
+            recovery = nil
+            showingRecovery = false
+            showingSetup = false
+            enrollmentRequests = []
+            status = try await Bridge.sshVaultStatus()
+        } catch { self.error = error.localizedDescription }
     }
     private func approve(_ request: SSHVaultEnrollment) async {
         do { _ = try await Bridge.approveSSHVaultEnrollment(request); enrollmentRequests.removeAll { $0.id == request.id } }
@@ -348,8 +404,10 @@ private struct SSHVaultBanner: View {
 private struct SSHRecoveryWordsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let recovery: String
-    let confirmed: () -> Void
+    let onConfirmed: () -> Void
+    let onDiscard: () -> Void
     @State private var storedSafely = false
+    @State private var confirmingDiscard = false
     @State private var confirmation3 = ""
     @State private var confirmation11 = ""
     @State private var confirmation20 = ""
@@ -371,7 +429,6 @@ private struct SSHRecoveryWordsSheet: View {
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery words")
-                    .disabled(!storedSafely || !wordsMatch)
             }
             Divider()
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 10) {
@@ -411,15 +468,22 @@ private struct SSHRecoveryWordsSheet: View {
                 }
             }
             HStack {
-                Text("tokenstat and pueev cannot reset this vault.").font(.caption).foregroundStyle(.secondary)
+                Button("Discard this vault", .delete) { confirmingDiscard = true }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.danger)
                 Spacer()
-                Button("Done", .done) { confirmed(); dismiss() }
+                Button("Done", .done) { onConfirmed(); dismiss() }
                     .buttonStyle(AccentButtonStyle()).disabled(!storedSafely || !wordsMatch)
             }
+            Text("Close without confirming to look at the words later. Discard deletes the vault so you can create a new one.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(Theme.Space.l)
-        .sshSheetFrame(width: 680, height: 650)
-        .interactiveDismissDisabled(!storedSafely || !wordsMatch)
+        .sshSheetFrame(width: 680, height: 670)
+        .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. This cannot be undone.") }
     }
 
     private func copyWords() {
@@ -444,6 +508,7 @@ private struct SSHVaultSetupSheet: View {
     @State private var working = false
     @State private var error: String?
     @State private var requestSent = false
+    @State private var confirmingReset = false
 
     private var choices: [Choice] {
         if status?.created == true && status?.enrolled == false { return [.restore, .request] }
@@ -451,7 +516,6 @@ private struct SSHVaultSetupSheet: View {
     }
 
     private var confirmTitle: String {
-        if status?.legacy == true { return "Migrate" }
         switch choice {
         case .create: return "Create vault"
         case .request: return "Request approval"
@@ -460,7 +524,6 @@ private struct SSHVaultSetupSheet: View {
     }
 
     private var confirmIcon: ActionIcon {
-        if status?.legacy == true { return .restore }
         switch choice {
         case .create: return .create
         case .request: return .pair
@@ -472,23 +535,22 @@ private struct SSHVaultSetupSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(status?.legacy == true ? "Migrate encrypted vault" : "Set up encrypted vault").font(.title3.weight(.semibold))
-                    Text("tokenstat cannot reset or recover it for you").font(.caption).foregroundStyle(.secondary)
+                    Text("Set up encrypted vault").font(.title3.weight(.semibold))
+                    Text("tokenstat cannot recover the secrets if the words and every device are lost").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault setup")
             }
             Divider()
-            if status?.legacy != true {
-                Picker("Vault action", selection: $choice) { ForEach(choices, id: \.self) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented)
-                    .onAppear { if !choices.contains(choice) { choice = choices[0] } }
-            }
+            Picker("Vault action", selection: $choice) { ForEach(choices, id: \.self) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented)
+                .onAppear { if !choices.contains(choice) { choice = choices[0] } }
+                .onChange(of: status?.created) { _, _ in if !choices.contains(choice) { choice = choices[0] } }
             if choice == .request {
                 Label(requestSent ? "Request sent. Keep this screen open while an enrolled device approves it." : "An enrolled device will see a content-free approval request for 15 minutes.", systemImage: requestSent ? "checkmark.circle.fill" : "iphone.and.arrow.forward")
                     .foregroundStyle(requestSent ? Theme.success : Color.gray)
-            } else if choice == .restore || status?.legacy == true {
-                Text(status?.legacy == true ? "Enter the recovery phrase for the existing local vault. Migration keeps the old file until the encrypted upload is accepted." : "Enter all 24 recovery words in order. Words are checked locally and are never sent to tokenstat.ai.")
+            } else if choice == .restore {
+                Text("Enter all 24 recovery words in order. Words are checked locally and are never sent to tokenstat.ai.")
                     .font(.callout).foregroundStyle(.secondary)
                 TextEditor(text: $enteredRecovery)
                     .font(.system(.body, design: .monospaced))
@@ -500,28 +562,40 @@ private struct SSHVaultSetupSheet: View {
                 Label("You will confirm and store 24 standard recovery words.", systemImage: "text.book.closed")
                 Label("Losing every enrolled device and the words permanently loses the vault.", systemImage: "exclamationmark.shield")
             }
+            if status?.created == true {
+                Text("If you no longer have the recovery words and cannot ask a device, drop this vault and create a new one. Stored secrets are lost.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
             if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             Spacer()
             HStack {
                 Button("Cancel", .dismiss) { dismiss() }.buttonStyle(.borderless)
+                if status?.created == true {
+                    Button("Drop vault", .delete) { confirmingReset = true }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.danger)
+                        .disabled(working)
+                }
                 Spacer()
                 Button(action: { Task { await run() } }) {
                     confirmIcon.label(confirmTitle)
                 }
                 .buttonStyle(AccentButtonStyle())
-                .disabled(working || requestSent || ((choice == .restore || status?.legacy == true) && enteredRecovery.split(whereSeparator: \.isWhitespace).count != 24))
+                .disabled(working || requestSent || (choice == .restore && enteredRecovery.split(whereSeparator: \.isWhitespace).count != 24) || (choice == .create && status?.created == true))
             }
         }
         .padding(Theme.Space.l)
-        .sshSheetFrame(width: 560, height: 440)
+        .sshSheetFrame(width: 560, height: 460)
+        .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
+            Button("Delete vault", role: .destructive) { Task { await resetVault() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") }
     }
 
     private func run() async {
         working = true; error = nil
         do {
-            if status?.legacy == true {
-                recovery = try await Bridge.migrateSSHVault(recovery: enteredRecovery, tier: tier).recovery
-            } else if choice == .create {
+            if choice == .create {
                 recovery = try await Bridge.createSSHVault(tier: tier).recovery
             } else if choice == .request {
                 _ = try await Bridge.requestSSHVaultEnrollment()
@@ -533,6 +607,19 @@ private struct SSHVaultSetupSheet: View {
             }
             status = try await Bridge.sshVaultStatus()
             dismiss()
+        } catch { self.error = error.localizedDescription }
+        working = false
+    }
+
+    private func resetVault() async {
+        working = true
+        error = nil
+        do {
+            try await Bridge.resetSSHVault()
+            recovery = nil
+            requestSent = false
+            status = try await Bridge.sshVaultStatus()
+            choice = .create
         } catch { self.error = error.localizedDescription }
         working = false
     }

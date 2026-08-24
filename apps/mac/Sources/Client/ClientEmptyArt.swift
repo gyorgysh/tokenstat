@@ -25,6 +25,8 @@ enum EmptyArtKind {
     /// The host has not answered yet. Deliberately not one of the others: a
     /// question nobody replied to is not an empty answer.
     case waiting
+    /// Cross-device SSH vault, shown when the plan does not include it.
+    case vault
 }
 
 /// The picture over an empty state.
@@ -53,6 +55,7 @@ struct ClientEmptyArt: View {
             case .changes: ChangesScene(reduceMotion: reduceMotion)
             case .files: FilesScene(reduceMotion: reduceMotion)
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
+            case .vault: VaultScene(reduceMotion: reduceMotion)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -62,7 +65,7 @@ struct ClientEmptyArt: View {
 
 // MARK: - Shared parts
 
-/// The stroke every scene draws with. One weight, round joins, so eight
+/// The stroke every scene draws with. One weight, round joins, so the
 /// pictures read as one hand.
 private enum Ink {
     static let width: CGFloat = 1.7
@@ -451,6 +454,71 @@ private struct WaitingScene: View {
             .frame(width: 38, height: 60)
         }
         .onAppear { out = true }
+    }
+}
+
+// MARK: - Vault
+
+/// Two devices drawing together around a lock: the vault before this plan
+/// includes it.
+private struct VaultScene: View {
+    var reduceMotion: Bool
+    @State private var together = false
+
+    var body: some View {
+        ZStack {
+            deviceFrame(width: 26, height: 44)
+                .offset(x: -togetherOffset, y: 6)
+            deviceFrame(width: 46, height: 28)
+                .offset(x: togetherOffset, y: 10)
+            lockMark
+                .offset(y: reduceMotion || together ? 0 : 4)
+                .opacity(reduceMotion || together ? 1 : 0.65)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.7).repeatForever(autoreverses: true)) {
+                together = true
+            }
+        }
+    }
+
+    private var togetherOffset: CGFloat {
+        reduceMotion || together ? 34 : 42
+    }
+
+    private func deviceFrame(width: CGFloat, height: CGFloat) -> some View {
+        Frame(radius: 6)
+            .frame(width: width, height: height)
+            .overlay {
+                VStack(spacing: 5) {
+                    Ghost(width: width * 0.5, color: Ink.second)
+                    Ghost(width: width * 0.32)
+                }
+            }
+    }
+
+    private var lockMark: some View {
+        VStack(spacing: 0) {
+            Path { path in
+                path.addArc(
+                    center: CGPoint(x: 9, y: 11),
+                    radius: 6,
+                    startAngle: .degrees(200),
+                    endAngle: .degrees(-20),
+                    clockwise: false
+                )
+            }
+            .stroke(Ink.lead, style: Ink.style)
+            .frame(width: 18, height: 12)
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(Theme.accentSoft)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .strokeBorder(Ink.lead, style: Ink.style)
+                }
+                .frame(width: 20, height: 15)
+        }
     }
 }
 

@@ -1845,8 +1845,8 @@ extension Bridge {
         try await background("ssh.vault.unlock", ["recovery": recovery, "tier": tier], as: SSHVaultUnlock.self)
     }
 
-    static func migrateSSHVault(recovery: String, tier: String) async throws -> SSHVaultRecovery {
-        try await background("ssh.vault.migrate", ["recovery": recovery, "tier": tier], as: SSHVaultRecovery.self)
+    static func resetSSHVault() async throws {
+        _ = try await background("ssh.vault.reset", [:], as: SSHVaultReset.self)
     }
 
     static func rotateSSHVaultRecovery() async throws -> SSHVaultRecovery {

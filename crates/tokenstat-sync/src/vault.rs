@@ -117,6 +117,10 @@ pub enum VaultError {
     NotSignedIn,
     #[error("this device is not enrolled in the SSH vault")]
     NotEnrolled,
+    #[error("a vault already exists")]
+    AlreadyExists,
+    #[error("no SSH vault exists")]
+    NotFound,
     #[error("vault revision conflict (server revision {0})")]
     Conflict(u64),
     #[error("{0}")]
@@ -137,6 +141,25 @@ fn auth() -> Result<(String, String, Client), VaultError> {
     Ok((host, token, client))
 }
 
+fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
+    let error: ErrorBody = serde_json::from_slice(bytes).unwrap_or(ErrorBody {
+        error: String::new(),
+        message: String::from_utf8_lossy(bytes).chars().take(240).collect(),
+        revision: None,
+    });
+    match error.error.as_str() {
+        "not_enrolled" => VaultError::NotEnrolled,
+        "already_exists" => VaultError::AlreadyExists,
+        "not_found" => VaultError::NotFound,
+        "revision_conflict" => VaultError::Conflict(error.revision.unwrap_or(0)),
+        _ => VaultError::Server(if error.message.is_empty() {
+            format!("vault request failed ({status})")
+        } else {
+            error.message
+        }),
+    }
+}
+
 fn send<T: DeserializeOwned>(request: RequestBuilder) -> Result<T, VaultError> {
     let response = request.send()?;
     let status = response.status();
@@ -144,20 +167,17 @@ fn send<T: DeserializeOwned>(request: RequestBuilder) -> Result<T, VaultError> {
     if status.is_success() {
         return Ok(serde_json::from_slice(&bytes)?);
     }
-    let error: ErrorBody = serde_json::from_slice(&bytes).unwrap_or(ErrorBody {
-        error: String::new(),
-        message: String::from_utf8_lossy(&bytes).chars().take(240).collect(),
-        revision: None,
-    });
-    match error.error.as_str() {
-        "not_enrolled" => Err(VaultError::NotEnrolled),
-        "revision_conflict" => Err(VaultError::Conflict(error.revision.unwrap_or(0))),
-        _ => Err(VaultError::Server(if error.message.is_empty() {
-            format!("vault request failed ({status})")
-        } else {
-            error.message
-        })),
+    Err(read_error(status, &bytes))
+}
+
+fn send_empty(request: RequestBuilder) -> Result<(), VaultError> {
+    let response = request.send()?;
+    let status = response.status();
+    let bytes = response.bytes()?;
+    if status.is_success() {
+        return Ok(());
     }
+    Err(read_error(status, &bytes))
 }
 
 pub fn get() -> Result<RemoteVault, VaultError> {
@@ -187,6 +207,20 @@ pub fn update(body: &UpdateVault<'_>) -> Result<Revision, VaultError> {
             .bearer_auth(token)
             .json(body),
     )
+}
+
+/// Permanently deletes the account vault. A missing vault is success: the
+/// caller is trying to reach a clean slate, not inspect one.
+pub fn remove() -> Result<(), VaultError> {
+    let (host, token, client) = auth()?;
+    match send_empty(
+        client
+            .delete(format!("{host}/api/v1/vault/ssh"))
+            .bearer_auth(token),
+    ) {
+        Ok(()) | Err(VaultError::NotFound) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 pub fn request_enrollment(nonce: &str) -> Result<EnrollmentRequest, VaultError> {

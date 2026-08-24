@@ -15,7 +15,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 const SCHEMA: u32 = 2;
@@ -38,19 +38,6 @@ struct VaultStore {
     recovery_wrap: String,
     #[serde(default)]
     device_wrap: String,
-    // v1 fields are retained only until guided migration succeeds.
-    #[serde(default)]
-    verifier: String,
-    #[serde(default)]
-    records: Vec<LegacyRecord>,
-}
-
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LegacyRecord {
-    id: String,
-    version: u64,
-    ciphertext: String,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -137,16 +124,33 @@ fn path() -> PathBuf {
         })
 }
 
-fn legacy_backup_path() -> PathBuf {
-    path().with_extension("legacy-backup.json")
+fn remove_if_present(path: &std::path::Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn clear_local() -> Result<(), String> {
+    let _guard = lock().lock().map_err(|_| "vault lock poisoned")?;
+    let path = path();
+    remove_if_present(&path)?;
+    remove_if_present(&path.with_extension("tmp"))?;
+    remove_if_present(&path.with_extension("legacy-backup.json"))?;
+    Ok(())
+}
+
+fn paid_vault_tier(tier: Option<&str>) -> bool {
+    matches!(
+        tier.map(|s| s.to_ascii_lowercase()).as_deref(),
+        Some("supporter" | "patron" | "legend")
+    )
 }
 
 fn verify_paid_account() -> Result<(), String> {
     let status = tokenstat_sync::profile::sync_status(None).map_err(|e| e.to_string())?;
-    if matches!(
-        status.tier.as_deref(),
-        Some("supporter" | "patron" | "legend")
-    ) {
+    if paid_vault_tier(status.tier.as_deref()) {
         Ok(())
     } else {
         Err("SSH vault sync requires Supporter or higher".into())
@@ -413,7 +417,16 @@ fn enroll_self(vmk: &[u8; 32]) -> Result<(), String> {
     Ok(())
 }
 
-fn create_v2(records: Vec<PlainRecord>) -> Result<String, String> {
+fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
+    match e {
+        tokenstat_sync::vault::VaultError::AlreadyExists => {
+            "A vault already exists. Drop it first if you want to start over.".into()
+        }
+        other => other.to_string(),
+    }
+}
+
+fn create_v2() -> Result<String, String> {
     verify_paid_account()?;
     let recovery = generate_recovery();
     let vmk = random32();
@@ -422,7 +435,13 @@ fn create_v2(records: Vec<PlainRecord>) -> Result<String, String> {
     let identity =
         tokenstat_identity::MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let device_wrap = wrap_for_device(&vmk, &identity.public_key())?;
-    let (nonce, ciphertext) = encrypt_snapshot(&vmk, 1, &Snapshot { records })?;
+    let (nonce, ciphertext) = encrypt_snapshot(
+        &vmk,
+        1,
+        &Snapshot {
+            records: Vec::new(),
+        },
+    )?;
     let revision = tokenstat_sync::vault::create(&tokenstat_sync::vault::CreateVault {
         schema_version: SCHEMA,
         ciphertext: &ciphertext,
@@ -432,7 +451,7 @@ fn create_v2(records: Vec<PlainRecord>) -> Result<String, String> {
         device_wrap: &device_wrap,
         wrap_version: WRAP_VERSION,
     })
-    .map_err(|e| e.to_string())?;
+    .map_err(create_error)?;
     write(&VaultStore {
         schema_version: SCHEMA,
         revision: revision.revision,
@@ -441,32 +460,8 @@ fn create_v2(records: Vec<PlainRecord>) -> Result<String, String> {
         recovery_salt,
         recovery_wrap,
         device_wrap,
-        verifier: String::new(),
-        records: Vec::new(),
     })?;
     Ok(recovery)
-}
-
-fn legacy_key(recovery: &str) -> [u8; 32] {
-    Sha256::digest(recovery.trim().as_bytes()).into()
-}
-
-fn legacy_verifier(recovery: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(b"tokenstat ssh vault verifier\0");
-    h.update(legacy_key(recovery));
-    hex(&h.finalize())
-}
-
-fn decrypt_legacy(recovery: &str, ciphertext: &str) -> Result<String, String> {
-    let bytes = unhex(ciphertext)?;
-    if bytes.len() < 40 {
-        return Err("invalid legacy ciphertext".into());
-    }
-    let plain = XChaCha20Poly1305::new((&legacy_key(recovery)).into())
-        .decrypt(XNonce::from_slice(&bytes[..24]), &bytes[24..])
-        .map_err(|_| "wrong recovery phrase or damaged legacy vault")?;
-    String::from_utf8(plain).map_err(|_| "legacy vault record is not UTF-8".into())
 }
 
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
@@ -504,47 +499,16 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 } else {
                     0
                 };
-                Ok(
-                    json!({"created": created, "recordCount": record_count, "legacy": !local.verifier.is_empty(), "enrolled": enrolled}),
-                )
+                Ok(json!({"created": created, "recordCount": record_count, "enrolled": enrolled}))
             }
             "ssh.vault.create" => {
                 let _: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let store = read()?;
-                if !store.verifier.is_empty() {
-                    return Err("A legacy vault is present. Choose Migrate instead of creating a second vault.".into());
-                }
-                Ok(json!({"recovery": create_v2(Vec::new())?}))
+                Ok(json!({"recovery": create_v2()?}))
             }
-            "ssh.vault.migrate" => {
-                let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let store = read()?;
-                if store.verifier.is_empty() {
-                    return Err("no legacy vault to migrate".into());
-                }
-                if store.verifier != legacy_verifier(&p.recovery) {
-                    return Err("wrong legacy recovery phrase".into());
-                }
-                let records = store
-                    .records
-                    .iter()
-                    .map(|r| {
-                        Ok(PlainRecord {
-                            id: r.id.clone(),
-                            version: r.version,
-                            deleted: false,
-                            modified_at: 0,
-                            device_id: "legacy".into(),
-                            plaintext: decrypt_legacy(&p.recovery, &r.ciphertext)?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, String>>()?;
-                fs::copy(path(), legacy_backup_path())
-                    .map_err(|e| format!("back up legacy vault before migration: {e}"))?;
-                let recovery = create_v2(records)?;
-                // `create_v2` atomically switched the active local cache only
-                // after the server accepted the encrypted snapshot.
-                Ok(json!({"recovery": recovery, "migrated": true}))
+            "ssh.vault.reset" => {
+                tokenstat_sync::vault::remove().map_err(|e| e.to_string())?;
+                clear_local()?;
+                Ok(json!({"reset": true}))
             }
             "ssh.vault.unlock" => {
                 let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
@@ -742,6 +706,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn paid_vault_tier_is_case_insensitive() {
+        assert!(paid_vault_tier(Some("legend")));
+        assert!(paid_vault_tier(Some("Legend")));
+        assert!(paid_vault_tier(Some("SUPPORTER")));
+        assert!(paid_vault_tier(Some("patron")));
+        assert!(!paid_vault_tier(Some("free")));
+        assert!(!paid_vault_tier(None));
+        assert!(!paid_vault_tier(Some("fam")));
+    }
+
+    #[test]
     fn recovery_is_bip39_and_wrap_round_trips() {
         let recovery = generate_recovery();
         assert_eq!(recovery.split_whitespace().count(), 24);
@@ -761,7 +736,44 @@ mod tests {
                 .expect_err("must refuse");
             assert!(refused.contains("local-only"), "{refused}");
             assert!(call("ssh.vault.enrollment.approve", "{}").unwrap().is_err());
+            assert!(call("ssh.vault.reset", "{}").unwrap().is_err());
         });
+    }
+
+    #[test]
+    fn migrate_is_not_a_method() {
+        let err = call("ssh.vault.migrate", "{}")
+            .unwrap()
+            .expect_err("migrate was never shipped");
+        assert!(err.contains("unknown"), "{err}");
+    }
+
+    #[test]
+    fn leftover_v1_json_is_an_empty_store() {
+        let store: VaultStore = serde_json::from_str(
+            r#"{"verifier":"abc","records":[{"id":"h","version":1,"ciphertext":"00"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(store.schema_version, 0);
+        assert!(store.ciphertext.is_empty());
+        assert!(store.recovery_wrap.is_empty());
+    }
+
+    #[test]
+    fn remove_if_present_ignores_missing_and_deletes() {
+        let path = std::env::temp_dir().join(format!(
+            "tokenstat-vault-clear-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let _ = fs::remove_file(&path);
+        remove_if_present(&path).unwrap();
+        fs::write(&path, b"{}").unwrap();
+        remove_if_present(&path).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]

@@ -68,9 +68,9 @@ struct SSHKeyMaterial: Codable, Sendable, Hashable {
 struct SSHVaultStatus: Codable, Sendable, Hashable {
     var created: Bool
     var recordCount: Int
-    var legacy: Bool?
     var enrolled: Bool?
 }
+struct SSHVaultReset: Codable, Sendable, Hashable { var reset: Bool }
 struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
 struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
 struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable {
@@ -783,6 +783,19 @@ struct Account: Codable, Sendable, Hashable {
         case "supporter", "patron", "legend": return true
         default: return false
         }
+    }
+
+    /// SSH vault is Supporter and above. Same three rungs as `isPaidTier`.
+    var allowsVaultSync: Bool { isPaidTier }
+
+    /// What the SSH vault UI and host methods take as `tier`.
+    ///
+    /// A signed-in paid account whose `/me` tier is missing still passes
+    /// `legend` rather than `free`, so a grant cannot be mapped to unpaid.
+    var vaultTierForSsh: String? {
+        guard signedIn else { return nil }
+        if allowsVaultSync { return tier?.lowercased() ?? "legend" }
+        return tier?.lowercased() ?? "free"
     }
 
     /// Live App Store subscription. StoreKit manage UI is only honest here.
