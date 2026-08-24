@@ -772,6 +772,8 @@ private fun AndroidSSHScreen(
     var hosts by remember { mutableStateOf(JsonArray(emptyList())) }
     var keys by remember { mutableStateOf(JsonArray(emptyList())) }
     var snippets by remember { mutableStateOf(JsonArray(emptyList())) }
+    var folders by remember { mutableStateOf(JsonArray(emptyList())) }
+    var query by remember { mutableStateOf("") }
     var vault by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var addHost by remember { mutableStateOf(false) }
@@ -788,6 +790,7 @@ private fun AndroidSSHScreen(
             hosts = model.core("ssh.host.list") as? JsonArray ?: JsonArray(emptyList())
             keys = model.core("ssh.key.list") as? JsonArray ?: JsonArray(emptyList())
             snippets = model.core("ssh.snippet.list") as? JsonArray ?: JsonArray(emptyList())
+            folders = model.core("ssh.folder.list") as? JsonArray ?: JsonArray(emptyList())
             if (vaultAllowed) vault = model.core("ssh.vault.status") as? JsonObject
         }.onFailure { error = it.message }
     }
@@ -847,14 +850,35 @@ private fun AndroidSSHScreen(
         PrimaryTabRow(selectedTabIndex = tab) {
             tabs.forEachIndexed { index, title -> Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) }) }
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                query,
+                { query = it },
+                Modifier.weight(1f),
+                label = { Text("Search ${tabs[tab].lowercase()}") },
+                singleLine = true,
+            )
             TextButton(onClick = {
                 if (tab == 0) addHost = true
                 else if (tab == 2) addSnippet = true
                 else error = "Android secure key import is being prepared."
             }) { Text("Add") }
         }
-        val rows = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
+        val all = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
+        // Searching looks at everything a person might remember about a record:
+        // its name, where it points, and what it runs.
+        val rows = if (query.isBlank()) all else JsonArray(
+            all.filter { value ->
+                val item = value.jsonObject
+                listOf("label", "title", "hostname", "username", "command", "algorithm", "fingerprint")
+                    .mapNotNull { item.string(it) }
+                    .any { it.contains(query.trim(), ignoreCase = true) }
+            },
+        )
         if (rows.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 if (vaultAllowed) {
@@ -870,10 +894,31 @@ private fun AndroidSSHScreen(
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(rows) { value ->
                     val item = value.jsonObject
+                    val folderName = item.string("folderId")?.let { id ->
+                        folders.firstOrNull { it.jsonObject.string("id") == id }?.jsonObject?.string("name")
+                    }
+                    val port = item.jsonObject["port"]?.toString() ?: "22"
                     ElevatedCard(Modifier.fillMaxWidth()) {
                         ListItem(
-                            headlineContent = { Text(item.string(if (tab == 0) "label" else if (tab == 1) "label" else "title") ?: "SSH item") },
-                            supportingContent = { Text(if (tab == 0) "${item.string("username") ?: "root"}@${item.string("hostname") ?: ""}" else if (tab == 1) item.string("algorithm") ?: "Key" else item.string("command") ?: "") },
+                            headlineContent = {
+                                Text(item.string(if (tab == 2) "title" else "label") ?: "SSH item")
+                            },
+                            supportingContent = {
+                                Text(
+                                    when (tab) {
+                                        0 -> "${item.string("username") ?: "root"}@${item.string("hostname") ?: ""}:$port"
+                                        1 -> item.string("fingerprint")?.takeIf { it.isNotBlank() }
+                                            ?: item.string("algorithm") ?: "Key"
+                                        else -> item.string("command") ?: ""
+                                    },
+                                    maxLines = 1,
+                                )
+                            },
+                            trailingContent = {
+                                if (tab == 0 && folderName != null) {
+                                    Text(folderName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
                             leadingContent = { Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null) },
                         )
                     }
@@ -881,7 +926,7 @@ private fun AndroidSSHScreen(
             }
         }
     }
-    if (addHost) SSHHostDialog(onDismiss = { addHost = false }) { body ->
+    if (addHost) SSHHostDialog(folders = folders, onDismiss = { addHost = false }) { body ->
         scope.launch { runCatching { model.core("ssh.host.save", body); load() }.onFailure { error = it.message }; addHost = false }
     }
     if (addSnippet) SSHSnippetDialog(onDismiss = { addSnippet = false }) { body ->
@@ -928,24 +973,97 @@ private fun AndroidSSHScreen(
 }
 
 @Composable
-private fun SSHHostDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
+@OptIn(ExperimentalMaterial3Api::class)
+private fun SSHHostDialog(folders: JsonArray, onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
     var label by remember { mutableStateOf("") }; var host by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("root") }; var directory by remember { mutableStateOf("~") }
+    var port by remember { mutableStateOf("22") }
+    var folderId by remember { mutableStateOf<String?>(null) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add SSH host") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             OutlinedTextField(label, { label = it }, label = { Text("Name") }, singleLine = true)
             OutlinedTextField(host, { host = it }, label = { Text("Address") }, singleLine = true)
             OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true)
+            OutlinedTextField(port, { value -> port = value.filter { it.isDigit() }.take(5) }, label = { Text("Port") }, singleLine = true)
             OutlinedTextField(directory, { directory = it }, label = { Text("Starting directory") }, singleLine = true)
+            if (folders.isNotEmpty()) {
+                Text("Folder", style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = folderId == null, onClick = { folderId = null }, label = { Text("Top level") })
+                    folders.forEach { value ->
+                        val id = value.jsonObject.string("id") ?: return@forEach
+                        FilterChip(
+                            selected = folderId == id,
+                            onClick = { folderId = id },
+                            label = { Text(value.jsonObject.string("name") ?: "Folder") },
+                        )
+                    }
+                }
+            }
             Text("You will verify the host fingerprint and choose a password or saved key before connecting.", style = MaterialTheme.typography.bodySmall)
         }
-    }, confirmButton = { Button(enabled = label.isNotBlank() && host.isNotBlank() && user.isNotBlank(), onClick = { onSave(buildJsonObject { put("id", ""); put("label", label); put("hostname", host); put("port", 22); put("username", user); put("initialDirectory", directory.ifBlank { "~" }); put("tags", JsonArray(emptyList())); put("hostKeys", JsonArray(emptyList())) }) }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }, confirmButton = {
+        Button(
+            enabled = label.isNotBlank() && host.isNotBlank() && user.isNotBlank(),
+            onClick = {
+                onSave(buildJsonObject {
+                    put("id", ""); put("label", label); put("hostname", host)
+                    put("port", port.toIntOrNull() ?: 22)
+                    put("username", user); put("initialDirectory", directory.ifBlank { "~" })
+                    folderId?.let { put("folderId", it) }
+                    put("tags", JsonArray(emptyList())); put("hostKeys", JsonArray(emptyList()))
+                })
+            },
+        ) { Text("Save") }
+    }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
 private fun SSHSnippetDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit) {
     var title by remember { mutableStateOf("") }; var command by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add snippet") }, text = { Column { OutlinedTextField(title, { title = it }, label = { Text("Name") }); OutlinedTextField(command, { command = it }, label = { Text("Command") }, minLines = 3, textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace)) } }, confirmButton = { Button(enabled = title.isNotBlank() && command.isNotBlank(), onClick = { onSave(buildJsonObject { put("id", ""); put("title", title); put("command", command); put("tags", JsonArray(emptyList())); put("hostIDs", JsonArray(emptyList())) }) }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    // Placeholders are read back the same way every client reads them, so a
+    // snippet written here asks for the same values on a Mac.
+    val variables = Regex("\\{\\{\\s*([^}]+?)\\s*\\}\\}")
+        .findAll(command)
+        .map { it.groupValues[1] }
+        .distinct()
+        .toList()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add snippet") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(
+                    command,
+                    { command = it },
+                    Modifier.fillMaxWidth(),
+                    label = { Text("Command") },
+                    minLines = 8,
+                    textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
+                )
+                Text(
+                    if (variables.isEmpty()) "Wrap a value in {{braces}} to be asked for it every time this runs."
+                    else "Asks for: ${variables.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            Button(enabled = title.isNotBlank() && command.isNotBlank(), onClick = {
+                onSave(buildJsonObject {
+                    put("id", ""); put("title", title); put("command", command)
+                    put("tags", JsonArray(emptyList())); put("hostIDs", JsonArray(emptyList()))
+                    put("variables", JsonArray(variables.map { JsonPrimitive(it) }))
+                })
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
