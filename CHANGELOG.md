@@ -6,6 +6,16 @@ under one version number. Newest first.
 
 ## [Unreleased]
 
+### New
+
+- On a phone, an awake computer's detail shows power, CPU, and memory, read over the tunnel and not uploaded with usage. Open work and view screen sit on that same page, so connecting is not only a Mac-to-Mac action.
+- Android puts SSH under Devices, matching iOS, instead of a fifth tab.
+
+### Fixed
+
+- SSH vault setup no longer offers migrate (that path was never in a release). If you did not save the recovery words, or cannot open the vault, you can drop it and create a new one.
+- The unpaid SSH empty state now pitches the vault the same way tasks and notes pitch their screens, with a path to plans.
+
 ## [0.6.9] - 2026-08-24
 
 ### New
