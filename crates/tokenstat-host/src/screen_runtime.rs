@@ -21,6 +21,46 @@ struct CaptureSession {
     dropped: u64,
 }
 
+/// Why a screen session ended.
+///
+/// Named rather than inferred, because the relay only records that a channel
+/// went away and the log then says nothing about the cause. With three
+/// sessions interleaving their failures the log was unreadable, and one live
+/// session per peer plus a reason on every teardown is what makes it legible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EndReason {
+    /// A newer session for the same peer took over.
+    Superseded,
+    /// The grant was removed or narrowed while the session was live.
+    Revoked,
+    /// The capture helper asked for it to end.
+    HelperClosed,
+    /// The encrypted stream went away: the viewer left, or the route dropped.
+    StreamClosed,
+}
+
+impl EndReason {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Superseded => "superseded",
+            Self::Revoked => "revoked",
+            Self::HelperClosed => "helper closed",
+            Self::StreamClosed => "stream closed",
+        }
+    }
+}
+
+/// One line per teardown, on the one channel the daemon already logs to.
+fn note_end(id: &str, peer: &str, reason: EndReason) {
+    // The peer key is long and its head is enough to follow one device
+    // through a log without printing a full public key on every line.
+    let short: String = peer.chars().take(8).collect();
+    eprintln!(
+        "[screen] session {id} for {short}… ended: {}",
+        reason.as_str()
+    );
+}
+
 fn sessions() -> &'static Mutex<HashMap<String, Arc<Mutex<CaptureSession>>>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, Arc<Mutex<CaptureSession>>>>> = OnceLock::new();
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -32,13 +72,41 @@ pub(crate) fn revoke_peer(peer: &str, view: bool, control: bool) -> Result<(), S
     let mut held = sessions()
         .lock()
         .map_err(|_| "screen capture registry poisoned")?;
-    held.retain(|_, session| {
+    held.retain(|id, session| {
         let Ok(session) = session.lock() else {
             return false;
         };
-        session.peer != peer || (view && (!session.control || control))
+        let keep = session.peer != peer || (view && (!session.control || control));
+        if !keep {
+            note_end(id, &session.peer, EndReason::Revoked);
+        }
+        keep
     });
     Ok(())
+}
+
+/// End every live session belonging to one peer.
+///
+/// A device gets one screen at a time. Without this, `create` happily added a
+/// second capture beside the first, so a viewer that reconnected left the old
+/// `SCStream` running and started another: the same desktop shared twice, then
+/// three times, each one still pushing frames.
+fn end_sessions_for(peer: &str, reason: EndReason) -> Result<usize, String> {
+    let mut held = sessions()
+        .lock()
+        .map_err(|_| "screen capture registry poisoned")?;
+    let before = held.len();
+    held.retain(|id, session| {
+        let Ok(session) = session.lock() else {
+            return false;
+        };
+        if session.peer == peer {
+            note_end(id, &session.peer, reason);
+            return false;
+        }
+        true
+    });
+    Ok(before - held.len())
 }
 
 pub(crate) struct CaptureReceiver {
@@ -56,13 +124,24 @@ impl CaptureReceiver {
 
 impl Drop for CaptureReceiver {
     fn drop(&mut self) {
-        if let Ok(mut held) = sessions().lock() {
-            held.remove(&self.id);
+        if let Ok(mut held) = sessions().lock()
+            && let Some(session) = held.remove(&self.id)
+        {
+            // Only when this drop is what removed it. A superseded or revoked
+            // session is already gone from the map and has already said why,
+            // and logging twice would name the wrong cause the second time.
+            if let Ok(session) = session.lock() {
+                note_end(&self.id, &session.peer, EndReason::StreamClosed);
+            }
         }
     }
 }
 
 pub(crate) fn create(id: String, peer: String, control: bool) -> Result<CaptureReceiver, String> {
+    // One live session per peer. Dropping the old sender wakes its pump, which
+    // closes its stream and stops its capture, so the replacement is a
+    // handover rather than a second share.
+    end_sessions_for(&peer, EndReason::Superseded)?;
     let (tx, rx) = mpsc::sync_channel(FRAME_SLOTS);
     sessions()
         .lock()
@@ -184,9 +263,13 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let removed = sessions()
                     .lock()
                     .map_err(|_| "screen capture registry poisoned")?
-                    .remove(&p.id)
-                    .is_some();
-                Ok(json!({"closed": removed}))
+                    .remove(&p.id);
+                if let Some(session) = &removed
+                    && let Ok(session) = session.lock()
+                {
+                    note_end(&p.id, &session.peer, EndReason::HelperClosed);
+                }
+                Ok(json!({"closed": removed.is_some()}))
             }
             _ => Err(format!("unknown screen capture method: {method}")),
         }
@@ -198,8 +281,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_second_session_for_one_peer_replaces_the_first() {
+        let first = create("first".into(), "one-screen-peer".into(), true).unwrap();
+        assert!(queue_input(&first.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok());
+        let second = create("second".into(), "one-screen-peer".into(), true).unwrap();
+        // The replacement works and the original is gone, so the peer is not
+        // being shown the same desktop twice.
+        assert!(queue_input(&second.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok());
+        assert!(
+            queue_input(&first.id, br#"{"type":"display","id":1}"#.to_vec()).is_err(),
+            "the superseded session must not still be live"
+        );
+    }
+
+    #[test]
+    fn one_peer_does_not_end_another_peers_session() {
+        let mine = create("mine".into(), "peer-a".into(), true).unwrap();
+        let _theirs = create("theirs".into(), "peer-b".into(), true).unwrap();
+        assert!(
+            queue_input(&mine.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok(),
+            "another peer connecting must not end this one"
+        );
+    }
+
+    // Every test names its own peer. The registry is process-wide and the
+    // tests run in parallel, so two of them sharing a peer would now end each
+    // other's sessions and fail for a reason that is not the rule under test.
+    #[test]
     fn view_only_session_rejects_control_input() {
-        let receiver = create("view-only".into(), "phone".into(), false).unwrap();
+        let receiver = create("view-only".into(), "view-only-peer".into(), false).unwrap();
         assert!(queue_input(&receiver.id, vec![1]).is_err());
         assert!(queue_input(&receiver.id, br#"{"type":"display","id":2}"#.to_vec()).is_ok());
         assert!(
@@ -209,13 +319,24 @@ mod tests {
     }
 
     #[test]
-    fn reducing_a_grant_ends_affected_live_sessions() {
-        let view = create("view-grant".into(), "phone".into(), false).unwrap();
-        let control = create("control-grant".into(), "phone".into(), true).unwrap();
-        revoke_peer("phone", true, false).unwrap();
+    fn narrowing_a_grant_to_view_ends_a_control_session() {
+        let control = create("narrow-control".into(), "narrow-peer".into(), true).unwrap();
+        revoke_peer("narrow-peer", true, false).unwrap();
+        assert!(
+            !sessions().lock().unwrap().contains_key(&control.id),
+            "a control session must end when control is taken away"
+        );
+    }
+
+    #[test]
+    fn narrowing_a_grant_to_view_keeps_a_view_session() {
+        let view = create("keep-view".into(), "keep-peer".into(), false).unwrap();
+        revoke_peer("keep-peer", true, false).unwrap();
         assert!(sessions().lock().unwrap().contains_key(&view.id));
-        assert!(!sessions().lock().unwrap().contains_key(&control.id));
-        revoke_peer("phone", false, false).unwrap();
-        assert!(!sessions().lock().unwrap().contains_key(&view.id));
+        revoke_peer("keep-peer", false, false).unwrap();
+        assert!(
+            !sessions().lock().unwrap().contains_key(&view.id),
+            "removing the grant entirely must end it"
+        );
     }
 }
