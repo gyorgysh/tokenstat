@@ -53,12 +53,12 @@ settings:
     # upload, and bump alongside MARKETING_VERSION in the same commit on each
     # release.
     #
-    # 44, 45 and 46 have been uploaded as 0.6.9 on TestFlight. This cut is 47,
-    # still 0.6.9: SSH as a place in the sidebar, one accent colour, and
-    # screen permissions that ask. Marketing stays where it is because this is
-    # a TestFlight build, not a release, and a version number spent here is a
+    # 44 to 47 have been uploaded as 0.6.9 on TestFlight. This cut is 48, still
+    # 0.6.9: the vault opened by a password, one screen session per peer, and
+    # the reconnect loop. Marketing stays where it is because this is a
+    # TestFlight build, not a release, and a version number spent here is a
     # version number the next release cannot use.
-    CURRENT_PROJECT_VERSION: "47"
+    CURRENT_PROJECT_VERSION: "48"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
