@@ -23,22 +23,20 @@ final class SSHVaultModel {
     /// one vault state that is allowed to look urgent.
     var recovery: String?
     var error: String?
-    var enrollmentRequests: [SSHVaultEnrollment] = []
 
     var created: Bool { status?.created == true }
     var enrolled: Bool { status?.enrolled == true }
-    var needsEnrollment: Bool { created && status?.enrolled == false }
+    /// The vault exists and this device has no key for it yet, so somebody has
+    /// to type the password before anything can be read here.
+    var locked: Bool { created && status?.locked == true }
+    /// Made before password unlock existed. It cannot be opened at all.
+    var needsRecreate: Bool { status?.needsRecreate == true }
     var recordCount: Int { status?.recordCount ?? 0 }
     /// Words generated and not yet confirmed. The only warning here.
     var unconfirmedRecovery: Bool { recovery != nil }
 
     func refresh() async {
         status = try? await Bridge.sshVaultStatus()
-        guard enrolled else {
-            enrollmentRequests = []
-            return
-        }
-        enrollmentRequests = (try? await Bridge.sshVaultEnrollmentRequests()) ?? []
     }
 
     func rotateRecovery() async {
@@ -48,20 +46,33 @@ final class SSHVaultModel {
         } catch { self.error = error.localizedDescription }
     }
 
+    /// Forget the key held for this run, so the password is asked for again.
+    func lock() async {
+        await Bridge.lockSSHVault()
+        status = try? await Bridge.sshVaultStatus()
+    }
+
     func reset() async {
         do {
             try await Bridge.resetSSHVault()
             recovery = nil
-            enrollmentRequests = []
             status = try await Bridge.sshVaultStatus()
         } catch { self.error = error.localizedDescription }
     }
 
-    func approve(_ request: SSHVaultEnrollment) async {
+    /// Change the password, having proved the current one.
+    func changePassword(current: String, to next: String) async -> Bool {
         do {
-            _ = try await Bridge.approveSSHVaultEnrollment(request)
-            enrollmentRequests.removeAll { $0.id == request.id }
-        } catch { self.error = error.localizedDescription }
+            let result = try await Bridge.setSSHVaultPassword(current: current, newPassword: next)
+            // A change made with the current password keeps the recovery code,
+            // so there is nothing new to show.
+            if let fresh = result.recovery { recovery = fresh }
+            status = try await Bridge.sshVaultStatus()
+            return true
+        } catch {
+            self.error = error.localizedDescription
+            return false
+        }
     }
 }
 
@@ -84,10 +95,8 @@ struct SSHVaultRow: View {
                 Text(label)
                     .font(.callout)
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Color.primary)
-                if !vault.enrollmentRequests.isEmpty {
-                    Text(vault.enrollmentRequests.count == 1
-                        ? "1 device waiting"
-                        : "\(vault.enrollmentRequests.count) devices waiting")
+                if vault.locked {
+                    Text("Locked")
                         .font(.caption)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Theme.accentSoft, in: Capsule())
@@ -114,7 +123,8 @@ struct SSHVaultRow: View {
 
     private var label: String {
         if vault.unconfirmedRecovery { return "Recovery words not confirmed" }
-        if vault.needsEnrollment { return "Encrypted vault · this device is not enrolled" }
+        if vault.needsRecreate { return "Encrypted vault · has to be recreated" }
+        if vault.locked { return "Encrypted vault · locked" }
         if vault.created {
             return vault.recordCount == 1
                 ? "Encrypted vault · 1 record"
@@ -140,6 +150,7 @@ struct SSHVaultScreen: View {
     let canWrite: Bool
 
     @State private var showingSetup = false
+    @State private var changingPassword = false
     @State private var showingRecovery = false
     @State private var confirmingRotation = false
     @State private var confirmingReset = false
@@ -175,15 +186,6 @@ struct SSHVaultScreen: View {
                             prominent: true
                         ) { showingRecovery = true }
                     }
-                    ForEach(vault.enrollmentRequests) { request in
-                        action(
-                            title: "A device is waiting to join",
-                            detail: "Identity \(String(request.publicIdentity.prefix(16)))… Approving lets it decrypt everything in the vault.",
-                            button: "Approve",
-                            icon: .approve,
-                            prominent: true
-                        ) { Task { await vault.approve(request) } }
-                    }
 
                     if !vault.created {
                         action(
@@ -196,23 +198,43 @@ struct SSHVaultScreen: View {
                             prominent: true,
                             enabled: canWrite
                         ) { showingSetup = true }
-                    } else if vault.needsEnrollment {
+                    } else if vault.needsRecreate {
                         action(
-                            title: "Enrol this device",
-                            detail: "This computer cannot read the vault yet. Approve it from a device that is already in, or enter the recovery words here.",
-                            button: "Enrol this device",
-                            icon: .device,
+                            title: "Recreate the vault",
+                            detail: "It was made before password unlock and cannot be opened by this version. Anything saved on this Mac stays where it is.",
+                            button: "Recreate",
+                            icon: .refresh,
+                            prominent: true
+                        ) { showingSetup = true }
+                    } else if vault.locked {
+                        action(
+                            title: "Unlock the vault",
+                            detail: "Enter your vault password to let this computer read and write the account's saved servers and keys.",
+                            button: "Unlock",
+                            icon: .signIn,
                             prominent: true
                         ) { showingSetup = true }
                     } else {
                         status
                         if canWrite {
                             action(
-                                title: "New recovery words",
-                                detail: "Replaces the current 24 words. The old ones stop working as soon as the encrypted update succeeds, so write the new ones down before closing.",
-                                button: "New recovery words",
+                                title: "Change the password",
+                                detail: "Ask for the one you use now, then the new one. The records are untouched: only the lock around them changes.",
+                                button: "Change password",
+                                icon: .edit
+                            ) { changingPassword = true }
+                            action(
+                                title: "New recovery code",
+                                detail: "Replaces the current code. The old one stops working as soon as the encrypted update succeeds, so save the new one before closing.",
+                                button: "New recovery code",
                                 icon: .refresh
                             ) { confirmingRotation = true }
+                            action(
+                                title: "Lock on this Mac",
+                                detail: "Forgets the key held for this session. The password is asked for again next time the vault is read.",
+                                button: "Lock",
+                                icon: .signOut
+                            ) { Task { await vault.lock() } }
                             action(
                                 title: "Delete this vault",
                                 detail: "Every encrypted secret in it is permanently lost, and other devices will have to set up a new one. This cannot be undone.",
@@ -234,6 +256,9 @@ struct SSHVaultScreen: View {
         .sshSheetFrame(width: 560, height: 520)
         .sheet(isPresented: $showingSetup) {
             SSHVaultSetupSheet(tier: tier, status: $vault.status, recovery: $vault.recovery)
+        }
+        .sheet(isPresented: $changingPassword) {
+            SSHVaultPasswordSheet(vault: vault)
         }
         .sheet(isPresented: $showingRecovery) {
             if let recovery = vault.recovery {
@@ -306,5 +331,72 @@ struct SSHVaultScreen: View {
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Change the vault password, having proved the current one.
+///
+/// A change is not a reset: the records never move, only the wrap around the
+/// key. That is why it does not produce a new recovery code and does not touch
+/// the snapshot revision, so it cannot collide with a device writing a record.
+struct SSHVaultPasswordSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var vault: SSHVaultModel
+
+    @State private var current = ""
+    @State private var next = ""
+    @State private var again = ""
+    @State private var working = false
+
+    private var problems: [String] { VaultPassword.problems(next) }
+    private var canSave: Bool {
+        !working && !current.isEmpty && problems.isEmpty && next == again
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Change vault password").font(.title3.weight(.semibold))
+                    Text("Your saved servers and keys stay exactly as they are.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close password change")
+            }
+            Divider()
+            SecureField("Current password", text: $current)
+                .textFieldStyle(.roundedBorder)
+            SecureField("New password", text: $next)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Type the new one again", text: $again)
+                .textFieldStyle(.roundedBorder)
+            VaultPasswordRules(password: next)
+            if !again.isEmpty, next != again {
+                Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+            }
+            if let error = vault.error {
+                Text(FriendlyError.from(error).message).font(.caption).foregroundStyle(Theme.danger)
+            }
+            Spacer(minLength: 0)
+            HStack {
+                Button("Cancel", .dismiss) { dismiss() }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .frame(minWidth: Theme.Control.pairedWidth)
+                Spacer()
+                Button("Change password", .save) {
+                    Task {
+                        working = true
+                        if await vault.changePassword(current: current, to: next) { dismiss() }
+                        working = false
+                    }
+                }
+                .buttonStyle(AccentButtonStyle())
+                .frame(minWidth: Theme.Control.pairedWidth)
+                .disabled(!canSave)
+            }
+        }
+        .padding(Theme.Space.l)
+        .sshSheetFrame(width: 520, height: 420)
     }
 }

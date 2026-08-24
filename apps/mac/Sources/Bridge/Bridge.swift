@@ -1940,12 +1940,26 @@ extension Bridge {
         try await background("screen.transfer.destination.set", ["path": path], as: ScreenTransferDestination.self)
     }
 
-    static func createSSHVault(tier: String) async throws -> SSHVaultRecovery {
-        try await background("ssh.vault.create", ["tier": tier], as: SSHVaultRecovery.self)
+    /// Create the account's one vault behind a password. Returns the recovery
+    /// code, which is shown once and is the way back if the password is lost.
+    static func createSSHVault(password: String, tier: String) async throws -> SSHVaultRecovery {
+        try await background("ssh.vault.create", ["password": password, "tier": tier], patience: Patience.standard, as: SSHVaultRecovery.self)
     }
 
-    static func unlockSSHVault(recovery: String, tier: String) async throws -> SSHVaultUnlock {
-        try await background("ssh.vault.unlock", ["recovery": recovery, "tier": tier], as: SSHVaultUnlock.self)
+    /// Open the vault with the password, or with the recovery code.
+    static func unlockSSHVault(password: String = "", recovery: String = "", tier: String) async throws -> SSHVaultUnlock {
+        try await background("ssh.vault.unlock", ["password": password, "recovery": recovery, "tier": tier], patience: Patience.standard, as: SSHVaultUnlock.self)
+    }
+
+    /// Change the password, or set one after proving the recovery code. A reset
+    /// answers with a fresh recovery code, because it retires the one spent.
+    static func setSSHVaultPassword(current: String = "", recovery: String = "", newPassword: String) async throws -> SSHVaultPasswordChange {
+        try await background("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, as: SSHVaultPasswordChange.self)
+    }
+
+    static func lockSSHVault() async {
+        struct Locked: Codable, Sendable { var locked: Bool }
+        _ = try? await background("ssh.vault.lock", [:], as: Locked.self)
     }
 
     static func resetSSHVault() async throws {

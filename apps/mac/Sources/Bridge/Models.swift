@@ -172,9 +172,22 @@ struct SSHVaultStatus: Codable, Sendable, Hashable {
     var created: Bool
     var recordCount: Int
     var enrolled: Bool?
+    /// The vault exists and this device has no key for it yet, so the password
+    /// has to be typed before anything can be read.
+    var locked: Bool?
+    /// Made before password unlock existed. It cannot be opened by this build,
+    /// so the screen offers to recreate it rather than asking for a password
+    /// nothing will accept.
+    var needsRecreate: Bool?
 }
 struct SSHVaultReset: Codable, Sendable, Hashable { var reset: Bool }
 struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
+/// A password change. Carries a fresh recovery code only when the change was a
+/// reset, because a reset retires the code it just spent.
+struct SSHVaultPasswordChange: Codable, Sendable, Hashable {
+    var changed: Bool
+    var recovery: String?
+}
 struct SSHVaultUnlock: Codable, Sendable, Hashable { var unlocked: Bool }
 struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable {
     var id: String

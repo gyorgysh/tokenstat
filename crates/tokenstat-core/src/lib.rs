@@ -32,6 +32,7 @@ pub mod engine;
 pub mod error;
 pub mod limits;
 pub mod model;
+pub mod passphrase;
 pub mod pricing;
 pub mod scan;
 pub mod sources;

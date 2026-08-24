@@ -26,6 +26,12 @@ pub struct RemoteVault {
     pub recovery_wrap: String,
     pub device_wrap: Option<String>,
     pub wrap_version: Option<u32>,
+    /// Absent on a vault made before password unlock existed.
+    pub password_salt: Option<String>,
+    pub password_wrap: Option<String>,
+    /// The KDF the password wrap was made with, written down so a later change
+    /// of cost can be read rather than guessed.
+    pub kdf: Option<String>,
     pub updated_at: String,
 }
 
@@ -39,6 +45,27 @@ pub struct CreateVault<'a> {
     pub recovery_wrap: &'a str,
     pub device_wrap: &'a str,
     pub wrap_version: u32,
+    pub password_salt: &'a str,
+    pub password_wrap: &'a str,
+    pub kdf: &'a str,
+}
+
+/// A new password wrap for a vault that already exists.
+///
+/// The snapshot is not part of this. Changing a password changes the wrap
+/// around the key and nothing about the records, so it is not a new revision
+/// and cannot collide with a device writing one.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RewrapVault<'a> {
+    pub password_salt: &'a str,
+    pub password_wrap: &'a str,
+    pub kdf: &'a str,
+    /// Set only on a recovery reset, which retires the code it just spent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_salt: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_wrap: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,6 +231,17 @@ pub fn update(body: &UpdateVault<'_>) -> Result<Revision, VaultError> {
     send(
         client
             .put(format!("{host}/api/v1/vault/ssh"))
+            .bearer_auth(token)
+            .json(body),
+    )
+}
+
+/// Replace the password wrap on the vault that already exists.
+pub fn rewrap(body: &RewrapVault<'_>) -> Result<(), VaultError> {
+    let (host, token, client) = auth()?;
+    send_empty(
+        client
+            .post(format!("{host}/api/v1/vault/ssh/rewrap"))
             .bearer_auth(token)
             .json(body),
     )

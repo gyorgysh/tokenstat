@@ -244,94 +244,81 @@ struct SSHRecoveryWordsSheet: View {
     }
 }
 
+/// Create the account's one vault, or open it on this device.
+///
+/// One password, and the recovery code is only the way back if it is
+/// forgotten. The old version of this screen offered "Create new", "Recovery
+/// words" and "Ask a device", which is three ways to say "which of the several
+/// vaults did you mean", and the answer is that an account has one.
 struct SSHVaultSetupSheet: View {
-    private enum Choice: String, CaseIterable { case create = "Create new", restore = "Recovery words", request = "Ask a device" }
     @Environment(\.dismiss) private var dismiss
     let tier: String
     @Binding var status: SSHVaultStatus?
     @Binding var recovery: String?
-    @State private var choice = Choice.create
+
+    @State private var password = ""
+    @State private var confirmPassword = ""
     @State private var enteredRecovery = ""
+    @State private var forgot = false
     @State private var working = false
     @State private var error: String?
-    @State private var requestSent = false
     @State private var confirmingReset = false
 
-    private var choices: [Choice] {
-        if status?.created == true && status?.enrolled == false { return [.restore, .request] }
-        return [.create, .restore]
+    /// The vault exists, so this is an unlock rather than a creation.
+    private var exists: Bool { status?.created == true }
+    /// Made before password unlock existed and cannot be opened by this build.
+    private var stale: Bool { status?.needsRecreate == true }
+
+    private var problems: [String] { VaultPassword.problems(password) }
+    private var matches: Bool { password == confirmPassword }
+
+    private var canConfirm: Bool {
+        if working { return false }
+        if stale { return false }
+        if exists {
+            return forgot ? !enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty
+                          : !password.isEmpty
+        }
+        return problems.isEmpty && matches
     }
 
-    private var confirmTitle: String {
-        switch choice {
-        case .create: return "Create vault"
-        case .request: return "Request approval"
-        case .restore: return "Restore vault"
-        }
+    private var title: String {
+        if stale { return "This vault has to be recreated" }
+        return exists ? "Unlock your vault" : "Create your vault"
     }
 
-    private var confirmIcon: ActionIcon {
-        switch choice {
-        case .create: return .create
-        case .request: return .pair
-        case .restore: return .restore
+    private var subtitle: String {
+        if stale {
+            return "It was made before password unlock and cannot be opened by this version."
         }
+        return exists
+            ? "One vault for the account, on every device you sign in to."
+            : "One password protects every saved server and key, on all your devices."
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Set up encrypted vault").font(.title3.weight(.semibold))
-                    Text("tokenstat cannot recover the secrets if the words and every device are lost").font(.caption).foregroundStyle(.secondary)
+                    Text(title).font(.title3.weight(.semibold))
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault setup")
             }
             Divider()
-            Picker("Vault action", selection: $choice) { ForEach(choices, id: \.self) { Text($0.rawValue).tag($0) } }
-                .pickerStyle(.segmented)
-                .onAppear { if !choices.contains(choice) { choice = choices[0] } }
-                .onChange(of: status?.created) { _, _ in if !choices.contains(choice) { choice = choices[0] } }
-            if choice == .request {
-                Label(requestSent ? "Request sent. Keep this screen open while an enrolled device approves it." : "An enrolled device will see a content-free approval request for 15 minutes.", systemImage: requestSent ? "checkmark.circle.fill" : "iphone.and.arrow.forward")
-                    .foregroundStyle(requestSent ? Theme.success : Color.gray)
-            } else if choice == .restore {
-                Text("Enter all 24 recovery words in order. Words are checked locally and are never sent to tokenstat.ai.")
-                    .font(.callout).foregroundStyle(.secondary)
-                TextEditor(text: $enteredRecovery)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 130)
-                    .padding(8)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10))
+            if stale {
+                staleBody
+            } else if exists {
+                unlockBody
             } else {
-                Label("A random vault key is created on this device.", systemImage: "key.horizontal")
-                Label("You will confirm and store 24 standard recovery words.", systemImage: "text.book.closed")
-                Label("Losing every enrolled device and the words permanently loses the vault.", systemImage: "exclamationmark.shield")
+                createBody
             }
-            if status?.created == true {
-                Text("If you no longer have the recovery words and cannot ask a device, drop this vault and create a new one. Stored secrets are lost.")
-                    .font(.callout).foregroundStyle(.secondary)
+            if let error {
+                Text(FriendlyError.from(error).message).font(.caption).foregroundStyle(Theme.danger)
             }
-            if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
-            Spacer()
-            HStack {
-                Button("Cancel", .dismiss) { dismiss() }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                if status?.created == true {
-                    Button("Drop vault", .delete) { confirmingReset = true }
-                        .buttonStyle(DestructiveButtonStyle())
-                        .disabled(working)
-                }
-                Spacer()
-                Button(action: { Task { await run() } }) {
-                    confirmIcon.label(confirmTitle)
-                }
-                .buttonStyle(AccentButtonStyle())
-                .frame(minWidth: Theme.Control.pairedWidth)
-                .disabled(working || requestSent || (choice == .restore && enteredRecovery.split(whereSeparator: \.isWhitespace).count != 24) || (choice == .create && status?.created == true))
-            }
+            Spacer(minLength: 0)
+            footer
         }
         .padding(Theme.Space.l)
         .sshSheetFrame(width: 560, height: 460)
@@ -341,18 +328,102 @@ struct SSHVaultSetupSheet: View {
         } message: { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") }
     }
 
-    private func run() async {
-        working = true; error = nil
-        do {
-            if choice == .create {
-                recovery = try await Bridge.createSSHVault(tier: tier).recovery
-            } else if choice == .request {
-                _ = try await Bridge.requestSSHVaultEnrollment()
-                requestSent = true
-                working = false
-                return
+    // MARK: - The three states
+
+    private var createBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            SecureField("Vault password", text: $password)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Type it again", text: $confirmPassword)
+                .textFieldStyle(.roundedBorder)
+            VaultPasswordRules(password: password)
+            if !confirmPassword.isEmpty, !matches {
+                Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+            }
+            Text("tokenstat never sees this password. It is what decrypts the vault, so nobody here can reset it or read what it protects.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var unlockBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if forgot {
+                Text("Enter your recovery code. It is the line you were given when the vault was created.")
+                    .font(.callout).foregroundStyle(.secondary)
+                TextField("Recovery code", text: $enteredRecovery)
+                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.mono(12))
+                Button("Use the password instead", .back) { forgot = false }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
-                _ = try await Bridge.unlockSSHVault(recovery: enteredRecovery, tier: tier)
+                SecureField("Vault password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { if canConfirm { Task { await run() } } }
+                Button("I forgot the password", .help) { forgot = true }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }
+            Text("Checked on this device. The password never leaves it.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var staleBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Earlier vaults were opened with 24 recovery words. This one is opened with a password you choose, so the old vault cannot be carried across.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Deleting it loses whatever it holds. Anything saved on this Mac stays where it is.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(minWidth: Theme.Control.pairedWidth)
+            if exists {
+                Button("Delete vault", .delete) { confirmingReset = true }
+                    .buttonStyle(DestructiveButtonStyle())
+                    .disabled(working)
+            }
+            Spacer()
+            // Written out rather than one button with two ternaries. The two
+            // do different things and read differently, and a glyph chosen by
+            // an expression is a glyph nobody can grep for.
+            if exists {
+                Button("Unlock", .signIn) { Task { await run() } }
+                    .buttonStyle(AccentButtonStyle())
+                    .frame(minWidth: Theme.Control.pairedWidth)
+                    .disabled(!canConfirm)
+            } else if !stale {
+                Button("Create vault", .create) { Task { await run() } }
+                    .buttonStyle(AccentButtonStyle())
+                    .frame(minWidth: Theme.Control.pairedWidth)
+                    .disabled(!canConfirm)
+            }
+        }
+    }
+
+    // MARK: - Doing it
+
+    private func run() async {
+        working = true
+        error = nil
+        do {
+            if exists {
+                if forgot {
+                    // A recovery unlock is a password reset: the code proves
+                    // who you are, and leaving without setting a password would
+                    // mean the next device still cannot get in.
+                    _ = try await Bridge.unlockSSHVault(recovery: enteredRecovery, tier: tier)
+                } else {
+                    _ = try await Bridge.unlockSSHVault(password: password, tier: tier)
+                }
+            } else {
+                recovery = try await Bridge.createSSHVault(password: password, tier: tier).recovery
             }
             status = try await Bridge.sshVaultStatus()
             dismiss()
@@ -366,11 +437,63 @@ struct SSHVaultSetupSheet: View {
         do {
             try await Bridge.resetSSHVault()
             recovery = nil
-            requestSent = false
+            password = ""
+            confirmPassword = ""
             status = try await Bridge.sshVaultStatus()
-            choice = .create
         } catch { self.error = error.localizedDescription }
         working = false
+    }
+}
+
+/// The password rule, said the same way everywhere it is shown.
+///
+/// The authority is `tokenstat_core::passphrase`, which the host enforces
+/// before it wraps a key. This is the same list written for a person to read
+/// while they type, so nobody meets a rule for the first time in a rejection.
+enum VaultPassword {
+    static let minLength = 12
+
+    static func problems(_ password: String) -> [String] {
+        var out: [String] = []
+        if password.count < minLength { out.append("At least \(minLength) characters") }
+        if !password.contains(where: { $0.isUppercase }) { out.append("An uppercase letter") }
+        if !password.contains(where: { $0.isNumber }) { out.append("A number") }
+        if !password.contains(where: { !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) {
+            out.append("A special character")
+        }
+        return out
+    }
+
+    static let all = [
+        "At least \(minLength) characters",
+        "An uppercase letter",
+        "A number",
+        "A special character",
+    ]
+}
+
+/// Every rule, with the ones already met ticked off as you type.
+///
+/// All four are on screen from the start. A rule revealed one rejection at a
+/// time is three rejections for one password.
+struct VaultPasswordRules: View {
+    let password: String
+
+    var body: some View {
+        let outstanding = Set(VaultPassword.problems(password))
+        return VStack(alignment: .leading, spacing: 2) {
+            ForEach(VaultPassword.all, id: \.self) { rule in
+                let met = !outstanding.contains(rule)
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: met ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 10))
+                        .foregroundStyle(met ? Theme.success : Color.secondary)
+                    Text(rule)
+                        .font(.caption)
+                        .foregroundStyle(met ? Color.secondary : Color.primary)
+                }
+            }
+        }
     }
 }
 

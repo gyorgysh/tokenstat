@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use bip39::{Language, Mnemonic};
+use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload, rand_core::RngCore};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use hkdf::Hkdf;
@@ -18,8 +18,27 @@ use serde_json::{Value, json};
 use sha2::Sha256;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-const SCHEMA: u32 = 2;
+const SCHEMA: u32 = 3;
 const WRAP_VERSION: u32 = 1;
+
+/// Argon2id cost. 64 MiB, three passes, one lane.
+///
+/// The ciphertext is on a server, so somebody who takes a copy can guess
+/// offline for as long as they like. This is what makes each guess cost
+/// something. The numbers are the RustCrypto defaults, which are the OWASP
+/// recommendation, and they take well under a second on a phone.
+const KDF_MEMORY_KIB: u32 = 64 * 1024;
+const KDF_PASSES: u32 = 3;
+const KDF_LANES: u32 = 1;
+
+/// The KDF written down beside the wrap it produced.
+///
+/// Stored with the vault so a future change of cost can be read rather than
+/// guessed. A device that meets a descriptor it does not understand refuses
+/// rather than deriving the wrong key and reporting a bad password.
+fn kdf_descriptor() -> String {
+    format!("argon2id$v=19$m={KDF_MEMORY_KIB},t={KDF_PASSES},p={KDF_LANES}")
+}
 
 #[derive(Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +57,12 @@ struct VaultStore {
     recovery_wrap: String,
     #[serde(default)]
     device_wrap: String,
+    #[serde(default)]
+    password_salt: String,
+    #[serde(default)]
+    password_wrap: String,
+    #[serde(default)]
+    kdf: String,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -94,6 +119,45 @@ struct EnrollmentApprovalParams {
     request_id: String,
     machine_id: String,
     public_identity: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordParams {
+    #[serde(default)]
+    password: String,
+    /// Only set when resetting a forgotten password.
+    #[serde(default)]
+    recovery: String,
+    /// The replacement, when changing or resetting.
+    #[serde(default)]
+    new_password: String,
+}
+
+/// The vault key for this run of the daemon.
+///
+/// Held after a successful unlock so the password is typed once and not on
+/// every record read. In memory only: it is never written anywhere, and it
+/// goes when the process does.
+fn unlocked() -> &'static Mutex<Option<[u8; 32]>> {
+    static UNLOCKED: OnceLock<Mutex<Option<[u8; 32]>>> = OnceLock::new();
+    UNLOCKED.get_or_init(|| Mutex::new(None))
+}
+
+fn remember_key(vmk: [u8; 32]) {
+    if let Ok(mut held) = unlocked().lock() {
+        *held = Some(vmk);
+    }
+}
+
+fn forget_key() {
+    if let Ok(mut held) = unlocked().lock() {
+        *held = None;
+    }
+}
+
+fn cached_key() -> Option<[u8; 32]> {
+    unlocked().lock().ok().and_then(|held| *held)
 }
 
 fn mutation_stamp() -> Result<(u64, String), String> {
@@ -180,24 +244,105 @@ fn random32() -> [u8; 32] {
     value
 }
 
+/// Crockford base32, which has no I, L, O or U.
+///
+/// A recovery code is read off a screen and typed back, sometimes from a
+/// photograph, so the alphabet must not contain two characters that look the
+/// same. Twenty-four words did not have this problem and had a much worse one:
+/// nobody could face typing them.
+const CODE_ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/// A fresh recovery code: 160 bits, in groups of four.
+///
+/// Not a password and never typed to get in day to day, so it can be as long
+/// as it needs to be. It is the way back when the password is forgotten, and
+/// the only thing standing between a forgotten password and a lost vault.
 fn generate_recovery() -> String {
-    Mnemonic::from_entropy_in(Language::English, &random32())
-        .expect("32 bytes is valid BIP-39 entropy")
-        .to_string()
+    let bytes = random32();
+    let mut out = String::new();
+    for (index, chunk) in bytes[..20].iter().enumerate() {
+        if index > 0 && index % 2 == 0 {
+            out.push('-');
+        }
+        out.push(CODE_ALPHABET[(chunk >> 3) as usize] as char);
+        out.push(CODE_ALPHABET[(chunk & 0b0001_1111) as usize] as char);
+    }
+    out
+}
+
+/// Compare recovery codes by what was meant, not by how it was typed.
+///
+/// Case and the grouping dashes carry no information, and neither does the
+/// difference between O and 0 on a code read off a photograph.
+fn normalize_recovery(recovery: &str) -> String {
+    recovery
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| match c.to_ascii_uppercase() {
+            'O' => '0',
+            'I' | 'L' => '1',
+            other => other,
+        })
+        .collect()
 }
 
 fn recovery_key(recovery: &str, salt: &str) -> Result<[u8; 32], String> {
-    let mnemonic = Mnemonic::parse_in_normalized(Language::English, recovery.trim())
-        .map_err(|_| "recovery phrase must be 24 valid BIP-39 words")?;
-    if mnemonic.word_count() != 24 {
-        return Err("recovery phrase must contain 24 words".into());
+    let code = normalize_recovery(recovery);
+    if code.len() < 16 {
+        return Err("that is not a recovery code".into());
     }
     let salt = unhex(salt)?;
-    let hk = Hkdf::<Sha256>::new(Some(&salt), mnemonic.to_entropy().as_slice());
+    let hk = Hkdf::<Sha256>::new(Some(&salt), code.as_bytes());
     let mut out = [0u8; 32];
-    hk.expand(b"tokenstat/ssh-vault/recovery-wrap/v2", &mut out)
+    hk.expand(b"tokenstat/ssh-vault/recovery-wrap/v3", &mut out)
         .map_err(|_| "recovery key derivation failed")?;
     Ok(out)
+}
+
+/// Derive the key-encryption key from what a person typed.
+///
+/// Argon2id, and slow on purpose. `descriptor` is the KDF the wrap was made
+/// with: a device that does not recognise it refuses rather than deriving some
+/// other key and reporting a wrong password.
+fn password_key(password: &str, salt: &str, descriptor: &str) -> Result<[u8; 32], String> {
+    if descriptor != kdf_descriptor() {
+        return Err(
+            "this vault was locked by a newer version of tokenstat. Update to open it.".into(),
+        );
+    }
+    let salt = unhex(salt)?;
+    let params = Params::new(KDF_MEMORY_KIB, KDF_PASSES, KDF_LANES, Some(32))
+        .map_err(|_| "vault key derivation is misconfigured")?;
+    let mut out = [0u8; 32];
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+        .hash_password_into(password.as_bytes(), &salt, &mut out)
+        .map_err(|_| "vault key derivation failed")?;
+    Ok(out)
+}
+
+fn wrap_password(vmk: &[u8; 32], password: &str, salt: &str) -> Result<String, String> {
+    let key = password_key(password, salt, &kdf_descriptor())?;
+    let (nonce, ciphertext) = seal(&key, vmk, b"tokenstat/ssh-vault/vmk/password/v3")?;
+    Ok(pack(&nonce, &ciphertext))
+}
+
+fn unwrap_password(
+    wrap: &str,
+    password: &str,
+    salt: &str,
+    descriptor: &str,
+) -> Result<[u8; 32], String> {
+    let (nonce, ciphertext) = unpack(wrap)?;
+    let plain = open(
+        &password_key(password, salt, descriptor)?,
+        nonce,
+        ciphertext,
+        b"tokenstat/ssh-vault/vmk/password/v3",
+    )
+    .map_err(|_| "wrong password".to_string())?;
+    plain
+        .try_into()
+        .map_err(|_| "invalid wrapped vault key".into())
 }
 
 fn seal(key: &[u8; 32], plaintext: &[u8], context: &[u8]) -> Result<(String, String), String> {
@@ -229,7 +374,7 @@ fn open(key: &[u8; 32], nonce: &str, ciphertext: &str, context: &[u8]) -> Result
                 aad: context,
             },
         )
-        .map_err(|_| "wrong recovery phrase or damaged vault".into())
+        .map_err(|_| "wrong password or recovery code, or a damaged vault".into())
 }
 
 fn pack(nonce: &str, ciphertext: &str) -> String {
@@ -245,7 +390,7 @@ fn unpack(value: &str) -> Result<(&str, &str), String> {
 
 fn wrap_recovery(vmk: &[u8; 32], recovery: &str, salt: &str) -> Result<String, String> {
     let key = recovery_key(recovery, salt)?;
-    let (nonce, ciphertext) = seal(&key, vmk, b"tokenstat/ssh-vault/vmk/recovery/v2")?;
+    let (nonce, ciphertext) = seal(&key, vmk, b"tokenstat/ssh-vault/vmk/recovery/v3")?;
     Ok(pack(&nonce, &ciphertext))
 }
 
@@ -255,7 +400,7 @@ fn unwrap_recovery(wrap: &str, recovery: &str, salt: &str) -> Result<[u8; 32], S
         &recovery_key(recovery, salt)?,
         nonce,
         ciphertext,
-        b"tokenstat/ssh-vault/vmk/recovery/v2",
+        b"tokenstat/ssh-vault/vmk/recovery/v3",
     )?;
     plain
         .try_into()
@@ -372,24 +517,31 @@ fn cache_remote(remote: &tokenstat_sync::vault::RemoteVault) -> Result<(), Strin
     write(&store)
 }
 
+/// The remote snapshot and the key that opens it.
+///
+/// Three ways to the key, cheapest first: the one already unlocked this run,
+/// this device's own wrap, or a recovery code the caller supplied. There is no
+/// fourth: a device with none of those has to be unlocked with the password,
+/// which is a thing a person does and not something a record read can do.
 fn remote_and_key(
     recovery: &str,
 ) -> Result<(tokenstat_sync::vault::RemoteVault, [u8; 32]), String> {
     let mut remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
-    let key = if recovery.trim().is_empty() {
-        unwrap_for_self(
-            remote
-                .device_wrap
-                .as_deref()
-                .ok_or("this device is not enrolled")?,
-        )?
-    } else {
+    let key = if !recovery.trim().is_empty() {
         let key = unwrap_recovery(&remote.recovery_wrap, recovery, &remote.recovery_salt)?;
         if remote.device_wrap.is_none() {
             enroll_self(&key)?;
             remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
         }
         key
+    } else if let Some(key) = cached_key() {
+        key
+    } else if let Some(wrap) = remote.device_wrap.as_deref() {
+        let key = unwrap_for_self(wrap)?;
+        remember_key(key);
+        key
+    } else {
+        return Err("the vault is locked. Enter your vault password to open it.".into());
     };
     cache_remote(&remote)?;
     Ok((remote, key))
@@ -426,12 +578,21 @@ fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
     }
 }
 
-fn create_v2() -> Result<String, String> {
+/// Create the account's one vault, locked by a password.
+///
+/// Returns the recovery code, which is shown once. It is not the way in, it is
+/// the way back when the password is forgotten.
+fn create_v3(password: &str) -> Result<String, String> {
     verify_paid_account()?;
+    if let Some(problem) = tokenstat_core::passphrase::password_error(password) {
+        return Err(problem);
+    }
     let recovery = generate_recovery();
     let vmk = random32();
     let recovery_salt = hex(&random32());
     let recovery_wrap = wrap_recovery(&vmk, &recovery, &recovery_salt)?;
+    let password_salt = hex(&random32());
+    let password_wrap = wrap_password(&vmk, password, &password_salt)?;
     let identity =
         tokenstat_identity::MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let device_wrap = wrap_for_device(&vmk, &identity.public_key())?;
@@ -442,6 +603,7 @@ fn create_v2() -> Result<String, String> {
             records: Vec::new(),
         },
     )?;
+    let kdf = kdf_descriptor();
     let revision = tokenstat_sync::vault::create(&tokenstat_sync::vault::CreateVault {
         schema_version: SCHEMA,
         ciphertext: &ciphertext,
@@ -450,6 +612,9 @@ fn create_v2() -> Result<String, String> {
         recovery_wrap: &recovery_wrap,
         device_wrap: &device_wrap,
         wrap_version: WRAP_VERSION,
+        password_salt: &password_salt,
+        password_wrap: &password_wrap,
+        kdf: &kdf,
     })
     .map_err(create_error)?;
     write(&VaultStore {
@@ -460,8 +625,47 @@ fn create_v2() -> Result<String, String> {
         recovery_salt,
         recovery_wrap,
         device_wrap,
+        password_salt,
+        password_wrap,
+        kdf,
     })?;
+    remember_key(vmk);
     Ok(recovery)
+}
+
+/// Open the vault with what the person typed, and remember the key for this
+/// run so they are not asked again.
+///
+/// A device that opens the vault for the first time also takes its own copy of
+/// the key, wrapped to its identity, so later launches need nothing typed. That
+/// is the whole of what enrolment used to be, and it happens by itself.
+fn unlock_with(password: &str, recovery: &str) -> Result<[u8; 32], String> {
+    let remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
+    let vmk = if !recovery.trim().is_empty() {
+        unwrap_recovery(&remote.recovery_wrap, recovery, &remote.recovery_salt)?
+    } else if password.is_empty() {
+        return Err("enter your vault password".into());
+    } else {
+        let wrap = remote
+            .password_wrap
+            .as_deref()
+            .ok_or("this vault predates password unlock and has to be recreated")?;
+        let salt = remote
+            .password_salt
+            .as_deref()
+            .ok_or("this vault predates password unlock and has to be recreated")?;
+        let kdf = remote.kdf.as_deref().unwrap_or_default();
+        unwrap_password(wrap, password, salt, kdf)?
+    };
+    // Prove it before believing it. A wrap that unwraps to the wrong key would
+    // otherwise be reported as a working unlock and fail later, on a read.
+    decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
+    if remote.device_wrap.is_none() {
+        enroll_self(&vmk)?;
+    }
+    cache_remote(&remote)?;
+    remember_key(vmk);
+    Ok(vmk)
 }
 
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
@@ -479,6 +683,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     .as_ref()
                     .and_then(|value| value.device_wrap.as_ref())
                     .is_some();
+                // A v2 vault has no password wrap. It cannot be opened by this
+                // build and the screen has to say so rather than asking for a
+                // password nothing will accept.
+                let needs_recreate = remote
+                    .as_ref()
+                    .is_some_and(|value| value.password_wrap.is_none());
+                let locked =
+                    !needs_recreate && remote.is_some() && cached_key().is_none() && !enrolled;
                 let record_count = if let Some(remote) = remote {
                     if let Some(wrap) = remote.device_wrap.as_deref() {
                         unwrap_for_self(wrap)
@@ -499,22 +711,76 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 } else {
                     0
                 };
-                Ok(json!({"created": created, "recordCount": record_count, "enrolled": enrolled}))
+                Ok(json!({
+                    "created": created,
+                    "recordCount": record_count,
+                    "enrolled": enrolled,
+                    "locked": locked,
+                    "needsRecreate": needs_recreate
+                }))
             }
             "ssh.vault.create" => {
-                let _: Value = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                Ok(json!({"recovery": create_v2()?}))
+                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                Ok(json!({"recovery": create_v3(&p.password)?}))
             }
             "ssh.vault.reset" => {
                 tokenstat_sync::vault::remove().map_err(|e| e.to_string())?;
                 clear_local()?;
+                forget_key();
                 Ok(json!({"reset": true}))
             }
             "ssh.vault.unlock" => {
-                let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let (remote, vmk) = remote_and_key(&p.recovery)?;
-                let _ = decrypt_snapshot(&vmk, remote.revision, &remote.nonce, &remote.ciphertext)?;
+                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                unlock_with(&p.password, &p.recovery)?;
                 Ok(json!({"unlocked": true}))
+            }
+            "ssh.vault.lock" => {
+                forget_key();
+                Ok(json!({"locked": true}))
+            }
+            // Change the password, or set a new one after a recovery-code
+            // reset. Either way the records are untouched: only the wrap around
+            // the key changes, so this is not a new revision of the snapshot
+            // and cannot collide with a device writing a record.
+            "ssh.vault.password.set" => {
+                verify_paid_account()?;
+                let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+                if let Some(problem) = tokenstat_core::passphrase::password_error(&p.new_password) {
+                    return Err(problem);
+                }
+                // Proving you can already open it is the authorisation. Either
+                // the current password or the recovery code will do.
+                let vmk = unlock_with(&p.password, &p.recovery)?;
+                let password_salt = hex(&random32());
+                let password_wrap = wrap_password(&vmk, &p.new_password, &password_salt)?;
+                // A reset also retires the recovery code that was just spent,
+                // so a code read off an old screenshot cannot be used twice.
+                let (recovery, recovery_salt, recovery_wrap) = if p.recovery.trim().is_empty() {
+                    (None, None, None)
+                } else {
+                    let code = generate_recovery();
+                    let salt = hex(&random32());
+                    let wrap = wrap_recovery(&vmk, &code, &salt)?;
+                    (Some(code), Some(salt), Some(wrap))
+                };
+                tokenstat_sync::vault::rewrap(&tokenstat_sync::vault::RewrapVault {
+                    password_salt: &password_salt,
+                    password_wrap: &password_wrap,
+                    kdf: &kdf_descriptor(),
+                    recovery_salt: recovery_salt.as_deref(),
+                    recovery_wrap: recovery_wrap.as_deref(),
+                })
+                .map_err(|e| e.to_string())?;
+                let mut local = read()?;
+                local.password_salt = password_salt;
+                local.password_wrap = password_wrap;
+                local.kdf = kdf_descriptor();
+                if let (Some(salt), Some(wrap)) = (&recovery_salt, &recovery_wrap) {
+                    local.recovery_salt = salt.clone();
+                    local.recovery_wrap = wrap.clone();
+                }
+                write(&local)?;
+                Ok(json!({"changed": true, "recovery": recovery}))
             }
             "ssh.vault.enrollment.request" => {
                 let nonce = hex(&random32());
@@ -717,15 +983,67 @@ mod tests {
     }
 
     #[test]
-    fn recovery_is_bip39_and_wrap_round_trips() {
+    fn a_recovery_code_is_one_copyable_line_and_round_trips() {
         let recovery = generate_recovery();
-        assert_eq!(recovery.split_whitespace().count(), 24);
-        assert!(Mnemonic::parse_in_normalized(Language::English, &recovery).is_ok());
+        // One line, not 24 words. Somebody has to be able to copy this in one
+        // go, or photograph it.
+        assert!(!recovery.contains(' '), "{recovery}");
+        assert_eq!(
+            recovery.chars().filter(char::is_ascii_alphanumeric).count(),
+            40
+        );
         let vmk = random32();
         let salt = hex(&random32());
         let wrap = wrap_recovery(&vmk, &recovery, &salt).unwrap();
         assert_eq!(unwrap_recovery(&wrap, &recovery, &salt).unwrap(), vmk);
         assert!(unwrap_recovery(&wrap, &generate_recovery(), &salt).is_err());
+    }
+
+    #[test]
+    fn a_recovery_code_survives_how_it_was_typed_back() {
+        let vmk = random32();
+        let salt = hex(&random32());
+        let recovery = generate_recovery();
+        let wrap = wrap_recovery(&vmk, &recovery, &salt).unwrap();
+        // Read off a photograph: lower case, no grouping dashes, and the
+        // letters that look like digits confused for them.
+        let retyped = recovery.to_lowercase().replace('-', " ").replace('0', "O");
+        assert_eq!(unwrap_recovery(&wrap, &retyped, &salt).unwrap(), vmk);
+    }
+
+    #[test]
+    fn a_password_wrap_round_trips_and_a_wrong_password_is_refused() {
+        let vmk = random32();
+        let salt = hex(&random32());
+        let wrap = wrap_password(&vmk, "Correct-Horse9!", &salt).unwrap();
+        let kdf = kdf_descriptor();
+        assert_eq!(
+            unwrap_password(&wrap, "Correct-Horse9!", &salt, &kdf).unwrap(),
+            vmk
+        );
+        let wrong = unwrap_password(&wrap, "Correct-Horse9?", &salt, &kdf).unwrap_err();
+        assert!(wrong.contains("wrong password"), "{wrong}");
+    }
+
+    #[test]
+    fn a_wrap_made_by_a_kdf_we_do_not_know_is_refused_rather_than_guessed() {
+        let vmk = random32();
+        let salt = hex(&random32());
+        let wrap = wrap_password(&vmk, "Correct-Horse9!", &salt).unwrap();
+        // Deriving with different parameters would produce a different key and
+        // report a wrong password, which sends somebody looking for a typo in
+        // a password that was right.
+        let refused = unwrap_password(&wrap, "Correct-Horse9!", &salt, "argon2id$v=19$m=1,t=1,p=1")
+            .unwrap_err();
+        assert!(refused.contains("newer version"), "{refused}");
+    }
+
+    #[test]
+    fn a_vault_cannot_be_created_behind_a_weak_password() {
+        // The host checks as well as the client. A client that forgets to
+        // must not be able to put a weak password on an account's one vault.
+        let refused = create_v3("short").unwrap_err();
+        assert!(refused.contains("12 characters"), "{refused}");
     }
 
     #[test]
