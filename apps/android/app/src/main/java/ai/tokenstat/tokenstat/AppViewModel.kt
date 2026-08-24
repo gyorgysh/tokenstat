@@ -38,6 +38,12 @@ data class ClientState(
             val tier = account?.get("tier")?.jsonPrimitive?.content?.lowercase()
             return tier == "patron" || tier == "legend"
         }
+    val vaultAllowed: Boolean
+        get() {
+            if (canRemote) return true
+            val tier = account?.get("tier")?.jsonPrimitive?.content?.lowercase()
+            return tier == "supporter" || tier == "patron" || tier == "legend"
+        }
     val appAccountToken: String?
         get() = (account?.get("billing") as? JsonObject)
             ?.get("appAccountToken")
@@ -130,6 +136,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun workspaces(peer: String): JsonArray =
         CoreClient.remote(peer, "workspace.list") as? JsonArray ?: JsonArray(emptyList())
+
+    suspend fun hostStats(peer: String): JsonObject =
+        CoreClient.remote(peer, "host.stats") as? JsonObject ?: buildJsonObject {}
 
     suspend fun workspaceSection(peer: String, method: String, params: JsonObject): JsonElement =
         CoreClient.remote(peer, method, params)

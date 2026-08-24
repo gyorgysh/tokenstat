@@ -4,18 +4,69 @@ This is the release gate for customer-visible mobile behavior. A shared feature
 does not leave a release branch until its Apple and Android implementations and
 contract tests are green. Platform presentation may differ; behavior may not.
 
+## Design-once rule
+
+The design system is defined once, in `apps/mac/Sources/Design/` (tokens,
+components, motion). Android ports those definitions 1:1 into
+`app/src/main/java/ai/tokenstat/tokenstat/ui/theme/`, `ui/components/`, and
+`ui/marks/`; it never invents its own colours, spacing, radii, or timing.
+Validation is the mapping table below: every Apple source has a named Android
+counterpart or an explicit gap. Pure logic that both platforms must answer
+identically (greeting pool, token compaction, tunnel copy) is pinned by unit
+tests in `PortedLogicTest.kt`.
+
 | Capability | Rust contract | Apple | Android |
 | --- | --- | --- | --- |
 | Sign-in, sign-out, account status | built | built | built |
 | Account activity, limits, insights | built | built | built |
 | Device and remote workspace directory | built | built | built |
-| Sessions, changes, tasks, notes | built | built | foundation |
-| Workflows, automations, files | built | built | foundation |
-| Interactive terminal emulator | built | built | pending terminal-view integration |
+| Sessions, changes, tasks, notes | built | built | built (real renderers; diff/tasks/notes/actions wired) |
+| Workflows, automations, files | built | built | foundation (read-only cards; run/stop + transcripts pending) |
+| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; SwiftTerm-grade key handling pending) |
 | Port-forwarded browser | built | built | pending WebView integration |
 | Store subscription activation | Apple + Google built | built | built; service endpoint required |
 | Push registration and delivery | built | built | built; FCM configuration required |
 
-`foundation` means the Android screen reaches the real remote method and
-renders its result, but its final task-specific editor/actions are not yet the
-release-quality equivalent of the Apple screen. These rows block production.
+## Component map (Apple → Android)
+
+| Apple (`Sources/Design`) | Android (`ui/theme`, `ui/components`) | Status |
+| --- | --- | --- |
+| `Theme.swift` tokens (accent/secondary pairs, background/panel/sidebar/tabStrip/border/row colours, semantic set, heat ramp, syntax palette) | `theme/TsColors.kt` (light+dark transcribed hex-for-hex) | done |
+| Spacing scale, cardRadius 14, cardPadding 16 | `theme/TsMotion.kt` (`Space`), `components/TsComponents.kt` (`cardRadiusDp`, `cardPaddingDp`) | done |
+| Tabular figures / mono / sectionHeader fonts | `TsType.numeric/.mono/.sectionHeader/.cardTitle` | done |
+| `Card` | `TsCard` (panel fill + hairline border) | done |
+| `Stat`, `SectionLabel`, `ScopeChip`, `TierBadge` | same names | done |
+| `Banner` (+severity tints/symbols) | `Banner`, `BannerSeverity` | done |
+| `EmptyState` | `EmptyState` | done |
+| `AccentButtonStyle` / `SecondaryButtonStyle` | `TsAccentButton` / `TsSecondaryButton` (pressed fills/strokes ported) | done |
+| `SegmentedCapsulePicker` | `SegmentedCapsulePicker` | done |
+| `TransientToast` | `TransientToast` (slide-from-trailing + fade, snappy 250ms) | done |
+| `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases) | done |
+| `smoothIn` content arrival (opacity + 4pt rise; fade under Reduce Motion) | `theme/smoothEnter` + `Arrive` wrapper | done |
+| Reduce Motion | `rememberReduceMotion()` (animator duration scale == 0) | done |
+| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark, Avatar (name-hashed tint) | `marks/Marks.kt` (geometry from the 64-unit artboard preserved), `UiSignals.beganRefreshing` | done |
+| `RelativeTimeText.swift` single shared 15s tick | pending (`RelativeClock` equivalent not yet needed on-screen) | gap |
+| `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
+| `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | pending (needed with workflow runs UI) | gap |
+| `CadenceGlyph`, `CountdownRing`, `SlotGauge` | pending (automations show cadence text) | gap |
+| `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (core rows only) | partial |
+| `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
+| `ActionIcon` (~55 glyphs) | Material extended icon mapping at call sites | partial |
+
+## Client screen map (Apple `Sources/Client` → Android)
+
+| Apple screen | Android counterpart | Motion parity |
+| --- | --- | --- |
+| Onboarding (10 pages) + art | `auth/Onboarding.kt` pager, same copy/order, progress bar, skip | spring mark entrance per page; full hand-drawn scenes gap |
+| Login | restyled login: animated LogoMark rise-and-land, Wordmark, pending copy | done |
+| Root chrome (avatar leading, wordmark centre) | Scaffold TopAppBar avatar + Wordmark + LogoMark refresh pulse | done |
+| HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` with `HomeGreeting` port, Stat tiles, Canvas heatmap, lock banner, skeleton→Arrive | done |
+| PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
+| InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
+| DevicesView (rows, awake dot, detail) | existing rows restyled onto theme surfaces; detail sheet kept | partial |
+| Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | done (runs/transcripts pending) |
+| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop | core done; custom key row gap |
+| AccountSheet (tier badge, products, sign out) | AccountDialog as ModalBottomSheet with Avatar/TierBadge/accent product buttons | done |
+| Paywall (gradient tier marks, tier-switch spring) | Play Billing dialog remains system-styled | gap |
+| WebBrowser sheet (progress bar animation) | pending | gap |
+| ConnectionChip | status folded into refresh/errors via TunnelCopy | gap |

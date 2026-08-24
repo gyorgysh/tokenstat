@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #08070D; }
+  #term { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="xterm.js"></script>
+<script src="xterm-fit.js"></script>
+<script>
+  // The dark theme colours come from the shared token system
+  // (Theme.background / textPrimary / accent / accentSoft).
+  var term = new Terminal({
+    fontFamily: "Menlo, monospace",
+    fontSize: 12,
+    theme: {
+      background: "#08070D",
+      foreground: "#F0EFF5",
+      cursor: "#8B5CF6",
+      cursorAccent: "#08070D",
+      selectionBackground: "#3B2A6B"
+    },
+    scrollback: 5000
+  });
+  var fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("term"));
+  try { fit.fit(); } catch (e) {}
+
+  function pushSize() {
+    if (window.TermBridge) TermBridge.onResize(term.rows, term.cols);
+  }
+
+  term.onData(function (data) {
+    if (window.TermBridge) {
+      TermBridge.onInput(btoa(unescape(encodeURIComponent(data))));
+    }
+  });
+
+  window.addEventListener("resize", function () {
+    try { fit.fit(); } catch (e) {}
+  });
+
+  // Kotlin hands us base64 so no escaping can corrupt the byte stream.
+  function termWriteB64(base64) {
+    var bin = atob(base64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    term.write(bytes);
+    pushSize();
+  }
+
+  setTimeout(pushSize, 50);
+</script>
+</body>
+</html>

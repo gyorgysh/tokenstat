@@ -2,7 +2,9 @@
 package ai.tokenstat.tokenstat.ui
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.browser.customtabs.CustomTabsIntent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -22,82 +24,182 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
+import ai.tokenstat.tokenstat.ui.components.Banner
+import ai.tokenstat.tokenstat.ui.components.BannerSeverity
+import ai.tokenstat.tokenstat.ui.components.SectionLabel
+import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
+import ai.tokenstat.tokenstat.ui.components.SkeletonCard
+import ai.tokenstat.tokenstat.ui.components.Stat
+import ai.tokenstat.tokenstat.ui.components.TsCard
+import ai.tokenstat.tokenstat.ui.components.TsType
+import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
+import ai.tokenstat.tokenstat.ui.components.cardPaddingDp
+import ai.tokenstat.tokenstat.ui.heatmap.DayDetailSheet
+import ai.tokenstat.tokenstat.ui.heatmap.YearHeatmap
+import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
+import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
+import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
+import ai.tokenstat.tokenstat.ui.components.TierBadge
+import ai.tokenstat.tokenstat.ui.components.TsAccentButton
+import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
+import ai.tokenstat.tokenstat.ui.auth.Onboarding
+import ai.tokenstat.tokenstat.ui.marks.Avatar
+import ai.tokenstat.tokenstat.ui.marks.LogoMark
+import ai.tokenstat.tokenstat.ui.marks.UiSignals
+import ai.tokenstat.tokenstat.ui.marks.Wordmark
+import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.theme.TsTheme
+import ai.tokenstat.tokenstat.ui.components.cardPaddingDp
+import ai.tokenstat.tokenstat.ui.theme.Space
+import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
+import ai.tokenstat.tokenstat.ui.theme.smoothEnter
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import java.text.NumberFormat
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
-private val Accent = Color(0xFF8B5CF6)
+/// The brand accent, from the shared token system (`MaterialTheme` maps it
+/// to `primary`, so every remaining Material component picks it up too).
+@Composable
+private fun tsAccent(): Color = MaterialTheme.colorScheme.primary
 
 private enum class Destination(val label: String, val icon: ImageVector) {
     Home("Home", Icons.Default.Home),
     Workspaces("Workspaces", Icons.Default.Folder),
     Insights("Insights", Icons.Default.BarChart),
     Devices("Devices", Icons.Default.Computer),
-    SSH("SSH", Icons.Default.Terminal),
 }
 
 @Composable
 fun TokenstatApp(model: AppViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
-    MaterialTheme(colorScheme = darkColorScheme(primary = Accent, secondary = Color(0xFF22D3EE))) {
-        Surface(Modifier.fillMaxSize()) {
-            when {
-                state.loading && state.account == null -> LoadingScreen()
-                !state.signedIn -> LoginScreen(model, state.error)
-                else -> SignedInApp(model, state)
+    val context = LocalContext.current
+    var hasOnboarded by remember {
+        mutableStateOf(
+            runCatching {
+                context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
+                    .getBoolean("hasOnboarded", false)
+            }.getOrDefault(false),
+        )
+    }
+    TsTheme {
+        val colors = LocalTsColors.current
+        MaterialTheme(
+            colorScheme = darkColorScheme(
+                primary = colors.accent,
+                secondary = colors.secondary,
+                background = colors.background,
+                surface = colors.panel,
+                surfaceVariant = colors.sidebar,
+                outline = colors.border,
+                error = colors.danger,
+            ),
+        ) {
+            Surface(Modifier.fillMaxSize(), color = colors.background) {
+                when {
+                    // A signed-in phone never sees the pitch at all.
+                    state.signedIn -> SignedInApp(model, state)
+                    !hasOnboarded -> Onboarding {
+                        runCatching {
+                            context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
+                                .edit().putBoolean("hasOnboarded", true).apply()
+                        }
+                        hasOnboarded = true
+                    }
+                    state.loading && state.account == null -> LoadingScreen()
+                    else -> LoginScreen(model, state.error)
+                }
             }
         }
     }
 }
 
+/// The cold-launch flow: wireframes with a light pulse while the core warms up,
+/// never a bare spinner in an empty pane.
 @Composable
-private fun LoadingScreen() = Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    CircularProgressIndicator(color = Accent)
+private fun LoadingScreen() {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SkeletonCard(rows = 2)
+        SkeletonCard(rows = 4)
+    }
 }
 
 @Composable
 private fun LoginScreen(model: AppViewModel, error: String?) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var pendingLogin by remember { mutableStateOf(false) }
     var loginError by remember { mutableStateOf<String?>(null) }
+    val colors = LocalTsColors.current
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("tokenstat", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+        // The mark rising once and landing: an intro page, not a spinner.
+        LogoMark(size = 44, animated = true, loops = false)
+        Spacer(Modifier.height(Space.s))
+        Wordmark()
         Spacer(Modifier.height(12.dp))
-        Text("Your AI coding activity, wherever your machines are.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Your AI coding activity, wherever your machines are.", color = colors.textSecondary)
+        if (pendingLogin) {
+            Spacer(Modifier.height(20.dp))
+            Text("Waiting for the browser to confirm you…", color = colors.textSecondary)
+        }
         val shown = loginError ?: error
         if (shown != null) {
-            Spacer(Modifier.height(20.dp)); Text(shown, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(20.dp))
+            Text(shown, color = colors.danger)
         }
         Spacer(Modifier.height(28.dp))
         Button(onClick = {
             scope.launch {
+                pendingLogin = true
                 runCatching { model.beginLogin() }
                     .onSuccess { url ->
                         loginError = null
                         CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
                     }
                     .onFailure { loginError = it.message ?: "Starting sign-in failed." }
+                pendingLogin = false
             }
         }, modifier = Modifier.fillMaxWidth()) { Text("Sign in") }
-        TextButton(onClick = model::refresh) { Text("I already signed in") }
+        TextButton(onClick = { UiSignals.beganRefreshing(); model.refresh() }) { Text("I already signed in") }
     }
 }
 
@@ -105,6 +207,7 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
 @OptIn(ExperimentalMaterial3Api::class)
 private fun SignedInApp(model: AppViewModel, state: ClientState) {
     var selected by rememberSaveable { mutableStateOf(Destination.Home) }
+    var pendingWorkHostId by rememberSaveable { mutableStateOf<String?>(null) }
     var accountOpen by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val billing = remember { PlayBillingManager(context) }
@@ -124,10 +227,25 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("tokenstat", fontWeight = FontWeight.Bold) },
+                // Avatar leading, wordmark centred: the same chrome shape as
+                // the Apple client's toolbar.
+                title = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Wordmark() } },
+                navigationIcon = {
+                    IconButton(onClick = { accountOpen = true }) {
+                        Avatar(state.account?.string("displayName") ?: state.account?.string("handle") ?: "?")
+                    }
+                },
                 actions = {
-                    IconButton(onClick = model::refresh) { Icon(Icons.Default.Refresh, "Refresh") }
-                    IconButton(onClick = { accountOpen = true }) { Icon(Icons.Default.AccountCircle, "Account") }
+                    // The mark sits beside refresh so a pull acknowledges
+                    // through the one place both apps can agree on.
+                    Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
+                        LogoMark(size = 18)
+                    }
+                    IconButton(onClick = {
+                        // A refresh somebody asked for dips the bars, once.
+                        UiSignals.beganRefreshing()
+                        model.refresh()
+                    }) { Icon(Icons.Default.Refresh, "Refresh") }
                 },
             )
         },
@@ -160,13 +278,22 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                 when (selected) {
                     Destination.Home -> HomeScreen(state)
                     Destination.Workspaces -> if (state.canRemote) {
-                        WorkspacesScreen(model, state, expanded)
+                        WorkspacesScreen(model, state, expanded, pendingWorkHostId) {
+                            pendingWorkHostId = null
+                        }
                     } else {
                         RemotePaywall { accountOpen = true }
                     }
                     Destination.Insights -> InsightsScreen(state)
-                    Destination.Devices -> DevicesScreen(state)
-                    Destination.SSH -> AndroidSSHScreen(model, state)
+                    Destination.Devices -> DevicesScreen(
+                        model,
+                        state,
+                        onPlans = { accountOpen = true },
+                        onOpenWork = { id ->
+                            pendingWorkHostId = id
+                            selected = Destination.Workspaces
+                        },
+                    )
                 }
             }
         }
@@ -199,42 +326,109 @@ private fun HomeScreen(state: ClientState) {
     val cells = rows.orEmpty().flatMap { row ->
         (row as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
     }
+    var selectedDay by remember { mutableStateOf<JsonObject?>(null) }
+    val reduceMotion = rememberReduceMotion()
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(cardPaddingDp),
+        verticalArrangement = Arrangement.spacedBy(Space.m),
     ) {
         item {
-            Text(greeting(state.account), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                homeGreeting(state.account, cells.isNotEmpty()),
+                style = MaterialTheme.typography.headlineSmall,
+                color = LocalTsColors.current.textPrimary,
+            )
+            Spacer(Modifier.height(Space.m))
+            Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 MetricCard("Today", money(spendSince(cells, calendar?.string("last"), 1)), Modifier.weight(1f))
                 MetricCard("This week", money(spendSince(cells, calendar?.string("last"), 7)), Modifier.weight(1f))
             }
         }
         item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Activity", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.weight(1f))
+            Arrive(reduceMotion) {
+                TsCard(
+                    title = "Activity",
+                    accessory = {
                         Text(
                             "${calendar?.int("activeDays") ?: 0} active days",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = LocalTsColors.current.textSecondary,
                         )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    if (cells.isEmpty()) Text("No synced activity yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else Heatmap(rows!!, calendar?.get("months") as? JsonArray ?: JsonArray(emptyList()))
+                    },
+                ) {
+                    if (cells.isEmpty()) Text("No synced activity yet.", color = LocalTsColors.current.textSecondary)
+                    else YearHeatmap(
+                        rows!!,
+                        calendar?.get("months") as? JsonArray ?: JsonArray(emptyList()),
+                        onSelectDay = { selectedDay = it },
+                    )
                 }
             }
         }
-        item { Text("Plan limits", style = MaterialTheme.typography.titleMedium) }
+        // The same Free-year note the public profile puts under the heatmap.
+        if (rows.orEmpty().any { (it as? JsonArray).orEmpty().any { c -> (c as? JsonObject)?.bool("locked") == true } }) {
+            item { HistoryLockBanner() }
+        }
+        item { SectionLabel("Plan limits") }
         if (state.limits.isEmpty()) item {
-            EmptyCard("No provider reading yet", "Limits appear after one of your hosts shares a reading.")
-        } else items(state.limits) { item -> LimitCard(item.jsonObject) }
+            Arrive(reduceMotion) { EmptyCard("No provider reading yet", "Limits appear after one of your hosts shares a reading.") }
+        } else itemsIndexed(state.limits) { index, item ->
+            Arrive(reduceMotion, staggerIndex = index) { LimitCard(item.jsonObject) }
+        }
         state.error?.let { item { ErrorCard(it) } }
+    }
+    DayDetailSheet(selectedDay, onDismiss = { selectedDay = null })
+}
+
+/// The `smoothIn` arrival of loaded content replacing its skeleton: a short
+/// fade with a small rise, collapsing to a plain fade under Reduce Motion.
+@Composable
+fun Arrive(reduceMotion: Boolean, staggerIndex: Int = 0, content: @Composable () -> Unit) {
+    val visibleState = remember { MutableTransitionState(false).apply { targetState = true } }
+    LaunchedEffect(Unit) {
+        if (staggerIndex > 0) delay(staggerIndex * 40L)
+        visibleState.targetState = true
+    }
+    AnimatedVisibility(visibleState = visibleState, enter = smoothEnter(reduceMotion)) { content() }
+}
+
+/// The Free-tier history-lock note under the heatmap
+/// (`HistoryLockBanner.swift`).
+@Composable
+private fun HistoryLockBanner() {
+    val colors = LocalTsColors.current
+    val context = LocalContext.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(colors.accentSoft.copy(alpha = 0.55f))
+            .border(1.dp, colors.border, RoundedCornerShape(10.dp))
+            .padding(horizontal = Space.m, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Older history is locked. ", style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold), color = colors.textPrimary)
+            Text(
+                "Free shows the last 30 days in full. Older days keep the year shape only.",
+                style = TextStyle(fontSize = 12.sp),
+                color = colors.textSecondary,
+            )
+        }
+        Text(
+            "Upgrade to see the year",
+            style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+            color = colors.accent,
+            modifier = Modifier.clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+            ) {
+                runCatching {
+                    CustomTabsIntent.Builder().build().launchUrl(context, "https://tokenstat.ai/pricing".toUri())
+                }
+            },
+        )
     }
 }
 
@@ -252,159 +446,326 @@ private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long 
 }
 
 @Composable
-private fun Heatmap(rows: JsonArray, months: JsonArray) {
-    // The Apple client draws a fixed cell and scrolls the year, opening on
-    // the most recent week. Fitting 53 weeks to a phone width shrinks a day
-    // below anything a finger can hit, so the same answer is copied here.
-    val cell = 15.dp
-    val gap = 3.dp
-    val step = cell + gap
-    // Seven rows, Monday first; a row's length is the number of weeks.
-    val weeks = (rows.firstOrNull() as? JsonArray)?.size ?: rows.size
-    val gridWidth = step * weeks - gap
-    val scroll = rememberScrollState()
-    LaunchedEffect(rows) {
-        // Open on the latest week, which is the part anybody wants first.
-        // maxValue is zero until the grid has been laid out, so follow it.
-        snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
-    }
-    Row {
-        Column(Modifier.width(16.dp)) {
-            Spacer(Modifier.height(14.dp))
-            listOf("M", "", "W", "", "F", "", "").forEach { letter ->
-                Box(Modifier.height(cell), contentAlignment = Alignment.CenterStart) {
-                    Text(letter, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                }
-            }
-        }
-        Column(Modifier.horizontalScroll(scroll)) {
-            Box(Modifier.height(14.dp).width(gridWidth)) {
-                // The core sends [column, name] pairs, the same marks the
-                // Apple client offsets across its grid.
-                months.forEach { month ->
-                    val entry = (month as? JsonArray) ?: return@forEach
-                    val column = entry.firstOrNull()?.jsonPrimitive?.intOrNull ?: return@forEach
-                    val name = entry.getOrNull(1)?.jsonPrimitive?.contentOrNull ?: return@forEach
-                    Text(
-                        name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.offset(x = step * column),
-                    )
-                }
-            }
-            rows.forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    ((row as? JsonArray) ?: JsonArray(emptyList())).forEachIndexed { _, day ->
-                        // A null cell is outside the rendered range, not an
-                        // idle day: it leaves a hole rather than a square.
-                        val value = (day as? JsonObject)
-                        val level = value?.int("level")?.coerceIn(0, 4)
-                            ?: when (val v = value?.long("value") ?: 0L) {
-                                0L -> 0; in 1..49_999 -> 1; in 50_000..499_999 -> 2; else -> 3
-                            }
-                        var alpha = when (level) {
-                            0 -> .10f; 1 -> .30f; 2 -> .52f; 3 -> .74f; else -> 1f
-                        }
-                        if (day is JsonObject && day.bool("locked")) alpha *= .28f
-                        Box(Modifier.size(cell).background(Accent.copy(alpha), RoundedCornerShape(3.dp)))
-                    }
-                }
-                Spacer(Modifier.height(gap))
-            }
-        }
-    }
-}
-
-@Composable
 private fun InsightsScreen(state: ClientState) {
+    val colors = LocalTsColors.current
+    val reduceMotion = rememberReduceMotion()
+    // Three cuts only — Models/Tools/Days — the privacy boundary the Apple
+    // client draws: the account holds no projects and no sessions.
+    var cut by rememberSaveable { mutableStateOf(0) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val cutNames = listOf("Models", "Tools", "Days")
+    val cutKeys = listOf("models", "tools", "days")
     val report = state.insights as? JsonObject
-    val buckets = ((report?.get("rows") ?: report?.get("buckets")) as? JsonArray)
-        ?.filterIsInstance<JsonObject>() ?: emptyList()
+    val buckets = ((report?.get(cutKeys[cut]) ?: report?.get("rows") ?: report?.get("buckets")) as? JsonArray)
+        ?.filterIsInstance<JsonObject>().orEmpty()
+        .filter { query.isBlank() || (it.string("key") ?: "").contains(query, ignoreCase = true) }
     val total = buckets.sumOf { it.long("valueMicros") ?: 0L }
     val peak = buckets.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 0L
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { Text("Models", style = MaterialTheme.typography.headlineSmall) }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(cardPaddingDp),
+        verticalArrangement = Arrangement.spacedBy(Space.s),
+    ) {
+        item {
+            Text("Insights", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
+            Spacer(Modifier.height(Space.s))
+            SegmentedCapsulePicker(
+                options = cutNames.mapIndexed { i, name -> Triple(i, name, null as ImageVector?) },
+                selection = cut,
+                onSelect = { cut = it },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Space.s))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
         if (buckets.isEmpty()) {
-            item { EmptyCard("No breakdown yet", "Model activity appears after your machines sync.") }
+            item { EmptyCard("No breakdown yet", "Activity appears after your machines sync.") }
         } else {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(money(total), style = MaterialTheme.typography.headlineSmall, color = Accent)
-                        Text("at list rates, across every device", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Arrive(reduceMotion) {
+                    TsCard(title = "Total", subtitle = "at list rates, across every device") {
+                        Text(money(total), style = TsType.numeric(26, FontWeight.Medium), color = tsAccent())
                     }
                 }
             }
-            items(buckets) { row ->
+            itemsIndexed(buckets) { index, row ->
                 val value = row.long("valueMicros") ?: 0L
                 val share = if (peak > 0) (value.toFloat() / peak).coerceIn(0f, 1f) else 0f
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Arrive(reduceMotion, staggerIndex = index.coerceAtMost(8)) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(cardRadiusDp))
+                            .background(colors.panel)
+                            .border(1.dp, colors.border, RoundedCornerShape(cardRadiusDp))
+                            .padding(Space.m),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(row.string("key") ?: "Model", fontWeight = FontWeight.Medium, maxLines = 1)
-                                Text(
-                                    "${tokens(row["counters"]?.jsonObject?.long("total"))} tokens · ${row.long("events") ?: 0} events",
+                                val counters = row["counters"]?.jsonObject?.long("total")
+                                val events = row.long("events")
+                                val bits = buildList {
+                                    counters?.let { add("${compactTokens(it)} tokens") }
+                                    events?.let { add("$it events") }
+                                }
+                                if (bits.isNotEmpty()) Text(
+                                    bits.joinToString(" · "),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = colors.textSecondary,
                                 )
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Text(money(value), color = Accent)
+                            Spacer(Modifier.width(Space.s))
+                            Text(money(value), color = tsAccent(), style = TsType.numeric(14))
                         }
-                        LinearProgressIndicator(
-                            progress = { share },
-                            modifier = Modifier.fillMaxWidth(),
-                            trackColor = Accent.copy(alpha = .12f),
-                        )
+                        // A quiet share bar in the accent, not a system meter.
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(colors.accentSoft),
+                        ) {
+                            val animated by animateFloatAsState(share, tween(320), label = "shareBar")
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(animated)
+                                    .height(5.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(colors.accent),
+                            )
+                        }
                     }
                 }
             }
         }
     }
-}
-
-/// Compact token counts, the way the Apple client renders them beside a model
-/// name: "1.6M" is a size, the full ten digits is a wall.
-private fun tokens(count: Long?): String = when {
-    count == null || count <= 0 -> "0"
-    count >= 1_000_000_000 -> "%.1fB".format(count / 1_000_000_000.0)
-    count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
-    count >= 1_000 -> "%.1fK".format(count / 1_000.0)
-    else -> count.toString()
 }
 
 @Composable
-private fun DevicesScreen(state: ClientState) {
+private fun DevicesScreen(
+    model: AppViewModel,
+    state: ClientState,
+    onPlans: () -> Unit,
+    onOpenWork: (String) -> Unit,
+) {
+    var sshOpen by rememberSaveable { mutableStateOf(false) }
+    var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     val machines = state.account?.get("machines") as? JsonArray ?: JsonArray(emptyList())
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { Text("Devices", style = MaterialTheme.typography.headlineSmall) }
-        items(machines) { machine ->
-            val value = machine.jsonObject
-            Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (value.string("kind") == "client") Icons.Default.PhoneAndroid else Icons.Default.Computer, null)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(value.string("label") ?: value.string("id") ?: "Device", fontWeight = FontWeight.SemiBold)
-                        val platform = value.string("platform")
-                        val lastSeen = value.string("lastSeenAt")
-                        Text(
-                            listOfNotNull(platform, lastSeen).joinToString(" · "),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    val selected = machines.map { it.jsonObject }.find { it.string("id") == selectedId }
+    val thisId = state.account?.string("thisMachineId")
+    BackHandler(enabled = sshOpen || selected != null) {
+        if (sshOpen) sshOpen = false else selectedId = null
+    }
+    when {
+        sshOpen -> AndroidSSHScreen(model, state, onPlans = onPlans, onBack = { sshOpen = false })
+        selected != null -> DeviceDetailScreen(
+            model = model,
+            state = state,
+            machine = selected,
+            thisId = thisId,
+            onBack = { selectedId = null },
+            onPlans = onPlans,
+            onOpenWork = { selected.string("id")?.let(onOpenWork) },
+        )
+        else -> LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item { Text("Devices", style = MaterialTheme.typography.headlineSmall) }
+            item {
+                Card(Modifier.fillMaxWidth().clickable { sshOpen = true }) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Terminal, null, tint = tsAccent())
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("SSH hosts", fontWeight = FontWeight.SemiBold)
+                            Text("Connect to a saved server", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            items(machines) { machine ->
+                val value = machine.jsonObject
+                val isHost = value.string("kind") != "client"
+                val online = value.bool("online")
+                Card(Modifier.fillMaxWidth().clickable { selectedId = value.string("id") }) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(if (value.string("kind") == "client") Icons.Default.PhoneAndroid else Icons.Default.Computer, null)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(value.string("label") ?: value.string("id") ?: "Device", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                when {
+                                    isHost && online && !value.string("publicIdentity").isNullOrEmpty() ->
+                                        "Awake. Open work from this phone."
+                                    else -> listOfNotNull(value.string("platform"), value.string("lastSeenAt")).joinToString(" · ")
+                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Box(
+                            Modifier.size(10.dp).background(
+                                if (online) Color(0xFF34D399) else Color.Gray,
+                                RoundedCornerShape(5.dp),
+                            ),
                         )
                     }
-                    Box(Modifier.size(10.dp).background(if (value.bool("online")) Color(0xFF34D399) else Color.Gray, RoundedCornerShape(5.dp)))
                 }
             }
         }
     }
+}
+
+@Composable
+private fun DeviceDetailScreen(
+    model: AppViewModel,
+    state: ClientState,
+    machine: JsonObject,
+    thisId: String?,
+    onBack: () -> Unit,
+    onPlans: () -> Unit,
+    onOpenWork: () -> Unit,
+) {
+    val isThis = thisId != null && machine.string("id") == thisId
+    val isHost = machine.string("kind") != "client"
+    val peer = machine.string("publicIdentity")
+    val online = machine.bool("online")
+    val label = machine.string("label") ?: machine.string("id") ?: "Device"
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            Text(label, style = MaterialTheme.typography.headlineSmall)
+        }
+        if (!isThis && !peer.isNullOrEmpty() && online) {
+            HostStatsBar(model, peer)
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Reach", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        isThis -> "This is the device you are holding."
+                        online -> "Awake and reachable through the tunnel from this phone, and from any other device signed in to this account."
+                        !peer.isNullOrEmpty() -> "Asleep. It has a connection key, so it can be reached from this phone once it is awake."
+                        else -> "Not set up for remote reach. Turn on Reach devices from anywhere on that computer."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (!isThis && isHost && !peer.isNullOrEmpty()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("From this phone", style = MaterialTheme.typography.titleMedium)
+                    if (state.canRemote) {
+                        Button(onClick = onOpenWork, modifier = Modifier.fillMaxWidth()) { Text("Open work") }
+                        Text(
+                            if (online) "Folders, terminals and sessions on this computer."
+                            else "It is asleep. Opening this will wake nothing, but it will try.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Text("Opening folders and terminals on this computer is on Patron.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = onPlans) { Text("See plans") }
+                    }
+                }
+            }
+        }
+        machine.string("platform")?.let { Text("Runs $it", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        machine.string("id")?.let { Text("Device id $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable
+private fun HostStatsBar(model: AppViewModel, peer: String) {
+    var stats by remember { mutableStateOf<JsonObject?>(null) }
+    LaunchedEffect(peer) {
+        runCatching { model.prepareHost(peer, "Host") }
+        while (true) {
+            runCatching { model.hostStats(peer) }.onSuccess { stats = it }
+            delay(2500)
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HostStatCell(
+                    title = "Power",
+                    value = powerLabel(stats),
+                    modifier = Modifier.weight(1f),
+                )
+                HostStatCell(
+                    title = "CPU",
+                    value = stats?.doubleOrNull("cpu")?.let { "${(it * 100).roundToInt()}%" } ?: if (stats == null) "…" else "n/a",
+                    modifier = Modifier.weight(1f),
+                )
+                HostStatCell(
+                    title = "Memory",
+                    value = ramLabel(stats) ?: if (stats == null) "…" else "n/a",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                "Read from this computer over the encrypted tunnel. It is not uploaded with usage.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HostStatCell(title: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(value, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+        Text(title, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private fun powerLabel(stats: JsonObject?): String {
+    if (stats == null) return "…"
+    val percent = stats.int("percent")
+    val charging = stats.bool("charging")
+    val power = stats.string("power")
+    if (charging && percent != null) return "$percent%"
+    if (power == "ac" && percent == null) return "Plugged in"
+    if (percent != null) return "$percent%"
+    if (power == "battery") return "On battery"
+    if (power == "ac") return "Plugged in"
+    return "n/a"
+}
+
+private fun ramLabel(stats: JsonObject?): String? {
+    val used = stats?.long("ramUsedBytes") ?: return null
+    val total = stats.long("ramTotalBytes") ?: return null
+    if (total <= 0L) return null
+    val g = 1024.0 * 1024 * 1024
+    val u = used / g
+    val t = total / g
+    return if (t >= 10) "%.0f / %.0f GB".format(u, t) else "%.1f / %.1f GB".format(u, t)
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
+private fun AndroidSSHScreen(
+    model: AppViewModel,
+    state: ClientState,
+    onPlans: () -> Unit,
+    onBack: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     val tabs = listOf("Hosts", "Keys", "Snippets")
     var tab by rememberSaveable { mutableIntStateOf(0) }
@@ -417,8 +778,10 @@ private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
     var addSnippet by remember { mutableStateOf(false) }
     var vaultSetup by remember { mutableStateOf(false) }
     var recoveryWords by remember { mutableStateOf<String?>(null) }
+    var showingRecovery by remember { mutableStateOf(false) }
+    var confirmDrop by remember { mutableStateOf(false) }
     val tier = state.account?.string("tier")?.lowercase()
-    val vaultAllowed = tier in setOf("supporter", "patron", "legend")
+    val vaultAllowed = state.vaultAllowed
 
     suspend fun load() {
         runCatching {
@@ -432,19 +795,49 @@ private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text("SSH", style = MaterialTheme.typography.headlineSmall)
-            if (vaultAllowed) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onBack != null) {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                }
+                Text("SSH", style = MaterialTheme.typography.headlineSmall)
+            }
+            if (!vaultAllowed) {
+                Spacer(Modifier.height(10.dp))
+                VaultUpgradeCard(onPlans)
+            } else if (vaultAllowed) {
                 Spacer(Modifier.height(10.dp))
                 ElevatedCard(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.EnhancedEncryption, null, tint = Accent)
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(if (vault?.bool("created") == true) "Encrypted vault ready" else "Encrypted cross-device vault", fontWeight = FontWeight.SemiBold)
-                            Text("Only enrolled devices or your 24 recovery words can decrypt it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.EnhancedEncryption, null, tint = tsAccent())
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    when {
+                                        recoveryWords != null -> "Recovery words have not been confirmed"
+                                        vault?.bool("created") == true -> "Encrypted vault ready"
+                                        else -> "Encrypted cross-device vault"
+                                    },
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    if (recoveryWords != null) "Close is allowed. Confirm the words when you have stored them, or discard the vault and create a new one."
+                                    else "Only enrolled devices or your 24 recovery words can decrypt it.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        if (vault?.bool("created") != true || vault?.bool("enrolled") != true) {
-                            Button(onClick = { vaultSetup = true }) { Text(if (vault?.bool("created") == true) "Enroll" else "Set up") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (recoveryWords != null) {
+                                Button(onClick = { showingRecovery = true }) { Text("Show words") }
+                                TextButton(onClick = { confirmDrop = true }) { Text("Discard vault") }
+                            } else if (vault?.bool("created") != true || vault?.bool("enrolled") != true) {
+                                Button(onClick = { vaultSetup = true }) { Text(if (vault?.bool("created") == true) "Enroll" else "Set up") }
+                            }
+                            if (vault?.bool("created") == true && recoveryWords == null) {
+                                TextButton(onClick = { confirmDrop = true }) { Text("Delete vault") }
+                            }
                         }
                     }
                 }
@@ -454,14 +847,23 @@ private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
         PrimaryTabRow(selectedTabIndex = tab) {
             tabs.forEachIndexed { index, title -> Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) }) }
         }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = {
+                if (tab == 0) addHost = true
+                else if (tab == 2) addSnippet = true
+                else error = "Android secure key import is being prepared."
+            }) { Text("Add") }
+        }
         val rows = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
         if (rows.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null, tint = Accent, modifier = Modifier.size(38.dp))
-                    Text("No ${tabs[tab].lowercase()} yet", style = MaterialTheme.typography.titleMedium)
-                    Text(if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { if (tab == 0) addHost = true else if (tab == 2) addSnippet = true else error = "Android secure key import is being prepared." }) { Text("Add ${tabs[tab].dropLast(if (tab == 2) 1 else 1).lowercase()}") }
+                if (vaultAllowed) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null, tint = tsAccent(), modifier = Modifier.size(38.dp))
+                        Text("No ${tabs[tab].lowercase()} yet", style = MaterialTheme.typography.titleMedium)
+                        Text(if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(onClick = { if (tab == 0) addHost = true else if (tab == 2) addSnippet = true else error = "Android secure key import is being prepared." }) { Text("Add ${tabs[tab].dropLast(if (tab == 2) 1 else 1).lowercase()}") }
+                    }
                 }
             }
         } else {
@@ -489,7 +891,7 @@ private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
         existing = vault?.bool("created") == true,
         onDismiss = { vaultSetup = false },
         onCreate = {
-            scope.launch { runCatching { model.core("ssh.vault.create", buildJsonObject { put("tier", tier ?: "") }).jsonObject.string("recovery")!! }.onSuccess { recoveryWords = it; load() }.onFailure { error = it.message }; vaultSetup = false }
+            scope.launch { runCatching { model.core("ssh.vault.create", buildJsonObject { put("tier", tier ?: "") }).jsonObject.string("recovery")!! }.onSuccess { recoveryWords = it; showingRecovery = true; load() }.onFailure { error = it.message }; vaultSetup = false }
         },
         onRestore = { phrase ->
             scope.launch { runCatching { model.core("ssh.vault.unlock", buildJsonObject { put("recovery", phrase); put("tier", tier ?: "") }) }.onSuccess { load() }.onFailure { error = it.message }; vaultSetup = false }
@@ -497,8 +899,32 @@ private fun AndroidSSHScreen(model: AppViewModel, state: ClientState) {
         onRequest = {
             scope.launch { runCatching { model.core("ssh.vault.enrollment.request") }.onFailure { error = it.message }; vaultSetup = false }
         },
+        onDrop = { vaultSetup = false; confirmDrop = true },
     )
-    recoveryWords?.let { phrase -> RecoveryWordsDialog(phrase) { recoveryWords = null } }
+    if (showingRecovery) recoveryWords?.let { phrase ->
+        RecoveryWordsDialog(
+            phrase,
+            onDone = { recoveryWords = null; showingRecovery = false },
+            onDismiss = { showingRecovery = false },
+            onDiscard = { showingRecovery = false; confirmDrop = true },
+        )
+    }
+    if (confirmDrop) AlertDialog(
+        onDismissRequest = { confirmDrop = false },
+        title = { Text("Delete this vault?") },
+        text = { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") },
+        confirmButton = {
+            Button(onClick = {
+                confirmDrop = false
+                scope.launch {
+                    runCatching { model.core("ssh.vault.reset") }
+                        .onSuccess { recoveryWords = null; showingRecovery = false; vaultSetup = false; load() }
+                        .onFailure { error = it.message }
+                }
+            }) { Text("Delete vault") }
+        },
+        dismissButton = { TextButton(onClick = { confirmDrop = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -523,25 +949,77 @@ private fun SSHSnippetDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit
 }
 
 @Composable
-private fun AndroidVaultDialog(existing: Boolean, onDismiss: () -> Unit, onCreate: () -> Unit, onRestore: (String) -> Unit, onRequest: () -> Unit) {
+private fun AndroidVaultDialog(existing: Boolean, onDismiss: () -> Unit, onCreate: () -> Unit, onRestore: (String) -> Unit, onRequest: () -> Unit, onDrop: () -> Unit) {
     var phrase by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (existing) "Enroll this device" else "Set up encrypted vault") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { Text("tokenstat cannot reset this vault. If every device and the recovery words are lost, the vault is permanently lost."); OutlinedTextField(phrase, { phrase = it }, label = { Text("24 recovery words") }, minLines = 3) } }, confirmButton = { if (!existing) Button(onClick = onCreate) { Text("Create new") } else Button(onClick = onRequest) { Text("Ask a device") } }, dismissButton = { Row { TextButton(enabled = phrase.trim().split(Regex("\\s+")).size == 24, onClick = { onRestore(phrase) }) { Text("Restore") }; TextButton(onClick = onDismiss) { Text("Cancel") } } })
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (existing) "Enroll this device" else "Set up encrypted vault") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (existing) "Restore with the 24 words, ask an enrolled device, or drop this vault and create a new one. Dropping permanently loses stored secrets." else "tokenstat cannot recover the secrets if the words and every device are lost.")
+                OutlinedTextField(phrase, { phrase = it }, label = { Text("24 recovery words") }, minLines = 3)
+            }
+        },
+        confirmButton = {
+            if (!existing) Button(onClick = onCreate) { Text("Create new") }
+            else Button(onClick = onRequest) { Text("Ask a device") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(enabled = phrase.trim().split(Regex("\\s+")).size == 24, onClick = { onRestore(phrase) }) { Text("Restore") }
+                if (existing) TextButton(onClick = onDrop) { Text("Drop vault") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 @Composable
-private fun RecoveryWordsDialog(phrase: String, onDone: () -> Unit) {
+private fun RecoveryWordsDialog(phrase: String, onDone: () -> Unit, onDismiss: () -> Unit, onDiscard: () -> Unit) {
     var confirmed by remember { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = {}, title = { Text("Save your recovery words") }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { phrase.split(" ").chunked(3).forEachIndexed { row, words -> Text(words.mapIndexed { index, word -> "${row * 3 + index + 1}. $word" }.joinToString("     "), fontFamily = FontFamily.Monospace) }; Text("Store these offline. Screenshots are not a reliable backup."); Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(confirmed, { confirmed = it }); Text("I stored all 24 words safely") } } }, confirmButton = { Button(enabled = confirmed, onClick = onDone) { Text("Done") } })
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save your recovery words") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                phrase.split(" ").chunked(3).forEachIndexed { row, words ->
+                    Text(words.mapIndexed { index, word -> "${row * 3 + index + 1}. $word" }.joinToString("     "), fontFamily = FontFamily.Monospace)
+                }
+                Text("Store these offline. Screenshots are not a reliable backup. You can close this and confirm later, or discard the vault and create a new one.")
+                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(confirmed, { confirmed = it }); Text("I stored all 24 words safely") }
+            }
+        },
+        confirmButton = { Button(enabled = confirmed, onClick = onDone) { Text("Done") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDiscard) { Text("Discard vault") }
+                TextButton(onClick = onDismiss) { Text("Close") }
+            }
+        },
+    )
 }
 
 @Composable
-private fun WorkspacesScreen(model: AppViewModel, state: ClientState, expanded: Boolean) {
+private fun WorkspacesScreen(
+    model: AppViewModel,
+    state: ClientState,
+    expanded: Boolean,
+    pendingHostId: String? = null,
+    onPendingConsumed: () -> Unit = {},
+) {
     val hosts = ((state.account?.get("machines") as? JsonArray) ?: JsonArray(emptyList()))
         .map { it.jsonObject }.filter { it.string("kind") != "client" }
     var host by remember { mutableStateOf<JsonObject?>(null) }
+    LaunchedEffect(pendingHostId, hosts) {
+        val id = pendingHostId ?: return@LaunchedEffect
+        val match = hosts.find { it.string("id") == id } ?: return@LaunchedEffect
+        host = match
+        onPendingConsumed()
+    }
     var folders by remember { mutableStateOf(JsonArray(emptyList())) }
     var selectedFolder by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
     LaunchedEffect(host) {
         val key = host?.string("publicIdentity")
         if (host != null && key == null) {
@@ -560,18 +1038,40 @@ private fun WorkspacesScreen(model: AppViewModel, state: ClientState, expanded: 
             .onSuccess { folders = it; error = null }
             .onFailure { error = it.message }
     }
-    if (expanded && selectedFolder != null && host != null) {
+    val boundHost = host
+    val boundFolder = selectedFolder
+    val request = terminalSession
+    if (request != null && boundFolder != null && boundHost != null) {
+        TerminalScreen(
+            model = model,
+            peer = boundHost.string("publicIdentity") ?: "",
+            hostLabel = request.hostLabel,
+            workspaceId = request.workspaceId,
+            existingSessionId = request.sessionId,
+            onClose = { terminalSession = null },
+        )
+    } else if (expanded && boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
-            WorkspaceList(hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp))
+            WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp))
             VerticalDivider()
-            WorkspaceDetail(model, host!!, selectedFolder!!, Modifier.weight(1f))
+            WorkspaceDetail(
+                model, boundHost, boundFolder, Modifier.weight(1f),
+                onBack = null,
+                onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+            )
         }
-    } else if (selectedFolder != null && host != null) {
-        WorkspaceDetail(model, host!!, selectedFolder!!, Modifier.fillMaxSize(), onBack = { selectedFolder = null })
+    } else if (boundFolder != null && boundHost != null) {
+        WorkspaceDetail(
+            model, boundHost, boundFolder, Modifier.fillMaxSize(),
+            onBack = { selectedFolder = null },
+            onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+        )
     } else {
         WorkspaceList(hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error)
     }
 }
+
+private data class WorkspaceTerminalRequest(val sessionId: String?, val workspaceId: String, val hostLabel: String)
 
 @Composable
 private fun WorkspaceList(
@@ -628,65 +1128,44 @@ private val workspaceParts = listOf(
 private fun WorkspaceDetail(
     model: AppViewModel, host: JsonObject, folder: JsonObject, modifier: Modifier,
     onBack: (() -> Unit)? = null,
+    onOpenTerminal: (String) -> Unit = {},
 ) {
-    val scope = rememberCoroutineScope()
-    var result by remember { mutableStateOf<JsonElement?>(null) }
-    var title by remember { mutableStateOf("Sessions") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var section by rememberSaveable { mutableStateOf("Sessions") }
     val peer = host.string("publicIdentity") ?: ""
     val workspace = folder.string("id") ?: ""
-    Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(modifier.padding(cardPaddingDp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (onBack != null) IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Column { Text(folder.string("name") ?: "Workspace", style = MaterialTheme.typography.headlineSmall); Text(title) }
-        }
-        Spacer(Modifier.height(12.dp))
-        workspaceParts.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { part ->
-                    OutlinedButton(onClick = {
-                        title = part.label
-                        scope.launch {
-                            val params = buildJsonObject {
-                                when (part.method) {
-                                    "pty.list" -> put("includeRemote", false)
-                                    "workspace.tree" -> { put("id", workspace); put("path", "") }
-                                    "workspace.status" -> put("id", workspace)
-                                    "todo.list" -> put("includeArchived", true)
-                                    else -> put("workspaceId", workspace)
-                                }
-                            }
-                            runCatching { model.workspaceSection(peer, part.method, params) }
-                                .onSuccess { element ->
-                                    result = part.kind
-                                        ?.let { kind ->
-                                            (element as? JsonArray)?.filter { item ->
-                                                item.jsonObject.string("kind") == kind
-                                            }
-                                        }
-                                        ?.let(::JsonArray)
-                                        ?: element
-                                    error = null
-                                }
-                                .onFailure { error = it.message }
-                        }
-                    }, modifier = Modifier.weight(1f)) {
-                        Icon(part.icon, null); Spacer(Modifier.width(4.dp)); Text(part.label, maxLines = 1)
-                    }
-                }
-                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+            Column {
+                Text(folder.string("name") ?: "Workspace", style = MaterialTheme.typography.headlineSmall, color = LocalTsColors.current.textPrimary)
+                Text(section, style = MaterialTheme.typography.bodySmall, color = LocalTsColors.current.textSecondary)
             }
-            Spacer(Modifier.height(8.dp))
         }
-        error?.let { ErrorCard(it) }
-        result?.let {
-            Card(Modifier.fillMaxWidth()) {
-                Text(it.toString(), Modifier.padding(16.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(Space.s))
+        // Section picker in the app's own capsule language.
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
+            workspaceParts.forEach { part ->
+                TsAccentButton(
+                    label = part.label,
+                    small = true,
+                    onClick = { section = part.label },
+                )
             }
-        } ?: EmptyCard("Choose a section", "Live data is read from ${host.string("label") ?: "this host"} over the encrypted tunnel.")
+        }
+        Spacer(Modifier.height(Space.m))
+        WorkspaceSection(
+            model = model,
+            peer = peer,
+            workspace = workspace,
+            hostLabel = host.string("label") ?: "Host",
+            section = section,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
+            onOpenTerminal = onOpenTerminal,
+        )
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun AccountDialog(
     state: ClientState,
@@ -695,38 +1174,55 @@ private fun AccountDialog(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val colors = LocalTsColors.current
     val billingState by billing.state.collectAsStateWithLifecycle()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.AccountCircle, null) },
-        title = { Text(state.account?.string("displayName") ?: state.account?.string("handle") ?: "Account") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${state.account?.string("tier")?.replaceFirstChar(Char::uppercase) ?: "Free"} plan")
-                Text("${(state.account?.get("machines") as? JsonArray)?.size ?: 0} linked devices")
-                if (billingState.loading && billingState.products.isEmpty()) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(Modifier.size(24.dp), color = Accent)
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = Space.l)
+                .padding(bottom = Space.xl),
+            verticalArrangement = Arrangement.spacedBy(Space.m),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Space.s),
+            ) {
+                Avatar(state.account?.string("displayName") ?: state.account?.string("handle") ?: "?", size = 44)
+                Column {
+                    Text(
+                        state.account?.string("displayName")
+                            ?: state.account?.string("handle") ?: "Account",
+                        style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold),
+                        color = colors.textPrimary,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TierBadge(state.account?.string("tier") ?: "free")
+                        Text("${(state.account?.get("machines") as? JsonArray)?.size ?: 0} linked devices", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                     }
                 }
-                billingState.products.forEach { product ->
-                    OutlinedButton(
-                        onClick = { (context as? Activity)?.let { billing.purchase(it, product) } },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("${product.label} · ${product.price}") }
-                }
-                billingState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                Text("Identity and credentials stay in Android's no-backup app storage.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
-        dismissButton = { TextButton(onClick = { model.signOut(); onDismiss() }) { Text("Sign out", color = MaterialTheme.colorScheme.error) } },
-    )
+            if (billingState.loading && billingState.products.isEmpty()) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(Modifier.size(24.dp), color = colors.accent)
+                }
+            }
+            billingState.products.forEach { product ->
+                TsAccentButton(
+                    label = "${product.label} · ${product.price}",
+                    onClick = { (context as? Activity)?.let { billing.purchase(it, product) } },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            billingState.error?.let { Text(it, color = colors.danger) }
+            TsSecondaryButton(label = "Sign out", onClick = { model.signOut(); onDismiss() }, modifier = Modifier.fillMaxWidth())
+            Text("Identity and credentials stay in Android's no-backup app storage.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+        }
+    }
 }
 
-@Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) = Card(modifier) {
-    Column(Modifier.padding(16.dp)) { Text(value, style = MaterialTheme.typography.headlineMedium, color = Accent); Text(label) }
-}
+@Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) =
+    Column(modifier) { Stat(label = label, value = value, tint = tsAccent()) }
 
 /// One provider reading with its windows, the shape `usage.limits` actually
 /// returns: `windows[{label, percent, resetsAtMs}]` under a `source`. The
@@ -734,21 +1230,18 @@ private fun AccountDialog(
 @Composable
 private fun LimitCard(reading: JsonObject) {
     val windows = reading["windows"] as? JsonArray ?: JsonArray(emptyList())
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    reading.string("source") ?: "Provider",
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                if (reading.bool("stale")) Text(
-                    "stale",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            reading.string("plan")?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    TsCard(
+        title = reading.string("source") ?: "Provider",
+        subtitle = reading.string("plan"),
+        accessory = {
+            if (reading.bool("stale")) Text(
+                "stale",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (windows.isEmpty()) {
                 Text(reading.string("note") ?: "No window data in this reading.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
@@ -769,17 +1262,74 @@ private fun LimitCard(reading: JsonObject) {
         }
     }
 }
+
+@Composable
+private fun VaultUpgradeCard(onPlans: () -> Unit) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            VaultEmptyArt()
+            Text("Sync SSH between your devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onPlans) { Text("See plans") }
+        }
+    }
+}
+
+@Composable
+private fun VaultEmptyArt() {
+    val accent = tsAccent()
+    Canvas(Modifier.size(128.dp, 84.dp)) {
+        val stroke = Stroke(width = 3.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        drawRoundRect(
+            color = accent.copy(alpha = 0.55f),
+            topLeft = Offset(size.width * 0.16f, size.height * 0.16f),
+            size = Size(size.width * 0.18f, size.height * 0.58f),
+            cornerRadius = CornerRadius(10f, 10f),
+            style = stroke,
+        )
+        drawRoundRect(
+            color = accent.copy(alpha = 0.55f),
+            topLeft = Offset(size.width * 0.62f, size.height * 0.32f),
+            size = Size(size.width * 0.26f, size.height * 0.36f),
+            cornerRadius = CornerRadius(8f, 8f),
+            style = stroke,
+        )
+        drawArc(
+            color = accent,
+            startAngle = 200f,
+            sweepAngle = 140f,
+            useCenter = false,
+            topLeft = Offset(size.width * 0.445f, size.height * 0.26f),
+            size = Size(size.width * 0.11f, size.height * 0.24f),
+            style = stroke,
+        )
+        drawRoundRect(
+            color = accent,
+            topLeft = Offset(size.width * 0.435f, size.height * 0.46f),
+            size = Size(size.width * 0.13f, size.height * 0.22f),
+            cornerRadius = CornerRadius(6f, 6f),
+            style = stroke,
+        )
+    }
+}
+
 @Composable private fun EmptyCard(title: String, message: String) = Card(Modifier.fillMaxWidth()) {
     Column(Modifier.padding(16.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
-@Composable private fun ErrorCard(message: String) = Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-    Text(message, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onErrorContainer)
-}
+@Composable private fun ErrorCard(message: String) = Banner(message, BannerSeverity.DANGER, Modifier.fillMaxWidth())
 
-private fun greeting(account: JsonObject?): String {
-    val name = account?.string("displayName") ?: account?.string("handle") ?: "there"
-    return "Hello, ${name.substringBefore(' ')}"
-}
+private fun homeGreeting(account: JsonObject?, hasHistory: Boolean): String =
+    HomeGreeting.line(
+        account?.string("displayName") ?: account?.string("handle") ?: "there",
+        hasHistory,
+    )
 private fun money(micros: Long): String = NumberFormat.getCurrencyInstance().format(micros / 1_000_000.0)
 private fun JsonObject.string(key: String): String? = this[key]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 private fun JsonObject.long(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
