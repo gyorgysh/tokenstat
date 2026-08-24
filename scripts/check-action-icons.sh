@@ -63,6 +63,14 @@ ALLOWED = [
     # Keycaps on the terminal accessory bar: the label is the key, and a
     # glyph beside "esc" or "⇧⇥" would be a second symbol for one keystroke.
     ("Client/ClientTerminalKeys.swift", "Button(action: action) {"),
+    # Keycaps on the screen viewer's accessory bar, same as the terminal's:
+    # the label is the key, and a glyph beside "cmd" would be a second symbol
+    # for one keystroke.
+    ("Features/Machines/ScreenInputSurface.swift", "modifiers ^= flag"),
+    # A colour swatch. The whole button is the colour, and a glyph on top of it
+    # would hide the one thing it is showing.
+    ("Features/Machines/SSHLibraryEditors.swift", "selection = selection == name ? nil : name"),
+
     # A toast's inline way to the thing it just named. Same class as an
     # alert action: the platform's own convention is text.
     ("Design/Theme.swift", "Button(actionLabel) {"),

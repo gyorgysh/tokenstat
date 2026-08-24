@@ -365,7 +365,25 @@ private enum ScreenAudioPCM {
 }
 
 private enum ScreenInput {
-    struct Event: Decodable { var type: String; var x: Double?; var y: Double?; var id: UInt32?; var button: Int?; var down: Bool?; var keyCode: UInt16?; var flags: UInt64?; var text: String? }
+    struct Event: Decodable {
+        var type: String
+        var x: Double?
+        var y: Double?
+        var id: UInt32?
+        var button: Int?
+        var down: Bool?
+        var keyCode: UInt16?
+        var flags: UInt64?
+        var text: String?
+        /// Wheel movement in pixels. A phone sends these from a two-finger
+        /// drag, which has no notion of a wheel detent.
+        var dx: Double?
+        var dy: Double?
+        /// 1 for a click, 2 for a double click. macOS decides what a double
+        /// click means from this field, not from the gap between two events,
+        /// so a touch client has to say it out loud.
+        var clickCount: Int?
+    }
     static func displaySelection(_ data: Data) -> CGDirectDisplayID? {
         guard let event = try? JSONDecoder().decode(Event.self, from: data), event.type == "display" else { return nil }
         return event.id
@@ -394,6 +412,38 @@ private enum ScreenInput {
             let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
             let type: CGEventType = event.down == true ? (button == .right ? .rightMouseDown : .leftMouseDown) : (button == .right ? .rightMouseUp : .leftMouseUp)
             cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+        // Press and release in one message, with the click count the caller
+        // means. A touch client cannot rely on two separate messages arriving
+        // close enough together for macOS to read them as a double click.
+        case "click":
+            let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
+            let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
+            let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+            let clicks = max(1, min(3, event.clickCount ?? 1))
+            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?
+                .post(tap: .cghidEventTap)
+            for step in 1...clicks {
+                for type in [downType, upType] {
+                    let click = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+                    click?.setIntegerValueField(.mouseEventClickState, value: Int64(step))
+                    if let flags = event.flags { click?.flags = CGEventFlags(rawValue: flags) }
+                    click?.post(tap: .cghidEventTap)
+                }
+            }
+            return
+        // Two-finger scrolling. Pixel units rather than lines, so the distance
+        // a finger travelled is the distance the content moves.
+        case "scroll":
+            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
+                .post(tap: .cghidEventTap)
+            cg = CGEvent(
+                scrollWheelEvent2Source: source,
+                units: .pixel,
+                wheelCount: 2,
+                wheel1: Int32(clamping: Int(event.dy ?? 0)),
+                wheel2: Int32(clamping: Int(event.dx ?? 0)),
+                wheel3: 0
+            )
         case "key": cg = CGEvent(keyboardEventSource: source, virtualKey: event.keyCode ?? 0, keyDown: event.down == true)
         case "text":
             guard let text = event.text else { return }

@@ -21,13 +21,27 @@ struct ScreenViewerView: View {
     @State private var controlling = false
     @State private var muted = false
     @State private var importingFile = false
+    @State private var zoom: CGFloat = 1
+    @State private var heldModifiers: UInt64 = 0
+    @State private var keyboardWanted = false
+    #if os(macOS)
+    @State private var mode: ScreenPointerMode = .direct
+    #else
+    @State private var mode: ScreenPointerMode = .trackpad
+    #endif
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+            // The input surface scales with the picture, so a pinch changes
+            // what a finger can reach without changing what a tap means: the
+            // surface reports its own coordinates, which stay normalized.
             ScreenVideoSurface(layer: model.decoder.layer)
                 .aspectRatio(model.aspectRatio, contentMode: .fit)
                 .overlay { inputSurface }
+                .overlay { pointerMark }
+                .scaleEffect(zoom, anchor: pointerAnchor)
+                .clipped()
             if model.state != .streaming {
                 VStack(spacing: Theme.Space.m) {
                     ProgressView().opacity(model.state == .connecting ? 1 : 0)
@@ -91,8 +105,36 @@ struct ScreenViewerView: View {
             }
             ToolbarItem {
                 Toggle(isOn: $controlling) { Label("Control", systemImage: "cursorarrow.motionlines") }
-                    .disabled(model.state == .streaming)
+                    .disabled(model.state == .connecting)
             }
+            if controlling {
+                ToolbarItem {
+                    Picker("Pointer", selection: $mode) {
+                        ForEach(ScreenPointerMode.allCases) { option in
+                            Label(option.title, systemImage: option.symbol).tag(option)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+            if zoom > 1.01 {
+                ToolbarItem {
+                    Button("Fit", .collapse) { withAnimation { zoom = 1 } }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
+            }
+            #if !os(macOS)
+            if controlling {
+                ToolbarItem {
+                    Toggle(isOn: $keyboardWanted) { Label("Keyboard", systemImage: "keyboard") }
+                }
+            }
+            #endif
+        }
+        // Control is a property of the session, so changing it reopens the
+        // stream rather than being refused.
+        .onChange(of: controlling) { _, wanted in
+            Task { await model.setControl(wanted) }
         }
         .task { await start() }
         .onDisappear { model.stop() }
@@ -105,6 +147,19 @@ struct ScreenViewerView: View {
                 ProgressView(value: progress).padding().background(.ultraThinMaterial, in: Capsule())
             }
         }
+        #if !os(macOS)
+        .safeAreaInset(edge: .bottom) {
+            if controlling {
+                ScreenKeyBar(modifiers: $heldModifiers) { code, flags in
+                    model.sendKey(code, down: true, flags: flags)
+                    model.sendKey(code, down: false, flags: flags)
+                }
+            }
+        }
+        // A screen somebody is watching must not dim under them.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        #endif
     }
 
     private func start() async { await model.start(peer: peer, tier: tier, control: controlling) }
@@ -115,29 +170,58 @@ struct ScreenViewerView: View {
             .foregroundStyle(ready ? Color.green : Color.white.opacity(0.72))
     }
 
+    private var actions: ScreenInputActions {
+        ScreenInputActions(
+            move: { model.move(to: $0) },
+            nudge: { delta, size in model.nudge(by: delta, in: size) },
+            click: { button, count in model.click(button: button, count: count) },
+            press: { model.press($0) },
+            scroll: { model.scroll(by: $0) },
+            text: { text, flags in model.sendText(text, flags: flags) },
+            key: { code, down, flags in model.sendKey(code, down: down, flags: flags) },
+            magnify: { factor in
+                zoom = min(max(zoom * factor, 1), 4)
+            }
+        )
+    }
+
     private var inputSurface: some View {
-        GeometryReader { geometry in
-            Color.clear
-                .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 0).onChanged { value in
-                    guard controlling else { return }
-                    model.movePointer(
-                        x: value.location.x / max(1, geometry.size.width),
-                        y: value.location.y / max(1, geometry.size.height)
+        #if os(macOS)
+        ScreenInputSurface(actions: actions, enabled: controlling, mode: mode)
+        #else
+        ScreenInputSurface(
+            actions: actions,
+            enabled: controlling,
+            mode: mode,
+            heldModifiers: $heldModifiers,
+            keyboardWanted: $keyboardWanted
+        )
+        #endif
+    }
+
+    /// Where the picture grows from when it is zoomed. Following the pointer
+    /// means a zoomed screen never needs a separate pan gesture: moving the
+    /// pointer to an edge brings that edge into view.
+    private var pointerAnchor: UnitPoint {
+        UnitPoint(x: model.cursor.x, y: model.cursor.y)
+    }
+
+    /// Trackpad mode hides the finger from the pointer, so the pointer has to
+    /// be visible. Direct mode does not need it: the finger is the pointer.
+    @ViewBuilder
+    private var pointerMark: some View {
+        if controlling, mode == .trackpad {
+            GeometryReader { geometry in
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 2)
+                    .background(Circle().fill(Color.black.opacity(0.35)))
+                    .frame(width: 22, height: 22)
+                    .position(
+                        x: model.cursor.x * geometry.size.width,
+                        y: model.cursor.y * geometry.size.height
                     )
-                }.onEnded { value in
-                    guard controlling else { return }
-                    model.releasePointer(
-                        x: value.location.x / max(1, geometry.size.width),
-                        y: value.location.y / max(1, geometry.size.height)
-                    )
-                })
-                .focusable(controlling)
-                .onKeyPress { press in
-                    guard controlling, !press.characters.isEmpty else { return .ignored }
-                    model.sendText(press.characters, flags: press.modifiers.screenFlags)
-                    return .handled
-                }
+                    .allowsHitTesting(false)
+            }
         }
     }
 }
@@ -152,6 +236,9 @@ private final class ScreenViewerModel {
     var selectedDisplay: UInt32?
     var transferProgress: Double?
     var transport = "relay"
+    /// Where the pointer is, normalized. The client owns this because trackpad
+    /// mode has no other way to know, and because a phone has to draw it.
+    var cursor = CGPoint(x: 0.5, y: 0.5)
     let decoder = ScreenH264Decoder()
     let audio = ScreenAudioPlayer()
     private var session: ScreenViewerSession?
@@ -300,20 +387,69 @@ private final class ScreenViewerModel {
             || value.contains("no display") || value.contains("videotoolbox")
     }
 
-    func movePointer(x: CGFloat, y: CGFloat) {
-        if pointerIsDown {
-            send(["type":"move", "x":x, "y":y] as [String: Any])
-        } else {
-            pointerIsDown = true
-            send(["type":"pointer", "x":x, "y":y, "down":true] as [String: Any])
-        }
+    /// Put the pointer at a normalized point on the remote display.
+    func move(to point: CGPoint) {
+        cursor = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        send(["type":"move", "x":cursor.x, "y":cursor.y] as [String: Any])
     }
-    func releasePointer(x: CGFloat, y: CGFloat) {
-        guard pointerIsDown else { return }
-        pointerIsDown = false
-        send(["type":"pointer", "x":x, "y":y, "down":false] as [String: Any])
+
+    /// Move the pointer by a distance measured on the viewer's own surface.
+    ///
+    /// Trackpad mode: the finger is not the pointer, so the client keeps the
+    /// pointer position itself and sends an absolute point. The host stays a
+    /// single "put it here", which is the only thing that survives two
+    /// displays of different sizes.
+    func nudge(by delta: CGSize, in size: CGSize) {
+        let sensitivity: CGFloat = 1.6
+        move(to: CGPoint(
+            x: cursor.x + delta.width * sensitivity / max(1, size.width),
+            y: cursor.y + delta.height * sensitivity / max(1, size.height)
+        ))
     }
+
+    /// Press and release in one message, with the count macOS needs to read a
+    /// double click as a double click.
+    func click(button: Int, count: Int) {
+        send(["type":"click", "x":cursor.x, "y":cursor.y, "button":button, "clickCount":count] as [String: Any])
+    }
+
+    /// Hold or release the left button, for a drag that outlives one gesture.
+    func press(_ down: Bool) {
+        pointerIsDown = down
+        send(["type":"mouse", "x":cursor.x, "y":cursor.y, "button":0, "down":down] as [String: Any])
+    }
+
+    func scroll(by delta: CGSize) {
+        send(["type":"scroll", "x":cursor.x, "y":cursor.y, "dx":delta.width, "dy":delta.height] as [String: Any])
+    }
+
+    func sendKey(_ code: UInt16, down: Bool, flags: UInt64) {
+        send(["type":"key", "keyCode":Int(code), "down":down, "flags":flags] as [String: Any])
+    }
+
     func sendText(_ text: String, flags: UInt64) { send(["type":"text", "text":text, "flags":flags] as [String: Any]) }
+
+    /// Turn control on or off on a session that is already running.
+    ///
+    /// Control is decided when the capability is issued, so switching means
+    /// reopening the stream. The toggle used to be disabled while streaming
+    /// instead, which meant control could never be turned on at all: the view
+    /// starts streaming as it appears.
+    func setControl(_ wanted: Bool) async {
+        guard wanted != requestedControl, !peer.isEmpty else { return }
+        let tier = requestedTier
+        stop()
+        stopped = false
+        requestedControl = wanted
+        reconnectAttempts = 0
+        state = .connecting
+        message = wanted ? "Asking for control…" : "Switching to view only…"
+        requestedTier = tier
+        await connect()
+    }
+
+    /// Whether the live session is actually carrying input.
+    var isControlling: Bool { requestedControl }
     func selectDisplay(_ id: UInt32) {
         guard displays.contains(where: { $0.id == id }) else { return }
         selectedDisplay = id
@@ -459,18 +595,6 @@ private struct ScreenMetadata: Codable {
     let displays: [ScreenDisplay]?
     let id: String?
     let text: String?
-}
-
-private extension EventModifiers {
-    var screenFlags: UInt64 {
-        var value: UInt64 = 0
-        if contains(.capsLock) { value |= 1 << 16 }
-        if contains(.shift) { value |= 1 << 17 }
-        if contains(.control) { value |= 1 << 18 }
-        if contains(.option) { value |= 1 << 19 }
-        if contains(.command) { value |= 1 << 20 }
-        return value
-    }
 }
 
 private struct ScreenEncodedFrame {
