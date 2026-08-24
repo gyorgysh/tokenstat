@@ -32,7 +32,11 @@ struct ClientHostWorkspacesView: View {
                 ClientHostHeader(
                     name: hostName,
                     peerKey: peerKey,
-                    online: model.errorMessage == nil ? true : nil,
+                    // Unknown until a call has actually come back. Reporting
+                    // awake while the first connect is still in flight told
+                    // somebody a sleeping computer was up for as long as the
+                    // attempt took to fail.
+                    online: model.reachedHost,
                     showsOpenWork: false
                 )
 
@@ -124,6 +128,9 @@ final class ClientHostWorkspacesModel {
     private(set) var sessions: [PtySessionInfo] = []
     private(set) var errorMessage: String?
     private(set) var isConnecting = false
+    /// Whether a call to this host has come back. Nil until one has, so the
+    /// header can say "not known yet" rather than guessing awake.
+    private(set) var reachedHost: Bool?
     var activeTerminal: ClientTerminalSession?
 
     func connect(peerKey: String, name: String) async {
@@ -137,10 +144,12 @@ final class ClientHostWorkspacesModel {
             _ = try await Bridge.setTunnel(true)
             folders = try await Bridge.remoteWorkspaces(peer: peer)
             sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
+            reachedHost = true
         } catch {
             errorMessage = error.localizedDescription
             folders = []
             sessions = []
+            reachedHost = false
         }
     }
 

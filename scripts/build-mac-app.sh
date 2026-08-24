@@ -144,13 +144,20 @@ IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
     | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
 if [ -n "$IDENTITY" ]; then
     echo "Signing with $IDENTITY"
-    # Deep, and the helper first: a bundle is verified from the inside out, so
-    # signing the outside over an unsigned nested binary produces a bundle that
-    # fails its own check.
+    # The helper first, by hand, then the bundle with --deep. Same order and
+    # the same reason as the publish job: the helper is a Mach-O executable
+    # living in Resources, which codesign hashes as a resource rather than
+    # signing as code, and the bundle embeds a Swift package's frameworks that
+    # have to be signed before the outer seal goes on. A bundle signed over
+    # unsigned nested code fails its own verification, and macOS will not hold
+    # a TCC grant against a signature that does not validate, which would leave
+    # this step doing nothing at all.
     codesign --force --options runtime --timestamp=none \
         --sign "$IDENTITY" "$OUT/Tokenstat.app/Contents/Resources/tokenstat-hostd"
-    codesign --force --options runtime --timestamp=none \
+    codesign --verify --strict --verbose=2 "$OUT/Tokenstat.app/Contents/Resources/tokenstat-hostd"
+    codesign --force --deep --options runtime --timestamp=none \
         --sign "$IDENTITY" "$OUT/Tokenstat.app"
+    codesign --verify --deep --strict --verbose=2 "$OUT/Tokenstat.app"
 else
     echo "No Developer ID identity on this machine: leaving the app unsigned."
     echo "Screen Recording and Accessibility grants will be lost on each rebuild."

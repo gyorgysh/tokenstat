@@ -35,32 +35,61 @@ final class ScreenAccess {
         accessibility = AXIsProcessTrusted()
     }
 
-    /// Ask for Screen Recording.
+    /// What happened when we asked.
     ///
-    /// macOS shows its prompt once per app per decision, so a second call after
-    /// a refusal returns false and shows nothing. That is why the caller falls
-    /// back to opening the pane: there is no way to ask twice.
-    @discardableResult
-    func requestScreenRecording() -> Bool {
+    /// Three answers, not two, and the third is the one that matters. Both
+    /// system calls return the *current* state and raise their prompt
+    /// asynchronously, so a first-ever request returns false while the dialog
+    /// is on screen. Treating that as "refused" and opening System Settings
+    /// slams a window over the prompt the person was about to answer.
+    enum Ask {
+        /// Already granted, nothing was shown.
+        case granted
+        /// The system prompt is now on screen. Leave them to it.
+        case asked
+        /// macOS already holds a decision and will not ask again, so the only
+        /// remaining route is the Settings pane.
+        case alreadyDecided
+    }
+
+    /// Whether this app has asked during this launch.
+    ///
+    /// macOS prompts once per app per permission and gives no way to ask
+    /// whether it will. Remembering that we have asked is what separates "the
+    /// dialog is up" from "there is no dialog coming".
+    private var askedScreenRecording = false
+    private var askedAccessibility = false
+
+    /// Ask for Screen Recording.
+    func requestScreenRecording() -> Ask {
         if CGPreflightScreenCaptureAccess() {
             screenRecording = true
-            return true
+            return .granted
         }
-        let granted = CGRequestScreenCaptureAccess()
-        screenRecording = granted
-        return granted
+        let alreadyAsked = askedScreenRecording
+        askedScreenRecording = true
+        // Raises the prompt when macOS has no decision yet, and returns the
+        // state as it stands, which is false either way.
+        screenRecording = CGRequestScreenCaptureAccess()
+        if screenRecording { return .granted }
+        return alreadyAsked ? .alreadyDecided : .asked
     }
 
     /// Ask for Accessibility, with the prompt that names Tokenstat.
     ///
     /// `AXIsProcessTrusted()` only reads the answer. The options form is the
     /// one that asks, and it is the call that was missing.
-    @discardableResult
-    func requestAccessibility() -> Bool {
+    func requestAccessibility() -> Ask {
+        if AXIsProcessTrusted() {
+            accessibility = true
+            return .granted
+        }
+        let alreadyAsked = askedAccessibility
+        askedAccessibility = true
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        let granted = AXIsProcessTrustedWithOptions(options)
-        accessibility = granted
-        return granted
+        accessibility = AXIsProcessTrustedWithOptions(options)
+        if accessibility { return .granted }
+        return alreadyAsked ? .alreadyDecided : .asked
     }
 
     /// Open the pane a person has to switch the row on in themselves.

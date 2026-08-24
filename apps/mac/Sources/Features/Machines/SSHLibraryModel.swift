@@ -48,6 +48,13 @@ final class SSHLibraryModel {
         return tier
     }
 
+    /// True once a load has finished, however empty the result was.
+    ///
+    /// "No hosts" and "not loaded yet" look identical from the outside, and
+    /// telling somebody with forty saved servers that they have none is worse
+    /// than showing them nothing at all.
+    private(set) var loaded = false
+
     func load(vaultTier: String? = nil) async {
         self.vaultTier = vaultTier
         do {
@@ -60,6 +67,7 @@ final class SSHLibraryModel {
             self.keys = try await keys
             self.snippets = try await snippets
             error = nil
+            loaded = true
             if let vaultTier { await pullVault(tier: vaultTier) }
             knownHosts = (try? await Bridge.sshKnownHosts()) ?? []
         } catch { self.error = error.localizedDescription }

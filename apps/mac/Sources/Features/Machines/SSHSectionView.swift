@@ -67,6 +67,14 @@ struct SSHSectionView: View {
             guard vaultTier != nil else { return }
             await vault.refresh()
         }
+        // Opening the screen loads it. The shell warms the same model at
+        // launch so the sidebar has counts, but that pass waits on the archive
+        // and can fail, and a library that is empty because nothing loaded
+        // must not look like a library with nothing in it.
+        .task(id: vaultTier) {
+            guard !model.loaded else { return }
+            await model.load(vaultTier: SSHLibraryModel.paidTier(for: vaultTier))
+        }
     }
 
     // MARK: - Chrome
@@ -114,6 +122,16 @@ struct SSHSectionView: View {
                     Button(section.addLabel, .create) { model.selection = addSelection }
                         .buttonStyle(AccentButtonStyle())
                 }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if searchedOut {
+            EmptyState(
+                symbol: "magnifyingglass",
+                title: "Nothing matched",
+                message: "No \(section.label.lowercased()) match \u{201c}\(model.search)\u{201d}."
+            ) {
+                Button("Clear search", .dismiss) { model.search = "" }
+                    .buttonStyle(SecondaryButtonStyle())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -199,7 +217,11 @@ struct SSHSectionView: View {
             for folder in model.folders(in: folderID) {
                 out.append(Row(id: "folder:\(folder.id)", kind: .folder(folder), depth: 0))
             }
-            for host in model.hosts(in: folderID) {
+            // Scoped to the folder even while searching. `hosts(in:)` drops
+            // its folder argument once a query is running, which is right at
+            // the root and wrong here: the sidebar still lights this folder,
+            // so a list holding somebody else's servers is a list that lies.
+            for host in model.hosts(in: folderID) where host.folderID == folderID {
                 out.append(Row(id: "host:\(host.id)", kind: .host(host), depth: 0))
             }
             return out
@@ -354,16 +376,34 @@ struct SSHSectionView: View {
         }
     }
 
+    /// Whether this section has nothing in it at all.
+    ///
+    /// Counted from the unfiltered lists on purpose. `hosts(in:)` and
+    /// `folders(in:)` narrow to the search, so asking them would tell somebody
+    /// whose query matched nothing that they have never added a server, and
+    /// offer to add their first one over the forty they already have.
     private var isEmpty: Bool {
         switch section {
         case let .hosts(folder):
             if let folder {
-                return model.hosts(in: folder).isEmpty && model.folders(in: folder).isEmpty
+                return !model.hosts.contains { $0.folderID == folder }
+                    && !model.folders.contains { $0.parentID == folder }
             }
             return model.hosts.isEmpty && model.folders.isEmpty
         case .keys: return model.keys.isEmpty
         case .snippets: return model.snippets.isEmpty
         case .knownHosts: return model.knownHosts.isEmpty
+        }
+    }
+
+    /// The list has rows in it, but the search hid all of them.
+    private var searchedOut: Bool {
+        guard model.searching, !isEmpty else { return false }
+        switch section {
+        case .hosts: return rows.isEmpty && recentHosts.isEmpty
+        case .keys: return model.visibleKeys.isEmpty
+        case .snippets: return model.visibleSnippets.isEmpty
+        case .knownHosts: return false
         }
     }
 

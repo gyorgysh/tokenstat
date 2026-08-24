@@ -1132,17 +1132,19 @@ private struct ScreenPermissionCard: View {
         }
     }
 
-    /// Ask, and open the pane when macOS has already recorded an answer.
+    /// Ask, and open the pane only once macOS has stopped asking.
     ///
-    /// The prompt only ever appears once per app, so a refusal cannot be
-    /// re-asked. Falling through to the pane is the only remaining route, and
+    /// Never both at once. Both system calls return false while their own
+    /// prompt is still on screen, so treating that as a refusal would throw a
+    /// Settings window over the dialog the person was about to answer. The
+    /// pane is the second press, when there is no dialog left to raise, and
     /// the row it needs switching on is named beside the button.
     private func ask(_ kind: ScreenAccess.Kind) {
-        let granted = switch kind {
+        let answer = switch kind {
         case .screenRecording: access.requestScreenRecording()
         case .accessibility: access.requestAccessibility()
         }
-        if !granted { access.openSettings(kind) }
+        if answer == .alreadyDecided { access.openSettings(kind) }
     }
     #endif
 
@@ -1159,8 +1161,8 @@ private struct ScreenPermissionCard: View {
             // what it needs. Waiting until a stream starts meant the viewer on
             // the other device had already failed before the prompt appeared.
             if enabled {
-                if permission.view { access.requestScreenRecording() }
-                if permission.control { access.requestAccessibility() }
+                if permission.view { _ = access.requestScreenRecording() }
+                if permission.control { _ = access.requestAccessibility() }
             }
             #endif
             Task {

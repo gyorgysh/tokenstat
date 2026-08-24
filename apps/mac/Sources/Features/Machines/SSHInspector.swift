@@ -46,7 +46,11 @@ struct SSHInspector: View {
         case let .host(id):
             SSHHostEditor(model: model, hostID: id, folderID: nil, onDone: clear).id(id)
         case let .newHost(folder):
+            // Keyed by the folder: without it, "Add server here" on a second
+            // folder reuses the open form, whose `loaded` guard means it never
+            // reads the new folder and files the server under the first one.
             SSHHostEditor(model: model, hostID: nil, folderID: folder, onDone: clear)
+                .id(folder ?? "")
         case let .key(id):
             SSHKeyEditor(model: model, keyID: id, onDone: clear).id(id)
         case .newKey:
@@ -59,6 +63,7 @@ struct SSHInspector: View {
             SSHFolderEditor(model: model, folderID: id, parentID: nil, onDone: clear).id(id)
         case let .newFolder(parent):
             SSHFolderEditor(model: model, folderID: nil, parentID: parent, onDone: clear)
+                .id(parent ?? "")
         case let .knownHost(id):
             trustedServer(id)
         case .knownHosts:

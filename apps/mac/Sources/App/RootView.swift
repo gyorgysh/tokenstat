@@ -2166,6 +2166,12 @@ struct RootView: View {
     #if os(macOS)
     private func openSSH(_ section: SSHSection) {
         navigate(to: .ssh(section)) {
+            // A selection belongs to the section it was made in. Carrying it
+            // across left a host editor open in the inspector under a sidebar
+            // that had moved to Keys, and saving from there edited a host from
+            // a screen that said Keys. Moving inside Hosts, folder to folder,
+            // is the one case that keeps it.
+            if route.sshSection?.row != section.row { ssh.selection = nil }
             lastSSHSection = section
             isSSHGroupExpanded = true
             // A folder cannot be selected while its parent chain is shut, so
