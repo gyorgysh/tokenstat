@@ -148,6 +148,7 @@ fn remember_key(vmk: [u8; 32]) {
     if let Ok(mut held) = unlocked().lock() {
         *held = Some(vmk);
     }
+    set_locked(false);
 }
 
 fn forget_key() {
@@ -158,6 +159,27 @@ fn forget_key() {
 
 fn cached_key() -> Option<[u8; 32]> {
     unlocked().lock().ok().and_then(|held| *held)
+}
+
+/// Whether this device has been deliberately locked.
+///
+/// Separate from "has no key". A device that has unlocked once holds a device
+/// wrap, which opens the vault with nothing typed, so forgetting the cached
+/// key alone would be undone by the very next read. Locking has to be a state
+/// that outranks the wrap, or the button is a lie.
+fn locked_flag() -> &'static Mutex<bool> {
+    static LOCKED: OnceLock<Mutex<bool>> = OnceLock::new();
+    LOCKED.get_or_init(|| Mutex::new(false))
+}
+
+fn set_locked(value: bool) {
+    if let Ok(mut held) = locked_flag().lock() {
+        *held = value;
+    }
+}
+
+fn is_locked() -> bool {
+    locked_flag().lock().is_ok_and(|held| *held)
 }
 
 fn mutation_stamp() -> Result<(u64, String), String> {
@@ -534,6 +556,10 @@ fn remote_and_key(
             remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
         }
         key
+    } else if is_locked() {
+        // Deliberately locked here. The device wrap below would open it with
+        // nothing typed, which is the whole reason this check comes first.
+        return Err("the vault is locked. Enter your vault password to open it.".into());
     } else if let Some(key) = cached_key() {
         key
     } else if let Some(wrap) = remote.device_wrap.as_deref() {
@@ -689,8 +715,12 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 let needs_recreate = remote
                     .as_ref()
                     .is_some_and(|value| value.password_wrap.is_none());
-                let locked =
-                    !needs_recreate && remote.is_some() && cached_key().is_none() && !enrolled;
+                // Locked when this device cannot read it without somebody
+                // typing the password: either it was locked on purpose, or it
+                // has neither a cached key nor a wrap of its own.
+                let locked = !needs_recreate
+                    && remote.is_some()
+                    && (is_locked() || (cached_key().is_none() && !enrolled));
                 let record_count = if let Some(remote) = remote {
                     if let Some(wrap) = remote.device_wrap.as_deref() {
                         unwrap_for_self(wrap)
@@ -736,6 +766,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             "ssh.vault.lock" => {
                 forget_key();
+                set_locked(true);
                 Ok(json!({"locked": true}))
             }
             // Change the password, or set a new one after a recovery-code
@@ -1036,6 +1067,22 @@ mod tests {
         let refused = unwrap_password(&wrap, "Correct-Horse9!", &salt, "argon2id$v=19$m=1,t=1,p=1")
             .unwrap_err();
         assert!(refused.contains("newer version"), "{refused}");
+    }
+
+    #[test]
+    fn locking_outranks_the_device_wrap() {
+        // Forgetting the cached key is not enough: a device that has unlocked
+        // once holds a wrap that opens the vault with nothing typed, so a lock
+        // that only cleared the cache would be undone by the next read.
+        set_locked(false);
+        remember_key(random32());
+        assert!(!is_locked());
+        forget_key();
+        set_locked(true);
+        assert!(is_locked());
+        // And unlocking clears it again, so the state cannot get stuck shut.
+        remember_key(random32());
+        assert!(!is_locked());
     }
 
     #[test]

@@ -57,7 +57,16 @@ final class ScreenAccess {
             needsRelaunch = false
             return
         }
-        // The preflight says no. It may be a stale no.
+        // The preflight says no, and it may be a stale no. Only worth a second
+        // opinion once this process has actually asked: `SCShareableContent`
+        // raises the system prompt when no decision exists, so calling it
+        // before somebody pressed Allow would make merely opening the screen
+        // ask for a permission nobody requested.
+        guard askedScreenRecording else {
+            screenRecording = false
+            needsRelaunch = false
+            return
+        }
         let real = await Self.canActuallyCapture()
         screenRecording = real
         // Granted in reality but not according to the cached preflight: the

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
+import Foundation
 import Observation
 import SwiftUI
 #if os(macOS)
@@ -276,8 +277,12 @@ struct SSHVaultSetupSheet: View {
         if working { return false }
         if stale { return false }
         if exists {
-            return forgot ? !enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty
-                          : !password.isEmpty
+            guard forgot else { return !password.isEmpty }
+            // A reset is a code plus the password that replaces the forgotten
+            // one. Unlocking on the code alone would leave every other device
+            // asking for a password nobody knows.
+            return !enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty
+                && problems.isEmpty && matches
         }
         return problems.isEmpty && matches
     }
@@ -349,11 +354,22 @@ struct SSHVaultSetupSheet: View {
     private var unlockBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if forgot {
-                Text("Enter your recovery code. It is the line you were given when the vault was created.")
+                Text("Enter your recovery code and choose a new password. The code is the line you were given when the vault was created.")
                     .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 TextField("Recovery code", text: $enteredRecovery)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.mono(12))
+                SecureField("New password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("Type it again", text: $confirmPassword)
+                    .textFieldStyle(.roundedBorder)
+                VaultPasswordRules(password: password)
+                if !confirmPassword.isEmpty, !matches {
+                    Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+                }
+                Text("The code is spent once this works, and you are given a fresh one.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Button("Use the password instead", .back) { forgot = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
@@ -415,10 +431,16 @@ struct SSHVaultSetupSheet: View {
         do {
             if exists {
                 if forgot {
-                    // A recovery unlock is a password reset: the code proves
-                    // who you are, and leaving without setting a password would
-                    // mean the next device still cannot get in.
-                    _ = try await Bridge.unlockSSHVault(recovery: enteredRecovery, tier: tier)
+                    // A recovery unlock is a password reset. The code proves
+                    // who you are and buys one new password: unlocking on the
+                    // code alone would leave every other device asking for the
+                    // password nobody knows. The answer carries the fresh code
+                    // that replaces the one just spent.
+                    let result = try await Bridge.setSSHVaultPassword(
+                        recovery: enteredRecovery,
+                        newPassword: password
+                    )
+                    recovery = result.recovery
                 } else {
                     _ = try await Bridge.unlockSSHVault(password: password, tier: tier)
                 }
@@ -453,12 +475,24 @@ struct SSHVaultSetupSheet: View {
 enum VaultPassword {
     static let minLength = 12
 
+    /// The same test the host runs, scalar for scalar.
+    ///
+    /// Measured over unicode scalars and with an ASCII-only digit test,
+    /// because `tokenstat_core::passphrase` does both. Swift's `isNumber`
+    /// matches Eastern Arabic digits and Rust's `is_ascii_digit` does not, so
+    /// the friendlier-looking predicate is the one that enables the button
+    /// over a password the host then refuses.
     static func problems(_ password: String) -> [String] {
+        let scalars = password.unicodeScalars
         var out: [String] = []
-        if password.count < minLength { out.append("At least \(minLength) characters") }
-        if !password.contains(where: { $0.isUppercase }) { out.append("An uppercase letter") }
-        if !password.contains(where: { $0.isNumber }) { out.append("A number") }
-        if !password.contains(where: { !$0.isLetter && !$0.isNumber && !$0.isWhitespace }) {
+        if scalars.count < minLength { out.append("At least \(minLength) characters") }
+        if !scalars.contains(where: { Character($0).isUppercase }) {
+            out.append("An uppercase letter")
+        }
+        if !scalars.contains(where: { $0.isASCII && Character($0).isNumber }) {
+            out.append("A number")
+        }
+        if !scalars.contains(where: { !CharacterSet.alphanumerics.contains($0) && !CharacterSet.whitespacesAndNewlines.contains($0) }) {
             out.append("A special character")
         }
         return out
