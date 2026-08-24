@@ -200,6 +200,29 @@ enum Theme {
         static let xl: CGFloat = 32
     }
 
+    /// Button metrics.
+    ///
+    /// Padding alone does not make two buttons the same size: a button with a
+    /// glyph is taller than one without, and a dense variant beside a regular
+    /// one is short by the difference in vertical padding. Both of those were
+    /// visible in the SSH library, where three sizes shared one row. Height is
+    /// set, not derived, and paired actions share a minimum width so Cancel and
+    /// Save are the same shape.
+    enum Control {
+        /// Sheets, detail footers, empty-state calls to action.
+        static let height: CGFloat = 30
+        /// Row accessories and card headers.
+        static let heightSmall: CGFloat = 24
+        /// Buttons that sit beside each other in a footer.
+        static let pairedWidth: CGFloat = 88
+        /// Row height for a list a person scans rather than reads.
+        #if os(macOS)
+        static let rowHeight: CGFloat = 32
+        #else
+        static let rowHeight: CGFloat = 44
+        #endif
+    }
+
     /// Corner radius for cards and panels.
     ///
     /// Matched to the window's own corner rather than picked. A card sitting a
@@ -1195,7 +1218,7 @@ struct AccentButtonStyle: ButtonStyle {
             .font(.system(size: small ? 12 : 13, weight: .medium))
             .foregroundStyle(Theme.accent)
             .padding(.horizontal, small ? 10 : 14)
-            .padding(.vertical, small ? 4 : 6)
+            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(
@@ -1207,6 +1230,36 @@ struct AccentButtonStyle: ButtonStyle {
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(Theme.accent.opacity(0.35), lineWidth: 1)
+            )
+            .contentShape(.rect)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+    }
+}
+
+/// The action somebody may regret: delete, drop, revoke, forget.
+///
+/// A real style rather than `.borderless` plus a hand-set `foregroundStyle`,
+/// which is how the SSH library ended up with three button sizes in one row and
+/// a delete that read as a link. Same shape as the other two, danger colour,
+/// so the eye sorts a row of actions by colour and not by guessing.
+struct DestructiveButtonStyle: ButtonStyle {
+    /// Dense variant for rows and card accessories.
+    var small = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .labelStyle(ActionLabelStyle(small: small))
+            .font(.system(size: small ? 12 : 13, weight: .medium))
+            .foregroundStyle(Theme.danger)
+            .padding(.horizontal, small ? 10 : 14)
+            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(configuration.isPressed ? Theme.danger.opacity(0.16) : Theme.danger.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Theme.danger.opacity(0.35), lineWidth: 1)
             )
             .contentShape(.rect)
             .opacity(configuration.isPressed ? 0.85 : 1)
@@ -1229,7 +1282,7 @@ struct SecondaryButtonStyle: ButtonStyle {
             .font(.system(size: small ? 12 : 13, weight: .medium))
             .foregroundStyle(.primary)
             .padding(.horizontal, small ? 10 : 14)
-            .padding(.vertical, small ? 4 : 6)
+            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(configuration.isPressed ? Theme.rowHighlight : Theme.panel)
