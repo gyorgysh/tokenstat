@@ -148,7 +148,7 @@ struct MachinesView: View {
         }
         #if os(macOS)
         .sheet(isPresented: $showingSSH) {
-            SSHConnectionsView(vaultTier: model.vaultTier, onClose: { showingSSH = false })
+            SSHLibraryView(vaultTier: model.vaultTier, onClose: { showingSSH = false })
                 .frame(minWidth: 760, idealWidth: 920, minHeight: 560, idealHeight: 680)
         }
         #endif
@@ -160,7 +160,7 @@ struct MachinesView: View {
             .buttonStyle(.plain)
         #else
         NavigationLink {
-            SSHConnectionsView(vaultTier: model.vaultTier)
+            SSHLibraryView(vaultTier: model.vaultTier)
         } label: { sshAccessLabel }
         .buttonStyle(.plain)
         #endif

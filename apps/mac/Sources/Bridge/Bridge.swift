@@ -1775,6 +1775,47 @@ extension Bridge {
         _ = try await background("ssh.key.delete", ["id": id], as: Removed.self)
     }
 
+    static func sshFolders() async throws -> [SSHFolder] {
+        try await background("ssh.folder.list", as: [SSHFolder].self)
+    }
+
+    static func saveSSHFolder(_ folder: SSHFolder) async throws -> SSHFolder {
+        try await background("ssh.folder.save", try payload(folder), as: SSHFolder.self)
+    }
+
+    /// Deleting a folder keeps everything in it: hosts and sub-folders move up
+    /// one level. The host enforces that, this is only the door to it.
+    static func deleteSSHFolder(id: String) async throws {
+        _ = try await background("ssh.folder.delete", ["id": id], as: Removed.self)
+    }
+
+    static func moveSSHHost(id: String, folderID: String?, sort: Int) async throws -> SSHHost {
+        try await background(
+            "ssh.host.move",
+            ["id": id, "folderId": folderID as Any, "sort": sort],
+            as: SSHHost.self
+        )
+    }
+
+    static func sshKnownHosts() async throws -> [SSHKnownHost] {
+        try await background("ssh.knownhost.list", as: [SSHKnownHost].self)
+    }
+
+    /// Forget a server's key so the next connection asks again. The honest
+    /// answer to a fingerprint that changed.
+    static func forgetSSHKnownHost(id: String) async throws -> Bool {
+        try await background("ssh.knownhost.forget", ["id": id], as: SSHKnownHostForget.self).forgotten
+    }
+
+    /// What `~/.ssh/config` already describes. Read only, always.
+    static func sshConfigCandidates() async throws -> [SSHConfigCandidate] {
+        try await background("ssh.config.preview", as: [SSHConfigCandidate].self)
+    }
+
+    static func importSSHConfig() async throws -> SSHConfigImport {
+        try await background("ssh.config.import", as: SSHConfigImport.self)
+    }
+
     static func sshSnippets() async throws -> [SSHSnippet] {
         try await background("ssh.snippet.list", as: [SSHSnippet].self)
     }
@@ -1795,15 +1836,31 @@ extension Bridge {
         ], as: SSHHostFingerprint.self)
     }
 
-    static func openSSHWithPassword(
-        _ host: SSHHost, password: String, rows: Int, cols: Int
-    ) async throws -> SSHSessionHandle {
-        try await background("ssh.session.open", [
+    /// Everything `ssh.session.open` needs about a host, in one place.
+    ///
+    /// Three call sites used to build this dictionary by hand and only one of
+    /// them would have gained the environment, the keepalive or the jump host.
+    private static func sessionParams(
+        _ host: SSHHost, rows: Int, cols: Int, auth: [String: Any], jump: [String: Any]?
+    ) -> [String: Any] {
+        [
             "hostname": host.hostname, "port": host.port, "username": host.username,
             "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
-            "auth": ["kind": "password", "password": password],
-        ], as: SSHSessionHandle.self)
+            "keepaliveSeconds": host.keepaliveSeconds,
+            "env": host.env.map { ["name": $0.name, "value": $0.value] },
+            "auth": auth,
+            "jump": jump as Any,
+        ]
+    }
+
+    static func openSSHWithPassword(
+        _ host: SSHHost, password: String, rows: Int, cols: Int, jump: [String: Any]? = nil
+    ) async throws -> SSHSessionHandle {
+        try await background("ssh.session.open", sessionParams(
+            host, rows: rows, cols: cols,
+            auth: ["kind": "password", "password": password], jump: jump
+        ), as: SSHSessionHandle.self)
     }
 
     static func sshVaultStatus() async throws -> SSHVaultStatus {
@@ -1928,25 +1985,50 @@ extension Bridge {
     }
 
     static func openSSHWithKey(
-        _ host: SSHHost, pem: String, passphrase: String?, rows: Int, cols: Int
+        _ host: SSHHost, pem: String, passphrase: String?, rows: Int, cols: Int,
+        jump: [String: Any]? = nil
     ) async throws -> SSHSessionHandle {
-        try await background("ssh.session.open", [
-            "hostname": host.hostname, "port": host.port, "username": host.username,
-            "initialDirectory": host.initialDirectory ?? "~",
-            "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
-            "auth": ["kind": "privateKey", "pem": pem, "passphrase": passphrase as Any],
-        ], as: SSHSessionHandle.self)
+        try await background("ssh.session.open", sessionParams(
+            host, rows: rows, cols: cols,
+            auth: ["kind": "privateKey", "pem": pem, "passphrase": passphrase as Any], jump: jump
+        ), as: SSHSessionHandle.self)
     }
 
     static func openSSHWithAgent(
-        _ host: SSHHost, fingerprint: String, rows: Int, cols: Int
+        _ host: SSHHost, fingerprint: String, rows: Int, cols: Int, jump: [String: Any]? = nil
     ) async throws -> SSHSessionHandle {
-        try await background("ssh.session.open", [
+        try await background("ssh.session.open", sessionParams(
+            host, rows: rows, cols: cols,
+            auth: ["kind": "agent", "fingerprint": fingerprint], jump: jump
+        ), as: SSHSessionHandle.self)
+    }
+
+    /// Describe a jump host, credentials included, for `ssh.session.open`.
+    ///
+    /// Built on the client because only the client can open the platform vault
+    /// where the private key lives. A jump host with no saved key cannot be
+    /// used: there is nobody to ask for a password at that point in the chain,
+    /// and prompting for two passwords before a terminal appears is worse than
+    /// saying so.
+    static func sshJumpPayload(_ host: SSHHost, key: SSHKeyRecord?) throws -> [String: Any] {
+        guard let key else {
+            throw BridgeError.core(
+                code: "jump_needs_key",
+                message: "\(host.label) is used to reach other servers, so it needs a saved key rather than a password."
+            )
+        }
+        let auth: [String: Any]
+        if key.secretRef.hasPrefix("agent:") {
+            auth = ["kind": "agent", "fingerprint": String(key.secretRef.dropFirst("agent:".count))]
+        } else {
+            auth = ["kind": "privateKey", "pem": try SSHSecretStore.load(reference: key.secretRef), "passphrase": nil as Any?  as Any]
+        }
+        return [
             "hostname": host.hostname, "port": host.port, "username": host.username,
-            "initialDirectory": host.initialDirectory ?? "~",
-            "hostKeys": host.hostKeys, "rows": rows, "cols": cols,
-            "auth": ["kind": "agent", "fingerprint": fingerprint],
-        ], as: SSHSessionHandle.self)
+            "hostKeys": host.hostKeys,
+            "keepaliveSeconds": host.keepaliveSeconds,
+            "auth": auth,
+        ]
     }
 
     static func readSSHSession(id: String, offset: UInt64) async throws -> SSHSessionRead {

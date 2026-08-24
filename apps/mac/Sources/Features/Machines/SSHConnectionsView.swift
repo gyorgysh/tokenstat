@@ -8,241 +8,14 @@ import AppKit
 import UIKit
 #endif
 
-@MainActor
-@Observable
-final class SSHConnectionsModel {
-    var hosts: [SSHHost] = []
-    var keys: [SSHKeyRecord] = []
-    var snippets: [SSHSnippet] = []
-    var error: String?
-
-    func load(vaultTier: String? = nil) async {
-        do {
-            async let hosts = Bridge.sshHosts()
-            async let keys = Bridge.sshKeys()
-            async let snippets = Bridge.sshSnippets()
-            self.hosts = try await hosts
-            self.keys = try await keys
-            self.snippets = try await snippets
-            error = nil
-            if let vaultTier { await pullVault(tier: vaultTier) }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func pullVault(tier: String) async {
-        guard let records = try? await Bridge.sshVaultRecords(recovery: "", tier: tier) else { return }
-        var changed = false
-        for record in records {
-            if record.deleted == true {
-                do {
-                    if record.id.hasPrefix("host:") {
-                        try await Bridge.deleteSSHHost(id: String(record.id.dropFirst("host:".count)))
-                    } else if record.id.hasPrefix("snippet:") {
-                        try await Bridge.deleteSSHSnippet(id: String(record.id.dropFirst("snippet:".count)))
-                    } else if record.id.hasPrefix("key:") {
-                        let id = String(record.id.dropFirst("key:".count))
-                        if let key = keys.first(where: { $0.id == id }) { SSHSecretStore.delete(reference: key.secretRef) }
-                        try await Bridge.deleteSSHKey(id: id)
-                    }
-                    changed = true
-                } catch { self.error = error.localizedDescription }
-                continue
-            }
-            guard let data = record.plaintext.data(using: .utf8),
-                  let envelope = try? JSONDecoder().decode(SSHVaultEnvelope.self, from: data)
-            else { continue }
-            do {
-                if let host = envelope.host {
-                    _ = try await Bridge.saveSSHHost(host); changed = true
-                } else if let snippet = envelope.snippet {
-                    _ = try await Bridge.saveSSHSnippet(snippet); changed = true
-                } else if let key = envelope.key {
-                    let reference = try SSHSecretStore.store(key.privateKey, id: key.id)
-                    _ = try await Bridge.saveSSHKey(SSHKeyRecord(id: key.id, label: key.label, algorithm: key.algorithm, publicKey: key.publicKey, secretRef: reference, hardwareBacked: key.hardwareBacked))
-                    changed = true
-                }
-            } catch { self.error = error.localizedDescription }
-        }
-        if changed {
-            hosts = (try? await Bridge.sshHosts()) ?? hosts
-            keys = (try? await Bridge.sshKeys()) ?? keys
-            snippets = (try? await Bridge.sshSnippets()) ?? snippets
-        }
-    }
-}
-
-private struct SSHVaultEnvelope: Codable {
-    var kind: String
-    var host: SSHHost?
-    var key: SSHVaultSyncedKey?
-    var snippet: SSHSnippet?
-}
-
-private struct SSHVaultSyncedKey: Codable {
-    var id: String
-    var label: String
-    var algorithm: String
-    var publicKey: String
-    var privateKey: String
-    var hardwareBacked: Bool
-}
-
-struct SSHConnectionsView: View {
-    var vaultTier: String?
-    var onClose: (() -> Void)? = nil
-    private enum Section: String, CaseIterable { case hosts = "Hosts", keys = "Keys", snippets = "Snippets" }
-    #if !os(macOS)
-    @Environment(ClientStore.self) private var store
-    #endif
-    @State private var model = SSHConnectionsModel()
-    @State private var section = Section.hosts
-    @State private var addingHost = false
-    @State private var addingKey = false
-    @State private var addingSnippet = false
-    @State private var connecting: SSHHost?
-    @State private var terminal: SSHLiveTerminal?
-    @State private var vaultRecovery: String?
-    @State private var vaultStatus: SSHVaultStatus?
-    @State private var importingDigitalOcean = false
-    private var paidVaultTier: String? {
-        guard let tier = vaultTier?.lowercased(), ["supporter", "patron", "legend"].contains(tier) else { return nil }
-        return tier
-    }
-
-    private var signedInUnpaid: Bool { vaultTier != nil && paidVaultTier == nil }
-
-    @ViewBuilder
-    private var vaultUpgrade: some View {
-        #if os(macOS)
-        EmptyState(
-            symbol: "lock.shield",
-            title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above."
-        ) {
-            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
-                .buttonStyle(AccentButtonStyle())
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
-        .padding(.horizontal)
-        .padding(.top, Theme.Space.s)
-        #else
-        ClientEmptyState(
-            kind: .needsAccount,
-            title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
-            actionTitle: "See plans",
-            actionIcon: .plans,
-            action: { store.showPaywall = true },
-            art: .vault
-        )
-        .padding(.horizontal, Theme.Space.m)
-        .padding(.top, Theme.Space.s)
-        #endif
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if signedInUnpaid {
-                vaultUpgrade
-            } else if let vaultTier {
-                SSHVaultBanner(tier: vaultTier, canWrite: paidVaultTier != nil, status: $vaultStatus, recovery: $vaultRecovery)
-            }
-            Picker("SSH library", selection: $section) {
-                ForEach(Section.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .padding()
-            if let error = model.error { Text(error).foregroundStyle(Theme.danger).padding(.horizontal) }
-            if isCurrentSectionEmpty {
-                if signedInUnpaid {
-                    Spacer(minLength: 0)
-                } else {
-                    EmptyState(symbol: emptySymbol, title: emptyTitle, message: emptyMessage) {
-                        Button(emptyActionTitle, .create) { presentAddSheet() }
-                            .buttonStyle(AccentButtonStyle())
-                    }
-                }
-            } else {
-                List {
-                    switch section {
-                case .hosts:
-                    ForEach(model.hosts) { host in
-                        Button { connecting = host } label: {
-                            Label {
-                                VStack(alignment: .leading) {
-                                    Text(host.label)
-                                    Text("\(host.username)@\(host.hostname):\(host.port)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                            } icon: { Image(systemName: "server.rack") }
-                        }.buttonStyle(.plain)
-                    }.onDelete { offsets in deleteHosts(offsets) }
-                case .keys:
-                    ForEach(model.keys) { key in
-                        Label {
-                            VStack(alignment: .leading) { Text(key.label); Text(key.publicKey).font(.caption).lineLimit(1) }
-                        } icon: { Image(systemName: key.hardwareBacked ? "key.radiowaves.forward" : "key.fill") }
-                    }.onDelete { offsets in deleteKeys(offsets) }
-                case .snippets:
-                    ForEach(model.snippets) { snippet in
-                        VStack(alignment: .leading) { Text(snippet.title); Text(snippet.command).font(.system(.caption, design: .monospaced)) }
-                    }.onDelete { offsets in deleteSnippets(offsets) }
-                    }
-                }
-            }
-        }
-        .navigationTitle("SSH")
-        .toolbar {
-            if let onClose {
-                ToolbarItem(placement: .cancellationAction) {
-                    InspectorCloseButton(action: onClose, help: "Close", label: "Close SSH library")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ToolbarIconButton(systemImage: "plus", help: "Add \(section.rawValue.lowercased())") {
-                    presentAddSheet()
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                ToolbarIconButton(systemImage: "cloud", help: "Import cloud servers") { importingDigitalOcean = true }
-            }
-        }
-        .task { await model.load(vaultTier: paidVaultTier) }
-        .task { vaultStatus = try? await Bridge.sshVaultStatus() }
-        .sheet(isPresented: $addingHost) { SSHHostForm(model: model, vaultTier: paidVaultTier) }
-        .sheet(isPresented: $addingKey) { SSHKeyForm(model: model, vaultTier: paidVaultTier) }
-        .sheet(isPresented: $addingSnippet) { SSHSnippetForm(model: model, vaultTier: paidVaultTier) }
-        .sheet(isPresented: $importingDigitalOcean) { CloudImportForm(model: model, vaultTier: paidVaultTier) }
-        .sheet(item: $connecting) { host in SSHConnectForm(host: host, model: model) { terminal = $0 } }
-        #if os(macOS)
-        .sheet(item: $terminal) { SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480) }
-        #else
-        .fullScreenCover(item: $terminal) { SSHLiveTerminalScreen(session: $0) }
-        #endif
-    }
-
-    private func deleteHosts(_ offsets: IndexSet) { for i in offsets { let id = model.hosts[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "host:\(id)") }; try await Bridge.deleteSSHHost(id: id); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
-    private func deleteKeys(_ offsets: IndexSet) { for i in offsets { let key = model.keys[i]; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "key:\(key.id)") }; try await Bridge.deleteSSHKey(id: key.id); SSHSecretStore.delete(reference: key.secretRef); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
-    private func deleteSnippets(_ offsets: IndexSet) { for i in offsets { let id = model.snippets[i].id; Task { do { if paidVaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: "snippet:\(id)") }; try await Bridge.deleteSSHSnippet(id: id); await model.load(vaultTier: paidVaultTier) } catch { model.error = error.localizedDescription } } } }
-    private var isCurrentSectionEmpty: Bool { switch section { case .hosts: model.hosts.isEmpty; case .keys: model.keys.isEmpty; case .snippets: model.snippets.isEmpty } }
-    private var emptySymbol: String { switch section { case .hosts: "server.rack"; case .keys: "key"; case .snippets: "text.badge.plus" } }
-    private var emptyTitle: String { "No \(section.rawValue.lowercased()) yet" }
-    private var emptyMessage: String { switch section {
-        case .hosts: "Add a server once, then connect without retyping its address and username."
-        case .keys: "Generate or import an SSH key to authenticate without a password."
-        case .snippets: "Save commands you use often and run them from a terminal."
-    } }
-    private var emptyActionTitle: String { switch section { case .hosts: "Add host"; case .keys: "Add key"; case .snippets: "Add snippet" } }
-    private func presentAddSheet() { switch section { case .hosts: addingHost = true; case .keys: addingKey = true; case .snippets: addingSnippet = true } }
-}
-
-private struct CloudImportForm: View {
+/// Read a cloud provider's server list and save what it finds.
+///
+/// A screen in the library rather than a sheet, so the result is a list a
+/// person can read rather than a line at the bottom of a small box.
+struct CloudImportForm: View {
     private enum Provider: String, CaseIterable { case digitalOcean = "DigitalOcean", aws = "AWS" }
-    @Environment(\.dismiss) private var dismiss
-    let model: SSHConnectionsModel
-    let vaultTier: String?
+    let model: SSHLibraryModel
+    let onDone: () -> Void
     @State private var token = ""
     @State private var username = "root"
     @State private var provider = Provider.digitalOcean
@@ -267,19 +40,20 @@ private struct CloudImportForm: View {
                 if let error { Text(error).foregroundStyle(Theme.danger) }
             }
             .navigationTitle("Import cloud servers")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close cloud import") }
-                ToolbarItem(placement: .confirmationAction) {
-                    if importedCount != nil {
-                        Button("Done") { dismiss() }.buttonStyle(AccentButtonStyle(small: true))
-                    } else {
-                        Button("Import", .download) { Task { await run() } }
-                            .buttonStyle(AccentButtonStyle(small: true))
-                            .disabled(importing || (provider == .digitalOcean && token.isEmpty) || username.isEmpty)
-                    }
-                }
-            }
-        }.sshSheetFrame(width: 520, height: 380)
+        }
+        .safeAreaInset(edge: .bottom) {
+            SSHEditorFooter(
+                saveTitle: importedCount == nil ? "Import" : "Done",
+                canSave: importedCount != nil
+                    || (!(provider == .digitalOcean && token.isEmpty) && !username.isEmpty),
+                working: importing,
+                onSave: {
+                    if importedCount == nil { Task { await run() } } else { onDone() }
+                },
+                onCancel: onDone,
+                onDelete: nil
+            )
+        }
     }
     private func run() async {
         importing = true
@@ -288,22 +62,19 @@ private struct CloudImportForm: View {
             let result: SSHHostImport
             if provider == .digitalOcean { result = try await Bridge.importDigitalOcean(token: token, username: username) }
             else { result = try await Bridge.importAWS(profile: profile.isEmpty ? nil : profile, region: region.isEmpty ? nil : region, username: username) }
-            if let vaultTier {
-                for host in result.hosts {
-                    let plaintext = try vaultJSON(SSHVaultEnvelope(kind: "host", host: host, key: nil, snippet: nil))
-                    _ = try await Bridge.putSSHVaultRecord(id: "host:\(host.id)", plaintext: plaintext, tier: vaultTier)
-                }
-            }
+            // Saving each one through the model is what puts it in the
+            // encrypted vault as well, so an import reaches the phone the same
+            // way a hand-typed host does.
+            for host in result.hosts { _ = await model.save(host: host) }
             token = ""
             importedCount = result.imported
-            await model.load(vaultTier: vaultTier)
         }
         catch { self.error = error.localizedDescription }
         importing = false
     }
 }
 
-private struct SSHVaultBanner: View {
+struct SSHVaultBanner: View {
     let tier: String
     let canWrite: Bool
     @Binding var status: SSHVaultStatus?
@@ -469,11 +240,12 @@ private struct SSHRecoveryWordsSheet: View {
             }
             HStack {
                 Button("Discard this vault", .delete) { confirmingDiscard = true }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.danger)
+                    .buttonStyle(DestructiveButtonStyle())
                 Spacer()
                 Button("Done", .done) { onConfirmed(); dismiss() }
-                    .buttonStyle(AccentButtonStyle()).disabled(!storedSafely || !wordsMatch)
+                    .buttonStyle(AccentButtonStyle())
+                    .frame(minWidth: Theme.Control.pairedWidth)
+                    .disabled(!storedSafely || !wordsMatch)
             }
             Text("Close without confirming to look at the words later. Discard deletes the vault so you can create a new one.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -569,11 +341,12 @@ private struct SSHVaultSetupSheet: View {
             if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
             Spacer()
             HStack {
-                Button("Cancel", .dismiss) { dismiss() }.buttonStyle(.borderless)
+                Button("Cancel", .dismiss) { dismiss() }
+                    .buttonStyle(SecondaryButtonStyle())
+                    .frame(minWidth: Theme.Control.pairedWidth)
                 if status?.created == true {
                     Button("Drop vault", .delete) { confirmingReset = true }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(Theme.danger)
+                        .buttonStyle(DestructiveButtonStyle())
                         .disabled(working)
                 }
                 Spacer()
@@ -581,6 +354,7 @@ private struct SSHVaultSetupSheet: View {
                     confirmIcon.label(confirmTitle)
                 }
                 .buttonStyle(AccentButtonStyle())
+                .frame(minWidth: Theme.Control.pairedWidth)
                 .disabled(working || requestSent || (choice == .restore && enteredRecovery.split(whereSeparator: \.isWhitespace).count != 24) || (choice == .create && status?.created == true))
             }
         }
@@ -625,56 +399,10 @@ private struct SSHVaultSetupSheet: View {
     }
 }
 
-private struct SSHHostForm: View {
-    @Environment(\.dismiss) private var dismiss
-    let model: SSHConnectionsModel
-    let vaultTier: String?
-    @State private var label = ""
-    @State private var hostname = ""
-    @State private var username = "root"
-    @State private var port = 22
-    @State private var initialDirectory = "~"
-    @State private var credentialID = ""
-    @State private var error: String?
-    var body: some View { NavigationStack { Form { Section("Connection") { TextField("Name", text: $label); TextField("Address", text: $hostname); TextField("Username", text: $username); TextField("Port", value: $port, format: .number); TextField("Starting directory", text: $initialDirectory, prompt: Text("~")) }; Section("Authentication") { Picker("Use", selection: $credentialID) { Text("Ask when connecting").tag(""); ForEach(model.keys) { Text($0.label).tag($0.id) } }; Text("Passwords are requested only when you connect and are never saved. Add a key first if you want this host to select it automatically.").font(.caption).foregroundStyle(.secondary) }; if let error { Text(error).foregroundStyle(Theme.danger) } }.navigationTitle("Add SSH host").toolbar { ToolbarItem(placement: .cancellationAction) { InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close add host") }; ToolbarItem(placement: .confirmationAction) { Button("Save", .save) { Task { await save() } }.buttonStyle(AccentButtonStyle(small: true)).disabled(label.isEmpty || hostname.isEmpty || username.isEmpty) } } }.sshSheetFrame(width: 500, height: 430) }
-    private func save() async { do { let host = try await Bridge.saveSSHHost(SSHHost(id: "", label: label, hostname: hostname, port: port, username: username, initialDirectory: initialDirectory.isEmpty ? "~" : initialDirectory, credentialID: credentialID.isEmpty ? nil : credentialID, jumpHostID: nil, tags: [], provider: nil, hostKeys: [])); if let vaultTier { let plaintext = try vaultJSON(SSHVaultEnvelope(kind: "host", host: host, key: nil, snippet: nil)); _ = try await Bridge.putSSHVaultRecord(id: "host:\(host.id)", plaintext: plaintext, tier: vaultTier) }; await model.load(); dismiss() } catch { self.error = error.localizedDescription } }
-}
-
-private struct SSHKeyForm: View {
-    @Environment(\.dismiss) private var dismiss
-    let model: SSHConnectionsModel
-    let vaultTier: String?
-    @State private var label = "My SSH key"
-    @State private var pem = ""
-    @State private var passphrase = ""
-    @State private var error: String?
-    var body: some View { NavigationStack { Form { TextField("Name", text: $label); TextEditor(text: $pem).font(.system(.caption, design: .monospaced)); SecureField("Private-key passphrase (if required)", text: $passphrase); if let error { Text(error).foregroundStyle(Theme.danger) } }.navigationTitle("Add key").toolbar { ToolbarItem(placement: .cancellationAction) { InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close add key") }; ToolbarItemGroup(placement: .confirmationAction) { Button("Generate", .create) { Task { do { await keep(try await Bridge.generateSSHKey()) } catch { self.error = error.localizedDescription } } }.buttonStyle(SecondaryButtonStyle(small: true)); Button("Import", .upload) { Task { do { await keep(try await Bridge.inspectSSHKey(pem: pem, passphrase: passphrase.isEmpty ? nil : passphrase)) } catch { self.error = error.localizedDescription } } }.buttonStyle(AccentButtonStyle(small: true)).disabled(pem.isEmpty) } } }.sshSheetFrame(width: 540, height: 460) }
-    private func keep(_ material: SSHKeyMaterial) async { do { let id = "key_\(UUID().uuidString)"; let ref = try SSHSecretStore.store(material.privateKey, id: id); let key = try await Bridge.saveSSHKey(SSHKeyRecord(id: id, label: label, algorithm: material.algorithm, publicKey: material.publicKey, secretRef: ref, hardwareBacked: false)); if let vaultTier { let synced = SSHVaultSyncedKey(id: key.id, label: key.label, algorithm: key.algorithm, publicKey: key.publicKey, privateKey: material.privateKey, hardwareBacked: key.hardwareBacked); let plaintext = try vaultJSON(SSHVaultEnvelope(kind: "key", host: nil, key: synced, snippet: nil)); _ = try await Bridge.putSSHVaultRecord(id: "key:\(key.id)", plaintext: plaintext, tier: vaultTier) }; await model.load(); dismiss() } catch { self.error = error.localizedDescription } }
-}
-
-private struct SSHSnippetForm: View {
-    @Environment(\.dismiss) private var dismiss
-    let model: SSHConnectionsModel
-    let vaultTier: String?
-    @State private var title = ""
-    @State private var command = ""
-    @State private var error: String?
-    var body: some View { NavigationStack { Form { TextField("Name", text: $title); TextEditor(text: $command).font(.system(.body, design: .monospaced)); if let error { Text(error).foregroundStyle(Theme.danger) } }.navigationTitle("Add snippet").toolbar { ToolbarItem(placement: .cancellationAction) { InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close add snippet") }; ToolbarItem(placement: .confirmationAction) { Button("Save", .save) { Task { await save() } }.buttonStyle(AccentButtonStyle(small: true)).disabled(title.isEmpty || command.isEmpty) } } }.sshSheetFrame(width: 500, height: 380) }
-    private func save() async { do { let snippet = try await Bridge.saveSSHSnippet(SSHSnippet(id: "", title: title, command: command, tags: [], hostIDs: [])); if let vaultTier { let plaintext = try vaultJSON(SSHVaultEnvelope(kind: "snippet", host: nil, key: nil, snippet: snippet)); _ = try await Bridge.putSSHVaultRecord(id: "snippet:\(snippet.id)", plaintext: plaintext, tier: vaultTier) }; await model.load(); dismiss() } catch { self.error = error.localizedDescription } }
-}
-
-private func vaultJSON<T: Encodable>(_ value: T) throws -> String {
-    let data = try JSONEncoder().encode(value)
-    guard let text = String(data: data, encoding: .utf8) else {
-        throw NSError(domain: "SSHVault", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not encode vault record"])
-    }
-    return text
-}
-
-private struct SSHConnectForm: View {
+struct SSHConnectForm: View {
     @Environment(\.dismiss) private var dismiss
     @State var host: SSHHost
-    let model: SSHConnectionsModel
+    let model: SSHLibraryModel
     let connected: (SSHLiveTerminal) -> Void
     @State private var password = ""
     @State private var selectedKeyID = ""
@@ -714,25 +442,33 @@ private struct SSHConnectForm: View {
     private func trust(_ fingerprint: String) async {
         do {
             host.hostKeys = [fingerprint]
-            _ = try await Bridge.saveSSHHost(host)
+            _ = await model.save(host: host)
             offeredFingerprint = nil
-            await model.load()
         } catch { self.error = error.localizedDescription }
     }
     private func connect() async {
         do {
+            // Resolved here rather than in the host, because the private key
+            // lives in this device's vault and nowhere else.
+            var jump: [String: Any]?
+            if let jumpID = host.jumpHostID,
+               let jumpHost = model.hosts.first(where: { $0.id == jumpID })
+            {
+                jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+            }
             let handle: SSHSessionHandle
             if let key = model.keys.first(where: { $0.id == selectedKeyID }) {
                 if key.secretRef.hasPrefix("agent:") {
-                    handle = try await Bridge.openSSHWithAgent(host, fingerprint: String(key.secretRef.dropFirst("agent:".count)), rows: 24, cols: 80)
+                    handle = try await Bridge.openSSHWithAgent(host, fingerprint: String(key.secretRef.dropFirst("agent:".count)), rows: 24, cols: 80, jump: jump)
                 } else {
                     let pem = try SSHSecretStore.load(reference: key.secretRef)
-                    handle = try await Bridge.openSSHWithKey(host, pem: pem, passphrase: nil, rows: 24, cols: 80)
+                    handle = try await Bridge.openSSHWithKey(host, pem: pem, passphrase: nil, rows: 24, cols: 80, jump: jump)
                 }
             } else {
-                handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80)
+                handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80, jump: jump)
             }
             connected(SSHLiveTerminal(handle: handle, title: host.label))
+            await model.noteConnection(host)
             dismiss()
         } catch { self.error = error.localizedDescription }
     }

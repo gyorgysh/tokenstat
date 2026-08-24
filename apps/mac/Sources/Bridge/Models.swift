@@ -28,6 +28,54 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
     var tags: [String]
     var provider: SSHProviderReference?
     var hostKeys: [String]
+    /// Nil is the top level. Every record saved before folders existed is
+    /// there, and stays there until somebody moves it.
+    var folderID: String?
+    /// A name from `SSHColor`, never a hex string.
+    var color: String?
+    var keepaliveSeconds: Int = 0
+    var env: [SSHEnvPair] = []
+    var agentForwarding: Bool = false
+    var lastConnectedMs: Int64?
+    var favorite: Bool = false
+    var sort: Int = 0
+
+    /// The address as somebody would type it into a terminal.
+    var address: String { "\(username)@\(hostname):\(port)" }
+}
+
+struct SSHEnvPair: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var value: String
+    var id: String { name }
+}
+
+struct SSHFolder: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    var parentID: String?
+    var color: String?
+    var sort: Int = 0
+}
+
+/// The fixed palette both ends agree on.
+///
+/// Names rather than hex, so the record stays a record and each platform draws
+/// its own idea of "amber". Mirrors `ssh_records::COLORS`.
+enum SSHColor {
+    static let names = ["violet", "blue", "green", "amber", "red", "grey"]
+
+    static func color(_ name: String?) -> Color {
+        switch name {
+        case "violet": Theme.accent
+        case "blue": Color.blue
+        case "green": Color.green
+        case "amber": Theme.warning
+        case "red": Theme.danger
+        case "grey": Theme.stateIdle
+        default: Theme.stateIdle
+        }
+    }
 }
 
 struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
@@ -38,6 +86,10 @@ struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
     /// Reference into Keychain/ssh-agent. This is never private key material.
     var secretRef: String
     var hardwareBacked: Bool
+    /// SHA256 fingerprint. What a row shows instead of the whole public key.
+    var fingerprint: String = ""
+    var createdMs: Int64 = 0
+    var passphraseProtected: Bool = false
 }
 
 struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
@@ -46,7 +98,58 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
     var command: String
     var tags: [String]
     var hostIDs: [String]
+    /// Placeholder names in the command, asked for when it runs. Values are
+    /// never stored: the useful ones are secrets.
+    var variables: [String] = []
+    var runOnConnect: Bool = false
+
+    /// `{{name}}` occurrences, in the order they appear. The editor keeps
+    /// `variables` in step with this so a client never has to parse it.
+    static func placeholders(in command: String) -> [String] {
+        var found: [String] = []
+        var rest = Substring(command)
+        while let open = rest.range(of: "{{"), let close = rest[open.upperBound...].range(of: "}}") {
+            let name = rest[open.upperBound..<close.lowerBound].trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty, !found.contains(name) { found.append(name) }
+            rest = rest[close.upperBound...]
+        }
+        return found
+    }
+
+    /// The command with every placeholder replaced. Missing values are left
+    /// alone rather than blanked, so a half-filled form cannot silently run a
+    /// different command.
+    func filled(with values: [String: String]) -> String {
+        var text = command
+        for name in variables {
+            guard let value = values[name] else { continue }
+            text = text.replacingOccurrences(of: "{{\(name)}}", with: value)
+        }
+        return text
+    }
 }
+
+struct SSHKnownHost: Codable, Sendable, Hashable, Identifiable {
+    var hostID: String
+    var label: String
+    var hostname: String
+    var port: Int
+    var fingerprints: [String]
+    var id: String { hostID }
+}
+
+struct SSHConfigCandidate: Codable, Sendable, Hashable, Identifiable {
+    var label: String
+    var hostname: String
+    var username: String
+    var port: Int
+    var identityFile: String?
+    var alreadySaved: Bool
+    var id: String { "\(label)|\(hostname)|\(port)" }
+}
+
+struct SSHConfigImport: Codable, Sendable, Hashable { var imported: Int; var found: Int }
+struct SSHKnownHostForget: Codable, Sendable, Hashable { var forgotten: Bool }
 
 struct SSHSessionHandle: Codable, Sendable, Hashable { var id: String }
 struct SSHHostFingerprint: Codable, Sendable, Hashable { var fingerprint: String }
