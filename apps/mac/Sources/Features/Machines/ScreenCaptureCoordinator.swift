@@ -419,16 +419,18 @@ private enum ScreenInput {
             let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
             let downType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
             let upType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+            // One pair, carrying the count. macOS reads the click count off the
+            // event rather than timing the events, so posting the pair once per
+            // click would make a double click arrive as three clicks: the first
+            // click of the pair has already been sent as its own press.
             let clicks = max(1, min(3, event.clickCount ?? 1))
             CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?
                 .post(tap: .cghidEventTap)
-            for step in 1...clicks {
-                for type in [downType, upType] {
-                    let click = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
-                    click?.setIntegerValueField(.mouseEventClickState, value: Int64(step))
-                    if let flags = event.flags { click?.flags = CGEventFlags(rawValue: flags) }
-                    click?.post(tap: .cghidEventTap)
-                }
+            for type in [downType, upType] {
+                let click = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+                click?.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
+                if let flags = event.flags { click?.flags = CGEventFlags(rawValue: flags) }
+                click?.post(tap: .cghidEventTap)
             }
             return
         // Two-finger scrolling. Pixel units rather than lines, so the distance

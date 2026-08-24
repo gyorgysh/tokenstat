@@ -53,6 +53,19 @@ extension Transport {
 struct InProcessTransport: Transport {
     var describedAs: String { "in-process" }
 
+    /// The wire contract compiled into this app.
+    ///
+    /// Its own C entry point rather than the `protocol` method, and it lives
+    /// here because this file is where the C boundary lives. A call through
+    /// `tokenstat_ffi_call` warms the login environment and the shell pool, and
+    /// this is asked at launch by an app that is usually about to hand that
+    /// work to the daemon instead. The pointer is a string constant and must
+    /// not be freed.
+    static var protocolVersion: String {
+        guard let raw = tokenstat_ffi_protocol_version() else { return "" }
+        return String(cString: raw)
+    }
+
     /// `patience` is ignored. This is a function call into the same process:
     /// there is no socket to time out, and a call that hangs here has hung the
     /// thread it was made on with nothing left to cancel.

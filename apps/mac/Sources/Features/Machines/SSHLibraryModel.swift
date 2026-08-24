@@ -101,13 +101,21 @@ final class SSHLibraryModel {
     func save(key: SSHKeyRecord, privateKey: String?) async -> SSHKeyRecord? {
         do {
             let saved = try await Bridge.saveSSHKey(key)
-            if let privateKey, vaultTier != nil {
-                let synced = SSHVaultSyncedKey(
-                    id: saved.id, label: saved.label, algorithm: saved.algorithm,
-                    publicKey: saved.publicKey, privateKey: privateKey,
-                    hardwareBacked: saved.hardwareBacked
-                )
-                try await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
+            if vaultTier != nil {
+                // An edit that carries no key material is still an edit the
+                // other devices need. Renaming used to skip the vault, which
+                // left them holding the old name and pushing it back over the
+                // new one on the next pull. The private half is read back from
+                // this device's vault for exactly this case.
+                let material = privateKey ?? (try? SSHSecretStore.load(reference: saved.secretRef))
+                if let material {
+                    let synced = SSHVaultSyncedKey(
+                        id: saved.id, label: saved.label, algorithm: saved.algorithm,
+                        publicKey: saved.publicKey, privateKey: material,
+                        hardwareBacked: saved.hardwareBacked
+                    )
+                    try await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
+                }
             }
             await reload()
             return saved
@@ -181,7 +189,11 @@ final class SSHLibraryModel {
     private func pullVault(tier: String) async {
         guard let records = try? await Bridge.sshVaultRecords(recovery: "", tier: tier) else { return }
         var changed = false
-        for record in records {
+        // Folders first, and shallow before deep. A host names the folder it
+        // belongs to and the host refuses a folder it has never heard of, so a
+        // pull that applied them in arrival order could drop a server for the
+        // rest of the session. Sub-folders have the same rule about parents.
+        for record in ordered(records) {
             if record.deleted == true {
                 changed = await applyDeletion(record.id) || changed
                 continue
@@ -208,6 +220,42 @@ final class SSHLibraryModel {
             } catch { self.error = error.localizedDescription }
         }
         if changed { await reload() }
+    }
+
+    /// Folder records first, each after its own parent, then the rest in the
+    /// order they arrived.
+    private func ordered(_ records: [SSHVaultRecord]) -> [SSHVaultRecord] {
+        var folders: [(SSHVaultRecord, SSHFolder)] = []
+        var rest: [SSHVaultRecord] = []
+        for record in records {
+            guard record.deleted != true,
+                  let data = record.plaintext.data(using: .utf8),
+                  let envelope = try? JSONDecoder().decode(SSHVaultEnvelope.self, from: data),
+                  let folder = envelope.folder
+            else {
+                rest.append(record)
+                continue
+            }
+            folders.append((record, folder))
+        }
+        var placed: Set<String> = Set(self.folders.map(\.id))
+        var sorted: [SSHVaultRecord] = []
+        // Repeat until nothing else can be placed. A folder whose parent is
+        // missing entirely still goes out, at the end: the host will reject it
+        // and say so, which beats dropping it silently.
+        var remaining = folders
+        while !remaining.isEmpty {
+            let ready = remaining.filter { $0.1.parentID == nil || placed.contains($0.1.parentID ?? "") }
+            guard !ready.isEmpty else { break }
+            for item in ready {
+                sorted.append(item.0)
+                placed.insert(item.1.id)
+            }
+            let readyIDs = Set(ready.map(\.1.id))
+            remaining.removeAll { readyIDs.contains($0.1.id) }
+        }
+        sorted.append(contentsOf: remaining.map(\.0))
+        return sorted + rest
     }
 
     private func applyDeletion(_ id: String) async -> Bool {

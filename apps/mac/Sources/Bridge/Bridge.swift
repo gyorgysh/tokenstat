@@ -187,18 +187,14 @@ enum Bridge {
         return spoken.protocolVersion == expectedProtocolVersion
     }
 
-    /// The contract this build speaks, asked of the copy compiled into the app
-    /// rather than written down twice.
-    private static let expectedProtocolVersion: String = {
-        let response = (try? InProcessTransport().call(
-            method: "protocol", params: "{}", patience: Patience.interactive
-        )) ?? ""
-        struct Spoken: Decodable { let protocolVersion: String }
-        guard let envelope = try? JSONDecoder().decode(
-            Envelope<Spoken>.self, from: Data(response.utf8)
-        ), let spoken = envelope.result else { return "" }
-        return spoken.protocolVersion
-    }()
+    /// The contract this build speaks, read straight from the library rather
+    /// than written down twice.
+    ///
+    /// Its own C entry point, not a `protocol` call: every call through the
+    /// bridge warms the login environment and the shell pool, and this is asked
+    /// at launch, before the daemon has been chosen, in an app that is usually
+    /// about to hand that work to the daemon instead.
+    private static let expectedProtocolVersion = InProcessTransport.protocolVersion
 
     private static func adopt(_ next: Route) {
         routeLock.lock()

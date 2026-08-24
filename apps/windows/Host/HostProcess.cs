@@ -17,9 +17,9 @@ internal static class HostProcess
     {
         // A pipe that answers is not enough: the scheduled task can be running
         // a helper from an older install, and every method added since would
-        // come back as "unknown method". Replacing it is the fix, and the
-        // install script is what replaces it.
-        if (PipeUp() && SpeaksThisVersion())
+        // come back as "unknown method".
+        var answering = PipeUp();
+        if (answering && SpeaksThisVersion())
         {
             return;
         }
@@ -27,7 +27,20 @@ internal static class HostProcess
         var hostd = FindHostd();
         if (hostd is null)
         {
+            // Nothing to replace it with. An old helper still answering is
+            // better than no helper at all.
             return;
+        }
+
+        if (answering)
+        {
+            // Unregistering the task does not stop what it already started, and
+            // the replacement cannot bind a pipe the old helper still holds. So
+            // stop it first, and only once there is something to put in its
+            // place. This ends its terminals, which is the same price the Mac
+            // pays for `kickstart -k`, and the alternative is an app that never
+            // sees the methods it was built for.
+            StopOldHelper();
         }
 
         TryInstallTask(hostd);
@@ -54,6 +67,30 @@ internal static class HostProcess
                 return;
             }
             Thread.Sleep(150);
+        }
+    }
+
+    /// <summary>
+    /// Stop a helper from an earlier install so a current one can take the pipe.
+    /// </summary>
+    private static void StopOldHelper()
+    {
+        foreach (var process in Process.GetProcessesByName("tokenstat-hostd"))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(4000);
+            }
+            catch
+            {
+                // Another user's helper, or one already gone. Either way there
+                // is nothing here to do about it.
+            }
+            finally
+            {
+                process.Dispose();
+            }
         }
     }
 
