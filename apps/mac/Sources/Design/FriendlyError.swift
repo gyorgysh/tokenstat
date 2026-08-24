@@ -51,6 +51,43 @@ struct FriendlyError {
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
+        // The vault lives on the account, so its failures arrive as server
+        // sentences written for a log. "Register this device before using the
+        // vault." is the account service saying a call reached it with no
+        // machine id, which is true and useless: nobody can act on it.
+        if lower.contains("machine_required") || lower.contains("register this device")
+            || lower.contains("machine_not_registered")
+            || lower.contains("not registered on the account")
+        {
+            return FriendlyError(
+                title: "This Mac is not on your account",
+                message: "Sync needs this computer linked to your account before it can hold a "
+                    + "copy of your servers. Everything still works here in the meantime.",
+                symbol: "person.badge.key",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
+        if lower.contains("vault already exists") {
+            return FriendlyError(
+                title: "There is already a vault",
+                message: "An account has one vault. Unlock the one you have, or reset it if you "
+                    + "cannot get back into it.",
+                symbol: "lock.shield",
+                raw: raw
+            )
+        }
+        if lower.contains("not enrolled") || lower.contains("did not enroll") {
+            return FriendlyError(
+                title: "This device cannot read the vault",
+                message: "It has not been let in yet. Unlock the vault here to give this device "
+                    + "its copy of the key.",
+                symbol: "lock.shield",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
+
         // A method the host has never heard of is not a bad call, it is an old
         // helper: the daemon outlives the app that installed it. The method
         // name belongs in a log, not on a screen.

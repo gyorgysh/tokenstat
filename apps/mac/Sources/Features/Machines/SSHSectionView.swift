@@ -45,9 +45,20 @@ struct SSHSectionView: View {
                 SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.s)
+                // A vault that could not take a copy is a sync problem, and it
+                // belongs on the vault's own row. Across the top of the screen
+                // it read as "your server was not saved", which was never true.
+                if let vaultError = model.vaultError {
+                    let friendly = FriendlyError.from(vaultError)
+                    InlineBanner(text: "Saved on this Mac, but not synced. \(friendly.message)") {
+                        model.vaultError = nil
+                    }
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.bottom, Theme.Space.s)
+                }
             }
             if let error = model.error {
-                InlineBanner(text: error, kind: .danger) { model.error = nil }
+                InlineBanner(text: FriendlyError.from(error).message, kind: .danger) { model.error = nil }
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.s)
             }

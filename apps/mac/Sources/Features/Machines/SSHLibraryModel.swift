@@ -23,6 +23,14 @@ final class SSHLibraryModel {
     var snippets: [SSHSnippet] = []
     var knownHosts: [SSHKnownHost] = []
     var error: String?
+    /// A write that landed locally but could not be mirrored to the vault.
+    ///
+    /// Separate from `error` on purpose. The local record store is the source
+    /// of truth on this machine and the vault is a copy of it for other
+    /// devices, so a vault that is unreachable is a sync problem and not a
+    /// save that did not happen. Reporting it as `error` is what made adding
+    /// and deleting look broken while both were actually working.
+    var vaultError: String?
     var search = ""
 
     /// What the inspector column is showing, on the Mac shell where the list
@@ -82,6 +90,27 @@ final class SSHLibraryModel {
         keys = (try? await Bridge.sshKeys()) ?? keys
         snippets = (try? await Bridge.sshSnippets()) ?? snippets
         knownHosts = (try? await Bridge.sshKnownHosts()) ?? knownHosts
+        dropMissingSelection()
+    }
+
+    /// Let go of a selection whose record is gone.
+    ///
+    /// Deleting the selected server left the inspector rendering an editor for
+    /// a record that no longer exists, with the deleted name still in the
+    /// chrome bar and a Save button that would put it back.
+    private func dropMissingSelection() {
+        let stillThere: Bool
+        switch selection {
+        case let .host(id): stillThere = hosts.contains { $0.id == id }
+        case let .key(id): stillThere = keys.contains { $0.id == id }
+        case let .snippet(id): stillThere = snippets.contains { $0.id == id }
+        case let .folder(id): stillThere = folders.contains { $0.id == id }
+        case let .knownHost(id): stillThere = knownHosts.contains { $0.id == id }
+        case .newHost, .newKey, .newSnippet, .newFolder, .knownHosts,
+             .importConfig, .importCloud, nil:
+            return
+        }
+        if !stillThere { selection = nil }
     }
 
     // MARK: - Writing
@@ -89,7 +118,7 @@ final class SSHLibraryModel {
     func save(host: SSHHost) async -> SSHHost? {
         do {
             let saved = try await Bridge.saveSSHHost(host)
-            try await mirror(id: "host:\(saved.id)", envelope: SSHVaultEnvelope(kind: "host", host: saved))
+            await mirror(id: "host:\(saved.id)", envelope: SSHVaultEnvelope(kind: "host", host: saved))
             await reload()
             return saved
         } catch {
@@ -101,7 +130,7 @@ final class SSHLibraryModel {
     func save(folder: SSHFolder) async -> SSHFolder? {
         do {
             let saved = try await Bridge.saveSSHFolder(folder)
-            try await mirror(id: "folder:\(saved.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: saved))
+            await mirror(id: "folder:\(saved.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: saved))
             await reload()
             return saved
         } catch {
@@ -113,7 +142,7 @@ final class SSHLibraryModel {
     func save(snippet: SSHSnippet) async -> SSHSnippet? {
         do {
             let saved = try await Bridge.saveSSHSnippet(snippet)
-            try await mirror(id: "snippet:\(saved.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: saved))
+            await mirror(id: "snippet:\(saved.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: saved))
             await reload()
             return saved
         } catch {
@@ -141,7 +170,7 @@ final class SSHLibraryModel {
                         publicKey: saved.publicKey, privateKey: material,
                         hardwareBacked: saved.hardwareBacked
                     )
-                    try await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
+                    await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
                 }
             }
             await reload()
@@ -174,7 +203,7 @@ final class SSHLibraryModel {
     func move(host: SSHHost, to folderID: String?) async {
         do {
             let moved = try await Bridge.moveSSHHost(id: host.id, folderID: folderID, sort: host.sort)
-            try await mirror(id: "host:\(moved.id)", envelope: SSHVaultEnvelope(kind: "host", host: moved))
+            await mirror(id: "host:\(moved.id)", envelope: SSHVaultEnvelope(kind: "host", host: moved))
             await reload()
         } catch { self.error = error.localizedDescription }
     }
@@ -196,19 +225,47 @@ final class SSHLibraryModel {
         await reload()
     }
 
+    /// Delete locally, then forget it in the vault.
+    ///
+    /// This order is the whole point. The vault delete used to run first,
+    /// under the same `try`, so a vault that answered with an error stopped
+    /// the local delete from ever running: the record stayed, the screen
+    /// showed a server sentence, and deleting appeared to be broken while
+    /// nothing had been attempted.
     private func remove(vaultID: String, _ work: () async throws -> Void) async {
         do {
-            if vaultTier != nil { _ = try await Bridge.deleteSSHVaultRecord(id: vaultID) }
             try await work()
-            await reload()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+        if vaultTier != nil {
+            do { _ = try await Bridge.deleteSSHVaultRecord(id: vaultID) } catch {
+                vaultError = error.localizedDescription
+            }
+        }
+        await reload()
     }
 
-    private func mirror(id: String, envelope: SSHVaultEnvelope) async throws {
+    /// Copy a record into the encrypted vault for the other devices.
+    ///
+    /// Cannot throw, deliberately. Every caller has already written the record
+    /// locally by the time this runs, so a failure here has to be reported as
+    /// what it is rather than turning a save that worked into a save that
+    /// looks like it did not.
+    private func mirror(id: String, envelope: SSHVaultEnvelope) async {
         guard let vaultTier else { return }
-        let data = try JSONEncoder().encode(envelope)
-        guard let plaintext = String(data: data, encoding: .utf8) else { return }
-        _ = try await Bridge.putSSHVaultRecord(id: id, plaintext: plaintext, tier: vaultTier)
+        guard let data = try? JSONEncoder().encode(envelope),
+              let plaintext = String(data: data, encoding: .utf8)
+        else {
+            vaultError = "This record could not be prepared for the vault."
+            return
+        }
+        do {
+            _ = try await Bridge.putSSHVaultRecord(id: id, plaintext: plaintext, tier: vaultTier)
+        } catch {
+            vaultError = error.localizedDescription
+        }
     }
 
     // MARK: - Reading the vault back

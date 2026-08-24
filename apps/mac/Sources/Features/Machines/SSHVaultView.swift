@@ -162,7 +162,9 @@ struct SSHVaultScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.l) {
                     if let error = vault.error {
-                        InlineBanner(text: error, kind: .danger) { vault.error = nil }
+                        InlineBanner(text: FriendlyError.from(error).message, kind: .danger) {
+                            vault.error = nil
+                        }
                     }
                     if vault.unconfirmedRecovery {
                         action(
