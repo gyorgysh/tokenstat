@@ -25,6 +25,14 @@ final class SSHLibraryModel {
     var error: String?
     var search = ""
 
+    /// What the inspector column is showing, on the Mac shell where the list
+    /// and the editor are two columns rather than one pushed screen.
+    ///
+    /// On the model rather than in a view, because the two columns are drawn
+    /// by different views and a selection that lives in one of them is a
+    /// selection the other has to be handed.
+    var selection: SSHLibraryRoute?
+
     /// The tier that may write to the vault, or nil when this device can only
     /// read from it.
     private(set) var vaultTier: String?

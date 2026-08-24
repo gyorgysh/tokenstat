@@ -18,6 +18,7 @@ enum SSHLibraryRoute: Hashable {
     case newSnippet
     case folder(String)
     case newFolder(parent: String?)
+    case knownHost(String)
     case knownHosts
     case importConfig
     case importCloud
@@ -107,7 +108,9 @@ struct SSHLibraryView: View {
             SSHFolderEditor(model: model, folderID: id, parentID: nil, onDone: close).id(id)
         case let .newFolder(parent):
             SSHFolderEditor(model: model, folderID: nil, parentID: parent, onDone: close)
-        case .knownHosts:
+        // The Mac shell selects one trusted server at a time; the phone shows
+        // the list and forgets from a row, so both land on the same screen.
+        case .knownHost, .knownHosts:
             SSHKnownHostsView(model: model)
         case .importConfig:
             SSHConfigImportView(model: model, onDone: close)
@@ -152,7 +155,9 @@ struct SSHLibraryView: View {
             SSHFolderEditor(model: model, folderID: id, parentID: nil, onDone: close)
         case let .newFolder(parent):
             SSHFolderEditor(model: model, folderID: nil, parentID: parent, onDone: close)
-        case .knownHosts:
+        // The Mac shell selects one trusted server at a time; the phone shows
+        // the list and forgets from a row, so both land on the same screen.
+        case .knownHost, .knownHosts:
             SSHKnownHostsView(model: model)
         case .importConfig:
             SSHConfigImportView(model: model, onDone: close)

@@ -883,8 +883,12 @@ struct RootView: View {
                 EmptyView()
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
-            case .ssh:
+            case let .ssh(section):
+                #if os(macOS)
+                SSHInspector(model: ssh, section: section) { closeInspector() }
+                #else
                 EmptyView()
+                #endif
             case .global(.insights):
                 InspectorView(model: model) { closeInspector() }
             case .global(.account):
@@ -1937,7 +1941,12 @@ struct RootView: View {
             AccountView(model: account)
         case let .ssh(section):
             #if os(macOS)
-            SSHSectionPlaceholder(section: section)
+            SSHSectionView(
+                model: ssh,
+                section: section,
+                vaultTier: machines.vaultTier,
+                onOpenFolder: { openSSH(.hosts(folder: $0)) }
+            )
             #else
             EmptyView()
             #endif
@@ -3433,24 +3442,3 @@ private struct SessionContextBar: View {
 #endif
 
 #endif  // os(macOS), the desktop shell
-
-#if os(macOS)
-/// The content column for an SSH section, until each screen is built.
-///
-/// A placeholder on purpose: the route, the sidebar and every switch that has
-/// to answer for them land first, so the screens that follow are built into a
-/// shell that already works rather than beside one.
-private struct SSHSectionPlaceholder: View {
-    let section: SSHSection
-
-    var body: some View {
-        EmptyState(
-            symbol: section.symbol,
-            title: section.label,
-            message: "This screen moves into the content column next."
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.background)
-    }
-}
-#endif
