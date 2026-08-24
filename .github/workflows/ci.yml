@@ -114,6 +114,17 @@ jobs:
       - name: Every content button carries a vocabulary glyph
         run: bash scripts/check-action-icons.sh
 
+  # Its own job for the same reason: a bare button and a system-blue control
+  # are two different rules, and one red check should name one of them.
+  accent-colour:
+    name: accent colour
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Every control takes its colour from the theme
+        run: bash scripts/check-accent-colour.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
