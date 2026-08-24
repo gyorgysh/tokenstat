@@ -10,6 +10,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import Observation
+import ScreenCaptureKit
 
 /// The two macOS permissions screen sharing needs, and the state of each.
 ///
@@ -28,11 +29,58 @@ final class ScreenAccess {
     /// Accessibility, which is what synthesised clicks and keystrokes need.
     private(set) var accessibility = false
 
-    init() { refresh() }
+    /// Set once a grant was made while this process was running.
+    ///
+    /// `CGPreflightScreenCaptureAccess()` answers from a value cached for the
+    /// life of the process, so a grant made in System Settings while the app
+    /// is open keeps reading false however often the card refreshes. Nothing
+    /// in the API clears that. The honest move is to notice, say so, and offer
+    /// the relaunch, rather than leave a card quietly lying.
+    private(set) var needsRelaunch = false
 
-    func refresh() {
+    init() {
         screenRecording = CGPreflightScreenCaptureAccess()
         accessibility = AXIsProcessTrusted()
+    }
+
+    /// Re-read both, asking the real subsystem about screen recording.
+    ///
+    /// Accessibility is cheap and truthful, so it is just read again. Screen
+    /// recording is the cached one, so a false preflight is checked a second
+    /// time against `SCShareableContent`, which actually goes and asks. That
+    /// is the call that notices a grant the preflight is still lying about.
+    func refresh() async {
+        accessibility = AXIsProcessTrusted()
+
+        if CGPreflightScreenCaptureAccess() {
+            screenRecording = true
+            needsRelaunch = false
+            return
+        }
+        // The preflight says no. It may be a stale no.
+        let real = await Self.canActuallyCapture()
+        screenRecording = real
+        // Granted in reality but not according to the cached preflight: the
+        // grant landed while this process was running, and capture code that
+        // preflights will keep refusing until the app is restarted.
+        needsRelaunch = real
+    }
+
+    /// Whether a capture could actually start right now.
+    ///
+    /// `SCShareableContent` is refused outright without the permission, so it
+    /// answers the real question. It is the heavier call, which is why it is
+    /// only used to double-check a negative.
+    private static func canActuallyCapture() async -> Bool {
+        do {
+            _ = try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: true
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// What happened when we asked.
@@ -104,6 +152,16 @@ final class ScreenAccess {
         }
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Quit and come back, because a cached preflight cannot be cleared.
+    func relaunch() {
+        let url = Bundle.main.bundleURL
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in
+            Task { @MainActor in NSApplication.shared.terminate(nil) }
+        }
     }
 
     enum Kind {

@@ -1080,6 +1080,19 @@ private struct ScreenPermissionCard: View {
                     }
                     Divider()
                     permissionRow(.screenRecording, granted: access.screenRecording)
+                    if access.needsRelaunch {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Restart to finish").font(.callout.weight(.medium))
+                                Text("macOS granted Screen Recording after this app started, and capture cannot see it until Tokenstat is restarted.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: Theme.Space.m)
+                            Button("Restart", .refresh) { access.relaunch() }
+                                .buttonStyle(AccentButtonStyle(small: true))
+                        }
+                    }
                     permissionRow(.accessibility, granted: access.accessibility)
                     // Directly above Always-on host, which is exactly where
                     // somebody would assume the opposite. Capture runs in this
@@ -1100,7 +1113,8 @@ private struct ScreenPermissionCard: View {
             // "granted" without a relaunch.
             .onReceive(
                 NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-            ) { _ in access.refresh() }
+            ) { _ in Task { await access.refresh() } }
+            .task { await access.refresh() }
             #endif
         }
     }
@@ -1145,6 +1159,9 @@ private struct ScreenPermissionCard: View {
         case .accessibility: access.requestAccessibility()
         }
         if answer == .alreadyDecided { access.openSettings(kind) }
+        // Read the real state back. Somebody who answers the prompt straight
+        // away should not have to click away and back for the card to agree.
+        Task { await access.refresh() }
     }
     #endif
 
