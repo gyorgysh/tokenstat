@@ -468,6 +468,7 @@ mod tests {
     #[test]
     fn account_and_sync_do_not_count() {
         assert!(!counts_as_work("info", None));
+        assert!(!counts_as_work("host.stats", None));
         assert!(!counts_as_work("sync.run", None));
         assert!(!counts_as_work("activity.calendar", None));
         assert!(!counts_as_work("remote.serve", None));

@@ -68,6 +68,27 @@ impl Overlapped {
 
 #[cfg_attr(test, allow(dead_code))]
 #[repr(C)]
+pub(crate) struct FileTime {
+    pub low: u32,
+    pub high: u32,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+#[repr(C)]
+pub(crate) struct MemoryStatusEx {
+    pub length: u32,
+    pub memory_load: u32,
+    pub total_phys: u64,
+    pub avail_phys: u64,
+    pub total_page_file: u64,
+    pub avail_page_file: u64,
+    pub total_virtual: u64,
+    pub avail_virtual: u64,
+    pub avail_extended_virtual: u64,
+}
+
+#[cfg_attr(test, allow(dead_code))]
+#[repr(C)]
 pub(crate) struct SystemPowerStatus {
     pub ac_line_status: u8,
     pub battery_flag: u8,
@@ -136,6 +157,14 @@ unsafe extern "system" {
     ) -> Bool;
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> Bool;
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn GlobalMemoryStatusEx(status: *mut MemoryStatusEx) -> Bool;
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn GetSystemTimes(
+        idle: *mut FileTime,
+        kernel: *mut FileTime,
+        user: *mut FileTime,
+    ) -> Bool;
     #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn PowerCreateRequest(context: *mut ReasonContext) -> Handle;
     #[cfg_attr(test, allow(dead_code))]

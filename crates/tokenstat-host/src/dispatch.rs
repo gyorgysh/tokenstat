@@ -2274,6 +2274,9 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     if let Some(answer) = crate::host_policy::call(method, params) {
         return Some(answer);
     }
+    if let Some(answer) = crate::host_stats::call(method, params) {
+        return Some(answer);
+    }
 
     // Serving and reaching other machines. None of these read the archive, and
     // a call being forwarded to an idle machine must not queue behind a scan
@@ -3469,6 +3472,7 @@ mod tests {
             // never be behind a session.
             "host.socketPath",
             "host.policy",
+            "host.stats",
             // The Machines screen has to answer on a machine whose archive
             // will not open, because that is when somebody goes looking at it.
             "machine.peers",
