@@ -15,7 +15,11 @@ internal static class HostProcess
 {
     public static void EnsureRunning()
     {
-        if (PipeUp())
+        // A pipe that answers is not enough: the scheduled task can be running
+        // a helper from an older install, and every method added since would
+        // come back as "unknown method". Replacing it is the fix, and the
+        // install script is what replaces it.
+        if (PipeUp() && SpeaksThisVersion())
         {
             return;
         }
@@ -50,6 +54,29 @@ internal static class HostProcess
                 return;
             }
             Thread.Sleep(150);
+        }
+    }
+
+    /// <summary>
+    /// Whether the helper answering the pipe was built from this release.
+    /// </summary>
+    /// <remarks>
+    /// Cheap: <c>protocol</c> is answered without opening an archive. Anything
+    /// that is not a clear match, including a helper too old to know the
+    /// method, counts as a mismatch, which is the right reading of both.
+    /// </remarks>
+    private static bool SpeaksThisVersion()
+    {
+        try
+        {
+            var answer = AppServices.Host.Call("protocol", null, TimeSpan.FromSeconds(5));
+            var spoken = answer["coreVersion"]?.GetValue<string>();
+            var mine = typeof(HostProcess).Assembly.GetName().Version?.ToString(3);
+            return spoken is not null && mine is not null && spoken == mine;
+        }
+        catch
+        {
+            return false;
         }
     }
 

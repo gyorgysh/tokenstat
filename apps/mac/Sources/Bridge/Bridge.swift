@@ -144,11 +144,61 @@ enum Bridge {
            let hosted = SocketTransport.connecting(to: path)
         {
             adopt(Route(transport: hosted, isHosted: true))
+            if !hostSpeaksThisProtocol(hosted) {
+                // The daemon outlives the app that installed it, so an old
+                // helper can be answering a new app. Everything added since it
+                // was built is then "unknown method", which is true and
+                // useless: it surfaced as raw protocol text on the SSH screen.
+                // Replace the helper, and only fall back in process if the
+                // replacement still does not agree.
+                try? HostAgentInstaller.installAndStart()
+                if let repaired = SocketTransport.connecting(to: path),
+                   hostSpeaksThisProtocol(repaired)
+                {
+                    adopt(Route(transport: repaired, isHosted: true))
+                    return
+                }
+                adopt(Route(transport: InProcessTransport(), isHosted: false))
+            }
             return
         }
         #endif
         adopt(Route(transport: InProcessTransport(), isHosted: false))
     }
+
+    /// Whether the helper on the other end of this transport was built from
+    /// the same wire contract as this app.
+    ///
+    /// Cheap on purpose: `protocol` is answered without opening an archive, so
+    /// this costs a round trip and nothing else. A helper too old to know the
+    /// method at all fails the same way as one that answers with a different
+    /// number, which is the correct reading of both.
+    private static func hostSpeaksThisProtocol(_ transport: Transport) -> Bool {
+        guard let response = try? transport.call(
+            method: "protocol", params: "{}", patience: Patience.interactive
+        ) else { return false }
+        struct Spoken: Decodable { let protocolVersion: String }
+        guard let envelope = try? JSONDecoder().decode(
+            Envelope<Spoken>.self, from: Data(response.utf8)
+        ), envelope.ok, let spoken = envelope.result else { return false }
+        // Nothing to compare against means nothing to conclude. Leave the
+        // daemon alone rather than reinstalling it on a guess.
+        guard !expectedProtocolVersion.isEmpty else { return true }
+        return spoken.protocolVersion == expectedProtocolVersion
+    }
+
+    /// The contract this build speaks, asked of the copy compiled into the app
+    /// rather than written down twice.
+    private static let expectedProtocolVersion: String = {
+        let response = (try? InProcessTransport().call(
+            method: "protocol", params: "{}", patience: Patience.interactive
+        )) ?? ""
+        struct Spoken: Decodable { let protocolVersion: String }
+        guard let envelope = try? JSONDecoder().decode(
+            Envelope<Spoken>.self, from: Data(response.utf8)
+        ), let spoken = envelope.result else { return "" }
+        return spoken.protocolVersion
+    }()
 
     private static func adopt(_ next: Route) {
         routeLock.lock()

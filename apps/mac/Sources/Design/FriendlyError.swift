@@ -51,6 +51,19 @@ struct FriendlyError {
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
+        // A method the host has never heard of is not a bad call, it is an old
+        // helper: the daemon outlives the app that installed it. The method
+        // name belongs in a log, not on a screen.
+        if lower.contains("unknown method") || lower.contains("unknown_method") {
+            return FriendlyError(
+                title: "Helper is out of date",
+                message: "The background helper on this machine is older than the app and does "
+                    + "not know this yet. Restart the app to replace it, then try again.",
+                symbol: "arrow.triangle.2.circlepath",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
         if lower.contains("not approved") || lower.contains("waiting for someone to allow") {
             return FriendlyError(
                 title: "Waiting for approval",
