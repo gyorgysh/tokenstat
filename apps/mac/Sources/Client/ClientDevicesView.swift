@@ -378,9 +378,19 @@ struct ClientDeviceDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 spend
-                liveStats
-                reach
-                fromThisPhone
+                // Reachability, live readings and the two ways in, as one
+                // header shared with the screen you reach from Workspaces.
+                if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
+                    ClientHostHeader(
+                        name: DeviceCopy.name(current),
+                        peerKey: key,
+                        online: machine.online,
+                        reach: DeviceCopy.reach(machine, isThisDevice: isThisDevice)
+                    )
+                } else {
+                    liveStats
+                    reach
+                }
                 identity
                 // The same explanation the Workspaces tab carries, with this
                 // machine's key beside it: somebody reading a device page is
@@ -509,14 +519,6 @@ struct ClientDeviceDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var canRemote: Bool {
-        if let remote = account.account?.canRemote { return remote }
-        switch account.account?.tier?.lowercased() {
-        case "patron", "legend": return true
-        default: return false
-        }
-    }
-
     /// Power, CPU and memory after a hop to an awake host. This phone is
     /// never sampled here: it is not a host.
     @ViewBuilder
@@ -526,66 +528,6 @@ struct ClientDeviceDetailView: View {
            !key.isEmpty,
            machine.online == true {
             HostStatsBar(peer: key, online: true)
-        }
-    }
-
-    /// Phone → host: open work on Patron, view screen on Legend.
-    ///
-    /// The Workspaces tab is the same plane reached the other way. Somebody
-    /// who opened a device from the list should not have to guess that
-    /// Connect lives on another tab.
-    @ViewBuilder
-    private var fromThisPhone: some View {
-        if isThisDevice { EmptyView() }
-        else if let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("From this phone")
-                    .font(ClientType.sectionTitle)
-                if canRemote {
-                    NavigationLink {
-                        ClientHostWorkspacesView(peerKey: key, hostName: DeviceCopy.name(current))
-                    } label: {
-                        DeviceActionRow(
-                            title: "Open work",
-                            subtitle: machine.online == true
-                                ? "Folders, terminals and sessions on this computer."
-                                : "It is asleep. Opening this will wake nothing, but it will try."
-                        )
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Open work")
-                            .font(ClientType.label.weight(.medium))
-                        Text("Opening folders and terminals on this computer is on Patron.")
-                            .font(ClientType.caption)
-                            .foregroundStyle(.secondary)
-                        Button("See plans", .plans) { store.showPaywall = true }
-                            .font(ClientType.caption.weight(.semibold))
-                            .tint(Theme.accent)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(minHeight: 44)
-                }
-                NavigationLink {
-                    ScreenViewerView(
-                        peer: key,
-                        name: DeviceCopy.name(current),
-                        tier: account.account?.tier
-                    )
-                } label: {
-                    DeviceActionRow(
-                        title: "View screen",
-                        subtitle: account.account?.tier?.lowercased() == "legend"
-                            ? "End-to-end encrypted from this device."
-                            : "Requires Legend."
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Theme.Space.m)
-            .cardSurface()
         }
     }
 
@@ -640,7 +582,7 @@ struct ClientDeviceDetailView: View {
 }
 
 /// One row inside the From this phone card: a title, a line of why, a chevron.
-private struct DeviceActionRow: View {
+struct DeviceActionRow: View {
     let title: String
     let subtitle: String
 
@@ -692,7 +634,7 @@ private struct DetailLine: View {
 /// Three states and three appearances, because a server that never reported
 /// presence must not be drawn as one that reported "asleep". The same rule the
 /// limit readings follow: "no answer" and "the answer is no" are different.
-private struct AwakeDot: View {
+struct AwakeDot: View {
     let online: Bool?
 
     var body: some View {

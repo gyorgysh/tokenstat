@@ -1869,7 +1869,8 @@ struct RootView: View {
             WorkspacesView(
                 model: workspaces,
                 terminals: terminals,
-                isActive: showsWorkspaceSurface
+                isActive: showsWorkspaceSurface,
+                tier: account.account?.tier
             )
             .opacity(showsWorkspaceSurface ? 1 : 0)
             .allowsHitTesting(showsWorkspaceSurface)

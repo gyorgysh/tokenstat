@@ -21,6 +21,11 @@ struct WorkspacesView: View {
     /// while the user is on Home or elsewhere so terminals are not torn down;
     /// when false the pane must not claim keyboard focus or poll as focused.
     var isActive: Bool = true
+    /// The signed-in tier, for the screen viewer a remote workspace offers.
+    /// Nil is a tier the viewer refuses, and says so.
+    var tier: String?
+    /// The peer whose screen the header is offering, while the viewer is up.
+    @State private var viewingScreen: RemoteScreenTarget?
     #endif
 
     var body: some View {
@@ -52,6 +57,12 @@ struct WorkspacesView: View {
             }
         }
         .background(Theme.background)
+        #if os(macOS)
+        .sheet(item: $viewingScreen) { target in
+            ScreenViewerView(peer: target.peer, name: target.name, tier: tier)
+                .frame(minWidth: 900, minHeight: 600)
+        }
+        #endif
     }
 
     private func header(_ folder: WorkspaceFolder) -> some View {
@@ -79,6 +90,23 @@ struct WorkspacesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer()
+            #if os(macOS)
+            // A workspace on another machine names that machine in the line
+            // above, and this is the rest of the answer: Devices was the only
+            // door to that computer's screen, which is not where somebody
+            // working in its folders would look.
+            if folder.isRemote, let peer = folder.machineID, !peer.isEmpty {
+                Button("View screen", .preview) {
+                    viewingScreen = RemoteScreenTarget(
+                        peer: peer,
+                        name: folder.machineLabel ?? "Remote machine"
+                    )
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .fixedSize()
+                .layoutPriority(2)
+            }
+            #endif
             if let git = folder.git, git.isRepo {
                 BranchChip(git: git)
                     // The chip keeps its whole shape whatever the path does:
@@ -743,3 +771,15 @@ private struct ChangeRow: View {
         .help(file.path)
     }
 }
+
+#if os(macOS)
+/// The machine whose screen the viewer is showing.
+///
+/// A value rather than a pair of `@State` strings, so "which machine" and
+/// "is the viewer up" cannot disagree.
+struct RemoteScreenTarget: Identifiable, Hashable {
+    let peer: String
+    let name: String
+    var id: String { peer }
+}
+#endif

@@ -25,6 +25,17 @@ struct ClientHostWorkspacesView: View {
         @Bindable var model = model
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
+                // What the machine is doing, at the top of the screen that
+                // opens it. This used to exist only on the Devices page, so the
+                // two things people most want from another computer were behind
+                // a tab nobody visits for that reason.
+                ClientHostHeader(
+                    name: hostName,
+                    peerKey: peerKey,
+                    online: model.errorMessage == nil ? true : nil,
+                    showsOpenWork: false
+                )
+
                 if let message = model.errorMessage {
                     ClientErrorCard(message: message) {
                         Task { await model.connect(peerKey: peerKey, name: hostName) }
