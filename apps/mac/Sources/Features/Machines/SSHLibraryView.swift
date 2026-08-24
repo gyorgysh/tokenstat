@@ -32,6 +32,12 @@ enum SSHLibraryRoute: Hashable {
 /// points tall, and a host had nowhere to show what it was actually configured
 /// to do. Sheets are kept for the two things that really are modal and
 /// dangerous: recovery words, and confirming a deletion.
+///
+/// The phone and the iPad only. The Mac used to present this same view in a
+/// sheet over Devices; it has an SSH section in the sidebar and three columns
+/// of its own now, so what is left here is the push stack, which was already
+/// the right shape for a phone.
+#if !os(macOS)
 struct SSHLibraryView: View {
     var vaultTier: String?
     var onClose: (() -> Void)?
@@ -43,9 +49,7 @@ struct SSHLibraryView: View {
         var id: String { rawValue }
     }
 
-    #if !os(macOS)
     @Environment(ClientStore.self) private var store
-    #endif
     @State private var model = SSHLibraryModel()
     @State private var section = Section.hosts
     @State private var route: SSHLibraryRoute?
@@ -66,66 +70,17 @@ struct SSHLibraryView: View {
             .sheet(item: $connecting) { host in
                 SSHConnectForm(host: host, model: model) { terminal = $0 }
             }
-            #if os(macOS)
-            .sheet(item: $terminal) { SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480) }
-            #else
             .fullScreenCover(item: $terminal) { SSHLiveTerminalScreen(session: $0) }
-            #endif
     }
 
-    // MARK: - Platform shells
+    // MARK: - The screen
 
-    #if os(macOS)
-    private var content: some View {
-        HStack(spacing: 0) {
-            listSide
-                .frame(width: 300)
-            Divider()
-            detailSide
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Theme.background)
-        .navigationTitle("SSH")
-        .toolbar { toolbarContent }
-    }
-
-    @ViewBuilder
-    private var detailSide: some View {
-        switch route {
-        case let .host(id):
-            SSHHostEditor(model: model, hostID: id, folderID: nil, onDone: close).id(id)
-        case let .newHost(folder):
-            SSHHostEditor(model: model, hostID: nil, folderID: folder, onDone: close)
-        case let .key(id):
-            SSHKeyEditor(model: model, keyID: id, onDone: close).id(id)
-        case .newKey:
-            SSHKeyEditor(model: model, keyID: nil, onDone: close)
-        case let .snippet(id):
-            SSHSnippetEditor(model: model, snippetID: id, onDone: close).id(id)
-        case .newSnippet:
-            SSHSnippetEditor(model: model, snippetID: nil, onDone: close)
-        case let .folder(id):
-            SSHFolderEditor(model: model, folderID: id, parentID: nil, onDone: close).id(id)
-        case let .newFolder(parent):
-            SSHFolderEditor(model: model, folderID: nil, parentID: parent, onDone: close)
-        // The Mac shell selects one trusted server at a time; the phone shows
-        // the list and forgets from a row, so both land on the same screen.
-        case .knownHost, .knownHosts:
-            SSHKnownHostsView(model: model)
-        case .importConfig:
-            SSHConfigImportView(model: model, onDone: close)
-        case .importCloud:
-            CloudImportForm(model: model, onDone: close)
-        case nil:
-            EmptyState(
-                symbol: "sidebar.left",
-                title: "Nothing selected",
-                message: "Pick a server, a key or a snippet on the left, or add one."
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-    #else
+    /// One pushed screen, on the stack it was opened from.
+    ///
+    /// The Mac used to present this same view in a sheet with a list pane and a
+    /// detail pane inside it. It has a sidebar section and three columns of its
+    /// own now, so what is left here is the phone's shape, which was already
+    /// the right one.
     private var content: some View {
         listSide
             .navigationTitle("SSH")
@@ -165,7 +120,6 @@ struct SSHLibraryView: View {
             CloudImportForm(model: model, onDone: close)
         }
     }
-    #endif
 
     // MARK: - The list side
 
@@ -239,11 +193,7 @@ struct SSHLibraryView: View {
                 ForEach(model.visibleSnippets) { snippet in snippetRow(snippet) }
             }
         }
-        #if os(macOS)
-        .listStyle(.sidebar)
-        #else
         .listStyle(.insetGrouped)
-        #endif
     }
 
     /// One row per visible line, with its depth.
@@ -437,19 +387,7 @@ struct SSHLibraryView: View {
         }
     }
 
-    @ViewBuilder
     private var vaultUpgrade: some View {
-        #if os(macOS)
-        EmptyState(
-            symbol: "lock.shield",
-            title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above."
-        ) {
-            Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
-                .buttonStyle(AccentButtonStyle())
-        }
-        .padding(Theme.Space.m)
-        #else
         ClientEmptyState(
             kind: .needsAccount,
             title: "Sync SSH between your devices",
@@ -460,9 +398,9 @@ struct SSHLibraryView: View {
             art: .vault
         )
         .padding(.horizontal, Theme.Space.m)
-        #endif
     }
 }
+#endif
 
 /// One server in the list.
 ///

@@ -100,7 +100,7 @@ ALLOWED = [
     ("Client/PhoneHeatmap.swift", "onSelect?(day)"),
     # Whole-row launch into the SSH library. The terminal glyph is already
     # inside the label, and a second one on the button would duplicate it.
-    ("Features/Machines/MachinesView.swift", "showingSSH = true"),
+    ("Features/Machines/MachinesView.swift", "onNavigate?(.ssh)"),
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),

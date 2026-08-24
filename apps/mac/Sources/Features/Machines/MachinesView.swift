@@ -26,9 +26,12 @@ struct MachinesView: View {
     @State private var confirmRevoke: Peer?
 
 @Bindable var model: MachinesModel
+    /// Where to send somebody who clicks the SSH card. The shell decides which
+    /// section they land on, because this card asks for "servers" and has no
+    /// business picking between Hosts and Keys.
+    var onNavigate: ((NavigationRequest) -> Void)?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var addingDevice = false
-    @State private var showingSSH = false
     @State private var encryptionExpanded = false
     /// The account machine waiting on a Remove confirmation. Destructive on
     /// the server, so it never happens from a single click.
@@ -146,17 +149,13 @@ struct MachinesView: View {
             }
             .frame(width: 500)
         }
-        #if os(macOS)
-        .sheet(isPresented: $showingSSH) {
-            SSHLibraryView(vaultTier: model.vaultTier, onClose: { showingSSH = false })
-                .frame(minWidth: 760, idealWidth: 920, minHeight: 560, idealHeight: 680)
-        }
-        #endif
     }
 
+    /// A way in, not a place. SSH is a section in the sidebar now, and this
+    /// card is here because Devices is where people looked for it first.
     private var sshAccess: some View {
         #if os(macOS)
-        Button { showingSSH = true } label: { sshAccessLabel }
+        Button { onNavigate?(.ssh) } label: { sshAccessLabel }
             .buttonStyle(.plain)
         #else
         NavigationLink {

@@ -1936,7 +1936,7 @@ struct RootView: View {
                 workspaceID: route.workspaceID
             )
         case .global(.machines):
-            MachinesView(model: machines)
+            MachinesView(model: machines) { handle($0) }
         case .global(.account):
             AccountView(model: account)
         case let .ssh(section):
