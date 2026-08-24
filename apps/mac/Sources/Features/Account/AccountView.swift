@@ -114,7 +114,6 @@ struct AccountView: View {
                     model.signIn()
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
             }
         }
     }
@@ -220,7 +219,6 @@ struct AccountView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
                     .disabled(model.isSyncing || model.syncCooldownUntil != nil)
                     #endif
                 }
@@ -456,7 +454,6 @@ struct AccountView: View {
                 set: { on in Task { await model.setLimitsSourceShared(provider.source, shared: on) } }
             ))
             .toggleStyle(.switch)
-            .tint(Theme.accent)
             .labelsHidden()
             .accessibilityLabel("Track \(harnessName(provider.source))")
             .fixedSize()
@@ -845,7 +842,6 @@ struct AccountView: View {
             Spacer(minLength: Theme.Space.m)
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
-                .tint(Theme.accent)
                 .labelsHidden()
                 .accessibilityLabel(title)
                 .fixedSize()

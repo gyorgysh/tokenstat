@@ -427,7 +427,6 @@ struct MachinesView: View {
                             set: { enabled in Task { await model.setTunnel(enabled) } }
                         ))
                         .toggleStyle(.switch)
-                        .tint(Theme.accent)
                         .labelsHidden()
                         .accessibilityLabel("Reach devices from anywhere")
                         .disabled(!allowed)
@@ -668,7 +667,6 @@ struct MachinesView: View {
             Spacer(minLength: Theme.Space.m)
             Toggle("", isOn: isOn)
                 .toggleStyle(.switch)
-                .tint(Theme.accent)
                 .labelsHidden()
                 .accessibilityLabel("Always-on host")
                 .fixedSize()

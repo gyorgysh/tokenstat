@@ -114,7 +114,6 @@ struct BrowserView: View {
 
             Button("Go", .next) { commit(text) }
                 .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
                 .controlSize(.small)
         }
         .padding(.horizontal, Theme.Space.s)

@@ -150,7 +150,6 @@ struct WorkspacesView: View {
                 model.requestAdd()
             }
             .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -192,6 +192,12 @@ struct RootView: View {
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
                 Task { await Bridge.nudgeTunnel() }
             }
+            // One accent for every control in the window. Set here so a toggle,
+            // a segmented picker or a prominent button does not have to
+            // remember it, and cannot come back as system blue when somebody
+            // adds the next one. The AppKit half of the same decision is the
+            // AccentColor colorset in the asset catalogue.
+            .tint(Theme.accent)
     }
 
     /// Splash or chrome, plus window geometry and the pointer peeks.

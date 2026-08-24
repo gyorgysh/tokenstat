@@ -171,6 +171,11 @@ targets:
         INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: YES
         ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # The accent lives in the catalogue as well as in Theme.swift,
+        # because AppKit reads the catalogue for the parts SwiftUI does
+        # not own: focus rings, sidebar selection, text selection. A
+        # `.tint` at the root cannot reach those.
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
       # Push notifications, iOS and iPadOS only.
       #
       # Scoped by SDK on purpose. The Mac notifies itself locally, which needs

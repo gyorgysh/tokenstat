@@ -579,7 +579,6 @@ struct HomeView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .tint(Theme.accent)
         }
         .padding(Theme.Space.m)
         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
