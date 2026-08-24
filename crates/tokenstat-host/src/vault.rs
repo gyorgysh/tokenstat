@@ -609,10 +609,13 @@ fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
 /// Returns the recovery code, which is shown once. It is not the way in, it is
 /// the way back when the password is forgotten.
 fn create_v3(password: &str) -> Result<String, String> {
-    verify_paid_account()?;
+    // The password before the plan. It is a pure check on what the caller
+    // typed, so answering it first costs nothing and does not make somebody
+    // with a short password wait on an account lookup to be told so.
     if let Some(problem) = tokenstat_core::passphrase::password_error(password) {
         return Err(problem);
     }
+    verify_paid_account()?;
     let recovery = generate_recovery();
     let vmk = random32();
     let recovery_salt = hex(&random32());
@@ -1089,6 +1092,10 @@ mod tests {
     fn a_vault_cannot_be_created_behind_a_weak_password() {
         // The host checks as well as the client. A client that forgets to
         // must not be able to put a weak password on an account's one vault.
+        //
+        // The password is checked before the account, which is what makes this
+        // hold on a machine with no account signed in. It failed on CI while
+        // passing here for exactly that reason.
         let refused = create_v3("short").unwrap_err();
         assert!(refused.contains("12 characters"), "{refused}");
     }
