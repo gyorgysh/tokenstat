@@ -37,6 +37,15 @@ struct WorkspacesView: View {
             }
             if let folder = model.selected {
                 header(folder)
+                #if os(macOS)
+                // What that computer is doing, where you are working in its
+                // folders. This block only existed on Devices, so somebody who
+                // opened a machine's workspace could see its files and not
+                // whether it was awake or what it was busy with.
+                if folder.isRemote, let peer = folder.machineID, !peer.isEmpty {
+                    remoteMachine(folder, peer: peer)
+                }
+                #endif
                 Divider()
                 // Remote workspaces run the same terminal surface as local
                 // ones: the host forwards every pty call to the machine that
@@ -90,23 +99,6 @@ struct WorkspacesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .layoutPriority(1)
             Spacer()
-            #if os(macOS)
-            // A workspace on another machine names that machine in the line
-            // above, and this is the rest of the answer: Devices was the only
-            // door to that computer's screen, which is not where somebody
-            // working in its folders would look.
-            if folder.isRemote, let peer = folder.machineID, !peer.isEmpty {
-                Button("View screen", .preview) {
-                    viewingScreen = RemoteScreenTarget(
-                        peer: peer,
-                        name: folder.machineLabel ?? "Remote machine"
-                    )
-                }
-                .buttonStyle(SecondaryButtonStyle(small: true))
-                .fixedSize()
-                .layoutPriority(2)
-            }
-            #endif
             if let git = folder.git, git.isRepo {
                 BranchChip(git: git)
                     // The chip keeps its whole shape whatever the path does:
@@ -119,6 +111,36 @@ struct WorkspacesView: View {
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, Theme.Space.s)
     }
+
+    #if os(macOS)
+    /// Power, CPU and memory for the machine this folder lives on, and the way
+    /// on to its screen.
+    ///
+    /// The same readings the Devices page shows, from the same `HostStatsBar`,
+    /// so the two cannot report different things about one computer.
+    private func remoteMachine(_ folder: WorkspaceFolder, peer: String) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "laptopcomputer")
+                    .foregroundStyle(Theme.accent)
+                Text(folder.machineLabel ?? "Remote machine")
+                    .font(.system(size: DisplayFit.dp(12), weight: .medium))
+                Spacer(minLength: 0)
+                Button("View screen", .preview) {
+                    viewingScreen = RemoteScreenTarget(
+                        peer: peer,
+                        name: folder.machineLabel ?? "Remote machine"
+                    )
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .fixedSize()
+            }
+            HostStatsBar(peer: peer, online: true)
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.bottom, Theme.Space.s)
+    }
+    #endif
 
     private func terminalPlaceholder(_ folder: WorkspaceFolder) -> some View {
         VStack(spacing: Theme.Space.m) {
