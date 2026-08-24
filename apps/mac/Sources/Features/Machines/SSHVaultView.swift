@@ -65,7 +65,6 @@ final class SSHVaultModel {
     }
 }
 
-#if os(macOS)
 /// The vault, as one quiet line above the host list.
 ///
 /// It used to be three buttons in a row, two of them destructive, at the top of
@@ -307,4 +306,3 @@ struct SSHVaultScreen: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
-#endif

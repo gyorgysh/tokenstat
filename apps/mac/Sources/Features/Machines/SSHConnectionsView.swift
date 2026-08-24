@@ -74,116 +74,35 @@ struct CloudImportForm: View {
     }
 }
 
-struct SSHVaultBanner: View {
-    let tier: String
-    let canWrite: Bool
-    @Binding var status: SSHVaultStatus?
-    @Binding var recovery: String?
-    @State private var error: String?
-    @State private var showingSetup = false
-    @State private var showingRecovery = false
-    @State private var confirmingRotation = false
-    @State private var confirmingReset = false
-    @State private var enrollmentRequests: [SSHVaultEnrollment] = []
-    var body: some View {
-        GroupBox {
-            if recovery != nil {
-                HStack {
-                    Label("Recovery words have not been confirmed", systemImage: "exclamationmark.shield.fill")
-                    Spacer()
-                    Button("Show words", .reveal) { showingRecovery = true }.buttonStyle(AccentButtonStyle(small: true))
-                    Button("Discard vault", .delete) { confirmingReset = true }.buttonStyle(SecondaryButtonStyle(small: true))
-                }
-            } else if status?.created == true {
-                HStack {
-                    Label("Encrypted vault ready · \(status?.recordCount ?? 0) records", systemImage: "lock.shield.fill")
-                    Spacer()
-                    if status?.enrolled == false { Button("Enroll this device", .device) { showingSetup = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
-                    else if canWrite { Button("New recovery words", .refresh) { confirmingRotation = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
-                    else { Text("Read-only after downgrade").font(.caption).foregroundStyle(.secondary) }
-                    if canWrite { Button("Delete vault", .delete) { confirmingReset = true }.buttonStyle(SecondaryButtonStyle(small: true)) }
-                }
-            } else {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Sync encrypted SSH secrets across your devices.")
-                        Text("Only your devices and 24 recovery words can decrypt it.").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if canWrite {
-                        Button("Set up vault", .security) { showingSetup = true }
-                            .buttonStyle(AccentButtonStyle(small: true))
-                    } else {
-                        Text("Supporter required to create a vault")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if let error { Text(error).foregroundStyle(Theme.danger) }
-            ForEach(enrollmentRequests) { request in
-                HStack {
-                    Label("A device is waiting to join", systemImage: "iphone.and.arrow.forward")
-                    Text(String(request.publicIdentity.prefix(12)) + "…").font(Theme.mono(11)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Approve", .approve) { Task { await approve(request) } }.buttonStyle(AccentButtonStyle(small: true))
-                }
-            }
-        }
-        .padding(.horizontal)
-        .sheet(isPresented: $showingSetup) {
-            SSHVaultSetupSheet(tier: tier, status: $status, recovery: $recovery)
-        }
-        .sheet(isPresented: $showingRecovery) {
-            if let recovery {
-                SSHRecoveryWordsSheet(recovery: recovery, onConfirmed: { self.recovery = nil }, onDiscard: { Task { await resetVault() } })
-            }
-        }
-        .onChange(of: recovery) { _, value in if value != nil { showingRecovery = true } }
-        .confirmationDialog("Replace the current recovery words?", isPresented: $confirmingRotation, titleVisibility: .visible) {
-            Button("Generate new recovery words", role: .destructive) { Task { await rotateRecovery() } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("The current words will stop working as soon as the encrypted update succeeds.") }
-        .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
-            Button("Delete vault", role: .destructive) { Task { await resetVault() } }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") }
-        .task(id: status?.enrolled) {
-            guard status?.enrolled == true else { return }
-            enrollmentRequests = (try? await Bridge.sshVaultEnrollmentRequests()) ?? []
-        }
-    }
-    private func rotateRecovery() async {
-        do { recovery = try await Bridge.rotateSSHVaultRecovery().recovery; status = try await Bridge.sshVaultStatus() }
-        catch { self.error = error.localizedDescription }
-    }
-    private func resetVault() async {
-        do {
-            try await Bridge.resetSSHVault()
-            recovery = nil
-            showingRecovery = false
-            showingSetup = false
-            enrollmentRequests = []
-            status = try await Bridge.sshVaultStatus()
-        } catch { self.error = error.localizedDescription }
-    }
-    private func approve(_ request: SSHVaultEnrollment) async {
-        do { _ = try await Bridge.approveSSHVaultEnrollment(request); enrollmentRequests.removeAll { $0.id == request.id } }
-        catch { self.error = error.localizedDescription }
-    }
-}
-
+/// The 24 words, then the three that prove they were written down.
+///
+/// Two steps, because one surface is not a confirmation. The old screen showed
+/// the grid, a "I stored all 24 words" toggle, and then three fields asking for
+/// words 3, 11 and 20 with the grid still on screen: an answer you can read off
+/// is a typing exercise, not a check.
+///
+/// Going back is allowed and re-showing the words is a deliberate action, so
+/// nobody is trapped and nobody confirms by reading.
 struct SSHRecoveryWordsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let recovery: String
     let onConfirmed: () -> Void
     let onDiscard: () -> Void
-    @State private var storedSafely = false
+
+    private enum Step { case read, confirm }
+
+    @State private var step = Step.read
     @State private var confirmingDiscard = false
     @State private var confirmation3 = ""
     @State private var confirmation11 = ""
     @State private var confirmation20 = ""
     @State private var copied = false
+
     private var words: [String] { recovery.split(whereSeparator: \.isWhitespace).map(String.init) }
+    private var typedAnything: Bool {
+        !confirmation3.isEmpty || !confirmation11.isEmpty || !confirmation20.isEmpty
+    }
+
     private var wordsMatch: Bool {
         words.count == 24
             && confirmation3.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == words[2]
@@ -193,15 +112,42 @@ struct SSHRecoveryWordsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Save your recovery words").font(.title3.weight(.semibold))
-                    Text("This is the only recovery method if every enrolled device is lost.").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery words")
-            }
+            header
             Divider()
+            switch step {
+            case .read: readStep
+            case .confirm: confirmStep
+            }
+            Spacer(minLength: 0)
+            footer
+        }
+        .padding(Theme.Space.l)
+        .sshSheetFrame(width: 680, height: 670)
+        .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
+            Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. This cannot be undone.") }
+    }
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step == .read ? "Save your recovery words" : "Confirm three words")
+                    .font(.title3.weight(.semibold))
+                Text(step == .read
+                    ? "This is the only recovery method if every enrolled device is lost."
+                    : "The words are off screen on purpose. Type them from where you saved them.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery words")
+        }
+    }
+
+    // MARK: - Step one: read them
+
+    private var readStep: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 10) {
                 ForEach(Array(words.enumerated()), id: \.offset) { index, word in
                     HStack(spacing: 8) {
@@ -219,43 +165,72 @@ struct SSHRecoveryWordsSheet: View {
                 Button(action: copyWords) {
                     Label(copied ? "Copied" : "Copy all words", systemImage: copied ? "checkmark" : "doc.on.doc")
                 }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
+                .buttonStyle(SecondaryButtonStyle(small: true))
                 Text("The clipboard may be visible to other apps; clear it after saving.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Toggle("I stored all 24 words in a safe place", isOn: $storedSafely)
-            if storedSafely {
-                VStack(alignment: .leading, spacing: Theme.Space.s) {
-                    Text("Confirm three words").font(.callout.weight(.semibold))
-                    HStack {
-                        TextField("Word 3", text: $confirmation3).textFieldStyle(.roundedBorder)
-                        TextField("Word 11", text: $confirmation11).textFieldStyle(.roundedBorder)
-                        TextField("Word 20", text: $confirmation20).textFieldStyle(.roundedBorder)
-                    }
-                    if !confirmation3.isEmpty || !confirmation11.isEmpty || !confirmation20.isEmpty {
-                        Text(wordsMatch ? "Recovery words match." : "Enter words 3, 11, and 20 exactly as shown.")
-                            .font(.caption).foregroundStyle(wordsMatch ? Theme.success : Theme.danger)
-                    }
-                }
+        }
+    }
+
+    // MARK: - Step two: prove it
+
+    private var confirmStep: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Text("Enter words 3, 11 and 20 exactly as they were written.")
+                .font(.callout)
+            HStack {
+                field("Word 3", text: $confirmation3)
+                field("Word 11", text: $confirmation11)
+                field("Word 20", text: $confirmation20)
             }
+            if typedAnything {
+                Text(wordsMatch ? "Recovery words match." : "That is not what was generated.")
+                    .font(.caption).foregroundStyle(wordsMatch ? Theme.success : Theme.danger)
+            }
+            Button("Show the words again", .reveal) {
+                step = .read
+                confirmation3 = ""
+                confirmation11 = ""
+                confirmation20 = ""
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            Text("Going back is fine. It clears what was typed, so the words still have to be read from where you saved them.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func field(_ prompt: String, text: Binding<String>) -> some View {
+        TextField(prompt, text: text)
+            .textFieldStyle(.roundedBorder)
+            #if !os(macOS)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            #endif
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack {
                 Button("Discard this vault", .delete) { confirmingDiscard = true }
                     .buttonStyle(DestructiveButtonStyle())
                 Spacer()
-                Button("Done", .done) { onConfirmed(); dismiss() }
-                    .buttonStyle(AccentButtonStyle())
-                    .frame(minWidth: Theme.Control.pairedWidth)
-                    .disabled(!storedSafely || !wordsMatch)
+                if step == .read {
+                    Button("I have saved these", .next) { step = .confirm }
+                        .buttonStyle(AccentButtonStyle())
+                        .frame(minWidth: Theme.Control.pairedWidth)
+                } else {
+                    Button("Done", .done) { onConfirmed(); dismiss() }
+                        .buttonStyle(AccentButtonStyle())
+                        .frame(minWidth: Theme.Control.pairedWidth)
+                        .disabled(!wordsMatch)
+                }
             }
             Text("Close without confirming to look at the words later. Discard deletes the vault so you can create a new one.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(Theme.Space.l)
-        .sshSheetFrame(width: 680, height: 670)
-        .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
-            Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. This cannot be undone.") }
     }
 
     private func copyWords() {

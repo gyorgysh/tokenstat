@@ -55,8 +55,8 @@ struct SSHLibraryView: View {
     @State private var route: SSHLibraryRoute?
     @State private var connecting: SSHHost?
     @State private var terminal: SSHLiveTerminal?
-    @State private var vaultRecovery: String?
-    @State private var vaultStatus: SSHVaultStatus?
+    @State private var vault = SSHVaultModel()
+    @State private var showingVault = false
     @State private var expanded: Set<String> = []
 
     private var paidVaultTier: String? { SSHLibraryModel.paidTier(for: vaultTier) }
@@ -66,7 +66,14 @@ struct SSHLibraryView: View {
     var body: some View {
         content
             .task { await model.load(vaultTier: paidVaultTier) }
-            .task { vaultStatus = try? await Bridge.sshVaultStatus() }
+            .task { await vault.refresh() }
+            .sheet(isPresented: $showingVault) {
+                SSHVaultScreen(
+                    vault: vault,
+                    tier: vaultTier ?? "",
+                    canWrite: paidVaultTier != nil
+                )
+            }
             .sheet(item: $connecting) { host in
                 SSHConnectForm(host: host, model: model) { terminal = $0 }
             }
@@ -149,13 +156,11 @@ struct SSHLibraryView: View {
 
     private var header: some View {
         VStack(spacing: Theme.Space.s) {
-            if let vaultTier {
-                SSHVaultBanner(
-                    tier: vaultTier,
-                    canWrite: paidVaultTier != nil,
-                    status: $vaultStatus,
-                    recovery: $vaultRecovery
-                )
+            // One row, not a control panel. Enrol, new recovery words and
+            // delete live inside the screen it opens, where each of them has
+            // room for the sentence it needs.
+            if vaultTier != nil {
+                SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
             }
             Picker("SSH library", selection: $section) {
                 ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
