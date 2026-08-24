@@ -452,13 +452,16 @@ mod platform {
                                 || status.eq_ignore_ascii_case("full");
                         }
                     }
-                    "Mains" | "ADP" => {
+                    // `online` is 1 while the adapter is actually supplying
+                    // power. A machine with the cable in but the supply off
+                    // reads 0, which is the honest answer and the one the
+                    // battery indicator wants.
+                    "Mains" | "ADP"
                         if fs::read_to_string(path.join("online"))
                             .map(|t| t.trim() == "1")
-                            .unwrap_or(false)
-                        {
-                            on_ac = true;
-                        }
+                            .unwrap_or(false) =>
+                    {
+                        on_ac = true;
                     }
                     _ => {}
                 }
