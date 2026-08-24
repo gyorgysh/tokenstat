@@ -34,7 +34,7 @@ struct ClientDevicesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 NavigationLink {
-                    SSHConnectionsView(vaultTier: account.account == nil ? nil : (account.account?.tier?.lowercased() ?? "free"))
+                    SSHConnectionsView(vaultTier: account.account?.vaultTierForSsh)
                 } label: {
                     HStack(spacing: Theme.Space.m) {
                         Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
@@ -354,6 +354,7 @@ struct ClientDeviceDetailView: View {
     /// the new name too.
     var onRenamed: () async -> Void = {}
     @Environment(AccountModel.self) private var account
+    @Environment(ClientStore.self) private var store
 
     @State private var renaming = false
     @State private var draft = ""
@@ -377,27 +378,9 @@ struct ClientDeviceDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 spend
+                liveStats
                 reach
-                work
-                if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty {
-                    NavigationLink {
-                        ScreenViewerView(peer: key, name: DeviceCopy.name(current), tier: account.account?.tier)
-                    } label: {
-                        HStack(spacing: Theme.Space.m) {
-                            Image(systemName: "display").foregroundStyle(Theme.accent)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("View screen").font(ClientType.label.weight(.semibold))
-                                Text(account.account?.tier?.lowercased() == "legend" ? "End-to-end encrypted from this device" : "Requires Legend")
-                                    .font(ClientType.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                        }
-                        .padding(Theme.Space.m)
-                        .cardSurface()
-                    }
-                    .buttonStyle(.plain)
-                }
+                fromThisPhone
                 identity
                 // The same explanation the Workspaces tab carries, with this
                 // machine's key beside it: somebody reading a device page is
@@ -526,35 +509,77 @@ struct ClientDeviceDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Levels 3 to 5: that device's folders, its sessions, and attaching to
-    /// one. A live connection is what they need, so the link is offered when
-    /// there is a key to dial and withheld, with the reason, when there is not.
+    private var canRemote: Bool {
+        if let remote = account.account?.canRemote { return remote }
+        switch account.account?.tier?.lowercased() {
+        case "patron", "legend": return true
+        default: return false
+        }
+    }
+
+    /// Power, CPU and memory after a hop to an awake host. This phone is
+    /// never sampled here: it is not a host.
     @ViewBuilder
-    private var work: some View {
-        if !isThisDevice, let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
+    private var liveStats: some View {
+        if !isThisDevice,
+           let key = machine.publicIdentity,
+           !key.isEmpty,
+           machine.online == true {
+            HostStatsBar(peer: key, online: true)
+        }
+    }
+
+    /// Phone → host: open work on Patron, view screen on Legend.
+    ///
+    /// The Workspaces tab is the same plane reached the other way. Somebody
+    /// who opened a device from the list should not have to guess that
+    /// Connect lives on another tab.
+    @ViewBuilder
+    private var fromThisPhone: some View {
+        if isThisDevice { EmptyView() }
+        else if let key = machine.publicIdentity, !key.isEmpty, machine.isHost {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
-                Text("Work")
+                Text("From this phone")
                     .font(ClientType.sectionTitle)
-                NavigationLink {
-                    ClientHostWorkspacesView(peerKey: key, hostName: DeviceCopy.name(machine))
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Folders and sessions")
-                                .font(ClientType.label.weight(.medium))
-                                .foregroundStyle(.primary)
-                            Text(machine.online == true
-                                ? "Open what this device is working on."
-                                : "It is asleep. Opening this will wake nothing, but it will try.")
-                                .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                if canRemote {
+                    NavigationLink {
+                        ClientHostWorkspacesView(peerKey: key, hostName: DeviceCopy.name(current))
+                    } label: {
+                        DeviceActionRow(
+                            title: "Open work",
+                            subtitle: machine.online == true
+                                ? "Folders, terminals and sessions on this computer."
+                                : "It is asleep. Opening this will wake nothing, but it will try."
+                        )
                     }
+                    .buttonStyle(.plain)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Open work")
+                            .font(ClientType.label.weight(.medium))
+                        Text("Opening folders and terminals on this computer is on Patron.")
+                            .font(ClientType.caption)
+                            .foregroundStyle(.secondary)
+                        Button("See plans", .plans) { store.showPaywall = true }
+                            .font(ClientType.caption.weight(.semibold))
+                            .tint(Theme.accent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 44)
+                }
+                NavigationLink {
+                    ScreenViewerView(
+                        peer: key,
+                        name: DeviceCopy.name(current),
+                        tier: account.account?.tier
+                    )
+                } label: {
+                    DeviceActionRow(
+                        title: "View screen",
+                        subtitle: account.account?.tier?.lowercased() == "legend"
+                            ? "End-to-end encrypted from this device."
+                            : "Requires Legend."
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -611,6 +636,31 @@ struct ClientDeviceDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Space.m)
         .cardSurface()
+    }
+}
+
+/// One row inside the From this phone card: a title, a line of why, a chevron.
+private struct DeviceActionRow: View {
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(ClientType.label.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: Theme.Space.s)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .frame(minHeight: 44)
     }
 }
 
@@ -694,6 +744,12 @@ private enum DeviceCopy {
     /// The second line: enough to tell two unnamed devices apart, then when it
     /// was last heard from.
     static func caption(_ machine: Machine, isThisDevice: Bool = false) -> String {
+        if !isThisDevice,
+           machine.online == true,
+           machine.isHost,
+           machine.publicIdentity?.isEmpty == false {
+            return "Awake. Open work from this phone."
+        }
         guard machine.label?.isEmpty != false, let id = machine.machineID else {
             return lastSeen(machine, isThisDevice: isThisDevice)
         }
@@ -724,10 +780,10 @@ private enum DeviceCopy {
     static func reach(_ machine: Machine, isThisDevice: Bool) -> String {
         if isThisDevice { return "This is the device you are holding." }
         if machine.online == true {
-            return "Awake and reachable through the tunnel from a computer signed in to this account."
+            return "Awake and reachable through the tunnel from this phone, and from any other device signed in to this account."
         }
         if machine.publicIdentity?.isEmpty == false {
-            return "Asleep. It has a connection key, so it can be reached once it is awake."
+            return "Asleep. It has a connection key, so it can be reached from this phone once it is awake."
         }
         // Not a fault, and not something to fix from a phone. Saying which
         // switch it is beats "unavailable".

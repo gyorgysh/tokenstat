@@ -1768,6 +1768,14 @@ extension Bridge {
         try await background("ssh.provider.aws.import", ["profile": profile as Any, "region": region as Any, "username": username], as: SSHHostImport.self)
     }
 
+    static func hostStats() async throws -> HostStats {
+        try await background("host.stats", as: HostStats.self)
+    }
+
+    static func hostStats(peer: String) async throws -> HostStats {
+        try await onPeer(peer, "host.stats", as: HostStats.self)
+    }
+
     static func screenPermissions() async throws -> [ScreenPermission] {
         try await background("screen.policy.list", as: [ScreenPermission].self)
     }

@@ -115,6 +115,7 @@ struct MachinesInspector: View {
                         status.tunnelOnline == true ? "Tunnel up" : "Not reachable from elsewhere"
                     )
                 }
+                HostStatsBar(local: true)
             }
             .padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,6 +135,7 @@ struct MachinesInspector: View {
                     Text("Workspaces from this device are in the sidebar.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    HostStatsBar(peer: peer.key, online: true)
                 }
 
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -174,9 +176,16 @@ struct MachinesInspector: View {
                     Text("This device.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                    HostStatsBar(local: true)
                 } else if let peer = model.peer(for: machine) {
+                    if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
+                        HostStatsBar(peer: key, online: true)
+                    }
                     peerActions(peer, machine: machine)
                 } else if model.canConnect(machine) {
+                    if machine.online == true, let key = machine.publicIdentity, !key.isEmpty {
+                        HostStatsBar(peer: key, online: true)
+                    }
                     Button("Connect", .connect) { Task { await model.connect(machine) } }
                         .buttonStyle(AccentButtonStyle())
                 }

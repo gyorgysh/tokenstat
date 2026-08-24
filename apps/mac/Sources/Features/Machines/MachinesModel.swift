@@ -109,8 +109,7 @@ final class MachinesModel {
     }
 
     var vaultTier: String? {
-        guard account?.signedIn == true else { return nil }
-        return account?.tier?.lowercased() ?? "free"
+        account?.vaultTierForSsh
     }
 
     /// Whether an account machine's workspaces are in the sidebar, which is

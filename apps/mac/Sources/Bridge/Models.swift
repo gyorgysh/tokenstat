@@ -833,6 +833,17 @@ struct AccountBilling: Codable, Sendable, Hashable {
     var blocksOtherStore: Bool { hasLiveSub ?? isLive }
 }
 
+/// Live power, CPU and memory from a host. Read over the tunnel after a
+/// dial. Missing fields were not measured: do not draw them as zero.
+struct HostStats: Codable, Sendable, Hashable {
+    var power: String?
+    var charging: Bool?
+    var percent: UInt8?
+    var cpu: Double?
+    var ramUsedBytes: UInt64?
+    var ramTotalBytes: UInt64?
+}
+
 /// A machine on the account.
 ///
 /// Field names follow the server (`id`, `label`, `last_sync_at`), not this
