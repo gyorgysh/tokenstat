@@ -309,13 +309,19 @@ mod tests {
     use rusqlite::Connection;
 
     fn tempfile_dir() -> PathBuf {
+        // A counter as well as the clock. Tests run in parallel and two of them
+        // read the same nanosecond often enough to matter: the second one then
+        // opened the first one's database and failed on "table threads already
+        // exists", which looks like a parser bug and is not one.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "tokenstat-zed-{}-{}",
+            "tokenstat-zed-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir

@@ -363,7 +363,7 @@ async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
         .await
         .map_err(|e| e.to_string())?;
     for pair in &p.env {
-        crate::ssh_records::validate_shell_text(&pair.name, "environment name")?;
+        crate::ssh_records::validate_env_name(&pair.name)?;
         crate::ssh_records::validate_shell_text(&pair.value, "environment value")?;
         let value = pair.value.replace('\'', "'\"'\"'");
         channel

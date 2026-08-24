@@ -35,6 +35,15 @@ extern "C" {
 char *tokenstat_ffi_call(const char *method, const char *params_json);
 
 /*
+ * The wire contract this build speaks, as a static NUL-terminated string.
+ *
+ * Asked before a front end has chosen a transport, so that a daemon from an
+ * older release can be told apart from a call that is simply wrong. Do NOT
+ * free the result: it points at a string constant.
+ */
+const char *tokenstat_ffi_protocol_version(void);
+
+/*
  * Release a string returned by tokenstat_ffi_call. NULL is accepted and
  * ignored. Passing any other pointer, or the same pointer twice, is undefined.
  */

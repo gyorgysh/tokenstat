@@ -35,6 +35,29 @@ unsafe fn as_str<'a>(ptr: *const c_char) -> &'a str {
     unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
 }
 
+/// The wire contract this build speaks, as a static NUL-terminated string.
+///
+/// Separate from [`tokenstat_ffi_call`] because a front end asks this before it
+/// has chosen a transport, and going through the call path would start the
+/// login-environment resolve and the shell pool inside an app that is about to
+/// hand its work to the daemon instead. Nothing to free: the pointer is to a
+/// string constant with the same lifetime as the library.
+#[unsafe(no_mangle)]
+pub extern "C" fn tokenstat_ffi_protocol_version() -> *const c_char {
+    // A C string has to be NUL terminated and the Rust constant is not, so
+    // this is written out once and checked against it at compile time. Bumping
+    // one without the other is a build error rather than a silent disagreement.
+    const VERSION: &str = "2\0";
+    const _: () = {
+        let spoken = tokenstat_host::PROTOCOL_VERSION.as_bytes();
+        assert!(
+            spoken.len() == 1 && spoken[0] == b'2',
+            "PROTOCOL_VERSION moved: update the C ABI string beside it"
+        );
+    };
+    VERSION.as_ptr() as *const c_char
+}
+
 /// Invoke one bridge method. See [`crate::api`] for the envelope shape.
 ///
 /// # Safety
