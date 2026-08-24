@@ -250,6 +250,16 @@ private final class ScreenViewerModel {
     private var requestedTier: String?
     private var requestedControl = false
     private var reconnectAttempts = 0
+    /// When the current session started streaming.
+    ///
+    /// The attempt counter used to reset on the first decoded frame, so a
+    /// session that died a second after its first frame reset the budget every
+    /// time and reconnected forever. That is the loop behind the endless
+    /// pair-then-close churn in the relay log. A session has to actually last
+    /// before it counts as recovered.
+    private var streamingSince: Date?
+    /// How long a session has to hold up before the budget is given back.
+    private static let stableAfter: TimeInterval = 12
     private var stopped = false
     var needsPermission: Bool {
         let value = message.lowercased()
@@ -297,6 +307,7 @@ private final class ScreenViewerModel {
             let session = try await Bridge.screenViewerOpen(peer: peer, capability: capability.token, control: control)
             self.session = session
             transport = session.transport
+            streamingSince = Date()
             state = .streaming
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
@@ -337,7 +348,13 @@ private final class ScreenViewerModel {
                 if let encoded = read.frame, let data = Data(base64Encoded: encoded),
                    let frame = ScreenEncodedFrame(data)
                 {
-                    reconnectAttempts = 0
+                    // Only once it has held up. A frame arriving proves the
+                    // session started, not that it is going to last, and
+                    // resetting on the first one is what made the retry budget
+                    // infinite.
+                    if let since = streamingSince, Date().timeIntervalSince(since) > Self.stableAfter {
+                        reconnectAttempts = 0
+                    }
                     aspectRatio = CGFloat(frame.width) / CGFloat(max(1, frame.height))
                     decoder.decode(frame)
                 }
@@ -362,6 +379,7 @@ private final class ScreenViewerModel {
         guard !stopped else { return }
         if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
         session = nil
+        streamingSince = nil
         decoder.reset(); audio.reset()
         reconnectAttempts += 1
         guard reconnectAttempts <= 3 else {
@@ -370,7 +388,10 @@ private final class ScreenViewerModel {
             return
         }
         state = .connecting
-        message = "Connection interrupted. Reconnecting…"
+        // Say why. The reason used to be kept back until the third failure,
+        // so the whole visible story of a session that could not stay up was
+        // "Reconnecting…", which names nothing anybody can act on.
+        message = "Reconnecting, attempt \(reconnectAttempts) of 3. \(reason)"
         let delay = reconnectAttempts
         task = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
