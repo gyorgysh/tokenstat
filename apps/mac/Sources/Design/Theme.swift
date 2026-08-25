@@ -1447,6 +1447,66 @@ extension ToggleStyle where Self == BrandCheckboxStyle {
     static var brandCheckbox: BrandCheckboxStyle { BrandCheckboxStyle() }
 }
 
+/// A row of mutually exclusive tabs, in the app's colours.
+///
+/// `.pickerStyle(.segmented)` is the platform's own control: a grey track with
+/// a grey pill sliding along it, which on a dark themed screen is the one
+/// piece of chrome wearing somebody else's palette. It carried the SSH
+/// library's Hosts/Keys/Snippets, the client's insight breakdowns and the iPad
+/// layout choice, so three of the most-looked-at rows in the phone app were
+/// grey on purple.
+///
+/// The selected tab slides rather than cuts, because a segmented control that
+/// teleports reads as two separate controls blinking.
+struct SegmentedTabs<Value: Hashable>: View {
+    let options: [Value]
+    @Binding var selection: Value
+    /// What to write on each tab.
+    let title: (Value) -> String
+
+    @Namespace private var slide
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = option == selection
+                Button {
+                    guard option != selection else { return }
+                    withAnimation(.snappy(duration: 0.22)) { selection = option }
+                } label: {
+                    Text(title(option))
+                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Theme.Control.height)
+                        .background {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 7)
+                                    .fill(Theme.accentSoft)
+                                    .matchedGeometryEffect(id: "segment", in: slide)
+                            }
+                        }
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            }
+        }
+        .padding(2)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(
+            RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border, lineWidth: 1)
+        )
+    }
+}
+
+extension SegmentedTabs where Value: RawRepresentable, Value.RawValue == String {
+    /// The common case: an enum whose raw value is already the label.
+    init(options: [Value], selection: Binding<Value>) {
+        self.init(options: options, selection: selection) { $0.rawValue }
+    }
+}
+
 /// A two-state chip in the same capsule family as the action buttons.
 ///
 /// A system switch next to `AccentButtonStyle` is a different language on the

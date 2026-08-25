@@ -211,11 +211,8 @@ struct SSHLibraryView: View {
             if vaultTier != nil {
                 SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
             }
-            Picker("SSH library", selection: $section) {
-                ForEach(Section.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            SegmentedTabs(options: Section.allCases, selection: $section)
+                .accessibilityLabel("SSH library")
             SearchField(text: $model.search, prompt: "Search \(section.rawValue.lowercased())")
         }
         .padding(Theme.Space.m)

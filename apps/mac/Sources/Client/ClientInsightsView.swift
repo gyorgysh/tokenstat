@@ -58,12 +58,11 @@ struct ClientInsightsView: View {
     // MARK: - Pieces
 
     private var cutPicker: some View {
-        Picker("Breakdown", selection: $model.cut) {
-            ForEach(ClientInsightsModel.Cut.allCases) { cut in
-                Text(cut.label).tag(cut)
-            }
-        }
-        .pickerStyle(.segmented)
+        SegmentedTabs(
+            options: ClientInsightsModel.Cut.allCases,
+            selection: $model.cut
+        ) { $0.label }
+        .accessibilityLabel("Breakdown")
         .onChange(of: model.cut) { _, _ in
             // Each cut keeps its own rows, so going back to one already seen is
             // instant and costs nothing. The host serves them all from one

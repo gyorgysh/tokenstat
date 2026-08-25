@@ -270,12 +270,11 @@ private struct ClientAccountContent: View {
         if UIDevice.current.userInterfaceIdiom == .pad {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 ClientSectionTitle(title: "Layout", mark: "mark_device")
-                Picker("Layout", selection: $layoutPreference) {
-                    ForEach(ClientLayoutPreference.allCases) { option in
-                        Text(option.label).tag(option.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
+                SegmentedTabs(
+                    options: ClientLayoutPreference.allCases.map(\.rawValue),
+                    selection: $layoutPreference
+                ) { ClientLayoutPreference(rawValue: $0)?.label ?? $0 }
+                .accessibilityLabel("Layout")
                 Text(
                     (ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic).detail
                 )
