@@ -15,37 +15,73 @@ struct SSHEditorFooter: View {
     var saveIcon: ActionIcon = .save
     var canSave: Bool
     var working: Bool
+    /// What to say while the work is in flight. Defaults from the icon, so
+    /// Connect says "Connecting…" and a save says "Saving…" without every
+    /// caller having to pass a second string.
+    var workingTitle: String?
     var onSave: () -> Void
     var onCancel: () -> Void
     var onDelete: (() -> Void)?
+
+    /// What the button says, which changes while the work is in flight.
+    private var title: String { working ? busyTitle : saveTitle }
+
+    /// The sentence for the state the button is in.
+    private var busyTitle: String {
+        if let workingTitle { return workingTitle }
+        switch saveIcon {
+        case .connect: return "Connecting…"
+        case .download: return "Importing…"
+        case .security, .approve: return "Checking…"
+        default: return "Saving…"
+        }
+    }
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
             if let onDelete {
                 Button("Delete", .delete, action: onDelete)
                     .buttonStyle(DestructiveButtonStyle())
+                    .disabled(working)
             }
             Spacer()
             Button("Cancel", .dismiss, action: onCancel)
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
-            Group {
-                // Keep the glyph literals visible to the design guard. The
-                // footer accepts a semantic action, but a dynamic value in
-                // `Button` would make a future bare button indistinguishable
-                // from this deliberate choice to the source check.
-                switch saveIcon {
-                case .download: Button(saveTitle, .download, action: onSave)
-                case .done: Button(saveTitle, .done, action: onSave)
-                case .connect: Button(saveTitle, .connect, action: onSave)
-                case .security: Button(saveTitle, .security, action: onSave)
-                case .approve: Button(saveTitle, .approve, action: onSave)
-                default: Button(saveTitle, .save, action: onSave)
+                // Cancelling out from under a request in flight leaves the
+                // request running with nothing on screen that owns it.
+                .disabled(working)
+            // A spinner and a verb, rather than the same button greyed out.
+            // Disabled on its own is what a button that will never work looks
+            // like, so a slow connect read as a dead control and people
+            // pressed it again.
+            //
+            // The button keeps its own title and glyph while it waits: the
+            // spinner sits beside it rather than replacing it, so the row does
+            // not change width halfway through a connect and the action you
+            // pressed is still the action you can read.
+            HStack(spacing: Theme.Space.xs) {
+                if working {
+                    ProgressView().controlSize(.small)
                 }
-            }
+                Group {
+                    // Keep the glyph literals visible to the design guard. The
+                    // footer accepts a semantic action, but a dynamic value in
+                    // `Button` would make a future bare button indistinguishable
+                    // from this deliberate choice to the source check.
+                    switch saveIcon {
+                    case .download: Button(title, .download, action: onSave)
+                    case .done: Button(title, .done, action: onSave)
+                    case .connect: Button(title, .connect, action: onSave)
+                    case .security: Button(title, .security, action: onSave)
+                    case .approve: Button(title, .approve, action: onSave)
+                    default: Button(title, .save, action: onSave)
+                    }
+                }
                 .buttonStyle(AccentButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
                 .disabled(!canSave || working)
+            }
         }
         .padding(Theme.Space.m)
         // The same tone as the chrome bar at the top of the inspector, so the
@@ -67,6 +103,11 @@ struct SSHEditorFooter: View {
 /// them. Insights, Tasks and the workspace inspectors all draw their own
 /// groups, so these do too.
 struct SSHEditorBody<Content: View>: View {
+    /// Whether a save or a connect is in flight. The fields go read-only and
+    /// fade while it is, so the form says the same thing the footer's spinner
+    /// does: this is busy, and typing into it now changes nothing that is
+    /// about to be sent.
+    var working = false
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -78,6 +119,9 @@ struct SSHEditorBody<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.background)
+        .disabled(working)
+        .opacity(working ? 0.6 : 1)
+        .animation(.easeOut(duration: 0.15), value: working)
     }
 }
 
@@ -176,7 +220,7 @@ struct SSHHostEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SSHEditorBody {
+            SSHEditorBody(working: working) {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
@@ -414,7 +458,7 @@ struct SSHKeyEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SSHEditorBody {
+            SSHEditorBody(working: working) {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
@@ -687,7 +731,7 @@ struct SSHFolderEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SSHEditorBody {
+            SSHEditorBody(working: working) {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }

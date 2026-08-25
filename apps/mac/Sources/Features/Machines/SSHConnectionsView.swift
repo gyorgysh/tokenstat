@@ -28,7 +28,7 @@ struct CloudImportForm: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                SSHEditorBody {
+                SSHEditorBody(working: importing) {
                     if let error {
                         InlineBanner(text: error, kind: .danger) { self.error = nil }
                     }
@@ -647,7 +647,7 @@ struct SSHConnectForm: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                SSHEditorBody {
+                SSHEditorBody(working: working) {
                     if let error {
                         InlineBanner(text: error, kind: .danger) { self.error = nil }
                     }
