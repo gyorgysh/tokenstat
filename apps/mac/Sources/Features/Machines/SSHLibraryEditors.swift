@@ -48,7 +48,6 @@ struct SSHHostEditor: View {
     let hostID: String?
     let folderID: String?
     let onDone: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     @State private var host = SSHHost(
         id: "", label: "", hostname: "", port: 22, username: "root",
@@ -64,9 +63,11 @@ struct SSHHostEditor: View {
 
     private var isNew: Bool { hostID == nil }
 
+    /// Leave the editor. On the Mac this is the inspector column, so
+    /// `Environment.dismiss` would close the window. On the phone, `onDone`
+    /// already pops the pushed screen by clearing the route.
     private func finish() {
         onDone()
-        dismiss()
     }
 
     var body: some View {
@@ -264,7 +265,6 @@ struct SSHKeyEditor: View {
     let model: SSHLibraryModel
     let keyID: String?
     let onDone: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     @State private var label = "My SSH key"
     @State private var pem = ""
@@ -278,9 +278,11 @@ struct SSHKeyEditor: View {
 
     private var isNew: Bool { keyID == nil }
 
+    /// Leave the editor. On the Mac this is the inspector column, so
+    /// `Environment.dismiss` would close the window. On the phone, `onDone`
+    /// already pops the pushed screen by clearing the route.
     private func finish() {
         onDone()
-        dismiss()
     }
 
     var body: some View {
@@ -437,7 +439,6 @@ struct SSHSnippetEditor: View {
     let model: SSHLibraryModel
     let snippetID: String?
     let onDone: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     @State private var snippet = SSHSnippet(id: "", title: "", command: "", tags: [], hostIDs: [])
     @State private var loaded = false
@@ -447,9 +448,11 @@ struct SSHSnippetEditor: View {
 
     private var isNew: Bool { snippetID == nil }
 
+    /// Leave the editor. On the Mac this is the inspector column, so
+    /// `Environment.dismiss` would close the window. On the phone, `onDone`
+    /// already pops the pushed screen by clearing the route.
     private func finish() {
         onDone()
-        dismiss()
     }
 
     private var placeholders: [String] { SSHSnippet.placeholders(in: snippet.command) }
@@ -533,7 +536,6 @@ struct SSHFolderEditor: View {
     let folderID: String?
     let parentID: String?
     let onDone: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     @State private var folder = SSHFolder(id: "", name: "", parentID: nil, color: nil)
     @State private var loaded = false
@@ -543,9 +545,11 @@ struct SSHFolderEditor: View {
 
     private var isNew: Bool { folderID == nil }
 
+    /// Leave the editor. On the Mac this is the inspector column, so
+    /// `Environment.dismiss` would close the window. On the phone, `onDone`
+    /// already pops the pushed screen by clearing the route.
     private func finish() {
         onDone()
-        dismiss()
     }
 
     var body: some View {
@@ -661,7 +665,6 @@ struct SSHKnownHostsView: View {
 struct SSHConfigImportView: View {
     let model: SSHLibraryModel
     let onDone: () -> Void
-    @Environment(\.dismiss) private var dismiss
 
     @State private var candidates: [SSHConfigCandidate] = []
     @State private var loading = true
@@ -671,9 +674,11 @@ struct SSHConfigImportView: View {
 
     private var newCount: Int { candidates.filter { !$0.alreadySaved }.count }
 
+    /// Leave the editor. On the Mac this is the inspector column, so
+    /// `Environment.dismiss` would close the window. On the phone, `onDone`
+    /// already pops the pushed screen by clearing the route.
     private func finish() {
         onDone()
-        dismiss()
     }
 
     var body: some View {

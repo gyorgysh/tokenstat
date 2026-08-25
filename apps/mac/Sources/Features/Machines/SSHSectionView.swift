@@ -38,7 +38,16 @@ struct SSHSectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            DetailChromeBar {
+                addMenu
+            }
+            HStack(spacing: Theme.Space.s) {
+                SearchField(text: $model.search, prompt: "Search \(section.label.lowercased())")
+                    .frame(maxWidth: 420)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.m)
+            .padding(.bottom, Theme.Space.s)
             // The vault belongs to hosts and keys, not to a fingerprint list,
             // and only when there is an account to hold one.
             if vaultTier != nil, section != .knownHosts {
@@ -89,16 +98,6 @@ struct SSHSectionView: View {
     }
 
     // MARK: - Chrome
-
-    private var header: some View {
-        HStack(spacing: Theme.Space.s) {
-            SearchField(text: $model.search, prompt: "Search \(section.label.lowercased())")
-                .frame(maxWidth: 420)
-            Spacer(minLength: 0)
-            addMenu
-        }
-        .padding(Theme.Space.m)
-    }
 
     @ViewBuilder
     private var addMenu: some View {
