@@ -787,13 +787,25 @@ struct SSHConnectForm: View {
 
 extension View {
     /// A sheet in the SSH path: a fixed size on the Mac, the whole screen on
-    /// a phone.
+    /// a phone, on the app's own background either way.
+    ///
+    /// The background is part of the frame rather than left to each sheet,
+    /// because leaving it to each sheet is what happened: none of them set
+    /// one, so every SSH sheet resolved to the system's window grey and was
+    /// the only surface in the app that did not look like the app. A sheet is
+    /// a small window, and `presentationBackground` is what paints the window
+    /// rather than the view inside it, so both are set: the fill for the
+    /// content, the presentation for the corners around it.
     @ViewBuilder
     func sshSheetFrame(width: CGFloat, height: CGFloat) -> some View {
         #if os(macOS)
         frame(width: width, height: height)
+            .background(Theme.background)
+            .presentationBackground(Theme.background)
         #else
         frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background)
+            .presentationBackground(Theme.background)
         #endif
     }
 }
