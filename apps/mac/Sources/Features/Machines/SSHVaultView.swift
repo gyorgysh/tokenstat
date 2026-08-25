@@ -185,12 +185,15 @@ struct SSHVaultScreen: View {
     @Bindable var vault: SSHVaultModel
     let tier: String
     let canWrite: Bool
+    /// What is on this device, so a fresh vault can be filled from it after a
+    /// delete. Nil where the screen was opened without a library beside it.
+    var library: SSHLibraryModel?
 
     @State private var showingSetup = false
     @State private var changingPassword = false
     @State private var showingRecovery = false
     @State private var confirmingRotation = false
-    @State private var confirmingReset = false
+    @State private var deleting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -285,18 +288,31 @@ struct SSHVaultScreen: View {
                                 button: "Lock",
                                 icon: .signOut
                             ) { Task { await vault.lock() } }
-                            action(
-                                title: "Delete this vault",
-                                detail: "Every encrypted secret in it is permanently lost, and other devices will have to set up a new one. This cannot be undone.",
-                                button: "Delete vault",
-                                icon: .delete,
-                                destructive: true
-                            ) { confirmingReset = true }
                         } else {
                             Text("Your plan can read this vault but not write to it. Hosts and keys still sync in; changes made here stay on this machine.")
                                 .font(.callout).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                    }
+
+                    // Outside every branch above, on purpose.
+                    //
+                    // This used to sit inside the unlocked case, which put the
+                    // one way out of a forgotten password behind the door it
+                    // is the way out of: a locked device was offered Unlock and
+                    // nothing else, and somebody with no other device and no
+                    // recovery code had no move left. Deleting needs no
+                    // password, no code and no key, so nothing about it
+                    // belonged behind an unlock.
+                    if vault.created || vault.unreachable != nil {
+                        Divider()
+                        action(
+                            title: "Delete the vault and start over",
+                            detail: startOverDetail,
+                            button: "Delete vault",
+                            icon: .delete,
+                            destructive: true
+                        ) { deleting = true }
                     }
                 }
                 .padding(Theme.Space.l)
@@ -329,11 +345,8 @@ struct SSHVaultScreen: View {
         } message: {
             Text("The current code will stop working as soon as the encrypted update succeeds.")
         }
-        .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
-            Button("Delete vault", role: .destructive) { Task { await vault.reset() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.")
+        .sheet(isPresented: $deleting) {
+            SSHVaultDeleteSheet(vault: vault, tier: tier, canWrite: canWrite, library: library)
         }
         .onChange(of: vault.recovery) { _, value in if value != nil { showingRecovery = true } }
         .task { await vault.refresh() }
@@ -343,6 +356,19 @@ struct SSHVaultScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await vault.refresh() } }
         }
+    }
+
+    /// What deleting costs, said differently depending on what can be opened.
+    ///
+    /// A locked device cannot list what is in the vault, so it must not claim
+    /// to know. What it can promise is the part that matters to somebody stuck:
+    /// the servers on this computer are records, not secrets, and they stay.
+    private var startOverDetail: String {
+        let kept = "Everything saved on this device stays where it is, and a new vault can be filled from it. Nothing on any server changes."
+        if vault.locked || vault.needsRecreate || vault.unreachable != nil {
+            return "You do not need the password or the recovery code for this. The vault is removed from the account, and anything in it that this device never received is gone for good.\n\n\(kept)"
+        }
+        return "The vault is removed from the account and every device is asked to set up a new one. This cannot be undone.\n\n\(kept)"
     }
 
     private var status: some View {
@@ -387,6 +413,185 @@ struct SSHVaultScreen: View {
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Delete the vault, and offer to make a new one out of what is on this device.
+///
+/// Two halves, because deleting alone is not a way out. Somebody reaches this
+/// screen having forgotten the password with no other device signed in, and
+/// what they want is not an empty account: it is their servers back, syncing
+/// again. The records are still in `connections.json`, so the second half is
+/// possible and the sheet stays open to offer it.
+///
+/// Typed confirmation rather than one tap. This is the one control in the app
+/// that destroys data for every device on the account at once.
+struct SSHVaultDeleteSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Bindable var vault: SSHVaultModel
+    let tier: String
+    let canWrite: Bool
+    var library: SSHLibraryModel?
+
+    @State private var typed = ""
+    @State private var working = false
+    @State private var deleted = false
+    @State private var creating = false
+
+    private static let word = "DELETE"
+
+    private var confirmed: Bool {
+        typed.trimmingCharacters(in: .whitespaces).uppercased() == Self.word
+    }
+
+    /// Keys whose private half only ever lived in the vault. Nothing recovers
+    /// these, so they are named before the button, not after it.
+    private var strandedKeys: [SSHKeyRecord] { library?.keysOnlyInTheVault ?? [] }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(deleted ? "The vault is gone" : "Delete the vault and start over")
+                        .font(.title3.weight(.semibold))
+                    Text(deleted
+                        ? "This account has no vault. Nothing saved on this device was touched."
+                        : "For when the password is forgotten and no other device can open it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault deletion")
+            }
+            Divider()
+            if deleted { afterBody } else { beforeBody }
+            if let error = vault.error {
+                Text(FriendlyError.from(error).message)
+                    .font(.caption).foregroundStyle(Theme.danger)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            footer
+        }
+        .padding(Theme.Space.l)
+        .sshSheetFrame(width: 560, height: 520)
+        .sheet(isPresented: $creating) {
+            SSHVaultSetupSheet(tier: tier, status: $vault.status, recovery: $vault.recovery)
+        }
+        // The setup sheet only makes the vault. Filling it is this screen's
+        // job, and it can only run once the vault exists to be filled.
+        .onChange(of: vault.created) { was, now in
+            guard deleted, !was, now, let library else { return }
+            Task {
+                working = true
+                await library.seedVaultFromThisDevice(tier: tier)
+                working = false
+                dismiss()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var beforeBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            bullet("The vault is removed from the account. Every signed-in device is asked to set up a new one.")
+            bullet("Anything in it that this device never received cannot be recovered, by you or by anybody here.")
+            bullet("Your saved servers, folders and snippets are records rather than secrets. They stay on this device, and a new vault can be filled from them.")
+            bullet("Nothing on any server changes, and no connection is closed.")
+            if !strandedKeys.isEmpty {
+                Text(strandedKeys.count == 1
+                    ? "One key has no private half on this device and will be lost:"
+                    : "\(strandedKeys.count) keys have no private half on this device and will be lost:")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(Theme.warning)
+                    .padding(.top, Theme.Space.xs)
+                ForEach(strandedKeys) { key in
+                    Text("\u{2022} \(key.label)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Text("Type \(Self.word) to confirm.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(.top, Theme.Space.xs)
+            TextField(Self.word, text: $typed)
+                .textFieldStyle(.roundedBorder)
+                .font(Theme.mono(12))
+                #if !os(macOS)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                #endif
+        }
+    }
+
+    @ViewBuilder
+    private var afterBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if canWrite {
+                Text("Make a new vault and put this device's servers, folders, snippets and keys into it. Your other devices join it with the new password.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let library {
+                    Text(summary(of: library))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Making a vault needs Supporter or above. Everything saved on this device keeps working without one.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func summary(of library: SSHLibraryModel) -> String {
+        let parts = [
+            count(library.hosts.count, "server", "servers"),
+            count(library.folders.count, "folder", "folders"),
+            count(library.snippets.count, "snippet", "snippets"),
+            count(library.keys.count - library.keysOnlyInTheVault.count, "key", "keys"),
+        ].compactMap { $0 }
+        return parts.isEmpty ? "There is nothing on this device to carry across." : "Ready to carry across: " + parts.joined(separator: ", ") + "."
+    }
+
+    private func count(_ n: Int, _ one: String, _ many: String) -> String? {
+        n <= 0 ? nil : "\(n) \(n == 1 ? one : many)"
+    }
+
+    private func bullet(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
+            Text("\u{2022}").foregroundStyle(.secondary)
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            Button(deleted ? "Not now" : "Cancel", .dismiss) { dismiss() }
+                .buttonStyle(SecondaryButtonStyle())
+                .frame(minWidth: Theme.Control.pairedWidth)
+            Spacer()
+            if deleted {
+                Button("Create a new vault", .create) { creating = true }
+                    .buttonStyle(AccentButtonStyle())
+                    .disabled(!canWrite || working)
+            } else {
+                Button("Delete vault", .delete) { Task { await run() } }
+                    .buttonStyle(DestructiveButtonStyle())
+                    .disabled(!confirmed || working)
+            }
+        }
+    }
+
+    private func run() async {
+        working = true
+        vault.error = nil
+        await vault.reset()
+        working = false
+        // Staying open is the point. A sheet that closed here would leave
+        // somebody on the screen they started from with an empty account and
+        // no hint that their servers are still on the machine.
+        if vault.error == nil { deleted = true }
     }
 }
 

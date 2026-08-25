@@ -71,7 +71,8 @@ struct SSHLibraryView: View {
                 SSHVaultScreen(
                     vault: vault,
                     tier: vaultTier ?? "",
-                    canWrite: paidVaultTier != nil
+                    canWrite: paidVaultTier != nil,
+                    library: model
                 )
             }
             .sheet(item: $connecting) { host in
@@ -134,9 +135,20 @@ struct SSHLibraryView: View {
         VStack(spacing: 0) {
             header
             if let error = model.error {
-                InlineBanner(text: error, kind: .danger) { model.error = nil }
+                InlineBanner(text: FriendlyError.from(error).message, kind: .danger) { model.error = nil }
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.bottom, Theme.Space.s)
+            }
+            // A save that landed here but not in the vault. Said out loud, the
+            // way the Mac says it: silence is what made an edit that another
+            // device later overwrote look like the save had never happened.
+            if let vaultError = model.vaultError {
+                let friendly = FriendlyError.from(vaultError)
+                InlineBanner(text: "Saved on this device, but not synced. \(friendly.message)") {
+                    model.vaultError = nil
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.bottom, Theme.Space.s)
             }
             if signedInUnpaid, model.hosts.isEmpty {
                 vaultUpgrade

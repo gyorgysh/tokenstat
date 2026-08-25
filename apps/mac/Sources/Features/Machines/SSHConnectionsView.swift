@@ -362,7 +362,7 @@ struct SSHVaultSetupSheet: View {
         .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { Task { await resetVault() } }
             Button("Cancel", role: .cancel) {}
-        } message: { Text("Every encrypted SSH secret in the vault is permanently lost. Other devices will need to set up a new vault. This cannot be undone.") }
+        } message: { Text("The vault is removed from the account and every device is asked to set up a new one. Anything in it that this device never received is gone for good. Your saved servers, folders and snippets stay on this device.") }
     }
 
     // MARK: - The three states
@@ -445,6 +445,9 @@ struct SSHVaultSetupSheet: View {
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
             if exists {
+                // The way out when the password is gone and no other device
+                // can open it. Deleting needs neither, so it is offered here
+                // rather than only after a successful unlock.
                 Button("Delete vault", .delete) { confirmingReset = true }
                     .buttonStyle(DestructiveButtonStyle())
                     .disabled(working)
