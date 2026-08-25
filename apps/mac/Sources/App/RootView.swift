@@ -136,6 +136,10 @@ struct RootView: View {
     #if os(macOS)
     /// Servers whose session rows are showing.
     @State private var expandedSSHHosts: Set<String> = []
+    /// The server whose sidebar menu asked to close every shell. Kept on the
+    /// sidebar rather than on an individual row so the confirmation survives
+    /// that row collapsing or disappearing while it is in front.
+    @State private var sshHostPendingClose: SSHHost?
     #endif
     /// The SSH section last left, so clicking the heading (or coming back from
     /// Home) returns to what you were doing rather than resetting to Hosts.
@@ -1403,6 +1407,20 @@ struct RootView: View {
                 isSelected: isCurrent && !isExpanded
             ) { navigate(to: .sshTerminals(host: host.id)) }
         }
+        .contextMenu {
+            Button("New session", .create) { ssh.connectRequest = host }
+            Button("Close all sessions", .delete, role: .destructive) {
+                sshHostPendingClose = host
+            }
+            Divider()
+            Button(isExpanded ? "Collapse" : "Expand", .collapse) {
+                if isExpanded {
+                    expandedSSHHosts.remove(host.id)
+                } else {
+                    expandedSSHHosts.insert(host.id)
+                }
+            }
+        }
         if isExpanded {
             ForEach(mine) { session in
                 SidebarRow(
@@ -1766,6 +1784,15 @@ struct RootView: View {
                 session: $sessionPendingClose,
                 close: { session in
                     Task { await terminals.close(session) }
+                }
+            )
+        }
+        .background {
+            CloseSSHSessionsConfirm(
+                host: $sshHostPendingClose,
+                sessionCount: { sshSessions.sessions(for: $0.id).count },
+                close: { host in
+                    Task { await sshSessions.closeAll(for: host.id) }
                 }
             )
         }
@@ -2546,6 +2573,46 @@ private struct CloseSessionConfirm: View {
             } message: {
                 Text("The process will be killed. A stopped session can still close in one click.")
             }
+    }
+}
+
+/// One confirmation for a host row's destructive action. A host remains in
+/// the live group while ended sessions are still held for their scrollback,
+/// so the count deliberately includes both running and ended tabs: all of
+/// them disappear, and every running process among them is stopped.
+private struct CloseSSHSessionsConfirm: View {
+    @Binding var host: SSHHost?
+    var sessionCount: (SSHHost) -> Int
+    var close: (SSHHost) -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .confirmationDialog(
+                "Close every session on this server?",
+                isPresented: Binding(
+                    get: { host != nil },
+                    set: { if !$0 { host = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Close all", role: .destructive) {
+                    if let host {
+                        close(host)
+                    }
+                    host = nil
+                }
+                Button("Cancel", role: .cancel) { host = nil }
+            } message: {
+                Text(message)
+            }
+    }
+
+    private var message: String {
+        guard let host else { return "" }
+        let count = sessionCount(host)
+        let noun = count == 1 ? "session" : "sessions"
+        return "Close \(count) \(noun) on \(host.label)? Anything still running in them stops."
     }
 }
 
