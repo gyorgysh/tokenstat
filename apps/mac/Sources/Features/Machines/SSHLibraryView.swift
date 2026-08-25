@@ -200,7 +200,10 @@ struct SSHLibraryView: View {
                 list
             }
         }
-        .background(Theme.sidebar)
+        // One tone, not two. The header sat on the sidebar colour and the list
+        // on the background, which drew a hard band across the screen at the
+        // seam and made the two halves look like separate screens.
+        .background(Theme.background)
     }
 
     private var header: some View {
@@ -382,15 +385,21 @@ struct SSHLibraryView: View {
     private func keyRow(_ key: SSHKeyRecord) -> some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(key.label)
-                Text(key.fingerprint.isEmpty ? key.algorithm : key.fingerprint)
-                    .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
+                Text(key.label).font(SSHRowType.name)
+                // The tail, not the whole line. A full SHA256 fingerprint is
+                // wider than a phone, so the row printed a wall of base64 that
+                // was cut off exactly where the part you compare against lives.
+                Text(SSHLibraryView.shortFingerprint(key.fingerprint) ?? key.algorithm)
+                    .font(SSHRowType.mono)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
             }
         } icon: {
             Image(systemName: key.hardwareBacked ? "key.radiowaves.forward" : "key.fill")
                 .foregroundStyle(Theme.accent)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 44)
         .contentShape(.rect)
         .onTapGesture { open(.key(key.id)) }
         .swipeActions(edge: .trailing) {
@@ -400,11 +409,14 @@ struct SSHLibraryView: View {
 
     private func snippetRow(_ snippet: SSHSnippet) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(snippet.title)
+            Text(snippet.title).font(SSHRowType.name)
             Text(snippet.command)
-                .font(Theme.mono(11)).foregroundStyle(.secondary).lineLimit(1)
+                .font(SSHRowType.mono)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .frame(height: Theme.Control.rowHeight)
+        .frame(minHeight: 44)
         .contentShape(.rect)
         .onTapGesture { open(.snippet(snippet.id)) }
         .swipeActions(edge: .trailing) {
@@ -442,6 +454,17 @@ struct SSHLibraryView: View {
     private func close() { route = nil }
 
     private func open(_ destination: SSHLibraryRoute) { route = destination }
+
+    /// The end of a fingerprint, which is the part anybody actually compares.
+    ///
+    /// Nil for an empty one, so the caller can fall back to the algorithm
+    /// rather than print an empty line.
+    static func shortFingerprint(_ value: String) -> String? {
+        guard !value.isEmpty else { return nil }
+        let body = value.hasPrefix("SHA256:") ? String(value.dropFirst("SHA256:".count)) : value
+        guard body.count > 16 else { return value }
+        return "…" + body.suffix(16)
+    }
 
     private var addRoute: SSHLibraryRoute {
         switch section {
@@ -500,6 +523,26 @@ struct SSHLibraryView: View {
 }
 #endif
 
+/// The type scale the library's rows share.
+///
+/// The Mac's default body size on a phone is a Mac list pretending to be a
+/// phone one: the client next door reads its sizes from `ClientType` so a row
+/// scales with Dynamic Type, and these rows were the only ones in the app
+/// still asking for a fixed system default. One place for both platforms, so
+/// a name means the same weight on each.
+enum SSHRowType {
+    #if os(macOS)
+    static let name = Font.system(size: 13)
+    static let detail = Font.caption
+    #else
+    static let name = ClientType.label.weight(.medium)
+    static let detail = ClientType.caption
+    #endif
+
+    /// A fingerprint or a command: content, so monospaced.
+    static let mono = Theme.mono(11)
+}
+
 /// One server in the list.
 ///
 /// Name in body weight, address in caption, folder colour as a leading bar, so
@@ -522,10 +565,16 @@ struct SSHHostRow: View {
         HStack(spacing: Theme.Space.s) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(SSHColor.color(host.color))
+                #if os(macOS)
                 .frame(width: 3)
+                #else
+                .frame(width: 4)
+                #endif
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: Theme.Space.xs) {
-                    Text(host.label).lineLimit(1)
+                    Text(host.label)
+                        .font(SSHRowType.name)
+                        .lineLimit(1)
                     if host.favorite {
                         Image(systemName: "star.fill")
                             .font(.system(size: 9))
@@ -534,7 +583,10 @@ struct SSHHostRow: View {
                 }
                 HStack(spacing: Theme.Space.xs) {
                     Text(host.address)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        .font(SSHRowType.detail)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     if searching, let folder {
                         Text(folder)
                             .font(.caption2)
@@ -546,20 +598,32 @@ struct SSHHostRow: View {
             }
             Spacer(minLength: 0)
             if let onConnect {
+                // The Mac has a pointer, so the button waits for it, stays
+                // quiet and lets the list read as a list. A phone has no hover
+                // to wait for and no pointer to aim with: this is the reason
+                // the screen exists, it has to be the one obviously pressable
+                // thing on the row, and it has to be big enough to hit with a
+                // thumb. Two platforms, two answers, one button.
+                #if os(macOS)
                 Button("Connect", .connect, action: onConnect)
                     .buttonStyle(SecondaryButtonStyle(small: true))
-                    // The Mac has a pointer, so the button waits for it and
-                    // the list stays a list. The phone has no hover state, so
-                    // a button that appeared on one would never appear.
-                    #if os(macOS)
                     .opacity(hovering ? 1 : 0)
                     .allowsHitTesting(hovering)
-                    #endif
+                #else
+                Button("Connect", .connect, action: onConnect)
+                    .buttonStyle(AccentButtonStyle())
+                    .frame(minHeight: 44)
+                #endif
             }
         }
-        .frame(height: Theme.Control.rowHeight)
+        // A fixed height on a phone is a row that cannot hold a second line of
+        // Dynamic Type and a tap target that shrinks with the text. A floor
+        // instead, so the row grows and never goes under 44.
         #if os(macOS)
+        .frame(height: Theme.Control.rowHeight)
         .onHover { hovering = $0 }
+        #else
+        .frame(minHeight: 44)
         #endif
     }
 }
