@@ -256,6 +256,7 @@ fun EmptyState(
     title: String,
     message: String,
     modifier: Modifier = Modifier,
+    art: (@Composable () -> Unit)? = null,
     action: (@Composable () -> Unit)? = null,
 ) {
     val colors = LocalTsColors.current
@@ -264,7 +265,7 @@ fun EmptyState(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        Icon(icon, null, tint = colors.accent.copy(alpha = 0.7f), modifier = Modifier.heightIn(min = 28.dp))
+        art?.invoke() ?: Icon(icon, null, tint = colors.accent.copy(alpha = 0.7f), modifier = Modifier.heightIn(min = 28.dp))
         Text(
             title,
             style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),

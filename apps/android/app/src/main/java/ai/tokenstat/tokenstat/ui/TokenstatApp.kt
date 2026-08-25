@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -69,8 +70,20 @@ import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
 import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
 import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
+import ai.tokenstat.tokenstat.ui.terminal.SshTerminalScreen
 import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
+import ai.tokenstat.tokenstat.ui.chrome.ConnectionChip
+import ai.tokenstat.tokenstat.ui.chrome.TsRefresh
+import ai.tokenstat.tokenstat.ui.billing.PaywallSheet
+import ai.tokenstat.tokenstat.ui.browser.PortBrowserScreen
+import ai.tokenstat.tokenstat.ui.screen.ScreenViewerScreen
+import ai.tokenstat.tokenstat.ui.ssh.SshConnectDialog
+import ai.tokenstat.tokenstat.ui.ssh.SshKeyImportDialog
+import ai.tokenstat.tokenstat.ui.marks.EmptyArt
+import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
+import ai.tokenstat.tokenstat.ui.marks.TierMark
+import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import ai.tokenstat.tokenstat.ui.components.TierBadge
 import ai.tokenstat.tokenstat.ui.components.TsAccentButton
 import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
@@ -152,7 +165,13 @@ fun TokenstatApp(model: AppViewModel) {
                             hasOnboarded = true
                         }
                         Door.Loading -> LoadingScreen()
-                        Door.Login -> LoginScreen(model, state.error)
+                        Door.Login -> LoginScreen(model, state.error) {
+                            runCatching {
+                                context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("hasOnboarded", false).apply()
+                            }
+                            hasOnboarded = false
+                        }
                     }
                 }
             }
@@ -176,7 +195,7 @@ private fun LoadingScreen() {
 }
 
 @Composable
-private fun LoginScreen(model: AppViewModel, error: String?) {
+private fun LoginScreen(model: AppViewModel, error: String?, onReboard: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var pendingLogin by remember { mutableStateOf(false) }
@@ -223,6 +242,12 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
         TsSecondaryButton(
             label = "I already signed in",
             onClick = { UiSignals.beganRefreshing(); model.refresh() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(Space.s))
+        TsSecondaryButton(
+            label = "What is tokenstat?",
+            onClick = onReboard,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -280,6 +305,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     }
                 },
                 actions = {
+                    ConnectionChip(state.connection, onRetry = { model.retryConnection() })
                     Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
                         LogoMark(size = 18)
                     }
@@ -329,7 +355,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 when (selected) {
-                    Destination.Home -> HomeScreen(state)
+                    Destination.Home -> HomeScreen(model, state)
                     Destination.Workspaces -> if (state.canRemote) {
                         WorkspacesScreen(model, state, expanded, pendingWorkHostId) {
                             pendingWorkHostId = null
@@ -337,7 +363,7 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
                     } else {
                         RemotePaywall { accountOpen = true }
                     }
-                    Destination.Insights -> InsightsScreen(state)
+                    Destination.Insights -> InsightsScreen(model, state)
                     Destination.Devices -> DevicesScreen(
                         model,
                         state,
@@ -374,7 +400,8 @@ private fun RemotePaywall(onPlans: () -> Unit) {
 }
 
 @Composable
-private fun HomeScreen(state: ClientState) {
+@OptIn(ExperimentalMaterial3Api::class)
+private fun HomeScreen(model: AppViewModel, state: ClientState) {
     val calendar = state.home
     val rows = calendar?.get("rows") as? JsonArray
     val cells = rows.orEmpty().flatMap { row ->
@@ -382,6 +409,19 @@ private fun HomeScreen(state: ClientState) {
     }
     var selectedDay by remember { mutableStateOf<JsonObject?>(null) }
     val reduceMotion = rememberReduceMotion()
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            scope.launch {
+                refreshing = true
+                TsRefresh.run("home") { model.refresh() }
+                refreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(cardPaddingDp),
@@ -431,6 +471,7 @@ private fun HomeScreen(state: ClientState) {
             Arrive(reduceMotion, staggerIndex = index) { LimitCard(item.jsonObject) }
         }
         state.error?.let { item { ErrorCard(it) } }
+    }
     }
     DayDetailSheet(selectedDay, onDismiss = { selectedDay = null })
 }
@@ -500,7 +541,8 @@ private fun spendSince(cells: List<JsonObject>, last: String?, days: Int): Long 
 }
 
 @Composable
-private fun InsightsScreen(state: ClientState) {
+@OptIn(ExperimentalMaterial3Api::class)
+private fun InsightsScreen(model: AppViewModel, state: ClientState) {
     val colors = LocalTsColors.current
     val reduceMotion = rememberReduceMotion()
     // Three cuts only — Models/Tools/Days — the privacy boundary the Apple
@@ -515,6 +557,19 @@ private fun InsightsScreen(state: ClientState) {
         .filter { query.isBlank() || (it.string("key") ?: "").contains(query, ignoreCase = true) }
     val total = buckets.sumOf { it.long("valueMicros") ?: 0L }
     val peak = buckets.maxOfOrNull { it.long("valueMicros") ?: 0L } ?: 0L
+    val scope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
+    PullToRefreshBox(
+        isRefreshing = refreshing,
+        onRefresh = {
+            scope.launch {
+                refreshing = true
+                TsRefresh.run("insights") { model.refresh() }
+                refreshing = false
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    ) {
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(cardPaddingDp),
@@ -600,6 +655,7 @@ private fun InsightsScreen(state: ClientState) {
                 }
             }
         }
+    }
     }
 }
 
@@ -711,6 +767,16 @@ private fun DeviceDetailScreen(
     val peer = machine.string("publicIdentity")
     val online = machine.bool("online")
     val label = machine.string("label") ?: machine.string("id") ?: "Device"
+    var viewing by remember { mutableStateOf(false) }
+    if (viewing && !peer.isNullOrEmpty()) {
+        ScreenViewerScreen(
+            model = model,
+            peer = peer,
+            hostLabel = label,
+            onClose = { viewing = false },
+        )
+        return
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -741,7 +807,7 @@ private fun DeviceDetailScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("From this phone", style = MaterialTheme.typography.titleMedium)
                     if (state.canRemote) {
-                        Button(onClick = onOpenWork, modifier = Modifier.fillMaxWidth()) { Text("Open work") }
+                        TsAccentButton(label = "Open work", onClick = onOpenWork, modifier = Modifier.fillMaxWidth())
                         Text(
                             if (online) "Folders, terminals and sessions on this computer."
                             else "It is asleep. Opening this will wake nothing, but it will try.",
@@ -749,8 +815,21 @@ private fun DeviceDetailScreen(
                         )
                     } else {
                         Text("Opening folders and terminals on this computer is on Patron.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = onPlans) { Text("See plans") }
+                        TsAccentButton(label = "See plans", onClick = onPlans)
                     }
+                    TsSecondaryButton(
+                        label = "View screen",
+                        onClick = { viewing = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        if ((state.account?.string("tier") ?: "").equals("legend", ignoreCase = true)) {
+                            "End-to-end encrypted from this device."
+                        } else {
+                            "Requires Legend."
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
@@ -848,6 +927,9 @@ private fun AndroidSSHScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var addHost by remember { mutableStateOf(false) }
     var addSnippet by remember { mutableStateOf(false) }
+    var addKey by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf<JsonObject?>(null) }
+    var sshSession by remember { mutableStateOf<Pair<String, String>?>(null) }
     var vaultSetup by remember { mutableStateOf(false) }
     var recoveryWords by remember { mutableStateOf<String?>(null) }
     var showingRecovery by remember { mutableStateOf(false) }
@@ -864,6 +946,17 @@ private fun AndroidSSHScreen(
         }.onFailure { error = it.message }
     }
     LaunchedEffect(Unit) { load() }
+
+    val live = sshSession
+    if (live != null) {
+        SshTerminalScreen(
+            model = model,
+            sessionId = live.first,
+            hostLabel = live.second,
+            onClose = { sshSession = null },
+        )
+        return
+    }
 
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -937,7 +1030,7 @@ private fun AndroidSSHScreen(
             TextButton(onClick = {
                 if (tab == 0) addHost = true
                 else if (tab == 2) addSnippet = true
-                else error = "Android secure key import is being prepared."
+                else addKey = true
             }) { Text("Add") }
         }
         val all = when (tab) { 0 -> hosts; 1 -> keys; else -> snippets }
@@ -964,7 +1057,7 @@ private fun AndroidSSHScreen(
                                 onClick = {
                                     if (tab == 0) addHost = true
                                     else if (tab == 2) addSnippet = true
-                                    else error = "Android secure key import is being prepared."
+                                    else addKey = true
                                 },
                             )
                         },
@@ -991,6 +1084,9 @@ private fun AndroidSSHScreen(
                             if (tab == 0 && folderName != null) {
                                 Text(folderName, style = MaterialTheme.typography.labelSmall, color = LocalTsColors.current.textSecondary)
                             }
+                        },
+                        modifier = Modifier.clickable {
+                            if (tab == 0) connecting = item
                         },
                     )
                 }
@@ -1065,6 +1161,29 @@ private fun AndroidSSHScreen(
         },
         dismissButton = { TextButton(onClick = { confirmDrop = false }) { Text("Cancel") } },
     )
+    connecting?.let { host ->
+        SshConnectDialog(
+            model = model,
+            host = host,
+            keys = keys,
+            onDismiss = { connecting = null },
+            onOpened = { id ->
+                val label = host.string("label") ?: host.string("hostname") ?: "SSH"
+                connecting = null
+                sshSession = id to label
+            },
+        )
+    }
+    if (addKey) {
+        SshKeyImportDialog(
+            model = model,
+            onDismiss = { addKey = false },
+            onSaved = {
+                addKey = false
+                scope.launch { load() }
+            },
+        )
+    }
 }
 
 @Composable
@@ -1284,6 +1403,7 @@ private fun WorkspacesScreen(
     var selectedFolder by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var terminalSession by remember { mutableStateOf<WorkspaceTerminalRequest?>(null) }
+    var browser by remember { mutableStateOf<Pair<String, Int>?>(null) }
     LaunchedEffect(host) {
         val key = host?.string("publicIdentity")
         if (host != null && key == null) {
@@ -1305,6 +1425,7 @@ private fun WorkspacesScreen(
     val boundHost = host
     val boundFolder = selectedFolder
     val request = terminalSession
+    val browsing = browser
     if (request != null && boundFolder != null && boundHost != null) {
         TerminalScreen(
             model = model,
@@ -1314,6 +1435,14 @@ private fun WorkspacesScreen(
             existingSessionId = request.sessionId,
             onClose = { terminalSession = null },
         )
+    } else if (browsing != null && boundHost != null) {
+        PortBrowserScreen(
+            model = model,
+            peer = boundHost.string("publicIdentity") ?: "",
+            url = browsing.first,
+            port = browsing.second,
+            onClose = { browser = null },
+        )
     } else if (expanded && boundFolder != null && boundHost != null) {
         Row(Modifier.fillMaxSize()) {
             WorkspaceList(hosts, boundHost, folders, { host = it }, { selectedFolder = it }, Modifier.width(340.dp))
@@ -1322,6 +1451,7 @@ private fun WorkspacesScreen(
                 model, boundHost, boundFolder, Modifier.weight(1f),
                 onBack = null,
                 onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+                onOpenBrowser = { url, port -> browser = url to port },
             )
         }
     } else if (boundFolder != null && boundHost != null) {
@@ -1329,6 +1459,7 @@ private fun WorkspacesScreen(
             model, boundHost, boundFolder, Modifier.fillMaxSize(),
             onBack = { selectedFolder = null },
             onOpenTerminal = { id -> terminalSession = WorkspaceTerminalRequest(id, boundFolder.string("id") ?: "", boundHost.string("label") ?: "Host") },
+            onOpenBrowser = { url, port -> browser = url to port },
         )
     } else {
         WorkspaceList(hosts, host, folders, { host = it }, { selectedFolder = it }, Modifier.fillMaxSize(), error)
@@ -1386,13 +1517,15 @@ private val workspaceParts = listOf(
     WorkspacePart("Workflows", "workflow.list", Icons.Default.AccountTree),
     WorkspacePart("Automations", "automation.list", Icons.Default.Bolt),
     WorkspacePart("Files", "workspace.tree", Icons.Default.FolderOpen),
+    WorkspacePart("Browser", "proxy.listen", Icons.Default.Language),
 )
 
 @Composable
 private fun WorkspaceDetail(
     model: AppViewModel, host: JsonObject, folder: JsonObject, modifier: Modifier,
     onBack: (() -> Unit)? = null,
-    onOpenTerminal: (String) -> Unit = {},
+    onOpenTerminal: (String?) -> Unit = {},
+    onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
 ) {
     var section by rememberSaveable { mutableStateOf("Sessions") }
     val peer = host.string("publicIdentity") ?: ""
@@ -1426,6 +1559,7 @@ private fun WorkspaceDetail(
             section = section,
             modifier = Modifier.verticalScroll(rememberScrollState()),
             onOpenTerminal = onOpenTerminal,
+            onOpenBrowser = onOpenBrowser,
         )
     }
 }
@@ -1440,7 +1574,13 @@ private fun AccountDialog(
 ) {
     val context = LocalContext.current
     val colors = LocalTsColors.current
-    val billingState by billing.state.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    var paywall by remember { mutableStateOf(false) }
+    var notifyOn by remember { mutableStateOf(PushRegistrar.registered()) }
+    var notifyError by remember { mutableStateOf<String?>(null) }
+    fun open(url: String) {
+        runCatching { CustomTabsIntent.Builder().build().launchUrl(context, url.toUri()) }
+    }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -1462,28 +1602,58 @@ private fun AccountDialog(
                         color = colors.textPrimary,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        TierMark((state.account?.string("tier") ?: "free").lowercase(), markSize = 16)
                         TierBadge(state.account?.string("tier") ?: "free")
                         Text("${(state.account?.get("machines") as? JsonArray)?.size ?: 0} linked devices", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
                     }
                 }
             }
-            if (billingState.loading && billingState.products.isEmpty()) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(24.dp), color = colors.accent)
+            TsAccentButton(
+                label = "See plans",
+                onClick = { paywall = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Notify this device", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                    Text(
+                        "When an agent run on one of your machines finishes, or stops to ask you something. The notification says which machine, and nothing about the work.",
+                        style = TextStyle(fontSize = 12.sp),
+                        color = colors.textSecondary,
+                    )
                 }
-            }
-            billingState.products.forEach { product ->
-                TsAccentButton(
-                    label = "${product.label} · ${product.price}",
-                    onClick = { (context as? Activity)?.let { billing.purchase(it, product) } },
-                    modifier = Modifier.fillMaxWidth(),
+                Switch(
+                    checked = notifyOn,
+                    onCheckedChange = { on ->
+                        scope.launch {
+                            runCatching {
+                                if (on) PushRegistrar.refresh() else PushRegistrar.unregister()
+                            }.onSuccess { notifyOn = on; notifyError = null }
+                                .onFailure { notifyError = it.message }
+                        }
+                    },
                 )
             }
-            billingState.error?.let { Text(it, color = colors.danger) }
+            if (notifyOn) {
+                TsSecondaryButton(
+                    label = "Send a test",
+                    small = true,
+                    onClick = { scope.launch { runCatching { PushRegistrar.test() }.onFailure { notifyError = it.message } } },
+                )
+            }
+            notifyError?.let { Text(it, color = colors.warning) }
+            TsSecondaryButton(label = "Terms", onClick = { open("https://tokenstat.ai/terms?mobile=1") }, modifier = Modifier.fillMaxWidth())
+            TsSecondaryButton(label = "Privacy", onClick = { open("https://tokenstat.ai/privacy?mobile=1") }, modifier = Modifier.fillMaxWidth())
+            TsSecondaryButton(
+                label = "Delete account",
+                onClick = { open("https://tokenstat.ai/settings/data?mobile=1&focus=delete#delete") },
+                modifier = Modifier.fillMaxWidth(),
+            )
             TsSecondaryButton(label = "Sign out", onClick = { model.signOut(); onDismiss() }, modifier = Modifier.fillMaxWidth())
             Text("Identity and credentials stay in Android's no-backup app storage.", style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
         }
     }
+    if (paywall) PaywallSheet(billing, onDismiss = { paywall = false })
 }
 
 @Composable private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) =
@@ -1536,7 +1706,7 @@ private fun VaultUpgradeCard(onPlans: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            VaultEmptyArt()
+                    EmptyArt(EmptyArtKind.Vault)
             Text("Sync SSH between your devices", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Text(
                 "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
@@ -1586,7 +1756,7 @@ private fun VaultEmptyArt() {
 }
 
 @Composable private fun EmptyCard(title: String, message: String) {
-    EmptyState(icon = ActionIcon.Help.vector, title = title, message = message)
+    EmptyState(icon = ActionIcon.Help.vector, title = title, message = message, art = { EmptyArt(EmptyArtKind.Waiting) })
 }
 @Composable private fun ErrorCard(message: String) = Banner(message, BannerSeverity.DANGER, Modifier.fillMaxWidth())
 

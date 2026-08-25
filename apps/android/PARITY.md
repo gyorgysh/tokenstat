@@ -21,11 +21,13 @@ tests in `PortedLogicTest.kt`.
 | Account activity, limits, insights | built | built | built |
 | Device and remote workspace directory | built | built | built |
 | Sessions, changes, tasks, notes | built | built | built (real renderers; diff/tasks/notes/actions wired) |
-| Workflows, automations, files | built | built | foundation (read-only cards; run/stop + transcripts pending) |
-| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; SwiftTerm-grade key handling pending) |
-| Port-forwarded browser | built | built | pending WebView integration |
-| Store subscription activation | Apple + Google built | built | built; service endpoint required |
+| Workflows, automations, files | built | built | built (run/stop, enable, tree drill, file edit) |
+| Interactive terminal emulator | built | built | built (xterm.js WebView over pty.*; accessory key row) |
+| Port-forwarded browser | built | built | built (`proxy.listen` + WebView) |
+| Store subscription activation | Apple + Google built | built | built; custom pitch wraps Play Billing |
 | Push registration and delivery | built | built | built; FCM configuration required |
+| SSH connect + key import | built | built | built (password/key, generate/import) |
+| Screen viewer (Legend) | built | built | built (JPEG blit; H.264 status) |
 
 ## Component map (Apple → Android)
 
@@ -49,7 +51,7 @@ tests in `PortedLogicTest.kt`.
 | `RelativeTimeText.swift` single shared 15s tick | pending (`RelativeClock` equivalent not yet needed on-screen) | gap |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
 | `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | pending (needed with workflow runs UI) | gap |
-| `CadenceGlyph`, `CountdownRing`, `SlotGauge` | pending (automations show cadence text) | gap |
+| `CadenceGlyph`, `CountdownRing`, `SlotGauge` | `marks/CadenceGlyph.kt` (ring + hand) | simplified |
 | `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (core rows only) | partial |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
 | `ActionIcon` (~55 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
@@ -65,9 +67,9 @@ tests in `PortedLogicTest.kt`.
 | HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` with `HomeGreeting` port, Stat tiles, Canvas heatmap, lock banner, skeleton→Arrive | done |
 | PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
 | InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
-| Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | done (runs/transcripts pending) |
-| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop | core done; custom key row gap |
-| AccountSheet (tier badge, products, sign out) | AccountDialog as ModalBottomSheet with Avatar/TierBadge/accent product buttons | done |
-| Paywall (gradient tier marks, tier-switch spring) | Play Billing dialog remains system-styled | gap |
-| WebBrowser sheet (progress bar animation) | pending | gap |
-| ConnectionChip | status folded into refresh/errors via TunnelCopy | gap |
+| Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | run/stop, file edit, browser |
+| TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop, accessory key row | done |
+| AccountSheet (tier badge, products, sign out) | AccountDialog: TierMark, notify toggle, legal/delete URLs, PaywallSheet | done |
+| Paywall (gradient tier marks, tier-switch spring) | `billing/PaywallSheet.kt` wraps Play Billing | done (no spring) |
+| WebBrowser sheet (progress bar animation) | `browser/PortBrowser.kt` | progress bar |
+| ConnectionChip | `chrome/ConnectionChip.kt` in the top bar | done |

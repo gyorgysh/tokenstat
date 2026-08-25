@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import ai.tokenstat.tokenstat.core.CoreClient
+import ai.tokenstat.tokenstat.core.CoreFailure
 import ai.tokenstat.tokenstat.notifications.PushRegistrar
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -20,6 +21,15 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
+data class ConnectionUi(
+    val ok: Boolean = true,
+    val down: Boolean = false,
+    val offline: Boolean = false,
+    val service: Boolean = false,
+    val title: String = "",
+    val detail: String = "",
+)
+
 data class ClientState(
     val loading: Boolean = true,
     val account: JsonObject? = null,
@@ -27,6 +37,7 @@ data class ClientState(
     val limits: JsonArray = JsonArray(emptyList()),
     val insights: JsonElement? = null,
     val error: String? = null,
+    val connection: ConnectionUi = ConnectionUi(),
 ) {
     val signedIn: Boolean get() = account?.get("signedIn")?.jsonPrimitive?.content == "true"
     val canRemote: Boolean
@@ -64,14 +75,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { CoreClient.call("account.status") }
             .onSuccess { account ->
                 val accountObject = account.jsonObject
-                mutableState.value = mutableState.value.copy(account = accountObject)
+                mutableState.value = mutableState.value.copy(
+                    account = accountObject,
+                    connection = ConnectionUi(),
+                )
                 if (accountObject["signedIn"]?.jsonPrimitive?.content == "true") {
                     PushRegistrar.refresh()
                     loadDashboard()
                 }
             }
-            .onFailure { mutableState.value = mutableState.value.copy(error = it.message) }
+            .onFailure { err ->
+                mutableState.value = mutableState.value.copy(
+                    error = err.message,
+                    connection = classify(err),
+                )
+            }
         mutableState.value = mutableState.value.copy(loading = false)
+    }
+
+    fun retryConnection() {
+        mutableState.value = mutableState.value.copy(connection = ConnectionUi())
+        refresh()
     }
 
     private suspend fun loadDashboard() {
@@ -145,4 +169,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun core(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
         CoreClient.call(method, params)
+}
+
+private fun classify(err: Throwable): ConnectionUi {
+    val code = (err as? CoreFailure)?.code.orEmpty()
+    val message = err.message.orEmpty().lowercase()
+    val offline = code == "offline" ||
+        message.contains("unable to resolve") ||
+        message.contains("network") ||
+        message.contains("enotconn")
+    if (offline) {
+        return ConnectionUi(
+            ok = false,
+            down = true,
+            offline = true,
+            title = "Offline",
+            detail = "This device cannot reach the internet. Retrying from Try now.",
+        )
+    }
+    if (code == "host_timeout" || code == "host_unreachable" || code.contains("peer")) {
+        return ConnectionUi(
+            ok = false,
+            down = false,
+            title = "Computer unreachable",
+            detail = "The internet is fine and the computer stopped answering. It is asleep, or tokenstat is not running there.",
+        )
+    }
+    return ConnectionUi(
+        ok = false,
+        down = true,
+        service = true,
+        title = "No connection",
+        detail = "Signed in, but tokenstat is not answering. Your numbers are the last ones this device read.",
+    )
 }

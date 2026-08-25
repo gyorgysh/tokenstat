@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Archive
@@ -62,8 +63,12 @@ import ai.tokenstat.tokenstat.ui.components.TsSecondaryButton
 import ai.tokenstat.tokenstat.ui.components.TsType
 import ai.tokenstat.tokenstat.ui.components.cardRadiusDp
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
+import ai.tokenstat.tokenstat.ui.marks.CadenceGlyph
+import ai.tokenstat.tokenstat.ui.marks.EmptyArt
+import ai.tokenstat.tokenstat.ui.marks.EmptyArtKind
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
 import ai.tokenstat.tokenstat.ui.theme.Space
+import androidx.compose.material.icons.filled.Language
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -94,7 +99,8 @@ fun WorkspaceSection(
     hostLabel: String,
     section: String,
     modifier: Modifier = Modifier,
-    onOpenTerminal: (String) -> Unit,
+    onOpenTerminal: (String?) -> Unit,
+    onOpenBrowser: (String, Int) -> Unit = { _, _ -> },
 ) {
     val scope = rememberCoroutineScope()
     var data by remember(section) { mutableStateOf<JsonElement?>(null) }
@@ -125,9 +131,10 @@ fun WorkspaceSection(
         "Changes" -> ChangesSection(model, peer, workspace, data, error, loading, modifier)
         "Tasks" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = true, onChanged = reload, modifier)
         "Notes" -> TodoSection(model, peer, workspace, data, error, loading, kindTask = false, onChanged = reload, modifier)
-        "Workflows" -> WorkflowsSection(data, error, loading, modifier)
-        "Automations" -> AutomationsSection(data, error, loading, modifier)
-        "Files" -> FilesSection(data, error, loading, modifier)
+        "Workflows" -> WorkflowsSection(model, peer, workspace, data, error, loading, reload, modifier)
+        "Automations" -> AutomationsSection(model, peer, data, error, loading, reload, modifier)
+        "Files" -> FilesSection(model, peer, workspace, modifier)
+        "Browser" -> BrowserSection(model, peer, onOpenBrowser, modifier)
         else -> EmptyState(Icons.AutoMirrored.Filled.Notes, "Nothing here", "This section has no content yet.", modifier)
     }
 }
@@ -152,12 +159,15 @@ private fun SessionsSection(
     data: JsonElement?,
     error: String?,
     loading: Boolean,
-    onOpen: (String) -> Unit,
+    onOpen: (String?) -> Unit,
     onLoad: () -> Unit,
     modifier: Modifier,
 ) {
     val sessions = asObjects(data)
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        item {
+            TsAccentButton(label = "New shell", small = true, onClick = { onOpen(null) })
+        }
         if (error != null) item { SectionError(error) }
         if (!loading && sessions.isEmpty()) {
             item {
@@ -165,6 +175,7 @@ private fun SessionsSection(
                     Icons.Default.Terminal,
                     "No live sessions",
                     "Terminals running on the host appear here. Open one to watch or type.",
+                    art = { EmptyArt(EmptyArtKind.Sessions) },
                 )
             }
         }
@@ -265,7 +276,12 @@ private fun ChangesSection(
         if (error != null) item { SectionError(error) }
         if (!loading && files.isEmpty()) {
             item {
-                EmptyState(Icons.Default.Difference, "A clean tree", "No uncommitted changes on this folder right now.")
+                EmptyState(
+                    Icons.Default.Difference,
+                    "A clean tree",
+                    "No uncommitted changes on this folder right now.",
+                    art = { EmptyArt(EmptyArtKind.Changes) },
+                )
             }
         }
         itemsIndexed(files) { _, file ->
@@ -356,6 +372,7 @@ private fun TodoSection(
                     } else {
                         "A note is text kept beside the folder it belongs to."
                     },
+                    art = { EmptyArt(if (kindTask) EmptyArtKind.Tasks else EmptyArtKind.Notes) },
                 )
             }
         }
@@ -443,20 +460,76 @@ private fun ComposerDialog(title: String, onDismiss: () -> Unit, onSave: (String
 
 @Composable
 private fun WorkflowsSection(
+    model: AppViewModel,
+    peer: String,
+    workspace: String,
     data: JsonElement?,
     error: String?,
     loading: Boolean,
+    onChanged: () -> Unit,
     modifier: Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     val workflows = asObjects(data)
+    var transcript by remember { mutableStateOf<String?>(null) }
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
         if (!loading && workflows.isEmpty()) {
-            item { EmptyState(Icons.Default.AccountTree, "No workflows yet", "Workflows built on the Mac appear here, read-only.") }
+            item {
+                EmptyState(
+                    Icons.Default.AccountTree,
+                    "No workflows yet",
+                    "Workflows built on the Mac appear here. Run one from this phone.",
+                    art = { EmptyArt(EmptyArtKind.Workflows) },
+                )
+            }
         }
         itemsIndexed(workflows) { _, wf ->
-            WorkflowCard(wf)
+            WorkflowCard(
+                wf = wf,
+                onRun = {
+                    val id = wf.str("id") ?: return@WorkflowCard
+                    scope.launch {
+                        runCatching {
+                            model.workspaceSection(peer, "workflow.run", buildJsonObject {
+                                put("id", id)
+                                put("input", "")
+                                put("workspaceId", workspace)
+                            })
+                        }
+                        onChanged()
+                    }
+                },
+                onKill = { runId ->
+                    scope.launch {
+                        runCatching {
+                            model.workspaceSection(peer, "workflow.kill", buildJsonObject { put("id", runId) })
+                        }
+                        onChanged()
+                    }
+                },
+                onTranscript = { runId, nodeId ->
+                    scope.launch {
+                        runCatching {
+                            val chunk = model.workspaceSection(peer, "workflow.transcript", buildJsonObject {
+                                put("id", runId)
+                                put("nodeId", nodeId)
+                                put("offset", 0)
+                            }) as? JsonObject
+                            transcript = chunk?.str("text") ?: chunk?.str("content") ?: chunk.toString()
+                        }.onFailure { transcript = it.message }
+                    }
+                },
+            )
         }
+    }
+    if (transcript != null) {
+        AlertDialog(
+            onDismissRequest = { transcript = null },
+            title = { Text("Transcript") },
+            text = { Text(transcript.orEmpty(), style = TsType.mono(11)) },
+            confirmButton = { TextButton(onClick = { transcript = null }) { Text("Close") } },
+        )
     }
 }
 
@@ -464,9 +537,15 @@ private fun WorkflowsSection(
 /// compact reading of `MiniGraph`/`WorkflowStepStrip` in a phone column.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun WorkflowCard(wf: JsonObject) {
+private fun WorkflowCard(
+    wf: JsonObject,
+    onRun: () -> Unit,
+    onKill: (String) -> Unit,
+    onTranscript: (String, String) -> Unit,
+) {
     val colors = LocalTsColors.current
     val steps = (wf["steps"] as? JsonArray)?.filterIsInstance<JsonObject>().orEmpty()
+    val liveRun = wf.str("runId") ?: wf.str("liveRunId")
     Column(
         Modifier
             .fillMaxWidth()
@@ -495,6 +574,15 @@ private fun WorkflowCard(wf: JsonObject) {
                 }
             }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            TsAccentButton(label = "Run", small = true, onClick = onRun)
+            if (liveRun != null) {
+                TsSecondaryButton(label = "Stop", small = true, onClick = { onKill(liveRun) })
+                steps.firstOrNull()?.str("id")?.let { node ->
+                    TsSecondaryButton(label = "Transcript", small = true, onClick = { onTranscript(liveRun, node) })
+                }
+            }
+        }
     }
 }
 
@@ -517,20 +605,33 @@ private fun StepCapsule(label: String) {
 
 @Composable
 private fun AutomationsSection(
+    model: AppViewModel,
+    peer: String,
     data: JsonElement?,
     error: String?,
     loading: Boolean,
+    onChanged: () -> Unit,
     modifier: Modifier,
 ) {
+    val scope = rememberCoroutineScope()
     val automations = asObjects(data)
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         if (error != null) item { SectionError(error) }
         if (!loading && automations.isEmpty()) {
-            item { EmptyState(Icons.Default.Bolt, "No automations yet", "Scheduled runs configured on the host appear here.") }
+            item {
+                EmptyState(
+                    Icons.Default.Bolt,
+                    "No automations yet",
+                    "Scheduled runs configured on the host appear here.",
+                    art = { EmptyArt(EmptyArtKind.Automations) },
+                )
+            }
         }
         itemsIndexed(automations) { _, automation ->
             val colors = LocalTsColors.current
             val enabled = automation.bol("enabled")
+            val id = automation.str("id") ?: return@itemsIndexed
+            val cadence = automation.str("cadence").orEmpty()
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -550,7 +651,19 @@ private fun AutomationsSection(
                         Modifier
                             .clip(RoundedCornerShape(50))
                             .background(if (enabled) colors.accentSoft else colors.controlSeat)
-                            .padding(horizontal = Space.s, vertical = 2.dp),
+                            .padding(horizontal = Space.s, vertical = 2.dp)
+                            .clickable {
+                                scope.launch {
+                                    runCatching {
+                                        model.workspaceSection(
+                                            peer,
+                                            if (enabled) "automation.disable" else "automation.enable",
+                                            buildJsonObject { put("id", id) },
+                                        )
+                                    }
+                                    onChanged()
+                                }
+                            },
                     ) {
                         Text(
                             if (enabled) "ON" else "OFF",
@@ -559,9 +672,24 @@ private fun AutomationsSection(
                         )
                     }
                 }
-                automation.str("cadence")?.let {
-                    Text(it, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                if (cadence.isNotBlank()) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        CadenceGlyph(cadence)
+                        Text(cadence, style = TextStyle(fontSize = 12.sp), color = colors.textSecondary)
+                    }
                 }
+                TsAccentButton(
+                    label = "Run",
+                    small = true,
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                model.workspaceSection(peer, "automation.run", buildJsonObject { put("id", id) })
+                            }
+                            onChanged()
+                        }
+                    },
+                )
             }
         }
     }
@@ -569,33 +697,166 @@ private fun AutomationsSection(
 
 @Composable
 private fun FilesSection(
-    data: JsonElement?,
-    error: String?,
-    loading: Boolean,
+    model: AppViewModel,
+    peer: String,
+    workspace: String,
     modifier: Modifier,
 ) {
-    val entries = asObjects(data)
+    val scope = rememberCoroutineScope()
+    var path by remember { mutableStateOf("") }
+    var entries by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var editorPath by remember { mutableStateOf<String?>(null) }
+    var editorBody by remember { mutableStateOf("") }
+
+    suspend fun load(at: String) {
+        loading = true
+        runCatching {
+            model.workspaceSection(peer, "workspace.tree", buildJsonObject {
+                put("id", workspace); put("path", at)
+            })
+        }.onSuccess {
+            entries = asObjects(it).ifEmpty { asObjects((it as? JsonObject)?.get("entries")) }
+            error = null
+        }.onFailure { error = it.message }
+        loading = false
+    }
+    LaunchedEffect(path) { load(path) }
+
     LazyColumn(modifier, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        if (path.isNotEmpty()) {
+            item {
+                TsSecondaryButton(label = "Up", small = true, onClick = {
+                    path = path.trimEnd('/').substringBeforeLast('/', "")
+                })
+            }
+        }
         if (error != null) item { SectionError(error) }
         if (!loading && entries.isEmpty()) {
-            item { EmptyState(Icons.Default.FolderOpen, "Empty folder", "This folder has nothing registered on the host.") }
+            item {
+                EmptyState(
+                    Icons.Default.FolderOpen,
+                    "Empty folder",
+                    "This folder has nothing registered on the host.",
+                    art = { EmptyArt(EmptyArtKind.Files) },
+                )
+            }
         }
         itemsIndexed(entries) { _, entry ->
+            val name = entry.str("name") ?: entry.str("path") ?: return@itemsIndexed
+            val child = entry.str("path") ?: listOf(path, name).filter { it.isNotBlank() }.joinToString("/")
+            val dir = entry.bol("dir") || entry.bol("isDir") || entry.str("kind") == "dir" || entry.str("type") == "dir"
             Column {
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = Space.xs),
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (dir) {
+                                path = child
+                            } else {
+                                scope.launch {
+                                    runCatching {
+                                        val read = model.workspaceSection(peer, "workspace.read", buildJsonObject {
+                                            put("id", workspace); put("path", child)
+                                        }) as? JsonObject
+                                        editorPath = child
+                                        editorBody = read?.str("content") ?: ""
+                                    }.onFailure { error = it.message }
+                                }
+                            }
+                        }
+                        .padding(vertical = Space.xs),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Space.s),
                 ) {
-                    Icon(Icons.Default.FolderOpen, null, tint = LocalTsColors.current.accent)
-                    Text(
-                        entry.str("name") ?: entry.str("path") ?: "",
-                        style = TsType.mono(12),
-                        color = LocalTsColors.current.textPrimary,
+                    Icon(
+                        if (dir) Icons.Default.FolderOpen else Icons.AutoMirrored.Filled.InsertDriveFile,
+                        null,
+                        tint = LocalTsColors.current.accent,
                     )
+                    Text(name, style = TsType.mono(12), color = LocalTsColors.current.textPrimary)
                 }
                 HorizontalDivider(color = LocalTsColors.current.border)
             }
         }
+    }
+    val editing = editorPath
+    if (editing != null) {
+        AlertDialog(
+            onDismissRequest = { editorPath = null },
+            title = { Text(editing, style = TsType.mono(12)) },
+            text = {
+                OutlinedTextField(
+                    editorBody,
+                    { editorBody = it },
+                    minLines = 8,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TsAccentButton(
+                    label = "Save",
+                    small = true,
+                    onClick = {
+                        scope.launch {
+                            runCatching {
+                                model.workspaceSection(peer, "workspace.write", buildJsonObject {
+                                    put("id", workspace)
+                                    put("path", editing)
+                                    put("content", editorBody)
+                                })
+                            }
+                            editorPath = null
+                        }
+                    },
+                )
+            },
+            dismissButton = { TextButton(onClick = { editorPath = null }) { Text("Close") } },
+        )
+    }
+}
+
+@Composable
+private fun BrowserSection(
+    model: AppViewModel,
+    peer: String,
+    onOpen: (String, Int) -> Unit,
+    modifier: Modifier,
+) {
+    val scope = rememberCoroutineScope()
+    var portText by remember { mutableStateOf("3000") }
+    var error by remember { mutableStateOf<String?>(null) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Text("Open a port on that computer in this phone's browser.", color = LocalTsColors.current.textSecondary)
+        OutlinedTextField(
+            portText,
+            { portText = it.filter(Char::isDigit).take(5) },
+            label = { Text("Port") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            leadingIcon = { Icon(Icons.Default.Language, null) },
+        )
+        error?.let { SectionError(it) }
+        TsAccentButton(
+            label = "Open",
+            onClick = {
+                val port = portText.toIntOrNull() ?: return@TsAccentButton
+                scope.launch {
+                    runCatching {
+                        val opened = model.core(
+                            "proxy.listen",
+                            buildJsonObject {
+                                put("peer", peer)
+                                put("host", "127.0.0.1")
+                                put("port", port)
+                            },
+                        ) as JsonObject
+                        val url = opened.str("url") ?: "http://127.0.0.1:$port/"
+                        onOpen(url, port)
+                    }.onFailure { error = it.message }
+                }
+            },
+        )
     }
 }

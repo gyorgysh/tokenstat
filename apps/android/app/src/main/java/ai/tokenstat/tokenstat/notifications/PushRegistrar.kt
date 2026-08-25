@@ -52,6 +52,12 @@ object PushRegistrar {
             .onFailure { prefs.edit().putString(KEY_PENDING, token).apply() }
     }
 
+    suspend fun test() {
+        CoreClient.call("push.test")
+    }
+
+    fun registered(): Boolean = prefs()?.getString(KEY_TOKEN, null) != null
+
     private suspend fun unregisterToken(token: String) {
         CoreClient.call("push.unregister", buildJsonObject {
             put("token", token)
