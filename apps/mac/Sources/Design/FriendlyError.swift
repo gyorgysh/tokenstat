@@ -52,15 +52,28 @@ struct FriendlyError {
         let lower = raw.lowercased()
 
         // The vault lives on the account, so its failures arrive as server
-        // sentences written for a log. "Register this device before using the
-        // vault." is the account service saying a call reached it with no
-        // machine id, which is true and useless: nobody can act on it.
-        if lower.contains("machine_required") || lower.contains("register this device")
-            || lower.contains("machine_not_registered")
+        // sentences written for a log. Two different causes share the
+        // `machine_required` code: a login that was never tied to this
+        // computer, and a computer the account has not heard of. They need
+        // different advice. Registering the machine cannot fix an unbound
+        // token; signing in again from this app can.
+        if lower.contains("register this device before using the vault") {
+            return FriendlyError(
+                title: "This login is not tied to this computer",
+                message: "The vault lives on your account, and this sign-in predates "
+                    + "linking the two. Press Try again first. If that does not clear it, "
+                    + "sign in again from Account. Everything saved here still works.",
+                symbol: "person.badge.key",
+                actionTitle: "Try again",
+                raw: raw
+            )
+        }
+        if lower.contains("machine_required") || lower.contains("machine_not_registered")
             || lower.contains("not registered on the account")
+            || lower.contains("not bound to an account device")
         {
             return FriendlyError(
-                title: "This Mac is not on your account",
+                title: "This computer is not on your account",
                 message: "Sync needs this computer linked to your account before it can hold a "
                     + "copy of your servers. Everything still works here in the meantime.",
                 symbol: "person.badge.key",
