@@ -187,13 +187,13 @@ fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
         "not_enrolled" => VaultError::NotEnrolled,
         // Typed rather than left as a server sentence, because the host acts
         // on this one: it republishes the machine record and tries again.
-        "machine_required" | "machine_not_registered" => VaultError::MachineNotRegistered(
-            if error.message.is_empty() {
+        "machine_required" | "machine_not_registered" => {
+            VaultError::MachineNotRegistered(if error.message.is_empty() {
                 "this machine is not registered on the account".into()
             } else {
                 error.message
-            },
-        ),
+            })
+        }
         "already_exists" => VaultError::AlreadyExists,
         "not_found" => VaultError::NotFound,
         "revision_conflict" => VaultError::Conflict(error.revision.unwrap_or(0)),
