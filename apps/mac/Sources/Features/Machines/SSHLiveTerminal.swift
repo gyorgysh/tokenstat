@@ -142,6 +142,20 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         Task { await Bridge.closeSSHSession(id: handle) }
     }
 
+    /// Keep the terminal and its scrollback, but stop treating it as live.
+    ///
+    /// `ssh.session.list` reaps a session once its command has exited. The
+    /// bookkeeping poll can therefore learn that a session ended before this
+    /// terminal's read poll sees the final `closed` response. That is not a
+    /// request to discard the tab: its last screenful is often the result the
+    /// person came back to read.
+    func markClosed(error: String? = nil) {
+        pollTask?.cancel()
+        pollTask = nil
+        closed = true
+        if let error { self.error = error }
+    }
+
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
         Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }

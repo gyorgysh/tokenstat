@@ -381,6 +381,9 @@ private final class ScreenViewerModel {
     private var requestedTier: String?
     private var requestedControl = false
     private var reconnectAttempts = 0
+    /// When the transport connected, used only to bound the wait for the
+    /// first decodable picture.
+    private var connectedSince: Date?
     /// When the current session started streaming.
     ///
     /// The attempt counter used to reset on the first decoded frame, so a
@@ -442,7 +445,8 @@ private final class ScreenViewerModel {
             let session = try await Bridge.screenViewerOpen(peer: peer, capability: capability.token, control: control)
             self.session = session
             transport = session.transport
-            streamingSince = Date()
+            connectedSince = Date()
+            streamingSince = nil
             // Connected is not the same as a picture. Marking streaming here
             // hid the overlay and left a black rectangle that still accepted
             // mouse and keyboard, because input is a side channel.
@@ -487,18 +491,32 @@ private final class ScreenViewerModel {
                 if let encoded = read.frame, let data = Data(base64Encoded: encoded),
                    let frame = ScreenEncodedFrame(data)
                 {
-                    if let since = streamingSince, Date().timeIntervalSince(since) > Self.stableAfter {
-                        reconnectAttempts = 0
-                    }
                     aspectRatio = CGFloat(frame.width) / CGFloat(max(1, frame.height))
-                    if decoder.decode(frame), state != .streaming {
-                        state = .streaming
+                    if decoder.decode(frame) {
+                        if let since = streamingSince {
+                            if Date().timeIntervalSince(since) > Self.stableAfter {
+                                reconnectAttempts = 0
+                            }
+                        } else {
+                            // Stability starts with a picture, not with the
+                            // transport. A slow first keyframe must not spend
+                            // almost all of the stability window by itself.
+                            streamingSince = Date()
+                        }
+                        if state != .streaming { state = .streaming }
                     }
                 }
                 if state != .streaming,
-                   let since = streamingSince,
+                   let since = connectedSince,
                    Date().timeIntervalSince(since) > 8
                 {
+                    // The transport is alive but unusable. Do not leave its
+                    // viewer and the host's capture running behind a failed
+                    // overlay while waiting for somebody to press Try Again.
+                    await Bridge.screenViewerClose(id: id)
+                    if session?.id == id { session = nil }
+                    connectedSince = nil
+                    streamingSince = nil
                     state = .failed
                     message = "Connected, but no picture has arrived yet. The host may not have Screen Recording, or Tokenstat may not be open on that Mac."
                     return
@@ -524,6 +542,7 @@ private final class ScreenViewerModel {
         guard !stopped else { return }
         if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
         session = nil
+        connectedSince = nil
         streamingSince = nil
         decoder.reset(); audio.reset()
         reconnectAttempts += 1

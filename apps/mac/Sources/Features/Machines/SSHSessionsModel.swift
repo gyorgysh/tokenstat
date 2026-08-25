@@ -72,13 +72,14 @@ final class SSHSessionsModel {
             sessions.append(SSHLiveTerminal(adopting: summary))
         }
         let held = Set(summaries.map(\.id))
-        // A session the host no longer lists is gone, whatever this side
-        // thought. Stopping it first is harmless when it is already dead and
-        // necessary when it is only this app that has lost track of it.
-        for session in sessions where !held.contains(session.id) {
-            session.stop()
+        // `ssh.session.list` reaps an ended shell before answering. Keep its
+        // local terminal and scrollback until the person explicitly closes
+        // the tab; otherwise the five-second bookkeeping poll can erase the
+        // command's final output before it has been read. A session removed
+        // explicitly is already absent from `sessions` and is unaffected.
+        for session in sessions where session.alive && !held.contains(session.id) {
+            session.markClosed()
         }
-        sessions.removeAll { !held.contains($0.id) }
         closingIDs.formIntersection(held)
         if selectedID == nil || !sessions.contains(where: { $0.id == selectedID }) {
             selectedID = sessions.last?.id
@@ -122,16 +123,25 @@ final class SSHSessionsModel {
         closingIDs.insert(session.id)
         sessions.removeAll { $0.id == session.id }
         if selectedID == session.id { selectedID = sessions.last?.id }
-        for (host, id) in selectedByHost where id == session.id {
+        let selectedHosts = selectedByHost.compactMap { host, id in
+            id == session.id ? host : nil
+        }
+        for host in selectedHosts {
             selectedByHost.removeValue(forKey: host)
         }
         #if os(macOS)
         // Splits name sessions by id, so a half pointing at a closed one has
         // to let go or the pane draws an empty rectangle beside a live shell.
-        for (host, id) in splitLeadingID where id == session.id {
+        let leadingHosts = splitLeadingID.compactMap { host, id in
+            id == session.id ? host : nil
+        }
+        for host in leadingHosts {
             splitLeadingID.removeValue(forKey: host)
         }
-        for (host, id) in splitTrailingID where id == session.id {
+        let trailingHosts = splitTrailingID.compactMap { host, id in
+            id == session.id ? host : nil
+        }
+        for host in trailingHosts {
             splitTrailingID.removeValue(forKey: host)
         }
         #endif
