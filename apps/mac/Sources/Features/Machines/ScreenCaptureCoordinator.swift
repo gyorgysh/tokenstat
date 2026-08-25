@@ -287,7 +287,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// a black screen while mouse and keyboard still arrived on a side
     /// channel.
     private func isKeyframe(_ sample: CMSampleBuffer) -> Bool {
-        if forceKey { return true }
         let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
         guard let value = attachments?.first?[kCMSampleAttachmentKey_NotSync] else { return true }
         if let flag = value as? Bool { return !flag }
@@ -298,7 +297,6 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     private func encoded(_ sample: CMSampleBuffer) {
         guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
         let keyframe = isKeyframe(sample)
-        if keyframe { forceKey = false }
         var payload = Data()
         if keyframe, let format = CMSampleBufferGetFormatDescription(sample) {
             for index in 0..<2 {
@@ -329,6 +327,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         }
         guard payload.count <= 1_048_576 else { return }
         sequence += 1
+        if keyframe { forceKey = false }
         output(ScreenWire.video(sequence: sequence, timestamp: sample.presentationTimeStamp, width: UInt16(width), height: UInt16(height), keyframe: keyframe, payload: payload))
     }
 }
