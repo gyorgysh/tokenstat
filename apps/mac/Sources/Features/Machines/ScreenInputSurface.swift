@@ -501,6 +501,13 @@ private extension UIKeyModifierFlags {
 struct ScreenKeyBar: View {
     @Binding var modifiers: UInt64
     let send: (UInt16, UInt64) -> Void
+    /// Pointer controls, when this bar is drawn over a screen somebody is
+    /// controlling with a finger.
+    ///
+    /// Buttons and not more gestures. A remote desktop needs a click, a double
+    /// click, a right click and a held button, and a phone was asking somebody
+    /// to guess four gestures for them with nothing on screen to say so.
+    var pointer: ScreenPointerControls?
 
     private struct Special: Identifiable {
         let id: String
@@ -527,6 +534,26 @@ struct ScreenKeyBar: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Space.s) {
+                if let pointer {
+                    Button("click") { pointer.click(0, 1) }
+                        .buttonStyle(ScreenKeyStyle(active: false))
+                    Button("double") { pointer.click(0, 2) }
+                        .buttonStyle(ScreenKeyStyle(active: false))
+                    Button("right") { pointer.click(1, 1) }
+                        .buttonStyle(ScreenKeyStyle(active: false))
+                    // Latched rather than held: a finger cannot hold a button
+                    // on screen and drag with the same hand, which is what a
+                    // long press was asking for.
+                    Button(pointer.dragLatched ? "drop" : "drag") { pointer.toggleDrag() }
+                        .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched))
+                    Button("fine") { pointer.toggleFine() }
+                        .buttonStyle(ScreenKeyStyle(active: pointer.fine))
+                    if pointer.zoom > 1.01 {
+                        Button(String(format: "%.1fx", pointer.zoom)) { pointer.resetZoom() }
+                            .buttonStyle(ScreenKeyStyle(active: true))
+                    }
+                    Divider().frame(height: 20)
+                }
                 ForEach(sticky, id: \.0) { name, flag in
                     Button(name) { modifiers ^= flag }
                         .buttonStyle(ScreenKeyStyle(active: modifiers & flag != 0))
@@ -551,6 +578,18 @@ struct ScreenKeyBar: View {
         }
         .background(.ultraThinMaterial)
     }
+}
+
+/// What the bar can do to the pointer. A value rather than a pile of bindings,
+/// so the bar takes one parameter and the viewer keeps the state.
+struct ScreenPointerControls {
+    var fine: Bool
+    var dragLatched: Bool
+    var zoom: CGFloat
+    var click: (Int, Int) -> Void
+    var toggleDrag: () -> Void
+    var toggleFine: () -> Void
+    var resetZoom: () -> Void
 }
 
 private struct ScreenKeyStyle: ButtonStyle {

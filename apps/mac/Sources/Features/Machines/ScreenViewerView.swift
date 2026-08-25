@@ -17,6 +17,7 @@ struct ScreenViewerView: View {
     @Environment(\.dismiss) private var dismiss
     #if !os(macOS)
     @Environment(ClientStore.self) private var store
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     #endif
     let peer: String
     let name: String
@@ -26,6 +27,12 @@ struct ScreenViewerView: View {
     @State private var muted = false
     @State private var importingFile = false
     @State private var zoom: CGFloat = 1
+    /// Slow the pointer right down, for a target a few pixels across.
+    @State private var fine = false
+    /// The left button is held, so the next drag drags. A toggle rather than
+    /// only a long press, because a long press cannot be held while the other
+    /// hand does anything and is not visible anywhere on screen.
+    @State private var dragLatched = false
     @State private var heldModifiers: UInt64 = 0
     @State private var keyboardWanted = false
     #if os(macOS)
@@ -52,11 +59,16 @@ struct ScreenViewerView: View {
         }
         .navigationTitle(name)
         .safeAreaInset(edge: .top) {
-            HStack(spacing: 6) {
-                Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
-                Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
+            // Turned sideways, a phone has very little height and every line
+            // of it is picture somebody rotated the device to see. The
+            // transport is worth a line in portrait and is not worth one here.
+            if !isCompactHeight {
+                HStack(spacing: 6) {
+                    Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
+                    Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
+                }
+                .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
             }
-            .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
         }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
@@ -119,13 +131,22 @@ struct ScreenViewerView: View {
         // Control is a property of the session, so changing it reopens the
         // stream rather than being refused.
         .onChange(of: controlling) { _, wanted in
+            // Handing control back with the button still latched down would
+            // leave the far end holding a click nothing here can release.
+            if !wanted, dragLatched {
+                model.press(false)
+                dragLatched = false
+            }
             Task {
                 await model.setControl(wanted)
                 if !model.isControlling { controlling = false }
             }
         }
         .task { await start() }
-        .onDisappear { model.stop() }
+        .onDisappear {
+            if dragLatched { model.press(false) }
+            model.stop()
+        }
         .fileImporter(isPresented: $importingFile, allowedContentTypes: [.data]) { result in
             guard case let .success(url) = result else { return }
             model.sendFile(url)
@@ -138,15 +159,40 @@ struct ScreenViewerView: View {
         #if !os(macOS)
         .safeAreaInset(edge: .bottom) {
             if controlling {
-                ScreenKeyBar(modifiers: $heldModifiers) { code, flags in
-                    model.sendKey(code, down: true, flags: flags)
-                    model.sendKey(code, down: false, flags: flags)
-                }
+                ScreenKeyBar(
+                    modifiers: $heldModifiers,
+                    send: { code, flags in
+                        model.sendKey(code, down: true, flags: flags)
+                        model.sendKey(code, down: false, flags: flags)
+                    },
+                    pointer: ScreenPointerControls(
+                        fine: fine,
+                        dragLatched: dragLatched,
+                        zoom: zoom,
+                        click: { button, count in model.click(button: button, count: count) },
+                        toggleDrag: {
+                            dragLatched.toggle()
+                            model.press(dragLatched)
+                        },
+                        toggleFine: { fine.toggle() },
+                        resetZoom: { withAnimation { zoom = 1 } }
+                    )
+                )
             }
         }
         // A screen somebody is watching must not dim under them.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        #endif
+    }
+
+    /// A phone on its side. iPad and Mac never report this, so nothing there
+    /// changes shape.
+    private var isCompactHeight: Bool {
+        #if os(macOS)
+        false
+        #else
+        verticalSizeClass == .compact
         #endif
     }
 
@@ -238,14 +284,16 @@ struct ScreenViewerView: View {
     private var actions: ScreenInputActions {
         ScreenInputActions(
             move: { model.move(to: $0) },
-            nudge: { delta, size in model.nudge(by: delta, in: size) },
+            nudge: { delta, size in
+                model.nudge(by: delta, in: size, sensitivity: pointerSensitivity)
+            },
             click: { button, count in model.click(button: button, count: count) },
             press: { model.press($0) },
             scroll: { model.scroll(by: $0) },
             text: { text, flags in model.sendText(text, flags: flags) },
             key: { code, down, flags in model.sendKey(code, down: down, flags: flags) },
             magnify: { factor in
-                zoom = min(max(zoom * factor, 1), 4)
+                zoom = min(max(zoom * factor, 1), Self.maxZoom)
             }
         )
     }
@@ -263,6 +311,24 @@ struct ScreenViewerView: View {
         )
         #endif
     }
+
+    /// How far the pointer travels for a finger's worth of drag.
+    ///
+    /// Divided by the zoom, so magnifying the picture magnifies the precision
+    /// with it: at 4x a finger crosses a quarter as much of the remote screen,
+    /// which is the whole reason to zoom in on a control too small to hit.
+    /// Fine takes another third off that, for the last few pixels.
+    private var pointerSensitivity: CGFloat {
+        let base: CGFloat = 1.6
+        return base / max(1, zoom) * (fine ? 0.35 : 1)
+    }
+
+    /// The most the picture can be magnified.
+    ///
+    /// Four was not enough on a phone looking at a large display: a menu bar
+    /// item is a couple of points across at fit, and no amount of steadiness
+    /// makes that reachable.
+    static let maxZoom: CGFloat = 8
 
     /// Where the picture grows from when it is zoomed. Following the pointer
     /// means a zoomed screen never needs a separate pan gesture: moving the
@@ -499,8 +565,15 @@ private final class ScreenViewerModel {
     /// pointer position itself and sends an absolute point. The host stays a
     /// single "put it here", which is the only thing that survives two
     /// displays of different sizes.
-    func nudge(by delta: CGSize, in size: CGSize) {
-        let sensitivity: CGFloat = 1.6
+    /// Move the pointer by a finger's worth of travel.
+    ///
+    /// `sensitivity` is the caller's, not a constant here, because how far a
+    /// finger should move the pointer depends on how magnified the picture is
+    /// and on whether somebody has asked for fine control. A fixed rate is
+    /// what made zooming in useless: the picture got bigger and the pointer
+    /// kept crossing it just as fast, so a four-pixel target stayed
+    /// unreachable at every zoom level.
+    func nudge(by delta: CGSize, in size: CGSize, sensitivity: CGFloat) {
         move(to: CGPoint(
             x: cursor.x + delta.width * sensitivity / max(1, size.width),
             y: cursor.y + delta.height * sensitivity / max(1, size.height)

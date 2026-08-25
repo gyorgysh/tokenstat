@@ -67,6 +67,15 @@ ALLOWED = [
     # the label is the key, and a glyph beside "cmd" would be a second symbol
     # for one keystroke.
     ("Features/Machines/ScreenInputSurface.swift", "modifiers ^= flag"),
+    # The pointer keycaps in the same strip, beside ctrl and cmd. "click" and
+    # "drag" are keys on that bar and read as keys: a glyph on one of them
+    # would be a second symbol for one press, in a row that is all text.
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.click(0, 1)"),
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.click(0, 2)"),
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.click(1, 1)"),
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.toggleDrag()"),
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.toggleFine()"),
+    ("Features/Machines/ScreenInputSurface.swift", "pointer.resetZoom()"),
     # A session tab on the phone's SSH terminal. The whole button is the
     # session's name and its live dot, and every tab carrying the same glyph
     # would be one symbol repeated across a strip that is already a strip.
