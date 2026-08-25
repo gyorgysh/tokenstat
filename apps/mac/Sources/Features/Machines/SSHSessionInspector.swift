@@ -41,8 +41,8 @@ struct SSHSessionInspector: View {
     private var host: SSHHost? { model.hosts.first { $0.id == hostID } }
     private var available: [SSHSnippet] { model.snippets(for: hostID) }
 
-    /// Where a snippet is typed. Nil when the server has no session in front,
-    /// which is what disables the rows: a command typed into nothing looks
+    /// Where a snippet runs. Nil when the server has no session in front,
+    /// which is what disables the rows: a command sent into nothing looks
     /// exactly like a command that ran and printed nothing.
     private var target: SSHLiveTerminal? {
         guard let active = sessions.activeSession(for: hostID), active.alive else { return nil }
@@ -150,8 +150,8 @@ struct SSHSessionInspector: View {
                     ForEach(available) { snippet in row(snippet) }
                     Text(
                         target == nil
-                            ? "Open a session on this server to type a snippet into it."
-                            : "A snippet is typed at the prompt, not run. Press Return when you have read it."
+                            ? "Open a session on this server to run a snippet in it."
+                            : "A snippet runs in the session in front. One with {{braces}} asks for its values first."
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -173,7 +173,7 @@ struct SSHSessionInspector: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: ActionIcon.apply.symbol)
+                    Image(systemName: ActionIcon.run.symbol)
                         .font(.system(size: 11))
                         .foregroundStyle(target == nil ? Color.secondary : Theme.accent)
                     Text(snippet.title)
@@ -208,7 +208,7 @@ struct SSHSessionInspector: View {
         .buttonStyle(.plain)
         .help(snippet.command)
         .contextMenu {
-            Button("Type it", .send) { run(snippet) }
+            Button("Run it", .run) { run(snippet) }
                 .disabled(target == nil)
             Button("Copy command", .copy) {
                 NSPasteboard.general.clearContents()
@@ -225,12 +225,12 @@ struct SSHSessionInspector: View {
         }
     }
 
-    /// Type a snippet, or ask for its placeholders first.
+    /// Run a snippet, or ask for its placeholders first.
     ///
-    /// The same rule the phone's key bar follows, for the same reason: the
-    /// line lands at the prompt with no trailing Return, so what is about to
-    /// happen can be read before it happens. Somebody's saved command is not
-    /// something to fire off because a click landed on the wrong card.
+    /// The same rule the phone's key bar follows: a snippet with placeholders
+    /// goes through the sheet, where the filled command is on screen before it
+    /// is sent, and everything else runs. A snippet is a command somebody
+    /// saved in order to run it.
     private func run(_ snippet: SSHSnippet) {
         if SSHSnippet.placeholders(in: snippet.command).isEmpty {
             type(snippet.command)
@@ -242,7 +242,7 @@ struct SSHSessionInspector: View {
     private func type(_ command: String) {
         guard let target else { return }
         sessions.select(target)
-        target.sendBytes(Array(command.utf8))
+        target.sendBytes(SSHSnippet.bytesToRun(command))
     }
 }
 #endif

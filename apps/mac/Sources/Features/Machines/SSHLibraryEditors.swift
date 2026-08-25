@@ -667,6 +667,16 @@ struct SSHSnippetEditor: View {
                 }
                 Toggle("Run automatically after connecting", isOn: $snippet.runOnConnect)
                     .toggleStyle(.brandCheckbox)
+                    .disabled(snippet.hostIDs.isEmpty || !placeholders.isEmpty)
+                if snippet.hostIDs.isEmpty {
+                    Text("Pick the servers this snippet belongs to before it can run by itself. A snippet kept for every server would fire into every connection.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !placeholders.isEmpty {
+                    Text("A snippet that asks for values cannot run by itself: the question would arrive on its own the moment you connected.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
             }
             .padding(Theme.Space.m)

@@ -141,15 +141,15 @@ struct SSHTerminalPane: View {
             if !snippets.isEmpty {
                 Menu {
                     ForEach(snippets) { snippet in
-                        Button(snippet.title, .apply) { use(snippet) }
+                        Button(snippet.title, .run) { use(snippet) }
                     }
                 } label: {
-                    ActionIcon.apply.label("Snippets")
+                    ActionIcon.run.label("Snippets")
                         .font(.system(size: 12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Type a saved command into the session in front")
+                .help("Run a saved command in the session in front")
                 .disabled(snippetTarget == nil)
             }
 
@@ -187,8 +187,9 @@ struct SSHTerminalPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Type a saved command without Return. Placeholder commands use the same
-    /// prompt as the phone and the inspector before they reach this path.
+    /// Run a saved command. Placeholder commands go through the same prompt as
+    /// the phone and the inspector before they reach this path, so the filled
+    /// line is on screen before anything is sent.
     private func use(_ snippet: SSHSnippet) {
         if SSHSnippet.placeholders(in: snippet.command).isEmpty {
             type(snippet.command)
@@ -200,7 +201,7 @@ struct SSHTerminalPane: View {
     private func type(_ command: String) {
         guard let snippetTarget else { return }
         sessions.select(snippetTarget)
-        snippetTarget.sendBytes(Array(command.utf8))
+        snippetTarget.sendBytes(SSHSnippet.bytesToRun(command))
     }
 }
 

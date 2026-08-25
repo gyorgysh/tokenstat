@@ -568,6 +568,15 @@ final class SSHLibraryModel {
             + ordered.filter { $0.hostIDs.isEmpty }
     }
 
+    /// What should run by itself as soon as a shell on this server exists.
+    ///
+    /// Scoped snippets only: a general snippet is one somebody keeps for every
+    /// server, and firing all of those into every connection is not what the
+    /// checkbox on one record says.
+    func startupSnippets(for hostID: String) -> [SSHSnippet] {
+        snippets(for: hostID).filter { $0.runOnConnect && $0.hostIDs.contains(hostID) }
+    }
+
     /// The handful somebody actually returns to. Favourites first, then the
     /// most recently used, because a list of forty servers is a list nobody
     /// scans twice.

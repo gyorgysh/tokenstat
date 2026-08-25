@@ -336,7 +336,7 @@ struct SSHLiveTerminalScreen: View {
         return AnyView(
             Menu {
                 ForEach(library.snippets) { snippet in
-                    Button(snippet.title, .apply) { run(snippet) }
+                    Button(snippet.title, .run) { run(snippet) }
                 }
             } label: {
                 Image(systemName: "text.append")
@@ -348,15 +348,14 @@ struct SSHLiveTerminalScreen: View {
     }
     #endif
 
-    /// Send a snippet, or ask for its placeholders first.
+    /// Run a snippet, or ask for its placeholders first.
     ///
-    /// A snippet is typed rather than run: the line lands at the prompt with
-    /// no trailing Return, so what is about to happen can be read before it
-    /// happens. Somebody's saved command is not something to fire off because
-    /// a thumb landed on the wrong row of a menu.
+    /// A snippet with placeholders goes through the sheet, where the filled
+    /// command is on screen before it is sent. Everything else runs on the
+    /// press: a snippet is a command somebody saved in order to run it.
     private func run(_ snippet: SSHSnippet) {
         if SSHSnippet.placeholders(in: snippet.command).isEmpty {
-            session.sendBytes(Array(snippet.command.utf8))
+            session.sendBytes(SSHSnippet.bytesToRun(snippet.command))
         } else {
             asking = snippet
         }
@@ -421,7 +420,7 @@ struct SSHSnippetRunSheet: View {
                     .buttonStyle(SecondaryButtonStyle())
                     .frame(minWidth: Theme.Control.pairedWidth)
                 Spacer()
-                Button("Type it", .send) {
+                Button("Run it", .run) {
                     onFilled(filled)
                     dismiss()
                 }

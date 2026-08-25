@@ -333,7 +333,10 @@ struct RootView: View {
         // prompt is in front.
         .sheet(item: $ssh.connectRequest) { host in
             SSHConnectForm(host: host, model: ssh) { session in
-                sshSessions.adopt(session)
+                sshSessions.adopt(
+                    session,
+                    startup: session.hostID.map { ssh.startupSnippets(for: $0) } ?? []
+                )
                 if let hostID = session.hostID {
                     navigate(to: .sshTerminals(host: hostID))
                 }

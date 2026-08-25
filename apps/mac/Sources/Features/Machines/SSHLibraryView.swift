@@ -83,7 +83,10 @@ struct SSHLibraryView: View {
             .task { await sessions.watch() }
             .sheet(item: $connecting) { host in
                 SSHConnectForm(host: host, model: model) { session in
-                    sessions.adopt(session)
+                    sessions.adopt(
+                        session,
+                        startup: session.hostID.map { model.startupSnippets(for: $0) } ?? []
+                    )
                     showingTerminal = true
                 }
             }

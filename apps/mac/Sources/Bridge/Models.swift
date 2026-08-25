@@ -208,6 +208,22 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
         case hostIDs
     }
 
+    /// The bytes a shell has to receive for a command to actually run.
+    ///
+    /// The trailing carriage return is the whole point. These screens used to
+    /// type the line at the prompt and stop, on the reasoning that a saved
+    /// command should be read before it fires. In practice a snippet is a
+    /// command somebody saved in order to run it, and leaving it sitting at
+    /// the prompt meant every use of the feature ended with reaching for the
+    /// keyboard, which on a phone means dismissing the menu first.
+    ///
+    /// One function rather than three call sites appending "\r", because
+    /// three call sites is how the Mac inspector, the Mac tab strip and the
+    /// phone's key bar came to disagree about anything in the first place.
+    static func bytesToRun(_ command: String) -> [UInt8] {
+        Array((command + "\r").utf8)
+    }
+
     /// `{{name}}` occurrences, in the order they appear. The editor keeps
     /// `variables` in step with this so a client never has to parse it.
     static func placeholders(in command: String) -> [String] {

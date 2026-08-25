@@ -110,9 +110,39 @@ final class SSHSessionsModel {
     // MARK: - Opening and closing
 
     /// Take a freshly opened session, select it, and remember it for its host.
-    func adopt(_ session: SSHLiveTerminal) {
+    ///
+    /// `startup` is whatever the library says should run on this server as
+    /// soon as a shell exists. Passed in rather than looked up, so the session
+    /// model stays ignorant of the record store.
+    func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) {
         sessions.append(session)
         select(session)
+        guard !startup.isEmpty else { return }
+        Task { await Self.runStartup(startup, in: session) }
+    }
+
+    /// Send the on-connect snippets, once the far end has had a moment to put
+    /// a prompt up.
+    ///
+    /// "Run automatically after connecting" has been a stored flag and a
+    /// checkbox in the editor since it was added, and nothing has ever read
+    /// it. This is the thing that reads it.
+    ///
+    /// The pause is not a race being papered over: the bytes would arrive
+    /// either way, because the shell buffers its input. It is so that what ran
+    /// is legible in the scrollback, under the login banner rather than
+    /// through the middle of it.
+    ///
+    /// Snippets with placeholders are skipped. Asking for values is a sheet,
+    /// and a sheet that opens by itself the moment a connection lands is not
+    /// something to do to somebody.
+    private static func runStartup(_ snippets: [SSHSnippet], in session: SSHLiveTerminal) async {
+        try? await Task.sleep(for: .milliseconds(600))
+        for snippet in snippets where SSHSnippet.placeholders(in: snippet.command).isEmpty {
+            guard session.alive else { return }
+            session.sendBytes(SSHSnippet.bytesToRun(snippet.command))
+            try? await Task.sleep(for: .milliseconds(120))
+        }
     }
 
     func select(_ session: SSHLiveTerminal) {
