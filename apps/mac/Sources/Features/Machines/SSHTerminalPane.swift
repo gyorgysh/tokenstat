@@ -30,6 +30,8 @@ struct SSHTerminalPane: View {
     /// under another destination.
     var claimsFocus: Bool = true
 
+    @Environment(\.detailChromeToggles) private var toggles
+
     @State private var closing: SSHLiveTerminal?
     /// A command whose placeholders are being filled before it is typed into
     /// the shell in front. This keeps snippets reachable when the inspector is
@@ -107,6 +109,15 @@ struct SSHTerminalPane: View {
 
     private var strip: some View {
         HStack(spacing: Theme.Space.s) {
+            // The window's own two marks, in the places every other screen
+            // puts them. This strip is written here rather than built from
+            // `DetailChromeBar`, because that view owns the order of its
+            // slots and a row of session tabs wants to sit after the sidebar
+            // mark rather than before it. What it must not do is skip them:
+            // the SSH terminal was the one destination in the app with no way
+            // to reopen the inspector except the keyboard, so a snippets pane
+            // somebody closed was a pane they had to know a chord to get back.
+            toggles?.leftSidebar
             ForEach(mine) { session in
                 SSHSessionChip(
                     session: session,
@@ -169,9 +180,17 @@ struct SSHTerminalPane: View {
                 .help("Show two sessions at once")
                 .disabled(mine.count < 2)
             }
+
+            // Last, nearest the edge it opens, exactly as the shared chrome
+            // bar places it.
+            if let right = toggles?.rightInspector {
+                right
+            }
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, Theme.Space.xs)
+        // The same height as every other destination's chrome row, so the
+        // content below starts on the same line whichever screen you are on.
+        .frame(height: DetailChromeBarHeight)
         .background(Theme.tabStrip)
     }
 
