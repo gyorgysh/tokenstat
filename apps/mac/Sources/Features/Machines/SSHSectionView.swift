@@ -164,6 +164,8 @@ struct SSHSectionView: View {
             }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .background(Theme.background)
     }
 
     @ViewBuilder

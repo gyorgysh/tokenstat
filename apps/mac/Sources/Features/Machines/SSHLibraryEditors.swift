@@ -34,7 +34,97 @@ struct SSHEditorFooter: View {
                 .disabled(!canSave || working)
         }
         .padding(Theme.Space.m)
-        .background(.thinMaterial)
+        // The same tone as the chrome bar at the top of the inspector, so the
+        // editor reads as content between two pieces of chrome. A material
+        // here resolved to a flat grey that belonged to no part of the theme.
+        .background(Theme.sidebar)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Theme.border).frame(height: 1)
+        }
+    }
+}
+
+/// The scrolling body of an editor, on the app's own background.
+///
+/// Deliberately not `Form` with `.formStyle(.grouped)`. That style paints its
+/// own grey on macOS and ignores the theme, which made the SSH screens the only
+/// ones in the app that looked like a System Settings pane: a flat grey slab
+/// beside panels that are all `Theme.background` with `Theme.panel` cards on
+/// them. Insights, Tasks and the workspace inspectors all draw their own
+/// groups, so these do too.
+struct SSHEditorBody<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                content
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Theme.background)
+    }
+}
+
+/// A titled group of fields: a quiet caption, then one card.
+struct SSHEditorSection<Content: View>: View {
+    var title: String?
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if let title {
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .semibold))
+                    .kerning(0.6)
+                    .foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                content
+            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
+        }
+    }
+}
+
+/// One labelled control, label above rather than beside.
+///
+/// The inspector column is narrow. A two-column form squeezes the field down
+/// to a few characters there, which is what made typing an address in the
+/// inspector worse than typing it in the sheet it replaced.
+struct SSHEditorField<Content: View>: View {
+    let label: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            content
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A caption under a group, for the sentence that explains it.
+struct SSHEditorNote: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -72,58 +162,76 @@ struct SSHHostEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
+            SSHEditorBody {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                Section("Connection") {
-                    TextField("Name", text: $host.label)
-                    TextField("Address", text: $host.hostname)
-                    TextField("Username", text: $host.username)
-                    TextField("Port", value: $host.port, format: .number)
-                    TextField(
-                        "Starting directory",
-                        text: Binding(
-                            get: { host.initialDirectory ?? "~" },
-                            set: { host.initialDirectory = $0 }
-                        ),
-                        prompt: Text("~")
-                    )
+                SSHEditorSection(title: "Connection") {
+                    SSHEditorField(label: "Name") {
+                        TextField("Name", text: $host.label).textFieldStyle(.roundedBorder)
+                    }
+                    SSHEditorField(label: "Address") {
+                        TextField("Address", text: $host.hostname).textFieldStyle(.roundedBorder)
+                    }
+                    SSHEditorField(label: "Username") {
+                        TextField("Username", text: $host.username).textFieldStyle(.roundedBorder)
+                    }
+                    SSHEditorField(label: "Port") {
+                        TextField("Port", value: $host.port, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 100)
+                    }
+                    SSHEditorField(label: "Starting directory") {
+                        TextField(
+                            "Starting directory",
+                            text: Binding(
+                                get: { host.initialDirectory ?? "~" },
+                                set: { host.initialDirectory = $0 }
+                            ),
+                            prompt: Text("~")
+                        )
+                        .textFieldStyle(.roundedBorder)
+                    }
                 }
 
-                Section("Authentication") {
-                    Picker("Use", selection: Binding(
-                        get: { host.credentialID ?? "" },
-                        set: { host.credentialID = $0.isEmpty ? nil : $0 }
-                    )) {
-                        Text("Ask when connecting").tag("")
-                        ForEach(model.keys) { Text($0.label).tag($0.id) }
+                SSHEditorSection(title: "Authentication") {
+                    SSHEditorField(label: "Use") {
+                        Picker("Use", selection: Binding(
+                            get: { host.credentialID ?? "" },
+                            set: { host.credentialID = $0.isEmpty ? nil : $0 }
+                        )) {
+                            Text("Ask when connecting").tag("")
+                            ForEach(model.keys) { Text($0.label).tag($0.id) }
+                        }
                     }
-                    Picker("Connect through", selection: Binding(
-                        get: { host.jumpHostID ?? "" },
-                        set: { host.jumpHostID = $0.isEmpty ? nil : $0 }
-                    )) {
-                        Text("Nothing, connect directly").tag("")
-                        ForEach(model.hosts.filter { $0.id != host.id }) { Text($0.label).tag($0.id) }
+                    SSHEditorField(label: "Connect through") {
+                        Picker("Connect through", selection: Binding(
+                            get: { host.jumpHostID ?? "" },
+                            set: { host.jumpHostID = $0.isEmpty ? nil : $0 }
+                        )) {
+                            Text("Nothing, connect directly").tag("")
+                            ForEach(model.hosts.filter { $0.id != host.id }) { Text($0.label).tag($0.id) }
+                        }
                     }
                     Toggle("Forward the SSH agent", isOn: $host.agentForwarding)
-                    Text("Passwords are asked for when you connect and are never saved. A key is stored in this device's vault and, if you have one, in the encrypted vault.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    SSHEditorNote(text: "Passwords are asked for when you connect and are never saved. A key is stored in this device's vault and, if you have one, in the encrypted vault.")
                 }
 
-                Section("In the list") {
-                    Picker("Folder", selection: Binding(
-                        get: { host.folderID ?? "" },
-                        set: { host.folderID = $0.isEmpty ? nil : $0 }
-                    )) {
-                        Text("Top level").tag("")
-                        ForEach(model.folders) { Text($0.name).tag($0.id) }
+                SSHEditorSection(title: "In the list") {
+                    SSHEditorField(label: "Folder") {
+                        Picker("Folder", selection: Binding(
+                            get: { host.folderID ?? "" },
+                            set: { host.folderID = $0.isEmpty ? nil : $0 }
+                        )) {
+                            Text("Top level").tag("")
+                            ForEach(model.folders) { Text($0.name).tag($0.id) }
+                        }
                     }
                     SSHColorPicker(selection: $host.color)
                     Toggle("Favourite", isOn: $host.favorite)
                 }
 
-                Section("Advanced") {
+                SSHEditorSection(title: "Advanced") {
                     Stepper(
                         keepaliveLabel,
                         value: $host.keepaliveSeconds,
@@ -134,20 +242,21 @@ struct SSHHostEditor: View {
                 }
 
                 if !host.hostKeys.isEmpty {
-                    Section("Trusted server key") {
+                    SSHEditorSection(title: "Trusted server key") {
                         ForEach(host.hostKeys, id: \.self) { key in
-                            Text(key).font(Theme.mono(11)).textSelection(.enabled)
+                            Text(key)
+                                .font(Theme.mono(11))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Button("Forget this key", .revoke) {
                             host.hostKeys = []
                         }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                        Text("Forgetting makes the next connection ask you to confirm the server's fingerprint again.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        SSHEditorNote(text: "Forgetting makes the next connection ask you to confirm the server's fingerprint again.")
                     }
                 }
             }
-            .formStyle(.grouped)
 
             SSHEditorFooter(
                 saveTitle: isNew ? "Add server" : "Save",
@@ -287,17 +396,23 @@ struct SSHKeyEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
+            SSHEditorBody {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                Section("Key") {
-                    TextField("Name", text: $label)
+                SSHEditorSection(title: "Key") {
+                    SSHEditorField(label: "Name") {
+                        TextField("Name", text: $label).textFieldStyle(.roundedBorder)
+                    }
                     if let record {
-                        LabeledContent("Algorithm", value: record.algorithm)
-                        LabeledContent("Fingerprint") {
+                        SSHEditorField(label: "Algorithm") {
+                            Text(record.algorithm)
+                        }
+                        SSHEditorField(label: "Fingerprint") {
                             Text(record.fingerprint.isEmpty ? "Not computed" : record.fingerprint)
-                                .font(Theme.mono(11)).textSelection(.enabled)
+                                .font(Theme.mono(11))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if record.passphraseProtected {
                             Label("Protected by a passphrase", systemImage: "lock")
@@ -307,28 +422,34 @@ struct SSHKeyEditor: View {
                 }
 
                 if let record {
-                    Section("Public key") {
+                    SSHEditorSection(title: "Public key") {
                         Text(record.publicKey)
                             .font(Theme.mono(11))
                             .textSelection(.enabled)
                             .lineLimit(4)
-                        HStack(spacing: Theme.Space.s) {
-                            Button(copied ? "Copied" : "Copy public key", .copy) {
-                                copy(record.publicKey)
-                            }
-                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(copied ? "Copied" : "Copy public key", .copy) {
+                            copy(record.publicKey)
                         }
-                        Text("Add this line to ~/.ssh/authorized_keys on a server to let this key in. tokenstat never edits that file for you.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        SSHEditorNote(text: "Add this line to ~/.ssh/authorized_keys on a server to let this key in. tokenstat never edits that file for you.")
                     }
                 } else {
-                    Section("Add") {
-                        Text("Generate a new Ed25519 key, or paste an existing private key. The private half goes into this device's vault, never into the connection list.")
-                            .font(.caption).foregroundStyle(.secondary)
+                    SSHEditorSection(title: "Add") {
+                        SSHEditorNote(text: "Generate a new Ed25519 key, or paste an existing private key. The private half goes into this device's vault, never into the connection list.")
                         TextEditor(text: $pem)
                             .font(Theme.mono(11))
                             .frame(minHeight: 160)
-                        SecureField("Private-key passphrase (if it has one)", text: $passphrase)
+                            .scrollContentBackground(.hidden)
+                            .padding(Theme.Space.xs)
+                            .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
+                            }
+                        SSHEditorField(label: "Private-key passphrase (if it has one)") {
+                            SecureField("Passphrase", text: $passphrase).textFieldStyle(.roundedBorder)
+                        }
                         HStack(spacing: Theme.Space.s) {
                             Button("Generate a key", .create) { Task { await generate() } }
                                 .buttonStyle(SecondaryButtonStyle())
@@ -339,7 +460,6 @@ struct SSHKeyEditor: View {
                     }
                 }
             }
-            .formStyle(.grouped)
 
             SSHEditorFooter(
                 canSave: record != nil && !label.isEmpty,
@@ -554,27 +674,27 @@ struct SSHFolderEditor: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
+            SSHEditorBody {
                 if let error {
                     InlineBanner(text: error, kind: .danger) { self.error = nil }
                 }
-                Section("Folder") {
-                    TextField("Name", text: $folder.name)
-                    Picker("Inside", selection: Binding(
-                        get: { folder.parentID ?? "" },
-                        set: { folder.parentID = $0.isEmpty ? nil : $0 }
-                    )) {
-                        Text("Top level").tag("")
-                        ForEach(model.folders.filter { $0.id != folder.id }) { Text($0.name).tag($0.id) }
+                SSHEditorSection(title: "Folder") {
+                    SSHEditorField(label: "Name") {
+                        TextField("Name", text: $folder.name).textFieldStyle(.roundedBorder)
+                    }
+                    SSHEditorField(label: "Inside") {
+                        Picker("Inside", selection: Binding(
+                            get: { folder.parentID ?? "" },
+                            set: { folder.parentID = $0.isEmpty ? nil : $0 }
+                        )) {
+                            Text("Top level").tag("")
+                            ForEach(model.folders.filter { $0.id != folder.id }) { Text($0.name).tag($0.id) }
+                        }
                     }
                     SSHColorPicker(selection: $folder.color)
                 }
-                Section {
-                    Text("Deleting a folder keeps what is in it. Servers and sub-folders move up one level.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                SSHEditorNote(text: "Deleting a folder keeps what is in it. Servers and sub-folders move up one level.")
             }
-            .formStyle(.grouped)
 
             SSHEditorFooter(
                 saveTitle: isNew ? "Add folder" : "Save",
