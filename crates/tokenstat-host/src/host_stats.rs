@@ -404,11 +404,23 @@ mod platform {
         if kr != 0 {
             return (0, total);
         }
-        let free = (vm.free_count as u64)
-            .saturating_add(vm.speculative_count as u64)
-            .saturating_mul(page as u64);
-        let used = total.saturating_sub(free.min(total));
-        (used, total)
+        // What Activity Monitor calls Memory Used: app memory, wired, and
+        // whatever the compressor is holding.
+        //
+        // This used to be total minus free-and-speculative, which counts the
+        // file cache and every purgeable page as used. macOS keeps that number
+        // near the top of the bar on a machine with nothing wrong with it, so
+        // the reading said "nearly full" all day and meant nothing. Linux
+        // reads MemAvailable and Windows reads avail_phys, both of which are
+        // the honest figure, and this was the one platform disagreeing with
+        // its own Activity Monitor.
+        let page = page as u64;
+        let app = (vm.internal_page_count as u64).saturating_sub(vm.purgeable_count as u64);
+        let used = app
+            .saturating_add(vm.wire_count as u64)
+            .saturating_add(vm.compressor_page_count as u64)
+            .saturating_mul(page);
+        (used.min(total), total)
     }
 }
 

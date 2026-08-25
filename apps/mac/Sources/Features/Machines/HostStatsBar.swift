@@ -40,20 +40,20 @@ enum HostStatsFormat {
         return "n/a"
     }
 
+    /// What the memory figure counts, in one line.
+    ///
+    /// Worth saying out loud. "24 GB" beside a machine with 32 invites the
+    /// reading that eight are left and everything else is spoken for, which is
+    /// not what any of the three platforms measures: the cache and the
+    /// purgeable pages are available and are not in this number.
+    static let ramExplanation = "Memory in use by apps, wired and compressed. Cached files are not counted, so the rest is available."
+
     static func ramLabel(used: UInt64, total: UInt64) -> String {
         let g = 1024.0 * 1024 * 1024
         let u = Double(used) / g
         let t = Double(total) / g
         if t >= 10 { return String(format: "%.0f / %.0f GB", u, t) }
         return String(format: "%.1f / %.1f GB", u, t)
-    }
-
-    /// Memory for a row that has one line to spend: used, not used-of-total.
-    static func ramShort(used: UInt64, total: UInt64) -> String {
-        let g = 1024.0 * 1024 * 1024
-        let u = Double(used) / g
-        if u >= 10 { return String(format: "%.0f GB", u) }
-        return String(format: "%.1f GB", u)
     }
 
     static func cpuLabel(_ cpu: Double) -> String {
@@ -164,6 +164,16 @@ struct HostStatsBar: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .help(HostStatsFormat.ramExplanation)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(ramVoiceOver)
+    }
+
+    private var ramVoiceOver: String {
+        guard let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 else {
+            return "Memory not available"
+        }
+        return "Memory \(HostStatsFormat.ramLabel(used: used, total: total)) used. \(HostStatsFormat.ramExplanation)"
     }
 
     private var statFont: Font {
@@ -249,7 +259,11 @@ struct HostStatsStrip: View {
                 cell(icon: "cpu", text: HostStatsFormat.cpuLabel(cpu))
             }
             if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-                cell(icon: "memorychip", text: HostStatsFormat.ramShort(used: used, total: total))
+                // Used of total, not used alone. One figure with nothing to
+                // measure it against is a figure nobody can read: "24 GB" says
+                // nothing until the 32 is beside it.
+                cell(icon: "memorychip", text: HostStatsFormat.ramLabel(used: used, total: total))
+                    .help(HostStatsFormat.ramExplanation)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -282,7 +296,7 @@ struct HostStatsStrip: View {
         var parts = ["Power \(HostStatsFormat.powerLabel(stats, failed: failed))"]
         if let cpu = stats?.cpu { parts.append("CPU \(HostStatsFormat.cpuLabel(cpu))") }
         if let used = stats?.ramUsedBytes, let total = stats?.ramTotalBytes, total > 0 {
-            parts.append("Memory \(HostStatsFormat.ramShort(used: used, total: total))")
+            parts.append("Memory \(HostStatsFormat.ramLabel(used: used, total: total)) used. \(HostStatsFormat.ramExplanation)")
         }
         return parts.joined(separator: ", ")
     }
