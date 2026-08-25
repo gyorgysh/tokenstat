@@ -52,6 +52,8 @@ ALLOWED = [
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),
     ("Features/Automations/AutomationsView.swift", "scheduleWeekday = day.0"),
     ("Features/Terminals/TerminalPane.swift", "start(profile)"),
+    # A segmented tab. The whole surface is the label, like a sidebar row.
+    ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),
     ("Client/ClientHostWorkspacesView.swift", "model.open(session, peer: peerKey)"),
     ("Client/ClientLaunchTile.swift", "Button(action: action)"),
