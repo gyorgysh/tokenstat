@@ -103,6 +103,11 @@ pub enum RemoteError {
     FrameTooLarge(u64, usize),
     #[error("the connection closed before the answer arrived")]
     Closed,
+    #[error(
+        "the link failed in the middle of a message, so the stream can no \
+         longer be read in step and this connection has to be replaced"
+    )]
+    BrokenMessage,
     #[error("tunnel: {0}")]
     Tunnel(String),
 }
@@ -281,6 +286,15 @@ impl Connection {
 /// read fails loudly rather than silently corrupting anything.
 const STREAM_READ_TIMEOUT: Duration = Duration::from_millis(50);
 
+/// How long the rest of a message may take once its first frame has arrived.
+///
+/// Not the same budget as the wait before a message, and it cannot be: the
+/// short one exists so an idle reader hands the writer the lock, and applying
+/// it inside a message is what used to tear the stream in half. A message that
+/// has started is being delivered, so the only question here is whether the
+/// far side is still alive at all.
+const MESSAGE_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The shared state of a split connection: one Noise session, one transport,
 /// one ownership flag.
 struct Core {
@@ -310,10 +324,21 @@ impl StreamReader {
                 return Err(RemoteError::Closed);
             }
             match read_one(noise, &mut **stream, max, Some(STREAM_READ_TIMEOUT)) {
+                // Nothing arrived yet. No bytes were taken off the transport,
+                // so the next pass starts where this one did.
                 Err(RemoteError::Io(e))
                     if e.kind() == std::io::ErrorKind::TimedOut
                         || e.kind() == std::io::ErrorKind::WouldBlock => {}
-                other => return other,
+                // Anything else leaves the stream somewhere it cannot be read
+                // in step from again, so the connection is finished rather
+                // than merely unlucky. Closing here is what stops a later
+                // caller picking it up and reading ciphertext as a header.
+                other => {
+                    if other.is_err() {
+                        closed.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    return other;
+                }
             }
             drop(guard);
             std::thread::sleep(Duration::from_millis(5));
@@ -413,11 +438,65 @@ fn read_one(
         return Err(RemoteError::FrameTooLarge(total as u64, max));
     }
 
+    // The message has started, so the deadline comes off the transport until
+    // it ends.
+    //
+    // `read_framed`'s no-deadline path calls `read_exact`, which *discards the
+    // bytes it already consumed* when it fails. The idle timeout `split` arms
+    // is a property of the transport, not of the call, so without this the
+    // continuation frames were read with a 50 ms deadline still live: one
+    // relay gap inside a large message dropped part of a frame, the stream
+    // never came back into step, and the next four bytes read as a length
+    // header were ciphertext. A 1 MiB video frame is seventeen Noise messages,
+    // which is why the screen stream met this and request/response never did.
+    //
+    // The budget covers silence *before* a message. Inside one there is
+    // nothing to wait for but the rest of it.
+    let restore = idle_timeout.is_some();
+    if restore {
+        // A long deadline rather than none at all. None would trade the
+        // desynchronised stream for a parked one: the reader on a split
+        // connection holds the shared lock while it waits, so a peer whose
+        // Mac went to sleep half way through a frame would starve the writer
+        // for as long as the socket stayed open. This is long enough that no
+        // healthy link reaches it and short enough that a dead one is noticed,
+        // and hitting it now ends the connection instead of corrupting it.
+        stream
+            .set_read_timeout(Some(MESSAGE_STALL_TIMEOUT))
+            .map_err(RemoteError::Io)?;
+    }
+    let result = read_remaining_frames(noise, stream, total);
+    if restore {
+        // Best effort: the value is going back the way it was found, and a
+        // transport that cannot take it is already failing the read above.
+        let _ = stream.set_read_timeout(idle_timeout);
+    }
+    result
+}
+
+/// Read the frames after the header, treating every failure as terminal.
+///
+/// A timeout in here is not "no data yet". Part of the message has been taken
+/// off the transport already, so there is nothing to retry into: the caller
+/// must drop the connection. Mapping it away from `Io` is what stops
+/// `StreamReader::read` from looping back and reading from the middle of a
+/// frame.
+fn read_remaining_frames(
+    noise: &mut snow::TransportState,
+    stream: &mut dyn Transport,
+    total: usize,
+) -> Result<Vec<u8>, RemoteError> {
     let mut payload = Vec::with_capacity(total.min(MAX_NOISE_MESSAGE));
     while payload.len() < total {
-        // The message has started; the remaining frames must complete without
-        // an idle timeout or the stream would be left mid-message.
-        let chunk = read_noise_frame(noise, stream, None)?;
+        let chunk = read_noise_frame(noise, stream, None).map_err(|error| match error {
+            RemoteError::Io(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                RemoteError::BrokenMessage
+            }
+            other => other,
+        })?;
         if chunk.is_empty() {
             return Err(RemoteError::Closed);
         }
@@ -954,5 +1033,166 @@ mod tests {
         assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
         writer.write(&[]).expect("end of stream");
         echo.join().expect("echo thread");
+    }
+
+    /// A transport that hands over one byte at a time and reports a timeout
+    /// between each, which is what a relay under load looks like from here.
+    ///
+    /// The point is the gaps, not the slowness: a gap inside a message used to
+    /// be read with the split stream's 50 ms deadline still armed, and
+    /// `read_exact` throws away what it already consumed when it fails.
+    struct StutteringTransport {
+        data: Vec<u8>,
+        position: usize,
+        timeout: Option<Duration>,
+        /// Flips on every read, so every byte is followed by one timeout.
+        stall: bool,
+    }
+
+    impl Read for StutteringTransport {
+        fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+            if output.is_empty() || self.position >= self.data.len() {
+                return Ok(0);
+            }
+            // A gap longer than the split stream's short deadline and far
+            // shorter than the one a message is allowed. Only a deadline in
+            // that band fires, which is the band a loaded relay sits in.
+            if self.timeout.is_some_and(|t| t < Duration::from_secs(1)) {
+                self.stall = !self.stall;
+                if self.stall {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "no data yet",
+                    ));
+                }
+            }
+            output[0] = self.data[self.position];
+            self.position += 1;
+            Ok(1)
+        }
+    }
+
+    impl Write for StutteringTransport {
+        fn write(&mut self, input: &[u8]) -> std::io::Result<usize> {
+            self.data.extend_from_slice(input);
+            Ok(input.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Transport for StutteringTransport {
+        fn close(&mut self) {}
+
+        fn set_deadline(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+            self.set_read_timeout(timeout)
+        }
+
+        fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+            self.timeout = timeout;
+            Ok(())
+        }
+    }
+
+    /// A message longer than one Noise frame survives a link that pauses in
+    /// the middle of it.
+    ///
+    /// Before the fix this failed the way the screen stream failed on a
+    /// phone: the continuation frames kept the split stream's deadline, a
+    /// stalled read dropped the bytes it had taken, and the next four bytes
+    /// were decoded as a length header, giving a nonsense frame size against
+    /// the 65535 limit.
+    #[test]
+    fn a_large_message_survives_a_pause_inside_it() {
+        // Three Noise frames' worth, so the continuation path is exercised
+        // rather than the header path alone.
+        let payload: Vec<u8> = (0..(MAX_PAYLOAD * 2 + 1024))
+            .map(|i| (i % 251) as u8)
+            .collect();
+
+        let (mut initiator, mut responder) = transport_pair();
+        let mut wire = StutteringTransport {
+            data: Vec::new(),
+            position: 0,
+            timeout: None,
+            stall: false,
+        };
+        write_one(&mut initiator, &mut wire, &payload).expect("write the message");
+
+        let mut reader = StutteringTransport {
+            data: std::mem::take(&mut wire.data),
+            position: 0,
+            timeout: None,
+            stall: false,
+        };
+        // Exactly what `split` does to the transport it is handed.
+        reader
+            .set_read_timeout(Some(STREAM_READ_TIMEOUT))
+            .expect("arm the deadline");
+
+        // The same loop `StreamReader::read` runs: a timeout before a message
+        // has started is "nothing yet", and is retried. A timeout once one has
+        // started is the failure this test is about.
+        let got = loop {
+            match read_one(
+                &mut responder,
+                &mut reader,
+                1 << 20,
+                Some(STREAM_READ_TIMEOUT),
+            ) {
+                Err(RemoteError::Io(e))
+                    if e.kind() == std::io::ErrorKind::TimedOut
+                        || e.kind() == std::io::ErrorKind::WouldBlock => {}
+                other => break other.expect("the message must survive a pause inside it"),
+            }
+        };
+        assert_eq!(got.len(), payload.len());
+        assert_eq!(got, payload);
+        // And the deadline is handed back, so the next read still yields to
+        // the writer rather than parking on the lock forever.
+        assert_eq!(reader.timeout, Some(STREAM_READ_TIMEOUT));
+    }
+
+    /// Two Noise transport states that can talk to each other, without a
+    /// socket in the way.
+    fn transport_pair() -> (snow::TransportState, snow::TransportState) {
+        let initiator_ident = MachineIdentity::from_secret([7u8; 32]);
+        let responder_ident = MachineIdentity::from_secret([9u8; 32]);
+        let mut initiator = snow::Builder::new(PATTERN.parse().expect("pattern"))
+            .local_private_key(&initiator_ident.secret_bytes())
+            .expect("initiator key")
+            .build_initiator()
+            .expect("initiator");
+        let mut responder = snow::Builder::new(PATTERN.parse().expect("pattern"))
+            .local_private_key(&responder_ident.secret_bytes())
+            .expect("responder key")
+            .build_responder()
+            .expect("responder");
+
+        let mut buffer = [0u8; 1024];
+        let mut scratch = [0u8; 1024];
+        let n = initiator.write_message(&[], &mut buffer).expect("e");
+        responder
+            .read_message(&buffer[..n], &mut scratch)
+            .expect("e in");
+        let n = responder.write_message(&[], &mut buffer).expect("ee");
+        initiator
+            .read_message(&buffer[..n], &mut scratch)
+            .expect("ee in");
+        let n = initiator.write_message(&[], &mut buffer).expect("s");
+        responder
+            .read_message(&buffer[..n], &mut scratch)
+            .expect("s in");
+
+        (
+            initiator
+                .into_transport_mode()
+                .expect("initiator transport"),
+            responder
+                .into_transport_mode()
+                .expect("responder transport"),
+        )
     }
 }
