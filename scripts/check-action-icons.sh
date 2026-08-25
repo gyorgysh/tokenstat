@@ -52,6 +52,9 @@ ALLOWED = [
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),
     ("Features/Automations/AutomationsView.swift", "scheduleWeekday = day.0"),
     ("Features/Terminals/TerminalPane.swift", "start(profile)"),
+    # The busy variant of the editor footer's action. It carries a glyph when
+    # it is idle; while a request is in flight the spinner stands in for it.
+    ("Features/Machines/SSHLibraryEditors.swift", "ProgressView().controlSize(.small)"),
     # A segmented tab. The whole surface is the label, like a sidebar row.
     ("Design/Theme.swift", "withAnimation(.snappy(duration: 0.22)) { selection = option }"),
     ("Client/AvatarButton.swift", "Button(action: action)"),

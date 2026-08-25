@@ -23,9 +23,6 @@ struct SSHEditorFooter: View {
     var onCancel: () -> Void
     var onDelete: (() -> Void)?
 
-    /// What the button says, which changes while the work is in flight.
-    private var title: String { working ? busyTitle : saveTitle }
-
     /// The sentence for the state the button is in.
     private var busyTitle: String {
         if let workingTitle { return workingTitle }
@@ -45,43 +42,49 @@ struct SSHEditorFooter: View {
                     .disabled(working)
             }
             Spacer()
+            // Never disabled, including while a request is in flight. Held
+            // shut, it left the one way out of a connect that was going to sit
+            // there until the socket gave up unavailable for exactly as long
+            // as somebody wanted it: the screen looked frozen and the button
+            // that would have got them out was the greyed-out one.
             Button("Cancel", .dismiss, action: onCancel)
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
-                // Cancelling out from under a request in flight leaves the
-                // request running with nothing on screen that owns it.
-                .disabled(working)
             // A spinner and a verb, rather than the same button greyed out.
             // Disabled on its own is what a button that will never work looks
             // like, so a slow connect read as a dead control and people
             // pressed it again.
             //
-            // The button keeps its own title and glyph while it waits: the
-            // spinner sits beside it rather than replacing it, so the row does
-            // not change width halfway through a connect and the action you
-            // pressed is still the action you can read.
-            HStack(spacing: Theme.Space.xs) {
+            // The spinner sits where the glyph does, inside the button. Beside
+            // it, it was a loose piece of chrome floating in the gap between
+            // Cancel and the action, and it moved the action along the row
+            // every time the work started.
+            Group {
                 if working {
-                    ProgressView().controlSize(.small)
-                }
-                Group {
+                    Button(action: {}) {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text(busyTitle)
+                        }
+                    }
+                } else {
                     // Keep the glyph literals visible to the design guard. The
                     // footer accepts a semantic action, but a dynamic value in
                     // `Button` would make a future bare button indistinguishable
                     // from this deliberate choice to the source check.
                     switch saveIcon {
-                    case .download: Button(title, .download, action: onSave)
-                    case .done: Button(title, .done, action: onSave)
-                    case .connect: Button(title, .connect, action: onSave)
-                    case .security: Button(title, .security, action: onSave)
-                    case .approve: Button(title, .approve, action: onSave)
-                    default: Button(title, .save, action: onSave)
+                    case .download: Button(saveTitle, .download, action: onSave)
+                    case .done: Button(saveTitle, .done, action: onSave)
+                    case .connect: Button(saveTitle, .connect, action: onSave)
+                    case .security: Button(saveTitle, .security, action: onSave)
+                    case .approve: Button(saveTitle, .approve, action: onSave)
+                    default: Button(saveTitle, .save, action: onSave)
                     }
                 }
-                .buttonStyle(AccentButtonStyle())
-                .frame(minWidth: Theme.Control.pairedWidth)
-                .disabled(!canSave || working)
             }
+            .buttonStyle(AccentButtonStyle())
+            .frame(minWidth: Theme.Control.pairedWidth)
+            .disabled(!canSave || working)
         }
         .padding(Theme.Space.m)
         // The same tone as the chrome bar at the top of the inspector, so the

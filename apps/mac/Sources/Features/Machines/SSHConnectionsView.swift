@@ -644,6 +644,13 @@ struct SSHConnectForm: View {
     @State private var offeredFingerprint: String?
     @State private var error: String?
     @State private var working = false
+    /// The probe or connect in flight, so Cancel has something to stop.
+    ///
+    /// A TCP connect to a host that is not answering sits there until the
+    /// socket times out, which is around a minute, and for that whole minute
+    /// this sheet was a screen with nothing on it that did anything. Holding
+    /// the task means leaving is leaving.
+    @State private var inFlight: Task<Void, Never>?
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -685,8 +692,8 @@ struct SSHConnectForm: View {
                     saveIcon: connectActionIcon,
                     canSave: canContinue,
                     working: working,
-                    onSave: { Task { await continueConnection() } },
-                    onCancel: { dismiss() },
+                    onSave: { start() },
+                    onCancel: { cancelAndClose() },
                     onDelete: nil
                 )
             }
@@ -720,6 +727,25 @@ struct SSHConnectForm: View {
         return model.keys.contains { $0.id == selectedKeyID }
     }
 
+    /// Begin, keeping hold of the work so it can be abandoned.
+    private func start() {
+        inFlight?.cancel()
+        inFlight = Task { await continueConnection() }
+    }
+
+    /// Leave, whether or not something is still running.
+    ///
+    /// The underlying call may well keep going until the host answers or the
+    /// socket gives up: the cancel that matters to a person is the one that
+    /// gets them off this screen, and nothing here is waiting on the result
+    /// any more once the sheet is gone.
+    private func cancelAndClose() {
+        inFlight?.cancel()
+        inFlight = nil
+        working = false
+        dismiss()
+    }
+
     private func continueConnection() async {
         working = true
         defer { working = false }
@@ -741,9 +767,16 @@ struct SSHConnectForm: View {
             {
                 jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
             }
-            offeredFingerprint = try await Bridge.probeSSHHost(host, jump: jump).fingerprint
+            let probed = try await Bridge.probeSSHHost(host, jump: jump).fingerprint
+            // The call carries on after a cancel, so its answer can arrive
+            // for a sheet somebody has already left. Say nothing then.
+            guard !Task.isCancelled else { return }
+            offeredFingerprint = probed
         }
-        catch { self.error = error.localizedDescription }
+        catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
+        }
     }
     private func trust(_ fingerprint: String) async {
         host.hostKeys = [fingerprint]
