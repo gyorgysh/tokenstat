@@ -27,6 +27,8 @@ enum EmptyArtKind {
     case waiting
     /// Cross-device SSH vault, shown when the plan does not include it.
     case vault
+    /// Remote screen, shown when the plan does not include Legend.
+    case screen
 }
 
 /// The picture over an empty state.
@@ -56,6 +58,7 @@ struct ClientEmptyArt: View {
             case .files: FilesScene(reduceMotion: reduceMotion)
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
             case .vault: VaultScene(reduceMotion: reduceMotion)
+            case .screen: ScreenScene(reduceMotion: reduceMotion)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -519,6 +522,44 @@ private struct VaultScene: View {
                 }
                 .frame(width: 20, height: 15)
         }
+    }
+}
+
+// MARK: - Screen
+
+/// A display with a scan line, the picture that is missing until Legend.
+private struct ScreenScene: View {
+    var reduceMotion: Bool
+    @State private var scan = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Theme.panel)
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Ink.lead, style: Ink.style)
+            }
+            .overlay {
+                VStack(spacing: 6) {
+                    Ghost(width: 54, color: Ink.second)
+                    Ghost(width: 38)
+                    Ghost(width: 46, color: Ink.second)
+                }
+                .padding(.horizontal, 14)
+            }
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Ink.lead.opacity(0.45))
+                    .frame(height: 1.5)
+                    .offset(y: reduceMotion ? 28 : (scan ? 52 : 10))
+            }
+            .frame(width: 88, height: 58)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                    scan = true
+                }
+            }
     }
 }
 

@@ -439,7 +439,8 @@ struct SSHSectionView: View {
         EmptyState(
             symbol: "lock.shield",
             title: "Sync SSH between your devices",
-            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above."
+            message: "An encrypted vault keeps hosts and keys on every computer and phone signed in to this account. Supporter and above.",
+            mark: "mark_plan"
         ) {
             Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
                 .buttonStyle(AccentButtonStyle())

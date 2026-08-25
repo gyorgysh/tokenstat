@@ -192,6 +192,9 @@ struct ScreenViewerView: View {
         }
         .padding(Theme.Space.l)
         .frame(maxWidth: 420)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.45))
+        .contentShape(Rectangle())
     }
 
     /// The viewer opened on a plan that does not include the screen. A
@@ -199,7 +202,11 @@ struct ScreenViewerView: View {
     /// do not need to grant.
     private var legendRequired: some View {
         VStack(spacing: Theme.Space.m) {
+            #if os(macOS)
             TierMark(tier: "legend", size: 36)
+            #else
+            ClientEmptyArt(kind: .screen)
+            #endif
             Text("Screen access is on Legend")
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)

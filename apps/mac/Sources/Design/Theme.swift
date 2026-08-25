@@ -786,25 +786,34 @@ struct EmptyState<Action: View>: View {
     var symbol: String
     var title: String
     var message: String
+    /// Product mark, preferred over the SF Symbol when the empty state is
+    /// about a feature (the vault, a plan) rather than a list.
+    var mark: String? = nil
     @ViewBuilder var action: Action
 
     init(
         symbol: String,
         title: String,
         message: String,
+        mark: String? = nil,
         @ViewBuilder action: () -> Action = { EmptyView() }
     ) {
         self.symbol = symbol
         self.title = title
         self.message = message
+        self.mark = mark
         self.action = action()
     }
 
     var body: some View {
         VStack(spacing: Theme.Space.s) {
-            Image(systemName: symbol)
-                .font(.system(size: 28, weight: .light))
-                .foregroundStyle(Theme.accent.opacity(0.7))
+            if let mark {
+                FeatureMark(name: mark, tint: Theme.accent, size: 36)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(Theme.accent.opacity(0.7))
+            }
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
             Text(message)

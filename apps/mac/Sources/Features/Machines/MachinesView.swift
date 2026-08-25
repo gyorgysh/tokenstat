@@ -233,7 +233,8 @@ struct MachinesView: View {
             title: "Remote is on Patron",
             message: model.account?.signedIn == true
                 ? "This Mac already shares the account and sees usage from every device on it. Opening folders and terminals from another device is a paid feature."
-                : "Sign in with a Patron or Legend account to open folders and terminals on this Mac from another device."
+                : "Sign in with a Patron or Legend account to open folders and terminals on this Mac from another device.",
+            mark: "mark_plan"
         ) {
             Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
                 .buttonStyle(AccentButtonStyle())
