@@ -923,7 +923,7 @@ struct TransientToast: View {
                 .foregroundStyle(severity.tint)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
-                .background(.regularMaterial, in: Capsule())
+                .background(Theme.panel, in: Capsule())
                 .overlay(Capsule().strokeBorder(severity.tint.opacity(0.35), lineWidth: 1))
                 .shadow(color: Theme.shadow(0.2), radius: 14, y: 6)
                 .transition(.move(edge: .trailing).combined(with: .opacity))

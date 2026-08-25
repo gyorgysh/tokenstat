@@ -27,33 +27,75 @@ struct CloudImportForm: View {
     @State private var importedCount: Int?
     var body: some View {
         NavigationStack {
-            Form {
-                Picker("Provider", selection: $provider) { ForEach(Provider.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                if provider == .digitalOcean { SecureField("Read-only API token", text: $token) }
-                else { TextField("AWS CLI profile", text: $profile); TextField("Region (optional)", text: $region) }
-                TextField("SSH username", text: $username)
-                Text(provider == .digitalOcean ? "Only the Droplets list is read. The token is used once and is not saved." : "Uses your existing AWS CLI profile and only calls describe-instances. AWS keys never enter tokenstat.").font(.caption).foregroundStyle(.secondary)
-                if let importedCount {
-                    Label(importedCount == 1 ? "Imported 1 host" : "Imported \(importedCount) hosts", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(Theme.success)
+            VStack(spacing: 0) {
+                SSHEditorBody {
+                    if let error {
+                        InlineBanner(text: error, kind: .danger) { self.error = nil }
+                    }
+                    SSHEditorSection(title: "Provider") {
+                        SSHEditorField(label: "Import from") {
+                            Picker("Provider", selection: $provider) {
+                                ForEach(Provider.allCases, id: \.self) {
+                                    Text($0.rawValue).tag($0)
+                                }
+                            }
+                        }
+                        if provider == .digitalOcean {
+                            SSHEditorField(label: "Read-only API token") {
+                                SecureField("Read-only API token", text: $token)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        } else {
+                            SSHEditorField(label: "AWS CLI profile") {
+                                TextField("AWS CLI profile", text: $profile)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            SSHEditorField(label: "Region") {
+                                TextField("Region (optional)", text: $region)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        SSHEditorField(label: "SSH username") {
+                            TextField("SSH username", text: $username)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        SSHEditorNote(
+                            text: provider == .digitalOcean
+                                ? "Only the Droplets list is read. The token is used once and is not saved."
+                                : "Uses your existing AWS CLI profile and only calls describe-instances. AWS keys never enter tokenstat."
+                        )
+                    }
+                    if let importedCount {
+                        SSHEditorSection(title: "Imported") {
+                            Label(
+                                importedCount == 1 ? "Imported 1 server" : "Imported \(importedCount) servers",
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            .foregroundStyle(Theme.success)
+                        }
+                    } else if importing {
+                        HStack(spacing: Theme.Space.s) {
+                            ProgressView().controlSize(.small)
+                            Text("Reading server list…")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
-                if importing { ProgressView("Reading server list…") }
-                if let error { Text(error).foregroundStyle(Theme.danger) }
+                SSHEditorFooter(
+                    saveTitle: importedCount == nil ? "Import" : "Done",
+                    saveIcon: importedCount == nil ? .download : .done,
+                    canSave: importedCount != nil
+                        || (!(provider == .digitalOcean && token.isEmpty) && !username.isEmpty),
+                    working: importing,
+                    onSave: {
+                        if importedCount == nil { Task { await run() } } else { onDone() }
+                    },
+                    onCancel: onDone,
+                    onDelete: nil
+                )
             }
             .navigationTitle("Import cloud servers")
-        }
-        .safeAreaInset(edge: .bottom) {
-            SSHEditorFooter(
-                saveTitle: importedCount == nil ? "Import" : "Done",
-                canSave: importedCount != nil
-                    || (!(provider == .digitalOcean && token.isEmpty) && !username.isEmpty),
-                working: importing,
-                onSave: {
-                    if importedCount == nil { Task { await run() } } else { onDone() }
-                },
-                onCancel: onDone,
-                onDelete: nil
-            )
         }
     }
     private func run() async {
@@ -601,32 +643,86 @@ struct SSHConnectForm: View {
     @State private var selectedKeyID = ""
     @State private var offeredFingerprint: String?
     @State private var error: String?
+    @State private var working = false
     var body: some View {
         NavigationStack {
-            Form {
-                if host.hostKeys.isEmpty {
-                    Text("Verify the server identity before sending credentials.")
-                    Button("Show fingerprint", .security) { Task { await probe() } }
-                    if let offeredFingerprint {
-                        Text(offeredFingerprint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                        Button("Trust this fingerprint", .approve) { Task { await trust(offeredFingerprint) } }
+            VStack(spacing: 0) {
+                SSHEditorBody {
+                    if let error {
+                        InlineBanner(text: error, kind: .danger) { self.error = nil }
                     }
-                } else {
-                    Picker("Authentication", selection: $selectedKeyID) {
-                        Text("Password").tag("")
-                        ForEach(model.keys) { Text($0.label).tag($0.id) }
+                    if host.hostKeys.isEmpty {
+                        SSHEditorSection(title: "Server identity") {
+                            SSHEditorNote(text: "Verify the server identity before sending credentials.")
+                            if let offeredFingerprint {
+                                SSHEditorField(label: "Fingerprint") {
+                                    Text(offeredFingerprint)
+                                        .font(Theme.mono(11))
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                    } else {
+                        SSHEditorSection(title: "Authentication") {
+                            SSHEditorField(label: "Use") {
+                                Picker("Authentication", selection: $selectedKeyID) {
+                                    Text("Password").tag("")
+                                    ForEach(model.keys) { Text($0.label).tag($0.id) }
+                                }
+                            }
+                            if selectedKeyID.isEmpty {
+                                SSHEditorField(label: "Password") {
+                                    SecureField("Password", text: $password)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            }
+                            SSHEditorNote(text: "Passwords are used for this connection and are never saved.")
+                        }
                     }
-                    if selectedKeyID.isEmpty { SecureField("Password", text: $password) }
-                    Button("Connect", .connect) { Task { await connect() } }
-                        .disabled(selectedKeyID.isEmpty && password.isEmpty)
                 }
-                if let error { Text(error).foregroundStyle(Theme.danger) }
+                SSHEditorFooter(
+                    saveTitle: connectActionTitle,
+                    saveIcon: connectActionIcon,
+                    canSave: canContinue,
+                    working: working,
+                    onSave: { Task { await continueConnection() } },
+                    onCancel: { dismiss() },
+                    onDelete: nil
+                )
             }
             .navigationTitle(host.label)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close connection") } }
         }
         .sshSheetFrame(width: 500, height: 360)
         .onAppear { selectedKeyID = host.credentialID ?? "" }
+    }
+
+    private var connectActionTitle: String {
+        if !host.hostKeys.isEmpty { return "Connect" }
+        return offeredFingerprint == nil ? "Show fingerprint" : "Trust fingerprint"
+    }
+
+    private var connectActionIcon: ActionIcon {
+        if !host.hostKeys.isEmpty { return .connect }
+        return offeredFingerprint == nil ? .security : .approve
+    }
+
+    private var canContinue: Bool {
+        if host.hostKeys.isEmpty { return true }
+        return !selectedKeyID.isEmpty || !password.isEmpty
+    }
+
+    private func continueConnection() async {
+        working = true
+        defer { working = false }
+        if host.hostKeys.isEmpty {
+            if let offeredFingerprint {
+                await trust(offeredFingerprint)
+            } else {
+                await probe()
+            }
+        } else {
+            await connect()
+        }
     }
     private func probe() async {
         do {
@@ -641,11 +737,12 @@ struct SSHConnectForm: View {
         catch { self.error = error.localizedDescription }
     }
     private func trust(_ fingerprint: String) async {
-        do {
-            host.hostKeys = [fingerprint]
-            _ = await model.save(host: host)
+        host.hostKeys = [fingerprint]
+        if await model.save(host: host) != nil {
             offeredFingerprint = nil
-        } catch { self.error = error.localizedDescription }
+        } else {
+            error = model.error ?? "The trusted fingerprint could not be saved."
+        }
     }
     private func connect() async {
         do {

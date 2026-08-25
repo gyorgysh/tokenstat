@@ -12,6 +12,7 @@ import SwiftUI
 /// button sizes and delete styled as a link.
 struct SSHEditorFooter: View {
     var saveTitle = "Save"
+    var saveIcon: ActionIcon = .save
     var canSave: Bool
     var working: Bool
     var onSave: () -> Void
@@ -28,7 +29,20 @@ struct SSHEditorFooter: View {
             Button("Cancel", .dismiss, action: onCancel)
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
-            Button(saveTitle, .save, action: onSave)
+            Group {
+                // Keep the glyph literals visible to the design guard. The
+                // footer accepts a semantic action, but a dynamic value in
+                // `Button` would make a future bare button indistinguishable
+                // from this deliberate choice to the source check.
+                switch saveIcon {
+                case .download: Button(saveTitle, .download, action: onSave)
+                case .done: Button(saveTitle, .done, action: onSave)
+                case .connect: Button(saveTitle, .connect, action: onSave)
+                case .security: Button(saveTitle, .security, action: onSave)
+                case .approve: Button(saveTitle, .approve, action: onSave)
+                default: Button(saveTitle, .save, action: onSave)
+                }
+            }
                 .buttonStyle(AccentButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
                 .disabled(!canSave || working)

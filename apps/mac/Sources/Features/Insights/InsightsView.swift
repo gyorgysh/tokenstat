@@ -615,7 +615,7 @@ private struct DailyChart: View {
                 .foregroundStyle(Theme.accent)
         }
         .padding(Theme.Space.s)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Space.s))
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.Space.s))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Space.s)
                 .strokeBorder(Theme.border, lineWidth: 1)

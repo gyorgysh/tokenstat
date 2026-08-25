@@ -5,10 +5,11 @@
 // your own build of it.
 // "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
 
-import AppKit
 import SwiftUI
 
 #if os(macOS)
+import AppKit
+
 /// The saved commands for the server whose shells are on screen.
 ///
 /// The inspector used to force the host editor open beside a live session, on
