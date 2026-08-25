@@ -169,10 +169,11 @@ struct SSHHostEditor: View {
         }
         .confirmationDialog("Delete this server?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task {
-                    await model.delete(host: host)
-                    finish()
-                }
+                // Leave first, then delete. The delete reloads the list,
+                // and a detail view still bound to the record that just left
+                // it is a row being read while it is removed.
+                finish()
+                Task { await model.delete(host: host) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -357,10 +358,9 @@ struct SSHKeyEditor: View {
         }
         .confirmationDialog("Delete this key?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task {
-                    if let record { await model.delete(key: record) }
-                    finish()
-                }
+                let doomed = record
+                finish()
+                Task { if let doomed { await model.delete(key: doomed) } }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -507,10 +507,8 @@ struct SSHSnippetEditor: View {
         }
         .confirmationDialog("Delete this snippet?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task {
-                    await model.delete(snippet: snippet)
-                    finish()
-                }
+                finish()
+                Task { await model.delete(snippet: snippet) }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -595,10 +593,8 @@ struct SSHFolderEditor: View {
         }
         .confirmationDialog("Delete this folder?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task {
-                    await model.delete(folder: folder)
-                    finish()
-                }
+                finish()
+                Task { await model.delete(folder: folder) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

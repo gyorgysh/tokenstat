@@ -31,6 +31,7 @@ pub mod abi;
 #[cfg(target_os = "android")]
 mod android;
 pub mod api;
+mod crashlog;
 
 /// Version of the wire contract. Re-exported so a C consumer has one place to
 /// look, but owned by `tokenstat-host`.

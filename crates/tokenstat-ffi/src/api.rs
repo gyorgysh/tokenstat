@@ -41,6 +41,11 @@ fn warm() {
 /// and never returns a non-JSON string, so the caller can decode
 /// unconditionally.
 pub fn call(method: &str, params: &str) -> String {
+    // First, and before anything that could fail. `panic = "abort"` means a
+    // panic under here ends the app with no Rust frame in the crash report, so
+    // the hook that names the line has to be in place before the first call
+    // rather than after the first successful one.
+    crate::crashlog::install();
     warm();
 
     // Answered without the lock where the method allows it. A terminal polls
