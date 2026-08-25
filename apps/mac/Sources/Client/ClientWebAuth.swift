@@ -48,10 +48,25 @@ final class ClientWebAuth: NSObject {
         // no marketing column, providers as full-width rows. A query flag and
         // not a user agent, because an authentication session gives an app no
         // way to set one and sniffing strings is a losing game.
-        let tagged = url.appending(queryItems: [
+        var flags = [
             URLQueryItem(name: "app", value: "ios"),
             URLQueryItem(name: "mobile", value: "1"),
-        ])
+        ]
+        // TestFlight and App Review only. Every screen in this app is behind a
+        // sign-in, and sign-in is Apple, Google, GitHub or X through this page:
+        // there is no password field, so Apple's usual "here are the demo
+        // account details" cannot be honoured. The flag asks the page to offer
+        // a demo account beside the four providers.
+        //
+        // The app carries no credential and no secret. It says which kind of
+        // build this is and the site decides what that is worth, so the door
+        // can be closed after a review round without a new build. Harmless on
+        // a site that does not know the parameter yet, the same way `app` and
+        // `mobile` were harmless before it did.
+        if ReviewBuild.isTestFlight {
+            flags.append(URLQueryItem(name: "review", value: "1"))
+        }
+        let tagged = url.appending(queryItems: flags)
 
         let session = ASWebAuthenticationSession(
             url: tagged,
