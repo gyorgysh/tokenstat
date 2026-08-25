@@ -75,15 +75,15 @@ struct CloudImportForm: View {
     }
 }
 
-/// The 24 words, then the three that prove they were written down.
+/// The recovery code, then the same line typed back.
 ///
-/// Two steps, because one surface is not a confirmation. The old screen showed
-/// the grid, a "I stored all 24 words" toggle, and then three fields asking for
-/// words 3, 11 and 20 with the grid still on screen: an answer you can read off
-/// is a typing exercise, not a check.
+/// Two steps, because one surface is not a confirmation. The code is on
+/// screen to be written down, then off screen while it is typed, so confirming
+/// cannot be done by reading. Going back is allowed and re-showing the code is
+/// a deliberate action, so nobody is trapped.
 ///
-/// Going back is allowed and re-showing the words is a deliberate action, so
-/// nobody is trapped and nobody confirms by reading.
+/// This used to be 24 words and a three-word quiz. The host now issues one
+/// Crockford line, and the quiz has to ask for that line or Done never enables.
 struct SSHRecoveryWordsSheet: View {
     @Environment(\.dismiss) private var dismiss
     let recovery: String
@@ -94,21 +94,28 @@ struct SSHRecoveryWordsSheet: View {
 
     @State private var step = Step.read
     @State private var confirmingDiscard = false
-    @State private var confirmation3 = ""
-    @State private var confirmation11 = ""
-    @State private var confirmation20 = ""
+    @State private var typed = ""
     @State private var copied = false
 
-    private var words: [String] { recovery.split(whereSeparator: \.isWhitespace).map(String.init) }
-    private var typedAnything: Bool {
-        !confirmation3.isEmpty || !confirmation11.isEmpty || !confirmation20.isEmpty
+    private var typedAnything: Bool { !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// The same normalisation the host uses: case, dashes, and O/0 I,L/1.
+    private var codesMatch: Bool {
+        let expected = Self.normalized(recovery)
+        return !expected.isEmpty && expected == Self.normalized(typed)
     }
 
-    private var wordsMatch: Bool {
-        words.count == 24
-            && confirmation3.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == words[2]
-            && confirmation11.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == words[10]
-            && confirmation20.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == words[19]
+    static func normalized(_ value: String) -> String {
+        var out = ""
+        for ch in value.uppercased() {
+            guard ch.isASCII, ch.isLetter || ch.isNumber else { continue }
+            switch ch {
+            case "O": out.append("0")
+            case "I", "L": out.append("1")
+            default: out.append(ch)
+            }
+        }
+        return out
     }
 
     var body: some View {
@@ -123,7 +130,7 @@ struct SSHRecoveryWordsSheet: View {
             footer
         }
         .padding(Theme.Space.l)
-        .sshSheetFrame(width: 680, height: 670)
+        .sshSheetFrame(width: 560, height: 460)
         .confirmationDialog("Delete this vault?", isPresented: $confirmingDiscard, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { onDiscard(); dismiss() }
             Button("Cancel", role: .cancel) {}
@@ -133,84 +140,85 @@ struct SSHRecoveryWordsSheet: View {
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(step == .read ? "Save your recovery words" : "Confirm three words")
+                Text(step == .read ? "Save your recovery code" : "Type the recovery code")
                     .font(.title3.weight(.semibold))
                 Text(step == .read
-                    ? "This is the only recovery method if every enrolled device is lost."
-                    : "The words are off screen on purpose. Type them from where you saved them.")
+                    ? "This is the only way back if the password is forgotten and every device is lost."
+                    : "The code is off screen on purpose. Type it from where you saved it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery words")
+            InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery code")
         }
     }
 
-    // MARK: - Step one: read them
+    /// The code's ten groups, which is how it is written and how it is read
+    /// back off paper.
+    private var groups: [String] {
+        recovery.split(separator: "-").map(String.init)
+    }
 
     private var readStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 3), spacing: 10) {
-                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
-                    HStack(spacing: 8) {
-                        Text("\(index + 1)").font(Theme.mono(10)).foregroundStyle(.tertiary).frame(width: 18, alignment: .trailing)
-                        Text(word).font(.system(.body, design: .monospaced).weight(.medium))
-                    }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+            // Grouped rather than one long line. Fifty characters of monospace
+            // does not fit across a phone, and the version that wrapped
+            // wherever it ran out of room broke groups across lines, which is
+            // the one thing a code being copied onto paper must not do.
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 66), spacing: 8, alignment: .leading)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                    Text(group)
+                        .font(Theme.mono(16, weight: .medium))
+                        .textSelection(.enabled)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
-            Text("Store these offline in a password manager or on paper. Do not rely on this screen or a screenshot.")
+            .padding(Theme.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Recovery code \(groups.joined(separator: ", "))")
+            Text("Store this offline in a password manager or on paper. Do not rely on this screen or a screenshot.")
                 .font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button(action: copyWords) {
-                    Label(copied ? "Copied" : "Copy all words", systemImage: copied ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(SecondaryButtonStyle(small: true))
+                Button(copied ? "Copied" : "Copy", .copy) { copyCode() }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
                 Text("The clipboard may be visible to other apps; clear it after saving.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    // MARK: - Step two: prove it
-
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Text("Enter words 3, 11 and 20 exactly as they were written.")
+            Text("Enter the recovery code exactly as it was written.")
                 .font(.callout)
-            HStack {
-                field("Word 3", text: $confirmation3)
-                field("Word 11", text: $confirmation11)
-                field("Word 20", text: $confirmation20)
-            }
+            TextField("Recovery code", text: $typed)
+                .textFieldStyle(.roundedBorder)
+                .font(Theme.mono(14))
+                #if !os(macOS)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                #endif
             if typedAnything {
-                Text(wordsMatch ? "Recovery words match." : "That is not what was generated.")
-                    .font(.caption).foregroundStyle(wordsMatch ? Theme.success : Theme.danger)
+                Text(codesMatch ? "Recovery code matches." : "That is not what was generated.")
+                    .font(.caption).foregroundStyle(codesMatch ? Theme.success : Theme.danger)
             }
-            Button("Show the words again", .reveal) {
+            Button("Show the code again", .reveal) {
                 step = .read
-                confirmation3 = ""
-                confirmation11 = ""
-                confirmation20 = ""
+                typed = ""
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
-            Text("Going back is fine. It clears what was typed, so the words still have to be read from where you saved them.")
+            Text("Going back is fine. It clears what was typed, so the code still has to be read from where you saved it.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
-
-    private func field(_ prompt: String, text: Binding<String>) -> some View {
-        TextField(prompt, text: text)
-            .textFieldStyle(.roundedBorder)
-            #if !os(macOS)
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            #endif
-    }
-
-    // MARK: - Footer
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -219,22 +227,22 @@ struct SSHRecoveryWordsSheet: View {
                     .buttonStyle(DestructiveButtonStyle())
                 Spacer()
                 if step == .read {
-                    Button("I have saved these", .next) { step = .confirm }
+                    Button("I have saved this", .next) { step = .confirm }
                         .buttonStyle(AccentButtonStyle())
                         .frame(minWidth: Theme.Control.pairedWidth)
                 } else {
                     Button("Done", .done) { onConfirmed(); dismiss() }
                         .buttonStyle(AccentButtonStyle())
                         .frame(minWidth: Theme.Control.pairedWidth)
-                        .disabled(!wordsMatch)
+                        .disabled(!codesMatch)
                 }
             }
-            Text("Close without confirming to look at the words later. Discard deletes the vault so you can create a new one.")
+            Text("Close without confirming to look at the code later. Discard deletes the vault so you can create a new one.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private func copyWords() {
+    private func copyCode() {
         #if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(recovery, forType: .string)

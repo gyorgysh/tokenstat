@@ -31,7 +31,7 @@ enum SSHLibraryRoute: Hashable {
 /// problem: a snippet is a shell script and it was being edited in a box 380
 /// points tall, and a host had nowhere to show what it was actually configured
 /// to do. Sheets are kept for the two things that really are modal and
-/// dangerous: recovery words, and confirming a deletion.
+/// dangerous: the recovery code, and confirming a deletion.
 ///
 /// The phone and the iPad only. The Mac used to present this same view in a
 /// sheet over Devices; it has an SSH section in the sidebar and three columns
@@ -156,7 +156,7 @@ struct SSHLibraryView: View {
 
     private var header: some View {
         VStack(spacing: Theme.Space.s) {
-            // One row, not a control panel. Enrol, new recovery words and
+            // One row, not a control panel. Unlock, a new recovery code and
             // delete live inside the screen it opens, where each of them has
             // room for the sentence it needs.
             if vaultTier != nil {
