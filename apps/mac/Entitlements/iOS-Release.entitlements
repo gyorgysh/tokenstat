@@ -7,5 +7,18 @@
 	     to it is refused. -->
 	<key>aps-environment</key>
 	<string>production</string>
+	<!-- Generating or importing an SSH key writes the private half to this
+	     device's keychain. On iOS a generic-password write needs an access
+	     group, and a target that supplies its own entitlements file gets only
+	     what that file says: with no group named, SecItemAdd came back
+	     errSecMissingEntitlement (-34018) and "Generate a key" could not
+	     store anything it made.
+
+	     The prefix is a build variable, resolved from the signing identity at
+	     build time. No team identifier belongs in this repository. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)ai.tokenstat.tokenstat</string>
+	</array>
 </dict>
 </plist>

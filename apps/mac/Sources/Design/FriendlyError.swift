@@ -51,6 +51,32 @@ struct FriendlyError {
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
+        // A keychain refusal, which arrives as a bare OSStatus and a sentence
+        // that says nothing. -34018 is errSecMissingEntitlement: the build is
+        // not allowed to write to the keychain at all, which is a signing
+        // problem rather than anything somebody did.
+        if lower.contains("-34018") || lower.contains("errsecmissingentitlement") {
+            return FriendlyError(
+                title: "This build cannot use the keychain",
+                message: "An SSH key's private half is stored in this device's keychain, and "
+                    + "this copy of the app is not signed to reach it. A build from the App "
+                    + "Store or TestFlight can. Nothing was saved.",
+                symbol: "key.slash",
+                raw: raw
+            )
+        }
+        // -25300 is errSecItemNotFound: a key record survived the secret it
+        // points at, which happens after a restore from a backup.
+        if lower.contains("-25300") {
+            return FriendlyError(
+                title: "The private key is not on this device",
+                message: "The record is here but the secret it points at is not, which is what "
+                    + "a restore from a backup leaves behind. Import or generate the key again.",
+                symbol: "key.slash",
+                raw: raw
+            )
+        }
+
         // The vault lives on the account, so its failures arrive as server
         // sentences written for a log. Two different causes share the
         // `machine_required` code: a login that was never tied to this
