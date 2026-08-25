@@ -315,6 +315,27 @@ struct RootView: View {
         .sheet(isPresented: $workspaces.isAddSheetPresented) {
             AddWorkspaceSheet(model: workspaces)
         }
+        #if os(macOS)
+        // Connecting starts from four places: the list, the inspector, the
+        // sidebar and the tab strip above a running session. Only the first
+        // of those is on the SSH list screen, and the sheet used to hang off
+        // that screen alone. The route switch draws one destination at a time,
+        // so "New session" from the terminal pane set `connectRequest` on a
+        // model whose presenter was not in the hierarchy: the password prompt
+        // was asked for behind a screen nobody was looking at, and opening a
+        // second shell on a server looked like a button that did nothing.
+        //
+        // Here it is above the switch, so wherever a connection starts, the
+        // prompt is in front.
+        .sheet(item: $ssh.connectRequest) { host in
+            SSHConnectForm(host: host, model: ssh) { session in
+                sshSessions.adopt(session)
+                if let hostID = session.hostID {
+                    navigate(to: .sshTerminals(host: hostID))
+                }
+            }
+        }
+        #endif
         // The window size for the hover popover, which needs to be placed
         // against the window rather than the pane it floats over.
         //
@@ -2046,11 +2067,9 @@ struct RootView: View {
             #if os(macOS)
             SSHSectionView(
                 model: ssh,
-                sessions: sshSessions,
                 section: section,
                 vaultTier: machines.vaultTier,
-                onOpenFolder: { openSSH(.hosts(folder: $0)) },
-                onOpenTerminals: { navigate(to: .sshTerminals(host: $0)) }
+                onOpenFolder: { openSSH(.hosts(folder: $0)) }
             )
             #else
             EmptyView()
