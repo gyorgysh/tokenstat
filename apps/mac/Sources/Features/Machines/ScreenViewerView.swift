@@ -45,6 +45,16 @@ struct ScreenViewerView: View {
     @State private var viewerTitlebarInset: CGFloat = 0
     #else
     @State private var mode: ScreenPointerMode = .trackpad
+    /// The chrome is hidden and the picture has the whole display.
+    ///
+    /// A phone showing somebody's desktop wants every pixel: the navigation
+    /// bar, the status bar and the transport line together are a strip off the
+    /// top of a picture that is already smaller than the thing it is showing.
+    /// A tap on the picture brings them back.
+    @State private var immersive = false
+    /// Whether the last rotation into landscape has already been acted on, so
+    /// leaving immersive mode by hand is not undone on the next redraw.
+    @State private var appliedLandscape = false
     #endif
 
     var body: some View {
@@ -69,8 +79,9 @@ struct ScreenViewerView: View {
         .safeAreaInset(edge: .top) {
             // Turned sideways, a phone has very little height and every line
             // of it is picture somebody rotated the device to see. The
-            // transport is worth a line in portrait and is not worth one here.
-            if !isCompactHeight {
+            // transport is worth a line in portrait and is not worth one here,
+            // and it is not worth one with the chrome hidden either.
+            if !isCompactHeight, !isImmersive {
                 HStack(spacing: 6) {
                     Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
                     Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
@@ -79,9 +90,15 @@ struct ScreenViewerView: View {
             }
         }
         .toolbar {
+            // The Mac's viewer is a window and needs its own way out. A phone
+            // pushed this screen and already has a back control an inch to the
+            // left of this one, so a second close button was two controls for
+            // one job in a row that had no space to spare.
+            #if os(macOS)
             ToolbarItem(placement: .cancellationAction) {
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close screen viewer")
             }
+            #endif
             if model.displays.count > 1 {
                 ToolbarItem {
                     Picker("Display", selection: Binding(
@@ -139,6 +156,12 @@ struct ScreenViewerView: View {
                     NSApp.keyWindow?.toggleFullScreen(nil)
                 }
                 .help(viewerIsFullScreen ? "Return this viewer to its window" : "Fill this display")
+            }
+            #else
+            ToolbarItem {
+                Button("Full screen", .external) {
+                    withAnimation { immersive = true }
+                }
             }
             #endif
             #if !os(macOS)
@@ -206,12 +229,28 @@ struct ScreenViewerView: View {
         }
         #endif
         #if !os(macOS)
+        .toolbar(immersive ? .hidden : .visible, for: .navigationBar)
+        .statusBarHidden(immersive)
+        .persistentSystemOverlays(immersive ? .hidden : .automatic)
+        // A tap anywhere on the picture brings the chrome back. Deliberately
+        // not a swipe or a corner: somebody who has hidden every control needs
+        // the gesture that gets them back to be the one they would try first.
+        // It runs after the input surface, so a tap in control mode still
+        // clicks the far end and this only fires when nothing else took it.
+        .onTapGesture {
+            guard immersive else { return }
+            withAnimation { immersive = false }
+        }
+        // Rotating a phone onto its side is asking for the picture, so going
+        // sideways hides the chrome once. Turning it back shows it again.
+        // Tracked, so leaving immersive mode by hand while still in landscape
+        // is not undone by the next redraw.
         .safeAreaInset(edge: .bottom) {
             // Landscape is the full-screen viewing surface on a phone. The
             // key row consumes too much of its short edge; rotate back for the
             // keyboard controls, while pinch remains available in either
             // view or control mode.
-            if controlling, !isCompactHeight {
+            if controlling, !isCompactHeight, !isImmersive {
                 ScreenKeyBar(
                     modifiers: $heldModifiers,
                     send: { code, flags in
@@ -238,12 +277,34 @@ struct ScreenViewerView: View {
                 )
             }
         }
+        // Rotating a phone onto its side is asking for the picture, so going
+        // sideways hides the chrome once. Turning it back shows it again.
+        // Tracked, so leaving immersive mode by hand while still in landscape
+        // is not undone by the next redraw.
         .onChange(of: isCompactHeight) { _, compact in
-            if compact { keyboardWanted = false }
+            if compact {
+                keyboardWanted = false
+                guard !appliedLandscape else { return }
+                appliedLandscape = true
+                withAnimation { immersive = true }
+            } else {
+                appliedLandscape = false
+                withAnimation { immersive = false }
+            }
         }
         // A screen somebody is watching must not dim under them.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
         .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        #endif
+    }
+
+    /// Whether the chrome is hidden and the picture has the whole display.
+    /// Always false on the Mac, which fills a display by going full screen.
+    private var isImmersive: Bool {
+        #if os(macOS)
+        false
+        #else
+        immersive
         #endif
     }
 
