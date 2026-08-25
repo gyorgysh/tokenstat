@@ -67,7 +67,10 @@ settings:
     # sessions in the sidebar, connect without a context menu, the phone's
     # key bar and snippets, precision pointer control on the screen viewer,
     # and the review sign-in flag.
-    CURRENT_PROJECT_VERSION: "51"
+    # 52 carries the SSH follow-up review fixes: server-row menu polish,
+    # themed prompts, snippet targeting safety, fingerprint persistence
+    # recovery, and view-only zoom panning.
+    CURRENT_PROJECT_VERSION: "52"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
