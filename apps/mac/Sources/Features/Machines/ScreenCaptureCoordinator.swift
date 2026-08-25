@@ -144,6 +144,10 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     private var sourceWidth = 0
     private var sourceHeight = 0
     private var configuration: SCStreamConfiguration?
+    /// The decoder cannot start without SPS/PPS, which only ride on a
+    /// keyframe. The first picture, and the first after a compression
+    /// rebuild, must be one even if VideoToolbox would have waited.
+    private var forceKey = true
     private(set) var displayID: CGDirectDisplayID?
 
     init(output: @escaping @Sendable (Data) -> Void) { self.output = output }
@@ -180,6 +184,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         config.excludesCurrentProcessAudio = true
         configuration = config
 
+        forceKey = true
         try makeCompression()
         let stream = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
@@ -201,6 +206,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         Task { try? await stream?.stopCapture() }
         if let compression { VTCompressionSessionInvalidate(compression) }
         compression = nil
+        forceKey = true
     }
 
     func setQuality(_ quality: CGFloat) async {
@@ -215,6 +221,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
             queue.sync {
                 if let compression { VTCompressionSessionInvalidate(compression) }
                 compression = nil; width = newWidth; height = newHeight
+                forceKey = true
                 try? makeCompression()
             }
         } catch { return }
@@ -256,13 +263,42 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
               CMSampleBufferDataIsReady(sampleBuffer),
               let image = CMSampleBufferGetImageBuffer(sampleBuffer),
               let compression else { return }
-        VTCompressionSessionEncodeFrame(compression, imageBuffer: image, presentationTimeStamp: sampleBuffer.presentationTimeStamp, duration: sampleBuffer.duration, frameProperties: nil, sourceFrameRefcon: nil, infoFlagsOut: nil)
+        var properties: CFDictionary?
+        if forceKey {
+            properties = [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
+        }
+        VTCompressionSessionEncodeFrame(
+            compression,
+            imageBuffer: image,
+            presentationTimeStamp: sampleBuffer.presentationTimeStamp,
+            duration: sampleBuffer.duration,
+            frameProperties: properties,
+            sourceFrameRefcon: nil,
+            infoFlagsOut: nil
+        )
+    }
+
+    /// Whether this encoded sample can start a decoder on its own.
+    ///
+    /// `NotSync` missing means it is a sync sample. `NotSync` present and
+    /// false means the same thing: VideoToolbox does write the key as false
+    /// on IDR frames. Treating "key exists" as "not a keyframe" dropped
+    /// SPS/PPS from every picture, so the viewer decoded nothing and showed
+    /// a black screen while mouse and keyboard still arrived on a side
+    /// channel.
+    private func isKeyframe(_ sample: CMSampleBuffer) -> Bool {
+        if forceKey { return true }
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
+        guard let value = attachments?.first?[kCMSampleAttachmentKey_NotSync] else { return true }
+        if let flag = value as? Bool { return !flag }
+        if let number = value as? NSNumber { return !number.boolValue }
+        return true
     }
 
     private func encoded(_ sample: CMSampleBuffer) {
         guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
-        let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
-        let keyframe = attachments?.first?[kCMSampleAttachmentKey_NotSync] == nil
+        let keyframe = isKeyframe(sample)
+        if keyframe { forceKey = false }
         var payload = Data()
         if keyframe, let format = CMSampleBufferGetFormatDescription(sample) {
             for index in 0..<2 {

@@ -133,14 +133,29 @@ impl Frame {
 ///
 /// Dropping an H.264 delta picture invalidates every later delta that depends
 /// on it. When pressure forces a drop, the whole queue is cleared and deltas
-/// are ignored until the endpoint supplies another keyframe.
-#[derive(Debug, Default)]
+/// are ignored until the endpoint supplies another keyframe. A session also
+/// starts in that waiting state: the first pictures before an IDR cannot be
+/// drawn, and forwarding them made the viewer look connected while remaining
+/// black.
+#[derive(Debug)]
 pub struct VideoQueue {
     frames: VecDeque<Frame>,
     bytes: usize,
     waiting_for_keyframe: bool,
     dropped: u64,
     last_sequence: Option<u64>,
+}
+
+impl Default for VideoQueue {
+    fn default() -> Self {
+        Self {
+            frames: VecDeque::new(),
+            bytes: 0,
+            waiting_for_keyframe: true,
+            dropped: 0,
+            last_sequence: None,
+        }
+    }
 }
 
 impl VideoQueue {
@@ -265,5 +280,14 @@ mod tests {
         assert!(!queue.push(video(4, 8, false)).unwrap());
         assert!(queue.push(video(5, 8, true)).unwrap());
         assert_eq!(queue.pop().unwrap().sequence, 5);
+    }
+
+    #[test]
+    fn the_first_picture_must_be_a_keyframe() {
+        let mut queue = VideoQueue::default();
+        assert!(!queue.push(video(1, 8, false)).unwrap());
+        assert!(queue.push(video(2, 8, true)).unwrap());
+        assert_eq!(queue.pop().unwrap().sequence, 2);
+        assert_eq!(queue.dropped(), 1);
     }
 }

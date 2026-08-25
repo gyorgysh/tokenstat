@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import AVFoundation
+import CoreMedia
 import CryptoKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -14,6 +15,9 @@ import UIKit
 /// system display layer; the relay and account service see encrypted bytes.
 struct ScreenViewerView: View {
     @Environment(\.dismiss) private var dismiss
+    #if !os(macOS)
+    @Environment(ClientStore.self) private var store
+    #endif
     let peer: String
     let name: String
     let tier: String?
@@ -43,28 +47,7 @@ struct ScreenViewerView: View {
                 .scaleEffect(zoom, anchor: pointerAnchor)
                 .clipped()
             if model.state != .streaming {
-                VStack(spacing: Theme.Space.m) {
-                    ProgressView().opacity(model.state == .connecting ? 1 : 0)
-                    Text(model.message).foregroundStyle(.white)
-                    if model.state == .failed {
-                        VStack(alignment: .leading, spacing: 8) {
-                            readiness("Legend plan", ready: tier?.lowercased() == "legend")
-                            readiness("Signed in and paired", ready: true)
-                            readiness("Host online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
-                            readiness("Per-device screen permission", ready: !model.needsPermission)
-                            readiness(controlling ? "Screen Recording and Accessibility" : "Screen Recording on the host", ready: !model.message.localizedCaseInsensitiveContains("recording"))
-                        }
-                        .padding(Theme.Space.m)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                        if model.needsPermission {
-                            Button("Request access", .approve) { Task { await model.requestAccess() } }
-                                .buttonStyle(AccentButtonStyle())
-                        }
-                        Button("Try again", .refresh) { Task { await start() } }
-                            .buttonStyle(SecondaryButtonStyle())
-                    }
-                }
-                .padding(Theme.Space.l)
+                overlayStatus
             }
         }
         .navigationTitle(name)
@@ -169,6 +152,76 @@ struct ScreenViewerView: View {
 
     private func start() async { await model.start(peer: peer, tier: tier, control: controlling) }
 
+    /// Cover over the black backing until a picture is on it, or until the
+    /// session has said why there will not be one.
+    @ViewBuilder
+    private var overlayStatus: some View {
+        VStack(spacing: Theme.Space.m) {
+            if model.state == .connecting {
+                ProgressView()
+                Text(model.message)
+                    .font(.callout)
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+            } else if model.needsLegend {
+                legendRequired
+            } else {
+                Text(model.message)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                VStack(alignment: .leading, spacing: 8) {
+                    readiness("Legend plan", ready: tier?.lowercased() == "legend")
+                    readiness("Signed in and paired", ready: true)
+                    readiness("Host online", ready: !model.message.localizedCaseInsensitiveContains("offline"))
+                    readiness("Per-device screen permission", ready: !model.needsPermission)
+                    readiness(
+                        controlling ? "Screen Recording and Accessibility" : "Screen Recording on the host",
+                        ready: !model.message.localizedCaseInsensitiveContains("recording")
+                    )
+                }
+                .padding(Theme.Space.m)
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                if model.needsPermission {
+                    Button("Request access", .approve) { Task { await model.requestAccess() } }
+                        .buttonStyle(AccentButtonStyle())
+                }
+                Button("Try again", .refresh) { Task { await start() } }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+        }
+        .padding(Theme.Space.l)
+        .frame(maxWidth: 420)
+    }
+
+    /// The viewer opened on a plan that does not include the screen. A
+    /// checklist of other causes would send somebody hunting permissions they
+    /// do not need to grant.
+    private var legendRequired: some View {
+        VStack(spacing: Theme.Space.m) {
+            TierMark(tier: "legend", size: 36)
+            Text("Screen access is on Legend")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
+            Text("Mouse and keyboard never travel without the picture, and the picture is end-to-end encrypted between your devices. Legend is the plan that includes it.")
+                .font(.callout)
+                .foregroundStyle(Color.white.opacity(0.72))
+                .multilineTextAlignment(.center)
+            plansButton
+        }
+    }
+
+    @ViewBuilder
+    private var plansButton: some View {
+        #if os(macOS)
+        Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
+            .buttonStyle(AccentButtonStyle())
+        #else
+        Button("See plans", .plans) { store.showPaywall = true }
+            .buttonStyle(AccentButtonStyle())
+        #endif
+    }
+
     private func readiness(_ title: String, ready: Bool) -> some View {
         Label(title, systemImage: ready ? "checkmark.circle.fill" : "circle")
             .font(.callout)
@@ -270,6 +323,10 @@ private final class ScreenViewerModel {
         let value = message.lowercased()
         return value.contains("permission") || value.contains("screen access") || value.contains("allowed")
     }
+    /// The session never started because the plan does not include it.
+    var needsLegend: Bool {
+        message.localizedCaseInsensitiveContains("legend plan")
+    }
 
     func requestAccess() async {
         do {
@@ -313,7 +370,11 @@ private final class ScreenViewerModel {
             self.session = session
             transport = session.transport
             streamingSince = Date()
-            state = .streaming
+            // Connected is not the same as a picture. Marking streaming here
+            // hid the overlay and left a black rectangle that still accepted
+            // mouse and keyboard, because input is a side channel.
+            state = .connecting
+            message = "Waiting for the first picture…"
             task = Task { [weak self] in await self?.readLoop(session.id) }
         } catch {
             let reason = error.localizedDescription
@@ -353,15 +414,21 @@ private final class ScreenViewerModel {
                 if let encoded = read.frame, let data = Data(base64Encoded: encoded),
                    let frame = ScreenEncodedFrame(data)
                 {
-                    // Only once it has held up. A frame arriving proves the
-                    // session started, not that it is going to last, and
-                    // resetting on the first one is what made the retry budget
-                    // infinite.
                     if let since = streamingSince, Date().timeIntervalSince(since) > Self.stableAfter {
                         reconnectAttempts = 0
                     }
                     aspectRatio = CGFloat(frame.width) / CGFloat(max(1, frame.height))
-                    decoder.decode(frame)
+                    if decoder.decode(frame), state != .streaming {
+                        state = .streaming
+                    }
+                }
+                if state != .streaming,
+                   let since = streamingSince,
+                   Date().timeIntervalSince(since) > 8
+                {
+                    state = .failed
+                    message = "Connected, but no picture has arrived yet. The host may not have Screen Recording, or Tokenstat may not be open on that Mac."
+                    return
                 }
                 if let encoded = read.audio, let data = Data(base64Encoded: encoded) {
                     audio.play(data)
@@ -654,7 +721,9 @@ private final class ScreenH264Decoder {
     init() { layer.videoGravity = .resizeAspect }
     func reset() { layer.flushAndRemoveImage(); format = nil }
 
-    func decode(_ frame: ScreenEncodedFrame) {
+    /// True when a picture was actually given to the display layer.
+    @discardableResult
+    func decode(_ frame: ScreenEncodedFrame) -> Bool {
         let units = frame.payload.annexBUnits()
         if frame.keyframe,
            let sps = units.first(where: { $0.first.map { $0 & 0x1f == 7 } == true }),
@@ -667,25 +736,72 @@ private final class ScreenH264Decoder {
                         ppsBytes.baseAddress!.assumingMemoryBound(to: UInt8.self),
                     ]
                     let sizes = [sps.count, pps.count]
-                    CMVideoFormatDescriptionCreateFromH264ParameterSets(allocator: kCFAllocatorDefault, parameterSetCount: 2, parameterSetPointers: pointers, parameterSetSizes: sizes, nalUnitHeaderLength: 4, formatDescriptionOut: &format)
+                    CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                        allocator: kCFAllocatorDefault,
+                        parameterSetCount: 2,
+                        parameterSetPointers: pointers,
+                        parameterSetSizes: sizes,
+                        nalUnitHeaderLength: 4,
+                        formatDescriptionOut: &format
+                    )
                 }
             }
         }
-        guard let format else { return }
-        let pictures = units.filter { unit in unit.first.map { ![7, 8].contains(Int($0 & 0x1f)) } ?? false }
+        guard let format else { return false }
+        // VCL only. SEI and AUD in the sample confuse the display layer, and
+        // SPS/PPS already live in the format description.
+        let pictures = units.filter { unit in
+            guard let first = unit.first else { return false }
+            let nal = Int(first & 0x1f)
+            return (1...5).contains(nal)
+        }
         var avcc = Data()
         for unit in pictures { avcc.appendBigEndian(UInt32(unit.count)); avcc.append(unit) }
-        guard !avcc.isEmpty else { return }
+        guard !avcc.isEmpty else { return false }
         var block: CMBlockBuffer?
-        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: avcc.count, blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: avcc.count, flags: 0, blockBufferOut: &block) == kCMBlockBufferNoErr,
-              let block else { return }
-        avcc.withUnsafeBytes { raw in _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: avcc.count) }
+        guard CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: avcc.count,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: avcc.count,
+            flags: 0,
+            blockBufferOut: &block
+        ) == kCMBlockBufferNoErr,
+              let block else { return false }
+        avcc.withUnsafeBytes { raw in
+            _ = CMBlockBufferReplaceDataBytes(
+                with: raw.baseAddress!,
+                blockBuffer: block,
+                offsetIntoDestination: 0,
+                dataLength: avcc.count
+            )
+        }
         var sample: CMSampleBuffer?
         var size = avcc.count
-        guard CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format, sampleCount: 1, sampleTimingEntryCount: 0, sampleTimingArray: nil, sampleSizeEntryCount: 1, sampleSizeArray: &size, sampleBufferOut: &sample) == noErr,
-              let sample else { return }
+        guard CMSampleBufferCreateReady(
+            allocator: kCFAllocatorDefault,
+            dataBuffer: block,
+            formatDescription: format,
+            sampleCount: 1,
+            sampleTimingEntryCount: 0,
+            sampleTimingArray: nil,
+            sampleSizeEntryCount: 1,
+            sampleSizeArray: &size,
+            sampleBufferOut: &sample
+        ) == noErr,
+              let sample else { return false }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true)
+            as? [NSMutableDictionary],
+           let dict = attachments.first
+        {
+            dict[kCMSampleAttachmentKey_DisplayImmediately] = kCFBooleanTrue
+        }
         if layer.status == .failed { layer.flush() }
         layer.enqueue(sample)
+        return true
     }
 }
 
@@ -693,22 +809,49 @@ private final class ScreenH264Decoder {
 private struct ScreenVideoSurface: NSViewRepresentable {
     let layer: AVSampleBufferDisplayLayer
     func makeNSView(context: Context) -> NSView { LayerHost(layer) }
-    func updateNSView(_ view: NSView, context: Context) { view.layer?.frame = view.bounds }
+    func updateNSView(_ view: NSView, context: Context) {
+        (view as? LayerHost)?.layoutDisplay()
+    }
     private final class LayerHost: NSView {
-        init(_ display: CALayer) { super.init(frame: .zero); wantsLayer = true; layer = display }
+        let display: AVSampleBufferDisplayLayer
+        init(_ display: AVSampleBufferDisplayLayer) {
+            self.display = display
+            super.init(frame: .zero)
+            wantsLayer = true
+            layer?.addSublayer(display)
+        }
         required init?(coder: NSCoder) { nil }
-        override func layout() { super.layout(); layer?.frame = bounds }
+        override func layout() {
+            super.layout()
+            layoutDisplay()
+        }
+        func layoutDisplay() {
+            display.frame = bounds
+        }
     }
 }
 #else
 private struct ScreenVideoSurface: UIViewRepresentable {
     let layer: AVSampleBufferDisplayLayer
     func makeUIView(context: Context) -> UIView { LayerHost(layer) }
-    func updateUIView(_ view: UIView, context: Context) { view.layer.sublayers?.first?.frame = view.bounds }
+    func updateUIView(_ view: UIView, context: Context) {
+        (view as? LayerHost)?.layoutDisplay()
+    }
     private final class LayerHost: UIView {
-        init(_ display: CALayer) { super.init(frame: .zero); layer.addSublayer(display) }
+        let display: AVSampleBufferDisplayLayer
+        init(_ display: AVSampleBufferDisplayLayer) {
+            self.display = display
+            super.init(frame: .zero)
+            layer.addSublayer(display)
+        }
         required init?(coder: NSCoder) { nil }
-        override func layoutSubviews() { super.layoutSubviews(); layer.sublayers?.first?.frame = bounds }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            layoutDisplay()
+        }
+        func layoutDisplay() {
+            display.frame = bounds
+        }
     }
 }
 #endif
