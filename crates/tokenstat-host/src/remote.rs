@@ -211,6 +211,9 @@ pub fn start_if_enabled(session: Arc<Mutex<Session>>) {
 
 #[cfg(feature = "local-host")]
 fn start_direct_if_enabled() {
+    if tunnel_paused().load(Ordering::Acquire) {
+        return;
+    }
     if !load_settings().tunnel || direct_running().swap(true, Ordering::AcqRel) {
         return;
     }
@@ -252,6 +255,11 @@ fn start_direct_if_enabled() {
         }
         direct_running().store(false, Ordering::Release);
     });
+}
+
+#[cfg(feature = "local-host")]
+fn stop_direct() {
+    direct_running().store(false, Ordering::Release);
 }
 
 fn account_token() -> Result<String, String> {
@@ -476,9 +484,13 @@ fn tunnel_paused() -> &'static AtomicBool {
 ///
 /// Used when hosting is paused (lid closed, app gone). `remote.json` stays
 /// as the user left it, so opening the lid or the app brings the tunnel back.
+/// The LAN listener stops too: pausing only the tunnel left port 7878 up for
+/// an approved peer on the same network.
 pub(crate) fn pause_tunnel() {
     tunnel_paused().store(true, Ordering::Release);
     stop_tunnel();
+    #[cfg(feature = "local-host")]
+    stop_direct();
 }
 
 /// Start the tunnel again if the user still has remote reach on.
@@ -491,6 +503,8 @@ pub(crate) fn resume_tunnel_if_enabled() {
     if let Ok(session) = session_for_serving() {
         start_tunnel_if_enabled(session, &settings);
     }
+    #[cfg(feature = "local-host")]
+    start_direct_if_enabled();
 }
 
 fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettings) {
@@ -1809,7 +1823,7 @@ fn serve(params: &str) -> Result<Value, String> {
     if p.tunnel == Some(false) {
         stop_tunnel();
         #[cfg(feature = "local-host")]
-        direct_running().store(false, Ordering::Release);
+        stop_direct();
     }
     if settings.tunnel {
         start_tunnel_if_enabled(session_for_serving()?, &settings);

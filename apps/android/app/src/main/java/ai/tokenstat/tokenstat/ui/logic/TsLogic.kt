@@ -98,5 +98,39 @@ fun friendlyError(raw: String?): FriendlyError = when {
         FriendlyError("That took too long", "The machine did not answer in time. Try again.", true)
     raw.contains("unauthorized", ignoreCase = true) || raw.contains("forbidden", ignoreCase = true) ->
         FriendlyError("Not allowed", "This account or device does not have access to that.", false)
+    raw.contains("unknown method", ignoreCase = true) || raw.contains("unknown_method", ignoreCase = true) ->
+        FriendlyError(
+            "Helper is out of date",
+            "The background helper on this machine is older than the app and does not know this yet. Restart the app to replace it, then try again.",
+            true,
+        )
     else -> FriendlyError("Something went wrong", raw, true)
+}
+
+/// The same vault password rule the host enforces in `tokenstat_core::passphrase`.
+///
+/// Measured in Unicode scalars, with an ASCII-only digit test, so Eastern
+/// Arabic digits do not enable a button the host then refuses.
+fun vaultPasswordProblems(password: String): List<String> {
+    val scalars = password.codePoints().toArray()
+    val out = mutableListOf<String>()
+    if (scalars.size < 12) out += "At least 12 characters"
+    if (password.none { it.isUpperCase() }) out += "An uppercase letter"
+    if (scalars.none { it in '0'.code..'9'.code }) out += "A number"
+    if (password.none { !it.isLetterOrDigit() && !it.isWhitespace() }) out += "A special character"
+    return out
+}
+
+/// The same recovery-code normalisation the host uses.
+fun normalizedRecovery(value: String): String = buildString {
+    for (ch in value.uppercase()) {
+        if (!ch.isLetterOrDigit() || ch.code > 127) continue
+        append(
+            when (ch) {
+                'O' -> '0'
+                'I', 'L' -> '1'
+                else -> ch
+            },
+        )
+    }
 }

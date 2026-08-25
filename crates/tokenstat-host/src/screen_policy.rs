@@ -75,6 +75,20 @@ fn verify_legend_account() -> Result<(), String> {
     legend(status.tier.as_deref().unwrap_or(""))
 }
 
+pub(crate) fn verify_view_peer(peer_id: &str) -> Result<(), String> {
+    verify_legend_account()?;
+    let permission = load()?
+        .permissions
+        .into_iter()
+        .find(|value| value.peer_id == peer_id)
+        .ok_or("This device has not been allowed to view the screen")?;
+    if permission.view {
+        Ok(())
+    } else {
+        Err("This device does not have screen access".into())
+    }
+}
+
 pub(crate) fn verify_transfer_peer(peer_id: &str) -> Result<(), String> {
     verify_legend_account()?;
     let permission = load()?
@@ -82,10 +96,10 @@ pub(crate) fn verify_transfer_peer(peer_id: &str) -> Result<(), String> {
         .into_iter()
         .find(|value| value.peer_id == peer_id)
         .ok_or("This device has not been allowed to transfer files")?;
-    if permission.view {
+    if permission.control {
         Ok(())
     } else {
-        Err("This device does not have screen access".into())
+        Err("File transfer needs screen control".into())
     }
 }
 fn token_hash(token: &[u8]) -> String {
@@ -241,7 +255,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
 fn direct_candidate() -> Result<Value, String> {
     let peer = crate::request_context::remote_peer()
         .ok_or("direct candidate must be requested by an authenticated peer")?;
-    verify_transfer_peer(&peer)?;
+    verify_view_peer(&peer)?;
     #[cfg(feature = "local-host")]
     {
         let output = std::process::Command::new("hostname")

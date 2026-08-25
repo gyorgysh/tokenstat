@@ -11,8 +11,8 @@ under one version number. Newest first.
 - Opening a computer, from its device page or from Workspaces, shows what it is doing: power, CPU, and memory read over the tunnel and not uploaded with usage, with open work and view screen beside them. On the Mac, a workspace that lives on another machine offers that machine's screen without a trip to Devices.
 - Control a shared screen from an iPhone or iPad. One finger moves the pointer, tap clicks, two fingers tap for a right click and drag to scroll, long press then drag holds the button down, and pinch zooms in. A row of keys over the keyboard sends escape, tab, the arrows and sticky ctrl, opt, cmd and shift.
 - SSH is a place in the sidebar rather than a panel over Devices. Hosts, keys, snippets and trusted servers are sections you navigate to, folders nest under Hosts, the list gets the whole window and the editor opens beside it. Leaving for Home and coming back keeps you where you were, and the rest of the app stays usable throughout.
-- The encrypted vault is one quiet row above the server list instead of three buttons, two of them destructive, at the top of a screen you open to add a server. Setting it up, replacing the recovery words and deleting it live one click away, each with room to say what it costs.
-- Recovery words are confirmed in two steps. The words are on screen to be written down, then off screen while three of them are typed back, so confirming cannot be done by reading.
+- The encrypted vault is one quiet row above the server list instead of three buttons, two of them destructive, at the top of a screen you open to add a server. Setting it up, replacing the recovery code and deleting it live one click away, each with room to say what it costs.
+- Recovery is confirmed in two steps. The code is on screen to be written down, then off screen while it is typed back, so confirming cannot be done by reading.
 - A saved server carries what it needs to connect: which key to use, which server to reach it through, a starting directory, environment variables, a keepalive, and a colour and folder to find it by. Snippets can ask for `{{values}}` when they run, so one snippet covers every server.
 - Import servers from `~/.ssh/config`. tokenstat reads that file and never writes to it, and shows what it found before saving anything.
 - Trusted servers are listed with their fingerprints, and any of them can be forgotten, so a key that changed can be confirmed again rather than quietly accepted.
@@ -26,7 +26,7 @@ under one version number. Newest first.
 - Screen control can actually be turned on. The toggle was disabled as soon as the picture arrived, which was before anybody could reach it, so sessions were always view only.
 - Turning on view or control asks macOS for the permission it needs, right then, with the prompt that names Tokenstat. Screen Recording used to be requested only once a stream was already failing, and Accessibility was never requested at all, so control silently did nothing. The card now says which permissions are granted, and says out loud that the app has to be open for its screen to be shared.
 - Double clicks, right clicks and scrolling reach the shared Mac, rather than being flattened into a press and a drag.
-- SSH vault setup no longer offers migrate (that path was never in a release). If you did not save the recovery words, or cannot open the vault, you can drop it and create a new one.
+- SSH vault setup no longer offers migrate (that path was never in a release). If you did not save the recovery code, or cannot open the vault, you can drop it and create a new one.
 - The unpaid SSH empty state now pitches the vault the same way tasks and notes pitch their screens, with a path to plans.
 - Buttons across the SSH and screen surfaces are one height and line up. A glyph no longer makes a button taller than the one beside it, and destructive actions look like actions rather than links.
 

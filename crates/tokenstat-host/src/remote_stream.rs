@@ -108,11 +108,13 @@ fn pump_screen(connection: Connection, id: String, peer: String, control: bool) 
                     let Ok(frame) = crate::screen_stream::Frame::decode(&bytes) else {
                         break;
                     };
-                    if frame.kind != crate::screen_stream::FrameKind::Input
-                        || crate::screen_runtime::queue_input(&input_id, frame.payload).is_err()
-                    {
+                    if frame.kind != crate::screen_stream::FrameKind::Input {
                         break;
                     }
+                    // A view-only session rejects move/click. Drop that frame
+                    // and keep the pump: tearing the input channel down also
+                    // kills display switching.
+                    let _ = crate::screen_runtime::queue_input(&input_id, frame.payload);
                 }
                 Err(_) => break,
             }

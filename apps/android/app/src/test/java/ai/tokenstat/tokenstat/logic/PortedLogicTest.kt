@@ -4,7 +4,10 @@ package ai.tokenstat.tokenstat.logic
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
 import ai.tokenstat.tokenstat.ui.logic.TunnelCopy
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.logic.friendlyError
 import ai.tokenstat.tokenstat.ui.logic.money
+import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
+import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -89,5 +92,26 @@ class PortedLogicTest {
     fun tunnelWaitingCopyNamesTheHost() {
         assertEquals("Waiting for the computer to come back on the tunnel.", TunnelCopy.waiting(null))
         assertEquals("Waiting for Mac Studio to come back on the tunnel.", TunnelCopy.waiting(" Mac Studio "))
+    }
+
+    @Test
+    fun unknownMethodIsNotRawProtocolText() {
+        val error = friendlyError("unknown method: ssh.host.list")
+        assertEquals("Helper is out of date", error.title)
+        assertEquals(false, error.message.contains("ssh.host.list"))
+    }
+
+    @Test
+    fun vaultPasswordRuleMatchesTheHost() {
+        assertEquals(true, vaultPasswordProblems("Correct-Horse9").isEmpty())
+        assertEquals(true, vaultPasswordProblems("short").contains("At least 12 characters"))
+        assertEquals(true, vaultPasswordProblems("lowercase12!").contains("An uppercase letter"))
+        // Eastern Arabic digits must not count as a number: the host uses ASCII.
+        assertEquals(true, vaultPasswordProblems("Correct-Horse١٢").contains("A number"))
+    }
+
+    @Test
+    fun recoveryCodeNormalisesTheWayTheHostDoes() {
+        assertEquals("ABCD0101", normalizedRecovery("abcd-O1oI"))
     }
 }

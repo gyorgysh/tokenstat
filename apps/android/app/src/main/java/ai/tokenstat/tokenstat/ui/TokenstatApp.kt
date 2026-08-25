@@ -39,6 +39,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
@@ -60,6 +61,8 @@ import ai.tokenstat.tokenstat.ui.heatmap.DayDetailSheet
 import ai.tokenstat.tokenstat.ui.heatmap.YearHeatmap
 import ai.tokenstat.tokenstat.ui.logic.HomeGreeting
 import ai.tokenstat.tokenstat.ui.logic.compactTokens
+import ai.tokenstat.tokenstat.ui.logic.normalizedRecovery
+import ai.tokenstat.tokenstat.ui.logic.vaultPasswordProblems
 import ai.tokenstat.tokenstat.ui.terminal.TerminalScreen
 import ai.tokenstat.tokenstat.ui.workspace.WorkspaceSection
 import ai.tokenstat.tokenstat.ui.components.TierBadge
@@ -782,7 +785,6 @@ private fun AndroidSSHScreen(
     var recoveryWords by remember { mutableStateOf<String?>(null) }
     var showingRecovery by remember { mutableStateOf(false) }
     var confirmDrop by remember { mutableStateOf(false) }
-    val tier = state.account?.string("tier")?.lowercase()
     val vaultAllowed = state.vaultAllowed
 
     suspend fun load() {
@@ -817,15 +819,16 @@ private fun AndroidSSHScreen(
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     when {
-                                        recoveryWords != null -> "Recovery words have not been confirmed"
+                                        recoveryWords != null -> "Recovery code not confirmed"
+                                        vault?.bool("locked") == true -> "Encrypted vault · locked"
                                         vault?.bool("created") == true -> "Encrypted vault ready"
                                         else -> "Encrypted cross-device vault"
                                     },
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
-                                    if (recoveryWords != null) "Close is allowed. Confirm the words when you have stored them, or discard the vault and create a new one."
-                                    else "Only enrolled devices or your 24 recovery words can decrypt it.",
+                                    if (recoveryWords != null) "Close is allowed. Confirm the code when you have stored it, or discard the vault and create a new one."
+                                    else "One password protects every saved server and key, on all your devices.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -833,10 +836,12 @@ private fun AndroidSSHScreen(
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (recoveryWords != null) {
-                                Button(onClick = { showingRecovery = true }) { Text("Show words") }
+                                Button(onClick = { showingRecovery = true }) { Text("Show code") }
                                 TextButton(onClick = { confirmDrop = true }) { Text("Discard vault") }
-                            } else if (vault?.bool("created") != true || vault?.bool("enrolled") != true) {
-                                Button(onClick = { vaultSetup = true }) { Text(if (vault?.bool("created") == true) "Enroll" else "Set up") }
+                            } else if (vault?.bool("created") != true) {
+                                Button(onClick = { vaultSetup = true }) { Text("Set up") }
+                            } else if (vault?.bool("locked") == true || vault?.bool("enrolled") != true) {
+                                Button(onClick = { vaultSetup = true }) { Text("Unlock") }
                             }
                             if (vault?.bool("created") == true && recoveryWords == null) {
                                 TextButton(onClick = { confirmDrop = true }) { Text("Delete vault") }
@@ -935,19 +940,43 @@ private fun AndroidSSHScreen(
     if (vaultSetup) AndroidVaultDialog(
         existing = vault?.bool("created") == true,
         onDismiss = { vaultSetup = false },
-        onCreate = {
-            scope.launch { runCatching { model.core("ssh.vault.create", buildJsonObject { put("tier", tier ?: "") }).jsonObject.string("recovery")!! }.onSuccess { recoveryWords = it; showingRecovery = true; load() }.onFailure { error = it.message }; vaultSetup = false }
+        onCreate = { password ->
+            scope.launch {
+                runCatching {
+                    model.core("ssh.vault.create", buildJsonObject { put("password", password) }).jsonObject.string("recovery")!!
+                }.onSuccess { recoveryWords = it; showingRecovery = true; load() }.onFailure { error = it.message }
+                vaultSetup = false
+            }
         },
-        onRestore = { phrase ->
-            scope.launch { runCatching { model.core("ssh.vault.unlock", buildJsonObject { put("recovery", phrase); put("tier", tier ?: "") }) }.onSuccess { load() }.onFailure { error = it.message }; vaultSetup = false }
+        onUnlock = { password ->
+            scope.launch {
+                runCatching {
+                    model.core("ssh.vault.unlock", buildJsonObject { put("password", password) })
+                }.onSuccess { load() }.onFailure { error = it.message }
+                vaultSetup = false
+            }
         },
-        onRequest = {
-            scope.launch { runCatching { model.core("ssh.vault.enrollment.request") }.onFailure { error = it.message }; vaultSetup = false }
+        onReset = { code, password ->
+            scope.launch {
+                runCatching {
+                    model.core(
+                        "ssh.vault.password.set",
+                        buildJsonObject { put("recovery", code); put("newPassword", password) },
+                    ).jsonObject.string("recovery")
+                }.onSuccess { code ->
+                    if (code != null) {
+                        recoveryWords = code
+                        showingRecovery = true
+                    }
+                    load()
+                }.onFailure { error = it.message }
+                vaultSetup = false
+            }
         },
         onDrop = { vaultSetup = false; confirmDrop = true },
     )
     if (showingRecovery) recoveryWords?.let { phrase ->
-        RecoveryWordsDialog(
+        RecoveryCodeDialog(
             phrase,
             onDone = { recoveryWords = null; showingRecovery = false },
             onDismiss = { showingRecovery = false },
@@ -1067,25 +1096,65 @@ private fun SSHSnippetDialog(onDismiss: () -> Unit, onSave: (JsonObject) -> Unit
 }
 
 @Composable
-private fun AndroidVaultDialog(existing: Boolean, onDismiss: () -> Unit, onCreate: () -> Unit, onRestore: (String) -> Unit, onRequest: () -> Unit, onDrop: () -> Unit) {
-    var phrase by remember { mutableStateOf("") }
+private fun AndroidVaultDialog(
+    existing: Boolean,
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+    onUnlock: (String) -> Unit,
+    onReset: (String, String) -> Unit,
+    onDrop: () -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    var recovery by remember { mutableStateOf("") }
+    var forgot by remember { mutableStateOf(false) }
+    val problems = vaultPasswordProblems(password)
+    val matches = password == confirm
+    val canSubmit = if (!existing) {
+        problems.isEmpty() && matches
+    } else if (forgot) {
+        recovery.trim().isNotEmpty() && problems.isEmpty() && matches
+    } else {
+        password.isNotEmpty()
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing) "Enroll this device" else "Set up encrypted vault") },
+        title = { Text(if (existing) "Unlock your vault" else "Create your vault") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (existing) "Restore with the 24 words, ask an enrolled device, or drop this vault and create a new one. Dropping permanently loses stored secrets." else "tokenstat cannot recover the secrets if the words and every device are lost.")
-                OutlinedTextField(phrase, { phrase = it }, label = { Text("24 recovery words") }, minLines = 3)
+                if (existing && forgot) {
+                    Text("Enter your recovery code and choose a new password. The code is spent once this works.")
+                    OutlinedTextField(recovery, { recovery = it }, label = { Text("Recovery code") }, minLines = 2)
+                    OutlinedTextField(password, { password = it }, label = { Text("New password") }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(confirm, { confirm = it }, label = { Text("Type it again") }, visualTransformation = PasswordVisualTransformation())
+                    problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    TextButton(onClick = { forgot = false }) { Text("Use the password instead") }
+                } else if (existing) {
+                    OutlinedTextField(password, { password = it }, label = { Text("Vault password") }, visualTransformation = PasswordVisualTransformation())
+                    TextButton(onClick = { forgot = true }) { Text("I forgot the password") }
+                } else {
+                    Text("One password protects every saved server and key, on all your devices.")
+                    OutlinedTextField(password, { password = it }, label = { Text("Vault password") }, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(confirm, { confirm = it }, label = { Text("Type it again") }, visualTransformation = PasswordVisualTransformation())
+                    problems.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
             }
         },
         confirmButton = {
-            if (!existing) Button(onClick = onCreate) { Text("Create new") }
-            else Button(onClick = onRequest) { Text("Ask a device") }
+            Button(
+                enabled = canSubmit,
+                onClick = {
+                    when {
+                        !existing -> onCreate(password)
+                        forgot -> onReset(recovery, password)
+                        else -> onUnlock(password)
+                    }
+                },
+            ) { Text(if (!existing) "Create vault" else if (forgot) "Reset password" else "Unlock") }
         },
         dismissButton = {
             Row {
-                TextButton(enabled = phrase.trim().split(Regex("\\s+")).size == 24, onClick = { onRestore(phrase) }) { Text("Restore") }
-                if (existing) TextButton(onClick = onDrop) { Text("Drop vault") }
+                if (existing) TextButton(onClick = onDrop) { Text("Delete vault") }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },
@@ -1093,21 +1162,32 @@ private fun AndroidVaultDialog(existing: Boolean, onDismiss: () -> Unit, onCreat
 }
 
 @Composable
-private fun RecoveryWordsDialog(phrase: String, onDone: () -> Unit, onDismiss: () -> Unit, onDiscard: () -> Unit) {
-    var confirmed by remember { mutableStateOf(false) }
+private fun RecoveryCodeDialog(phrase: String, onDone: () -> Unit, onDismiss: () -> Unit, onDiscard: () -> Unit) {
+    var step by remember { mutableStateOf(0) }
+    var typed by remember { mutableStateOf("") }
+    val match = normalizedRecovery(phrase).isNotEmpty() && normalizedRecovery(phrase) == normalizedRecovery(typed)
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Save your recovery words") },
+        title = { Text(if (step == 0) "Save your recovery code" else "Type the recovery code") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                phrase.split(" ").chunked(3).forEachIndexed { row, words ->
-                    Text(words.mapIndexed { index, word -> "${row * 3 + index + 1}. $word" }.joinToString("     "), fontFamily = FontFamily.Monospace)
+                if (step == 0) {
+                    Text(phrase, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium)
+                    Text("Store this offline. Screenshots are not a reliable backup. You can close this and confirm later, or discard the vault and create a new one.")
+                } else {
+                    Text("The code is off screen on purpose. Type it from where you saved it.")
+                    OutlinedTextField(typed, { typed = it }, label = { Text("Recovery code") })
+                    if (typed.isNotBlank()) {
+                        Text(if (match) "Recovery code matches." else "That is not what was generated.")
+                    }
+                    TextButton(onClick = { step = 0; typed = "" }) { Text("Show the code again") }
                 }
-                Text("Store these offline. Screenshots are not a reliable backup. You can close this and confirm later, or discard the vault and create a new one.")
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(confirmed, { confirmed = it }); Text("I stored all 24 words safely") }
             }
         },
-        confirmButton = { Button(enabled = confirmed, onClick = onDone) { Text("Done") } },
+        confirmButton = {
+            if (step == 0) Button(onClick = { step = 1 }) { Text("I have saved this") }
+            else Button(enabled = match, onClick = onDone) { Text("Done") }
+        },
         dismissButton = {
             Row {
                 TextButton(onClick = onDiscard) { Text("Discard vault") }

@@ -126,6 +126,8 @@ pub use tokenstat_pty::warm_shell_pool;
 ///
 /// Bumped whenever methods are added, because a front end that finds a method
 /// missing has no way to tell "this host is old" from "this call is wrong" and
-/// used to print `unknown method: ssh.host.list` at a person. 2 is the SSH
-/// library and screen input work.
-pub const PROTOCOL_VERSION: &str = "2";
+/// used to print `unknown method: ssh.host.list` at a person. 2 was the SSH
+/// library and screen input work. 3 is the password vault: `ssh.vault.password.set`,
+/// `ssh.vault.lock`, `ssh.vault.recovery.rotate`, and enrollment gone from the
+/// public methods.
+pub const PROTOCOL_VERSION: &str = "3";

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::error::CoreError;
-use crate::model::{BillingMode, Counters, UsageEvent};
+use crate::model::{BillingMode, Counters, EventId, UsageEvent};
 use crate::sync_payload::SyncRollupBucket;
 use crate::watermark::Watermark;
 
@@ -565,6 +565,29 @@ impl Store {
         Ok(touched)
     }
 
+    /// SUM that stays NULL when any row in the group left that field unknown.
+    ///
+    /// SQLite's `SUM` skips NULL, so a Claude event with a cache-write count
+    /// plus a Codex event that never reports the field would otherwise look
+    /// like a complete total.
+    fn sum_known_counters() -> String {
+        [
+            "input_fresh",
+            "cache_read",
+            "cache_write_5m",
+            "cache_write_1h",
+            "output",
+        ]
+        .into_iter()
+        .map(|col| {
+            format!(
+                "CASE WHEN COUNT(*) FILTER (WHERE {col} IS NULL) > 0 THEN NULL ELSE SUM({col}) END"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+    }
+
     fn where_clause(q: &Query) -> (String, Vec<Box<dyn rusqlite::ToSql>>) {
         let mut sql = String::new();
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -605,12 +628,12 @@ impl Store {
         let limit = q.limit.map(|n| format!(" LIMIT {n}")).unwrap_or_default();
         let sql = format!(
             r#"SELECT {col} AS k,
-                      SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
-                      SUM(cache_write_1h), SUM(output),
+                      {counters},
                       COUNT(*), COUNT(DISTINCT session)
                FROM event{where_sql}
                GROUP BY k {order}{limit}"#,
             col = group.column(),
+            counters = Self::sum_known_counters(),
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -657,8 +680,7 @@ impl Store {
         };
         let sql = format!(
             r#"SELECT {col} AS k, {split_col} AS s,
-                      SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
-                      SUM(cache_write_1h), SUM(output),
+                      {counters},
                       COUNT(*), COUNT(DISTINCT session)
                FROM event{where_sql}
                GROUP BY k, s
@@ -668,6 +690,7 @@ impl Store {
                          +COALESCE(SUM(output),0)) DESC"#,
             col = group.column(),
             split_col = split.column(),
+            counters = Self::sum_known_counters(),
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -724,17 +747,19 @@ impl Store {
     /// Code ran model X": the counters came from different providers and the
     /// cache convention differs between them.
     pub fn day_detail(&self, date: &str) -> Result<Vec<DayPart>, CoreError> {
-        let sql = r#"SELECT model, source,
-                            SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
-                            SUM(cache_write_1h), SUM(output),
+        let sql = format!(
+            r#"SELECT model, source,
+                            {counters},
                             COUNT(*)
                      FROM event
                      WHERE local_date = ?1
                      GROUP BY model, source
                      ORDER BY (COALESCE(SUM(input_fresh),0)+COALESCE(SUM(cache_read),0)
                               +COALESCE(SUM(cache_write_5m),0)+COALESCE(SUM(cache_write_1h),0)
-                              +COALESCE(SUM(output),0)) DESC"#;
-        let mut stmt = self.conn.prepare(sql)?;
+                              +COALESCE(SUM(output),0)) DESC"#,
+            counters = Self::sum_known_counters(),
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(params![date], |r| {
             Ok(DayPart {
                 model: r.get::<_, Option<String>>(0)?.unwrap_or_default(),
@@ -755,11 +780,11 @@ impl Store {
     pub fn totals(&self, q: &Query) -> Result<Totals, CoreError> {
         let (where_sql, args) = Self::where_clause(q);
         let sql = format!(
-            r#"SELECT SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m),
-                      SUM(cache_write_1h), SUM(output), COUNT(*),
+            r#"SELECT {counters}, COUNT(*),
                       COUNT(DISTINCT session), COUNT(DISTINCT local_date),
                       MIN(local_date), MAX(local_date)
-               FROM event{where_sql}"#
+               FROM event{where_sql}"#,
+            counters = Self::sum_known_counters(),
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let params: Vec<&dyn rusqlite::ToSql> = args.iter().map(|b| b.as_ref()).collect();
@@ -805,18 +830,14 @@ impl Store {
         month_start: &str,
     ) -> Result<(Counters, Counters), CoreError> {
         let one = |since: &str, until: Option<&str>| -> Result<Counters, CoreError> {
+            let counters = Self::sum_known_counters();
             let sql = match until {
-                Some(_) => {
-                    "SELECT SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m), \
-                            SUM(cache_write_1h), SUM(output) FROM event \
-                            WHERE local_date >= ?1 AND local_date <= ?2"
-                }
-                None => {
-                    "SELECT SUM(input_fresh), SUM(cache_read), SUM(cache_write_5m), \
-                         SUM(cache_write_1h), SUM(output) FROM event WHERE local_date >= ?1"
-                }
+                Some(_) => format!(
+                    "SELECT {counters} FROM event WHERE local_date >= ?1 AND local_date <= ?2"
+                ),
+                None => format!("SELECT {counters} FROM event WHERE local_date >= ?1"),
             };
-            let mut stmt = self.conn.prepare(sql)?;
+            let mut stmt = self.conn.prepare(&sql)?;
             let map = |r: &rusqlite::Row| -> rusqlite::Result<Counters> {
                 Ok(Counters {
                     input_fresh: r.get::<_, Option<i64>>(0)?.map(|v| v as u64),
@@ -1174,6 +1195,45 @@ impl Store {
         self.conn
             .execute("DELETE FROM event WHERE source = 'claude_code_rollup'", [])?;
         Ok(())
+    }
+
+    /// Drop OpenClaw session-rollup rows once turn-level events exist for that
+    /// session. Scan used to keep the rollup from an earlier pass, so totals
+    /// became session plus turns.
+    pub fn delete_openclaw_session_rollups(
+        &self,
+        sessions: &HashSet<String>,
+    ) -> Result<u64, CoreError> {
+        if sessions.is_empty() {
+            return Ok(0);
+        }
+        let mut deleted = 0u64;
+        for session in sessions {
+            let id = EventId::derive(&["openclaw", "session", session]);
+            deleted += self
+                .conn
+                .execute("DELETE FROM event WHERE id = ?1", [&id.0[..]])?
+                as u64;
+        }
+        Ok(deleted)
+    }
+
+    /// Drop recovered Claude rollup rows for (day, model) that now have live
+    /// transcript events. Recovery only recomputes when stats-cache changes,
+    /// so a later transcript would otherwise sit beside the rollup forever.
+    pub fn evict_recovered_where_live(&self) -> Result<u64, CoreError> {
+        let n = self.conn.execute(
+            "DELETE FROM event
+              WHERE source = 'claude_code_rollup'
+                AND EXISTS (
+                    SELECT 1 FROM event AS live
+                     WHERE live.source = 'claude_code'
+                       AND live.local_date = event.local_date
+                       AND live.model = event.model
+                )",
+            [],
+        )?;
+        Ok(n as u64)
     }
 
     /// Snapshot Claude's daily vendor totals alongside exact archived buckets.
@@ -1583,6 +1643,55 @@ mod tests {
         // cache_write_1h was never reported, so it must not read as zero.
         assert_eq!(t.counters.cache_write_1h, None);
         assert!(t.counters.has_unknown());
+    }
+
+    #[test]
+    fn mixed_source_unknown_stays_unknown_through_aggregation() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut claude = ev("a", 1_700_000_000_000, "m", 1);
+        claude.counters.cache_write_1h = Some(4);
+        let mut codex = ev("b", 1_700_000_000_000, "m", 2);
+        codex.source = SourceId::Codex;
+        s.insert_events(&[claude, codex], &tz).unwrap();
+        let t = s.totals(&Query::default()).unwrap();
+        assert_eq!(t.counters.cache_write_1h, None);
+        assert!(t.counters.has_unknown());
+    }
+
+    #[test]
+    fn recovered_claude_rows_leave_when_live_transcripts_arrive() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut rollup = ev("roll", 1_700_000_000_000, "m", 9);
+        rollup.source = SourceId::ClaudeCodeRollup;
+        s.insert_events(&[rollup, ev("live", 1_700_000_000_000, "m", 1)], &tz)
+            .unwrap();
+        assert_eq!(s.evict_recovered_where_live().unwrap(), 1);
+        let t = s.totals(&Query::default()).unwrap();
+        assert_eq!(t.events, 1);
+        assert_eq!(t.counters.output, Some(1));
+    }
+
+    #[test]
+    fn openclaw_session_rollup_is_deleted_once_turns_exist() {
+        let mut s = Store::open_in_memory().unwrap();
+        let tz = jiff::tz::TimeZone::UTC;
+        let mut session = ev("sess", 1_700_000_000_000, "m", 10);
+        session.source = SourceId::OpenClaw;
+        session.session = "abc".into();
+        session.id = EventId::derive(&["openclaw", "session", "abc"]);
+        let mut turn = ev("turn", 1_700_000_000_000, "m", 3);
+        turn.source = SourceId::OpenClaw;
+        turn.session = "abc".into();
+        turn.id = EventId::derive(&["openclaw", "turn", "abc", "1"]);
+        s.insert_events(&[session, turn], &tz).unwrap();
+        let mut ids = HashSet::new();
+        ids.insert("abc".into());
+        assert_eq!(s.delete_openclaw_session_rollups(&ids).unwrap(), 1);
+        let t = s.totals(&Query::default()).unwrap();
+        assert_eq!(t.events, 1);
+        assert_eq!(t.counters.output, Some(3));
     }
 
     #[test]

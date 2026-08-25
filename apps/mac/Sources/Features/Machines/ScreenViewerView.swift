@@ -70,7 +70,7 @@ struct ScreenViewerView: View {
         .navigationTitle(name)
         .safeAreaInset(edge: .top) {
             HStack(spacing: 6) {
-                Circle().fill(model.transport == "direct" ? Color.green : Color.orange).frame(width: 7, height: 7)
+                Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
                 Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
             }
             .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
@@ -93,10 +93,12 @@ struct ScreenViewerView: View {
                 }
             }
             ToolbarItem {
-                if model.transferProgress == nil {
-                    Button("Send file", .upload) { importingFile = true }
-                } else {
-                    Button("Cancel transfer", .stop) { model.cancelTransfer() }
+                if controlling {
+                    if model.transferProgress == nil {
+                        Button("Send file", .upload) { importingFile = true }
+                    } else {
+                        Button("Cancel transfer", .stop) { model.cancelTransfer() }
+                    }
                 }
             }
             ToolbarItem {
@@ -134,7 +136,10 @@ struct ScreenViewerView: View {
         // Control is a property of the session, so changing it reopens the
         // stream rather than being refused.
         .onChange(of: controlling) { _, wanted in
-            Task { await model.setControl(wanted) }
+            Task {
+                await model.setControl(wanted)
+                if !model.isControlling { controlling = false }
+            }
         }
         .task { await start() }
         .onDisappear { model.stop() }
@@ -167,7 +172,7 @@ struct ScreenViewerView: View {
     private func readiness(_ title: String, ready: Bool) -> some View {
         Label(title, systemImage: ready ? "checkmark.circle.fill" : "circle")
             .font(.callout)
-            .foregroundStyle(ready ? Color.green : Color.white.opacity(0.72))
+            .foregroundStyle(ready ? Theme.success : Color.white.opacity(0.72))
     }
 
     private var actions: ScreenInputActions {
@@ -467,6 +472,9 @@ private final class ScreenViewerModel {
         message = wanted ? "Asking for control…" : "Switching to view only…"
         requestedTier = tier
         await connect()
+        if state != .streaming && state != .connecting {
+            requestedControl = false
+        }
     }
 
     /// Whether the live session is actually carrying input.
@@ -501,6 +509,8 @@ private final class ScreenViewerModel {
     }
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
+        let isDisplay = (value["type"] as? String) == "display"
+        guard isDisplay || session?.control == true else { return }
         Task { try? await Bridge.screenViewerInput(id: id, data: data) }
     }
 

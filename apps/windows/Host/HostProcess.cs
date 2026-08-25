@@ -13,6 +13,13 @@ namespace Tokenstat.Host;
 
 internal static class HostProcess
 {
+    /// <summary>
+    /// Kept next to <c>tokenstat_host::PROTOCOL_VERSION</c>. Bump both in the
+    /// same change, or this app will restart a helper that already speaks the
+    /// methods it was built for, or leave one that does not.
+    /// </summary>
+    private const string ExpectedProtocolVersion = "3";
+
     public static void EnsureRunning()
     {
         // A pipe that answers is not enough: the scheduled task can be running
@@ -62,7 +69,7 @@ internal static class HostProcess
         var deadline = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < deadline)
         {
-            if (PipeUp())
+            if (PipeUp() && SpeaksThisVersion())
             {
                 return;
             }
@@ -107,9 +114,8 @@ internal static class HostProcess
         try
         {
             var answer = AppServices.Host.Call("protocol", null, TimeSpan.FromSeconds(5));
-            var spoken = answer["coreVersion"]?.GetValue<string>();
-            var mine = typeof(HostProcess).Assembly.GetName().Version?.ToString(3);
-            return spoken is not null && mine is not null && spoken == mine;
+            var spoken = answer["protocolVersion"]?.GetValue<string>();
+            return spoken == ExpectedProtocolVersion;
         }
         catch
         {

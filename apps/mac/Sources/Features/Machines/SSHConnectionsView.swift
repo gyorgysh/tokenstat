@@ -626,7 +626,15 @@ struct SSHConnectForm: View {
         .onAppear { selectedKeyID = host.credentialID ?? "" }
     }
     private func probe() async {
-        do { offeredFingerprint = try await Bridge.probeSSHHost(host).fingerprint }
+        do {
+            var jump: [String: Any]?
+            if let jumpID = host.jumpHostID,
+               let jumpHost = model.hosts.first(where: { $0.id == jumpID })
+            {
+                jump = try Bridge.sshJumpPayload(jumpHost, key: model.key(jumpHost.credentialID))
+            }
+            offeredFingerprint = try await Bridge.probeSSHHost(host, jump: jump).fingerprint
+        }
         catch { self.error = error.localizedDescription }
     }
     private func trust(_ fingerprint: String) async {

@@ -398,6 +398,7 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
 
     // OpenClaw: trajectory turns preferred; session rollups only when a session
     // has no turn-level usage (otherwise the same tokens would count twice).
+    let mut openclaw_turn_sessions = std::collections::HashSet::new();
     if let Some(agents) = openclaw::discover(&home) {
         let trajectories = openclaw::trajectory_shards(&agents);
         report.files_found += trajectories.len() as u64;
@@ -415,6 +416,7 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
                 turn_sessions.insert(e.session.clone());
             }
         }
+        openclaw_turn_sessions.clone_from(&turn_sessions);
         absorb(&mut report, &mut all_events, &mut marks_to_store, outcomes);
 
         let sessions = openclaw::session_shards(&agents);
@@ -473,6 +475,8 @@ pub fn scan(store: &mut Store, tz: &jiff::tz::TimeZone) -> Result<ScanReport, Co
     for chunk in all_events.chunks(INSERT_CHUNK) {
         inserted += store.insert_events(chunk, tz)?;
     }
+    store.evict_recovered_where_live()?;
+    store.delete_openclaw_session_rollups(&openclaw_turn_sessions)?;
     report.events_new = inserted;
     report.events_recovered = recovered;
     store.set_watermarks(&marks_to_store)?;

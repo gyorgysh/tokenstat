@@ -39,14 +39,19 @@ pub(crate) fn now() -> String {
 pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     Some(match method {
         "machine.identity" => identity(),
-        "machine.rename" => rename(params),
         "machine.peers" => peers(),
-        "machine.pair" => pair(params),
-        "machine.approve" => set_trust(params, Trust::Approved),
-        "machine.revoke" => set_trust(params, Trust::Revoked),
-        "machine.forget" => forget(params),
+        "machine.rename" => local_trust(|| rename(params)),
+        "machine.pair" => local_trust(|| pair(params)),
+        "machine.approve" => local_trust(|| set_trust(params, Trust::Approved)),
+        "machine.revoke" => local_trust(|| set_trust(params, Trust::Revoked)),
+        "machine.forget" => local_trust(|| forget(params)),
         _ => return None,
     })
+}
+
+fn local_trust(work: impl FnOnce() -> Result<Value, String>) -> Result<Value, String> {
+    crate::request_context::refuse_remote("machine trust settings")?;
+    work()
 }
 
 /// Who this machine is.
@@ -218,4 +223,23 @@ fn forget(params: &str) -> Result<Value, String> {
         store.save().map_err(|e| e.to_string())?;
     }
     Ok(json!({"forgotten": forgotten}))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_remote_peer_cannot_change_who_is_trusted() {
+        crate::request_context::with_remote_peer("phone", || {
+            for method in [
+                "machine.approve",
+                "machine.pair",
+                "machine.revoke",
+                "machine.forget",
+                "machine.rename",
+            ] {
+                let refused = super::call(method, "{}").unwrap().expect_err(method);
+                assert!(refused.contains("local-only"), "{method}: {refused}");
+            }
+        });
+    }
 }

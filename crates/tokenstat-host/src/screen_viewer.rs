@@ -72,19 +72,19 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
     if !method.starts_with("screen.viewer.") {
         return None;
     }
-    Some(match method {
-        "screen.viewer.open" => open(params),
-        "screen.viewer.read" => read(params),
-        "screen.viewer.input" => input(params),
-        "screen.viewer.close" => close(params),
-        _ => Err(format!("unknown screen viewer method: {method}")),
-    })
+    Some((|| {
+        crate::request_context::refuse_remote("screen viewer methods")?;
+        match method {
+            "screen.viewer.open" => open(params),
+            "screen.viewer.read" => read(params),
+            "screen.viewer.input" => input(params),
+            "screen.viewer.close" => close(params),
+            _ => Err(format!("unknown screen viewer method: {method}")),
+        }
+    })())
 }
 
 fn open(params: &str) -> Result<Value, String> {
-    if crate::request_context::remote_peer().is_some() {
-        return Err("screen viewer methods are local-only".into());
-    }
     let p: OpenParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
     if let Ok(candidate) = crate::remote::call_peer_result(&p.peer, "screen.direct.candidate", "{}")
         && let Some(address) = candidate.get("address").and_then(Value::as_str)
@@ -266,4 +266,24 @@ fn close(params: &str) -> Result<Value, String> {
         viewer.changed.notify_all();
     }
     Ok(json!({"closed":closed}))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_remote_peer_cannot_drive_the_local_viewer() {
+        crate::request_context::with_remote_peer("phone", || {
+            for method in [
+                "screen.viewer.open",
+                "screen.viewer.read",
+                "screen.viewer.input",
+                "screen.viewer.close",
+            ] {
+                let refused = super::call(method, r#"{"id":"viewer-x"}"#)
+                    .unwrap()
+                    .expect_err(method);
+                assert!(refused.contains("local-only"), "{method}: {refused}");
+            }
+        });
+    }
 }

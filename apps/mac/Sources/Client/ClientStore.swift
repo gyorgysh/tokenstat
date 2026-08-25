@@ -190,7 +190,6 @@ final class ClientStore {
 
     func finishPendingIntent(with account: Account) async {
         guard let intent = pendingIntent, purchasingProductID == nil else { return }
-        pendingIntent = nil
         var offer: Product.SubscriptionOffer?
         if #available(iOS 18.0, *) {
             offer = intent.offer
@@ -209,9 +208,6 @@ final class ClientStore {
             errorMessage = "Could not start this purchase. Sign out and sign in again."
             return
         }
-        if pendingIntent?.id == product.id {
-            pendingIntent = nil
-        }
         purchasingProductID = product.id
         errorMessage = nil
         defer { purchasingProductID = nil }
@@ -223,10 +219,11 @@ final class ClientStore {
             let result = try await product.purchase(options: options)
             switch result {
             case .success(let verification):
+                if pendingIntent?.id == product.id { pendingIntent = nil }
                 try await activate(verification)
                 await reportRenewal()
             case .userCancelled:
-                break
+                if pendingIntent?.id == product.id { pendingIntent = nil }
             case .pending:
                 errorMessage = "This purchase is waiting for approval."
             @unknown default:
