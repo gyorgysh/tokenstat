@@ -693,7 +693,15 @@ struct SSHConnectForm: View {
             .navigationTitle(host.label)
         }
         .sshSheetFrame(width: 500, height: 360)
-        .onAppear { selectedKeyID = host.credentialID ?? "" }
+        .onAppear {
+            if let credentialID = host.credentialID,
+               model.keys.contains(where: { $0.id == credentialID })
+            {
+                selectedKeyID = credentialID
+            } else {
+                selectedKeyID = ""
+            }
+        }
     }
 
     private var connectActionTitle: String {
@@ -708,7 +716,8 @@ struct SSHConnectForm: View {
 
     private var canContinue: Bool {
         if host.hostKeys.isEmpty { return true }
-        return !selectedKeyID.isEmpty || !password.isEmpty
+        if selectedKeyID.isEmpty { return !password.isEmpty }
+        return model.keys.contains { $0.id == selectedKeyID }
     }
 
     private func continueConnection() async {
@@ -741,6 +750,10 @@ struct SSHConnectForm: View {
         if await model.save(host: host) != nil {
             offeredFingerprint = nil
         } else {
+            // The editor follows `host.hostKeys`. Leave it in verification
+            // mode when persistence failed, or the trust action disappears
+            // and Connect can proceed with a fingerprint that was never kept.
+            host.hostKeys = []
             error = model.error ?? "The trusted fingerprint could not be saved."
         }
     }

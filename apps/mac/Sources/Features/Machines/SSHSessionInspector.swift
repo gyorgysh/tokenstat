@@ -42,7 +42,10 @@ struct SSHSessionInspector: View {
     /// Where a snippet is typed. Nil when the server has no session in front,
     /// which is what disables the rows: a command typed into nothing looks
     /// exactly like a command that ran and printed nothing.
-    private var target: SSHLiveTerminal? { sessions.activeSession(for: hostID) }
+    private var target: SSHLiveTerminal? {
+        guard let active = sessions.activeSession(for: hostID), active.alive else { return nil }
+        return active
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -73,7 +76,10 @@ struct SSHSessionInspector: View {
         // A different server's shells are a different set of snippets, and an
         // editor left open over the old one belongs to a record this column is
         // no longer about.
-        .onChange(of: hostID) { _, _ in editing = nil }
+        .onChange(of: hostID) { _, _ in
+            editing = nil
+            asking = nil
+        }
     }
 
     @ViewBuilder
@@ -140,6 +146,7 @@ struct SSHSessionInspector: View {
 
     private func row(_ snippet: SSHSnippet) -> some View {
         Button {
+            guard target != nil else { return }
             run(snippet)
         } label: {
             VStack(alignment: .leading, spacing: 3) {
@@ -177,7 +184,6 @@ struct SSHSessionInspector: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(target == nil)
         .help(snippet.command)
         .contextMenu {
             Button("Type it", .send) { run(snippet) }

@@ -31,9 +31,14 @@ struct SSHTerminalPane: View {
     var claimsFocus: Bool = true
 
     @State private var closing: SSHLiveTerminal?
+    /// A command whose placeholders are being filled before it is typed into
+    /// the shell in front. This keeps snippets reachable when the inspector is
+    /// closed, which is the common layout on a narrower window.
+    @State private var asking: SSHSnippet?
 
     private var mine: [SSHLiveTerminal] { sessions.sessions(for: host.id) }
     private var layout: TerminalSplitLayout { sessions.layout(for: host.id) }
+    private var snippets: [SSHSnippet] { library.snippets(for: host.id) }
 
     private var leading: SSHLiveTerminal? {
         guard layout.isSplit else { return active }
@@ -46,6 +51,13 @@ struct SSHTerminalPane: View {
 
     private var active: SSHLiveTerminal? {
         sessions.activeSession(for: host.id)
+    }
+
+    /// Snippets type into a live shell only. Ended tabs keep their scrollback
+    /// and may stay selected, but writing to one is a silent no-op at the host.
+    private var snippetTarget: SSHLiveTerminal? {
+        guard let active, active.alive else { return nil }
+        return active
     }
 
     var body: some View {
@@ -86,6 +98,9 @@ struct SSHTerminalPane: View {
         } message: {
             Text("Whatever is running in it stops. Nothing else on the server changes.")
         }
+        .sheet(item: $asking) { snippet in
+            SSHSnippetRunSheet(snippet: snippet) { command in type(command) }
+        }
     }
 
     // MARK: - Tabs
@@ -123,6 +138,21 @@ struct SSHTerminalPane: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .help("Open another shell on \(host.label)")
 
+            if !snippets.isEmpty {
+                Menu {
+                    ForEach(snippets) { snippet in
+                        Button(snippet.title, .apply) { use(snippet) }
+                    }
+                } label: {
+                    ActionIcon.apply.label("Snippets")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Type a saved command into the session in front")
+                .disabled(snippetTarget == nil)
+            }
+
             Spacer()
 
             if !mine.isEmpty {
@@ -155,6 +185,22 @@ struct SSHTerminalPane: View {
                 .buttonStyle(AccentButtonStyle())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Type a saved command without Return. Placeholder commands use the same
+    /// prompt as the phone and the inspector before they reach this path.
+    private func use(_ snippet: SSHSnippet) {
+        if SSHSnippet.placeholders(in: snippet.command).isEmpty {
+            type(snippet.command)
+        } else {
+            asking = snippet
+        }
+    }
+
+    private func type(_ command: String) {
+        guard let snippetTarget else { return }
+        sessions.select(snippetTarget)
+        snippetTarget.sendBytes(Array(command.utf8))
     }
 }
 

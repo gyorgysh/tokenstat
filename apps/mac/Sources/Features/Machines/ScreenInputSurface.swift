@@ -28,12 +28,14 @@ struct ScreenInputActions {
     var press: (Bool) -> Void
     /// Wheel movement in pixels.
     var scroll: (CGSize) -> Void
+    /// Move a locally zoomed picture without sending anything to the host.
+    var panView: (CGSize, CGSize) -> Void
     /// Typed characters, with modifier flags already folded in.
     var text: (String, UInt64) -> Void
     /// A key that has no character: escape, tab, the arrows.
     var key: (UInt16, Bool, UInt64) -> Void
     /// Pinch. The surface reports the factor, the view decides what to do.
-    var magnify: (CGFloat) -> Void
+    var magnify: (CGFloat, CGSize) -> Void
 }
 
 /// Virtual key codes the accessory bar and the special keys send.
@@ -84,12 +86,14 @@ struct ScreenInputSurface: NSViewRepresentable {
     let actions: ScreenInputActions
     let enabled: Bool
     let mode: ScreenPointerMode
+    let zoomed: Bool
 
     func makeNSView(context: Context) -> NSView {
         let view = InputView()
         view.actions = actions
         view.enabled = enabled
         view.mode = mode
+        view.zoomed = zoomed
         return view
     }
 
@@ -98,12 +102,14 @@ struct ScreenInputSurface: NSViewRepresentable {
         view.actions = actions
         view.enabled = enabled
         view.mode = mode
+        view.zoomed = zoomed
     }
 
     private final class InputView: NSView {
         var actions: ScreenInputActions?
         var enabled = false
         var mode: ScreenPointerMode = .direct
+        var zoomed = false
 
         override var acceptsFirstResponder: Bool { enabled }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -157,9 +163,18 @@ struct ScreenInputSurface: NSViewRepresentable {
         }
 
         override func scrollWheel(with event: NSEvent) {
-            guard enabled, let actions else { return super.scrollWheel(with: event) }
-            actions.move(normalized(event))
-            actions.scroll(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+            guard let actions else { return super.scrollWheel(with: event) }
+            if enabled {
+                actions.move(normalized(event))
+                actions.scroll(CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY))
+            } else if zoomed {
+                actions.panView(
+                    CGSize(width: event.scrollingDeltaX, height: event.scrollingDeltaY),
+                    bounds.size
+                )
+            } else {
+                super.scrollWheel(with: event)
+            }
         }
 
         override func magnify(with event: NSEvent) {
@@ -167,7 +182,7 @@ struct ScreenInputSurface: NSViewRepresentable {
             // must not require permission to send mouse or keyboard input to
             // the far end.
             guard let actions else { return }
-            actions.magnify(1 + event.magnification)
+            actions.magnify(1 + event.magnification, bounds.size)
         }
 
         override func keyDown(with event: NSEvent) {
@@ -224,6 +239,7 @@ struct ScreenInputSurface: UIViewRepresentable {
     let actions: ScreenInputActions
     let enabled: Bool
     let mode: ScreenPointerMode
+    let zoomed: Bool
     /// Raised so the accessory bar can show which modifiers are held.
     @Binding var heldModifiers: UInt64
     /// Set by the view when the keyboard should be up.
@@ -231,14 +247,14 @@ struct ScreenInputSurface: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIView {
         let view = TouchInputView()
-        view.configure(actions: actions, enabled: enabled, mode: mode)
+        view.configure(actions: actions, enabled: enabled, mode: mode, zoomed: zoomed)
         view.onModifiersChanged = { heldModifiers = $0 }
         return view
     }
 
     func updateUIView(_ view: UIView, context: Context) {
         guard let view = view as? TouchInputView else { return }
-        view.configure(actions: actions, enabled: enabled, mode: mode)
+        view.configure(actions: actions, enabled: enabled, mode: mode, zoomed: zoomed)
         view.onModifiersChanged = { heldModifiers = $0 }
         view.apply(modifiers: heldModifiers)
         if keyboardWanted, !view.isFirstResponder {
@@ -252,9 +268,12 @@ struct ScreenInputSurface: UIViewRepresentable {
         private var actions: ScreenInputActions?
         private var enabled = false
         private var mode: ScreenPointerMode = .trackpad
+        private var zoomed = false
         private var modifiers: UInt64 = 0
         private var dragging = false
         private var lastPan: CGPoint = .zero
+        private weak var moveRecognizer: UIPanGestureRecognizer?
+        private weak var pinchRecognizer: UIPinchGestureRecognizer?
         var onModifiersChanged: ((UInt64) -> Void)?
 
         override init(frame: CGRect) {
@@ -265,14 +284,37 @@ struct ScreenInputSurface: UIViewRepresentable {
 
         required init?(coder: NSCoder) { nil }
 
-        func configure(actions: ScreenInputActions, enabled: Bool, mode: ScreenPointerMode) {
+        func configure(
+            actions: ScreenInputActions,
+            enabled: Bool,
+            mode: ScreenPointerMode,
+            zoomed: Bool
+        ) {
             self.actions = actions
             self.enabled = enabled
             self.mode = mode
+            self.zoomed = zoomed
             // Pinch is local viewing, not remote control. Keep the surface in
             // the gesture chain in view mode and let every input-sending
             // handler enforce `enabled` itself.
             isUserInteractionEnabled = true
+            for recognizer in gestureRecognizers ?? [] {
+                let shouldEnable: Bool
+                if recognizer === pinchRecognizer {
+                    shouldEnable = true
+                } else if recognizer === moveRecognizer {
+                    shouldEnable = enabled || zoomed
+                } else {
+                    shouldEnable = enabled
+                }
+                // Setting a recognizer false cancels an in-flight gesture.
+                // SwiftUI updates after every pinch step, so only touch the
+                // property when its desired state actually changed.
+                if recognizer.isEnabled != shouldEnable {
+                    recognizer.isEnabled = shouldEnable
+                    if recognizer === moveRecognizer, !shouldEnable { lastPan = .zero }
+                }
+            }
         }
 
         func apply(modifiers value: UInt64) { modifiers = value }
@@ -286,6 +328,7 @@ struct ScreenInputSurface: UIViewRepresentable {
             secondary.numberOfTouchesRequired = 2
             let move = UIPanGestureRecognizer(target: self, action: #selector(handleMove))
             move.maximumNumberOfTouches = 1
+            moveRecognizer = move
             let scroll = UIPanGestureRecognizer(target: self, action: #selector(handleScroll))
             scroll.minimumNumberOfTouches = 2
             scroll.maximumNumberOfTouches = 2
@@ -293,6 +336,7 @@ struct ScreenInputSurface: UIViewRepresentable {
             hold.minimumPressDuration = 0.35
             let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
             pinch.delegate = self
+            pinchRecognizer = pinch
             for recognizer in [tap, doubleTap, secondary, move, scroll, hold, pinch] as [UIGestureRecognizer] {
                 addGestureRecognizer(recognizer)
             }
@@ -344,7 +388,18 @@ struct ScreenInputSurface: UIViewRepresentable {
         }
 
         @objc private func handleMove(_ recognizer: UIPanGestureRecognizer) {
-            guard enabled, let actions else { return }
+            guard let actions else { return }
+            if !enabled {
+                guard zoomed else { return }
+                let translation = recognizer.translation(in: self)
+                actions.panView(
+                    CGSize(width: translation.x - lastPan.x, height: translation.y - lastPan.y),
+                    bounds.size
+                )
+                lastPan = translation
+                if recognizer.state == .ended || recognizer.state == .cancelled { lastPan = .zero }
+                return
+            }
             switch mode {
             case .trackpad:
                 let translation = recognizer.translation(in: self)
@@ -397,7 +452,7 @@ struct ScreenInputSurface: UIViewRepresentable {
                 recognizer.scale = 1
                 return
             }
-            actions.magnify(recognizer.scale)
+            actions.magnify(recognizer.scale, bounds.size)
             recognizer.scale = 1
         }
 

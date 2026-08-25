@@ -27,6 +27,9 @@ struct ScreenViewerView: View {
     @State private var muted = false
     @State private var importingFile = false
     @State private var zoom: CGFloat = 1
+    /// Local displacement of a magnified picture while merely viewing it.
+    /// Control mode follows the remote pointer instead and keeps this at zero.
+    @State private var viewOffset: CGSize = .zero
     /// Slow the pointer right down, for a target a few pixels across.
     @State private var fine = false
     /// The left button is held, so the next drag drags. A toggle rather than
@@ -55,11 +58,13 @@ struct ScreenViewerView: View {
                 .overlay { inputSurface }
                 .overlay { pointerMark }
                 .scaleEffect(zoom, anchor: pointerAnchor)
+                .offset(viewOffset)
                 .clipped()
             if model.state != .streaming {
                 overlayStatus
             }
         }
+        .clipped()
         .navigationTitle(name)
         .safeAreaInset(edge: .top) {
             // Turned sideways, a phone has very little height and every line
@@ -119,8 +124,13 @@ struct ScreenViewerView: View {
             }
             if zoom > 1.01 {
                 ToolbarItem {
-                    Button("Fit", .collapse) { withAnimation { zoom = 1 } }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    Button("Fit", .collapse) {
+                        withAnimation {
+                            zoom = 1
+                            viewOffset = .zero
+                        }
+                    }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
             #if os(macOS)
@@ -142,6 +152,7 @@ struct ScreenViewerView: View {
         // Control is a property of the session, so changing it reopens the
         // stream rather than being refused.
         .onChange(of: controlling) { _, wanted in
+            viewOffset = .zero
             // Handing control back with the button still latched down would
             // leave the far end holding a click nothing here can release.
             if !wanted, dragLatched {
@@ -169,9 +180,13 @@ struct ScreenViewerView: View {
         }
         .overlay(alignment: .bottom) {
             if dragLatched {
-                HStack(spacing: Theme.Space.xs) {
-                    Image(systemName: ActionIcon.move.symbol)
-                    Text("Holding the left button — move the pointer, then Release")
+                HStack(spacing: Theme.Space.s) {
+                    Text("Holding the left button")
+                    Button("Release", .move) {
+                        model.press(false)
+                        dragLatched = false
+                    }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
                 }
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
@@ -179,7 +194,6 @@ struct ScreenViewerView: View {
                 .padding(.vertical, Theme.Space.s)
                 .background(Theme.accent, in: Capsule())
                 .padding(.bottom, Theme.Space.s)
-                .allowsHitTesting(false)
             }
         }
         #if os(macOS)
@@ -214,10 +228,18 @@ struct ScreenViewerView: View {
                             model.press(dragLatched)
                         },
                         toggleFine: { fine.toggle() },
-                        resetZoom: { withAnimation { zoom = 1 } }
+                        resetZoom: {
+                            withAnimation {
+                                zoom = 1
+                                viewOffset = .zero
+                            }
+                        }
                     )
                 )
             }
+        }
+        .onChange(of: isCompactHeight) { _, compact in
+            if compact { keyboardWanted = false }
         }
         // A screen somebody is watching must not dim under them.
         .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
@@ -329,22 +351,47 @@ struct ScreenViewerView: View {
             click: { button, count in model.click(button: button, count: count) },
             press: { model.press($0) },
             scroll: { model.scroll(by: $0) },
+            panView: { delta, size in
+                viewOffset = clamped(
+                    CGSize(width: viewOffset.width + delta.width, height: viewOffset.height + delta.height),
+                    in: size,
+                    at: zoom
+                )
+            },
             text: { text, flags in model.sendText(text, flags: flags) },
             key: { code, down, flags in model.sendKey(code, down: down, flags: flags) },
-            magnify: { factor in
-                zoom = min(max(zoom * factor, 1), Self.maxZoom)
+            magnify: { factor, size in
+                let previous = zoom
+                let next = min(max(previous * factor, 1), Self.maxZoom)
+                zoom = next
+                if controlling || next <= 1.01 {
+                    viewOffset = .zero
+                } else {
+                    let ratio = previous > 0 ? next / previous : 1
+                    viewOffset = clamped(
+                        CGSize(width: viewOffset.width * ratio, height: viewOffset.height * ratio),
+                        in: size,
+                        at: next
+                    )
+                }
             }
         )
     }
 
     private var inputSurface: some View {
         #if os(macOS)
-        ScreenInputSurface(actions: actions, enabled: controlling, mode: mode)
+        ScreenInputSurface(
+            actions: actions,
+            enabled: controlling,
+            mode: mode,
+            zoomed: zoom > 1.01
+        )
         #else
         ScreenInputSurface(
             actions: actions,
             enabled: controlling,
             mode: mode,
+            zoomed: zoom > 1.01,
             heldModifiers: $heldModifiers,
             keyboardWanted: $keyboardWanted
         )
@@ -370,10 +417,22 @@ struct ScreenViewerView: View {
     static let maxZoom: CGFloat = 8
 
     /// Where the picture grows from when it is zoomed. Following the pointer
-    /// means a zoomed screen never needs a separate pan gesture: moving the
-    /// pointer to an edge brings that edge into view.
+    /// means control mode never needs a separate pan gesture: moving the
+    /// pointer to an edge brings that edge into view. View mode grows from the
+    /// centre and uses the local pan gesture instead.
     private var pointerAnchor: UnitPoint {
-        UnitPoint(x: model.cursor.x, y: model.cursor.y)
+        controlling ? UnitPoint(x: model.cursor.x, y: model.cursor.y) : .center
+    }
+
+    /// Keep local panning inside the part of a scaled picture that can exist
+    /// beyond its fitted bounds. At fit there is nowhere to pan.
+    private func clamped(_ offset: CGSize, in size: CGSize, at zoom: CGFloat) -> CGSize {
+        let horizontal = max(0, size.width * (zoom - 1) / 2)
+        let vertical = max(0, size.height * (zoom - 1) / 2)
+        return CGSize(
+            width: min(max(offset.width, -horizontal), horizontal),
+            height: min(max(offset.height, -vertical), vertical)
+        )
     }
 
     /// Trackpad mode hides the finger from the pointer, so the pointer has to
