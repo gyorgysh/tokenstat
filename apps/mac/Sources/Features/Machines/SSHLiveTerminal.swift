@@ -407,7 +407,7 @@ struct SSHSnippetRunSheet: View {
                         get: { values[name] ?? "" },
                         set: { values[name] = $0 }
                     ))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                 }
             }
             Text(filled)

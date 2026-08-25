@@ -43,21 +43,21 @@ struct CloudImportForm: View {
                         if provider == .digitalOcean {
                             SSHEditorField(label: "Read-only API token") {
                                 SecureField("Read-only API token", text: $token)
-                                    .textFieldStyle(.roundedBorder)
+                                    .themedFieldBox()
                             }
                         } else {
                             SSHEditorField(label: "AWS CLI profile") {
                                 TextField("AWS CLI profile", text: $profile)
-                                    .textFieldStyle(.roundedBorder)
+                                    .textFieldStyle(.themed)
                             }
                             SSHEditorField(label: "Region") {
                                 TextField("Region (optional)", text: $region)
-                                    .textFieldStyle(.roundedBorder)
+                                    .textFieldStyle(.themed)
                             }
                         }
                         SSHEditorField(label: "SSH username") {
                             TextField("SSH username", text: $username)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(.themed)
                         }
                         SSHEditorNote(
                             text: provider == .digitalOcean
@@ -241,7 +241,7 @@ struct SSHRecoveryWordsSheet: View {
             Text("Enter the recovery code exactly as it was written.")
                 .font(.callout)
             TextField("Recovery code", text: $typed)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .font(Theme.mono(14))
                 #if !os(macOS)
                 .textInputAutocapitalization(.never)
@@ -412,11 +412,11 @@ struct SSHVaultSetupSheet: View {
     private var createBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             SecureField("Vault password", text: $password)
-                .textFieldStyle(.roundedBorder)
+                .themedFieldBox()
                 .focused($focus, equals: .password)
                 .shake(on: refusals)
             SecureField("Type it again", text: $confirmPassword)
-                .textFieldStyle(.roundedBorder)
+                .themedFieldBox()
                 .focused($focus, equals: .confirmPassword)
                 .shake(on: refusals)
             VaultPasswordRules(password: password)
@@ -436,16 +436,16 @@ struct SSHVaultSetupSheet: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 TextField("Recovery code", text: $enteredRecovery)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                     .font(Theme.mono(12))
                     .focused($focus, equals: .recovery)
                     .shake(on: refusals)
                 SecureField("New password", text: $password)
-                    .textFieldStyle(.roundedBorder)
+                    .themedFieldBox()
                     .focused($focus, equals: .password)
                     .shake(on: refusals)
                 SecureField("Type it again", text: $confirmPassword)
-                    .textFieldStyle(.roundedBorder)
+                    .themedFieldBox()
                     .focused($focus, equals: .confirmPassword)
                     .shake(on: refusals)
                 VaultPasswordRules(password: password)
@@ -458,7 +458,7 @@ struct SSHVaultSetupSheet: View {
                     .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
                 SecureField("Vault password", text: $password)
-                    .textFieldStyle(.roundedBorder)
+                    .themedFieldBox()
                     .focused($focus, equals: .password)
                     .shake(on: refusals)
                     .onSubmit { attempt() }
@@ -673,7 +673,7 @@ struct SSHConnectForm: View {
                             if selectedKeyID.isEmpty {
                                 SSHEditorField(label: "Password") {
                                     SecureField("Password", text: $password)
-                                        .textFieldStyle(.roundedBorder)
+                                        .themedFieldBox()
                                 }
                             }
                             SSHEditorNote(text: "Passwords are used for this connection and are never saved.")

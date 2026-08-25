@@ -1502,7 +1502,7 @@ private struct PairingForm: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.themed)
         }
     }
 

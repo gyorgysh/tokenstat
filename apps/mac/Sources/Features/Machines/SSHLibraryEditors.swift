@@ -182,17 +182,17 @@ struct SSHHostEditor: View {
                 }
                 SSHEditorSection(title: "Connection") {
                     SSHEditorField(label: "Name") {
-                        TextField("Name", text: $host.label).textFieldStyle(.roundedBorder)
+                        TextField("Name", text: $host.label).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: "Address") {
-                        TextField("Address", text: $host.hostname).textFieldStyle(.roundedBorder)
+                        TextField("Address", text: $host.hostname).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: "Username") {
-                        TextField("Username", text: $host.username).textFieldStyle(.roundedBorder)
+                        TextField("Username", text: $host.username).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: "Port") {
                         TextField("Port", value: $host.port, format: .number)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.themed)
                             .frame(maxWidth: 100)
                     }
                     SSHEditorField(label: "Starting directory") {
@@ -204,7 +204,7 @@ struct SSHHostEditor: View {
                             ),
                             prompt: Text("~")
                         )
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.themed)
                     }
                 }
 
@@ -228,6 +228,8 @@ struct SSHHostEditor: View {
                         }
                     }
                     Toggle("Forward the SSH agent", isOn: $host.agentForwarding)
+                        .toggleStyle(.brandCheckbox)
+
                     SSHEditorNote(text: "Passwords are asked for when you connect and are never saved. A key is stored in this device's vault and, if you have one, in the encrypted vault.")
                 }
 
@@ -243,6 +245,8 @@ struct SSHHostEditor: View {
                     }
                     SSHColorPicker(selection: $host.color)
                     Toggle("Favourite", isOn: $host.favorite)
+                        .toggleStyle(.brandCheckbox)
+
                 }
 
                 SSHEditorSection(title: "Advanced") {
@@ -416,7 +420,7 @@ struct SSHKeyEditor: View {
                 }
                 SSHEditorSection(title: "Key") {
                     SSHEditorField(label: "Name") {
-                        TextField("Name", text: $label).textFieldStyle(.roundedBorder)
+                        TextField("Name", text: $label).textFieldStyle(.themed)
                     }
                     if let record {
                         SSHEditorField(label: "Algorithm") {
@@ -451,18 +455,9 @@ struct SSHKeyEditor: View {
                 } else {
                     SSHEditorSection(title: "Add") {
                         SSHEditorNote(text: "Generate a new Ed25519 key, or paste an existing private key. The private half goes into this device's vault, never into the connection list.")
-                        TextEditor(text: $pem)
-                            .font(Theme.mono(11))
-                            .frame(minHeight: 160)
-                            .scrollContentBackground(.hidden)
-                            .padding(Theme.Space.xs)
-                            .background(Theme.background, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Theme.border, lineWidth: 1)
-                            }
+                        ThemedEditor(text: $pem, font: Theme.mono(11), minHeight: 160)
                         SSHEditorField(label: "Private-key passphrase (if it has one)") {
-                            SecureField("Passphrase", text: $passphrase).textFieldStyle(.roundedBorder)
+                            SecureField("Passphrase", text: $passphrase).themedFieldBox()
                         }
                         HStack(spacing: Theme.Space.s) {
                             Button("Generate a key", .create) { Task { await generate() } }
@@ -600,13 +595,15 @@ struct SSHSnippetEditor: View {
             }
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Name", text: $snippet.title)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                 Text("Command")
                     .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $snippet.command)
-                    .font(Theme.mono(12))
+                // The border used to be drawn over a bare TextEditor, which
+                // themed the outline of the platform's grey slab and left the
+                // slab. ThemedEditor hides that background so the fill is the
+                // app's own panel, like the name field above it.
+                ThemedEditor(text: $snippet.command)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
                 if placeholders.isEmpty {
                     Text("Wrap a value in {{braces}} to be asked for it every time this runs, so one snippet covers every server.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -622,6 +619,8 @@ struct SSHSnippetEditor: View {
                     }
                 }
                 Toggle("Run automatically after connecting", isOn: $snippet.runOnConnect)
+                    .toggleStyle(.brandCheckbox)
+
             }
             .padding(Theme.Space.m)
 
@@ -694,7 +693,7 @@ struct SSHFolderEditor: View {
                 }
                 SSHEditorSection(title: "Folder") {
                     SSHEditorField(label: "Name") {
-                        TextField("Name", text: $folder.name).textFieldStyle(.roundedBorder)
+                        TextField("Name", text: $folder.name).textFieldStyle(.themed)
                     }
                     SSHEditorField(label: "Inside") {
                         Picker("Inside", selection: Binding(

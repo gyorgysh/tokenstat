@@ -513,7 +513,7 @@ struct SSHVaultDeleteSheet: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .padding(.top, Theme.Space.xs)
             TextField(Self.word, text: $typed)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .font(Theme.mono(12))
                 #if !os(macOS)
                 .textInputAutocapitalization(.characters)
@@ -627,11 +627,11 @@ struct SSHVaultPasswordSheet: View {
             }
             Divider()
             SecureField("Current password", text: $current)
-                .textFieldStyle(.roundedBorder)
+                .themedFieldBox()
             SecureField("New password", text: $next)
-                .textFieldStyle(.roundedBorder)
+                .themedFieldBox()
             SecureField("Type the new one again", text: $again)
-                .textFieldStyle(.roundedBorder)
+                .themedFieldBox()
             VaultPasswordRules(password: next)
             if !again.isEmpty, next != again {
                 Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)

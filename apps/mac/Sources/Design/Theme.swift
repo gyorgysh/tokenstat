@@ -1308,6 +1308,145 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// A text field on the app's own surface.
+///
+/// `.roundedBorder` is AppKit's bezel and UIKit's, and neither of them has
+/// heard of `Theme`: on a dark panel they resolve to a flat mid grey that
+/// belongs to no part of this design. That is the same failure the editors
+/// already avoided by refusing `Form`, then walked straight back into one
+/// field at a time. `SearchField` and the Automations search box had each
+/// hand-built this shape rather than share one, which is how a convention
+/// turns into three slightly different boxes.
+struct ThemedFieldStyle: TextFieldStyle {
+    /// Dense variant, for a field sharing a row with small buttons.
+    var small = false
+
+    // The protocol's requirement is underscored. Nothing to be done about it.
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration.themedFieldBox(small: small)
+    }
+}
+
+extension TextFieldStyle where Self == ThemedFieldStyle {
+    /// `TextField("Name", text: $name).textFieldStyle(.themed)`
+    static var themed: ThemedFieldStyle { ThemedFieldStyle() }
+    static var themedSmall: ThemedFieldStyle { ThemedFieldStyle(small: true) }
+}
+
+/// The same box, as a modifier, for the fields a `TextFieldStyle` cannot
+/// reach.
+///
+/// SwiftUI hands a custom `TextFieldStyle` a `TextField` and nothing else, so
+/// a `SecureField` silently keeps the platform's own chrome and a password box
+/// ends up as the one grey control on a themed form. Applied to the field
+/// itself rather than around it, so `focused`, `shake` and `onSubmit` chained
+/// after it still land on the field.
+///
+/// No focus ring here: the call sites that need one already own a
+/// `FocusState`, and a second focus binding underneath theirs is a fight over
+/// the same field rather than a feature.
+struct ThemedFieldBox: ViewModifier {
+    var small = false
+
+    func body(content: Content) -> some View {
+        content
+            .textFieldStyle(.plain)
+            .font(.system(size: small ? 12 : 13))
+            .padding(.horizontal, Theme.Space.s)
+            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    /// `SecureField("Password", text: $password).themedFieldBox()`
+    func themedFieldBox(small: Bool = false) -> some View {
+        modifier(ThemedFieldBox(small: small))
+    }
+}
+
+/// A multi-line editor on the app's own surface.
+///
+/// `TextEditor` paints the platform text view's background and ignores
+/// everything around it. Drawing a `Theme.border` on top of that, which is
+/// what the snippet editor did, themes the outline of a grey slab and leaves
+/// the slab. Hiding the scroll content background is what actually lets a
+/// colour through.
+struct ThemedEditor: View {
+    @Binding var text: String
+    /// Monospaced by default: everything this is used for is a command.
+    var font: Font = Theme.mono(12)
+    var minHeight: CGFloat = 88
+
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextEditor(text: $text)
+            .font(font)
+            .focused($focused)
+            .scrollContentBackground(.hidden)
+            .padding(.horizontal, Theme.Space.xs)
+            .padding(.vertical, Theme.Space.xs)
+            .frame(minHeight: minHeight)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(
+                        focused ? Theme.accent.opacity(0.7) : Theme.border,
+                        lineWidth: focused ? 1.5 : 1
+                    )
+            )
+            .animation(.easeOut(duration: 0.12), value: focused)
+    }
+}
+
+/// A checkbox in the app's colours.
+///
+/// The stock macOS checkbox is a small grey circle on a dark panel and the
+/// stock iOS switch is a green one, so a settings row was the only place in
+/// these screens wearing somebody else's palette. A tick in an accent box says
+/// the same thing and belongs to this app.
+struct BrandCheckboxStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: Theme.Space.s) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(configuration.isOn ? Theme.accent : Theme.panel)
+                    .frame(width: 18, height: 18)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5)
+                            .strokeBorder(configuration.isOn ? Theme.accent : Theme.border)
+                    )
+                    .overlay {
+                        if configuration.isOn {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                configuration.label
+                    .font(.system(size: 13))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
+    }
+}
+
+extension ToggleStyle where Self == BrandCheckboxStyle {
+    /// `Toggle("Run on connect", isOn: $flag).toggleStyle(.brandCheckbox)`
+    static var brandCheckbox: BrandCheckboxStyle { BrandCheckboxStyle() }
+}
+
 /// A two-state chip in the same capsule family as the action buttons.
 ///
 /// A system switch next to `AccentButtonStyle` is a different language on the
