@@ -16,6 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Notes
 import androidx.compose.material.icons.filled.*
@@ -47,8 +51,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ai.tokenstat.tokenstat.AppViewModel
 import ai.tokenstat.tokenstat.ClientState
 import ai.tokenstat.tokenstat.billing.PlayBillingManager
+import ai.tokenstat.tokenstat.ui.components.ActionIcon
 import ai.tokenstat.tokenstat.ui.components.Banner
 import ai.tokenstat.tokenstat.ui.components.BannerSeverity
+import ai.tokenstat.tokenstat.ui.components.EmptyState
 import ai.tokenstat.tokenstat.ui.components.SectionLabel
 import ai.tokenstat.tokenstat.ui.components.SegmentedCapsulePicker
 import ai.tokenstat.tokenstat.ui.components.SkeletonCard
@@ -74,7 +80,9 @@ import ai.tokenstat.tokenstat.ui.marks.LogoMark
 import ai.tokenstat.tokenstat.ui.marks.UiSignals
 import ai.tokenstat.tokenstat.ui.marks.Wordmark
 import ai.tokenstat.tokenstat.ui.theme.LocalTsColors
+import ai.tokenstat.tokenstat.ui.theme.TsMotion
 import ai.tokenstat.tokenstat.ui.theme.TsTheme
+import ai.tokenstat.tokenstat.ui.theme.toColorScheme
 import ai.tokenstat.tokenstat.ui.components.cardPaddingDp
 import ai.tokenstat.tokenstat.ui.theme.Space
 import ai.tokenstat.tokenstat.ui.theme.rememberReduceMotion
@@ -91,17 +99,18 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
-/// The brand accent, from the shared token system (`MaterialTheme` maps it
-/// to `primary`, so every remaining Material component picks it up too).
+/// The brand accent from the shared token system.
 @Composable
-private fun tsAccent(): Color = MaterialTheme.colorScheme.primary
+private fun tsAccent(): Color = LocalTsColors.current.accent
 
 private enum class Destination(val label: String, val icon: ImageVector) {
-    Home("Home", Icons.Default.Home),
+    Home("Home", Icons.Default.GridView),
     Workspaces("Workspaces", Icons.Default.Folder),
     Insights("Insights", Icons.Default.BarChart),
-    Devices("Devices", Icons.Default.Computer),
+    Devices("Devices", Icons.Default.Laptop),
 }
+
+private enum class Door { Onboarding, Loading, Login, SignedIn }
 
 @Composable
 fun TokenstatApp(model: AppViewModel) {
@@ -117,48 +126,52 @@ fun TokenstatApp(model: AppViewModel) {
     }
     TsTheme {
         val colors = LocalTsColors.current
-        MaterialTheme(
-            colorScheme = darkColorScheme(
-                primary = colors.accent,
-                secondary = colors.secondary,
-                background = colors.background,
-                surface = colors.panel,
-                surfaceVariant = colors.sidebar,
-                outline = colors.border,
-                error = colors.danger,
-            ),
-        ) {
+        MaterialTheme(colorScheme = colors.toColorScheme()) {
             Surface(Modifier.fillMaxSize(), color = colors.background) {
-                when {
-                    // A signed-in phone never sees the pitch at all.
-                    state.signedIn -> SignedInApp(model, state)
-                    !hasOnboarded -> Onboarding {
-                        runCatching {
-                            context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
-                                .edit().putBoolean("hasOnboarded", true).apply()
+                val door = when {
+                    state.signedIn -> Door.SignedIn
+                    !hasOnboarded -> Door.Onboarding
+                    state.loading && state.account == null -> Door.Loading
+                    else -> Door.Login
+                }
+                AnimatedContent(
+                    targetState = door,
+                    transitionSpec = {
+                        fadeIn(tween(TsMotion.doorMillis, easing = TsMotion.easeInOut)) togetherWith
+                            fadeOut(tween(TsMotion.doorMillis, easing = TsMotion.easeInOut))
+                    },
+                    label = "door",
+                ) { shown ->
+                    when (shown) {
+                        Door.SignedIn -> SignedInApp(model, state)
+                        Door.Onboarding -> Onboarding {
+                            runCatching {
+                                context.getSharedPreferences("client", android.content.Context.MODE_PRIVATE)
+                                    .edit().putBoolean("hasOnboarded", true).apply()
+                            }
+                            hasOnboarded = true
                         }
-                        hasOnboarded = true
+                        Door.Loading -> LoadingScreen()
+                        Door.Login -> LoginScreen(model, state.error)
                     }
-                    state.loading && state.account == null -> LoadingScreen()
-                    else -> LoginScreen(model, state.error)
                 }
             }
         }
     }
 }
 
-/// The cold-launch flow: wireframes with a light pulse while the core warms up,
-/// never a bare spinner in an empty pane.
+/// The cold-launch flow: the mark rising on paper, not a spinner in an empty pane.
 @Composable
 private fun LoadingScreen() {
+    val reduceMotion = rememberReduceMotion()
     Column(
-        Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        SkeletonCard(rows = 2)
-        SkeletonCard(rows = 4)
+        LogoMark(size = 44, animated = !reduceMotion, loops = true)
+        Spacer(Modifier.height(Space.s))
+        Wordmark(size = 22, showsMark = false)
     }
 }
 
@@ -177,7 +190,7 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
         // The mark rising once and landing: an intro page, not a spinner.
         LogoMark(size = 44, animated = true, loops = false)
         Spacer(Modifier.height(Space.s))
-        Wordmark()
+        Wordmark(size = 22, showsMark = false)
         Spacer(Modifier.height(12.dp))
         Text("Your AI coding activity, wherever your machines are.", color = colors.textSecondary)
         if (pendingLogin) {
@@ -190,19 +203,28 @@ private fun LoginScreen(model: AppViewModel, error: String?) {
             Text(shown, color = colors.danger)
         }
         Spacer(Modifier.height(28.dp))
-        Button(onClick = {
-            scope.launch {
-                pendingLogin = true
-                runCatching { model.beginLogin() }
-                    .onSuccess { url ->
-                        loginError = null
-                        CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
-                    }
-                    .onFailure { loginError = it.message ?: "Starting sign-in failed." }
-                pendingLogin = false
-            }
-        }, modifier = Modifier.fillMaxWidth()) { Text("Sign in") }
-        TextButton(onClick = { UiSignals.beganRefreshing(); model.refresh() }) { Text("I already signed in") }
+        TsAccentButton(
+            label = "Sign in",
+            onClick = {
+                scope.launch {
+                    pendingLogin = true
+                    runCatching { model.beginLogin() }
+                        .onSuccess { url ->
+                            loginError = null
+                            CustomTabsIntent.Builder().build().launchUrl(context, url.toUri())
+                        }
+                        .onFailure { loginError = it.message ?: "Starting sign-in failed." }
+                    pendingLogin = false
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(Space.s))
+        TsSecondaryButton(
+            label = "I already signed in",
+            onClick = { UiSignals.beganRefreshing(); model.refresh() },
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -227,54 +249,82 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
         LocalWindowInfo.current.containerSize.width.toDp() >= 840.dp
     }
 
+    val colors = LocalTsColors.current
+    val navItemColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = colors.accent,
+        selectedTextColor = colors.accent,
+        indicatorColor = colors.accentSoft,
+        unselectedIconColor = colors.controlGlyph,
+        unselectedTextColor = colors.controlGlyph,
+    )
     Scaffold(
+        containerColor = colors.background,
         topBar = {
             TopAppBar(
                 // Avatar leading, wordmark centred: the same chrome shape as
                 // the Apple client's toolbar.
-                title = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Wordmark() } },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = colors.background,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.textPrimary,
+                    actionIconContentColor = colors.textPrimary,
+                ),
+                title = {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Wordmark(size = 22, showsMark = false)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = { accountOpen = true }) {
                         Avatar(state.account?.string("displayName") ?: state.account?.string("handle") ?: "?")
                     }
                 },
                 actions = {
-                    // The mark sits beside refresh so a pull acknowledges
-                    // through the one place both apps can agree on.
                     Box(Modifier.padding(end = Space.s), contentAlignment = Alignment.Center) {
                         LogoMark(size = 18)
                     }
                     IconButton(onClick = {
-                        // A refresh somebody asked for dips the bars, once.
                         UiSignals.beganRefreshing()
                         model.refresh()
-                    }) { Icon(Icons.Default.Refresh, "Refresh") }
+                    }) { Icon(ActionIcon.Refresh.vector, "Refresh", tint = colors.controlGlyph) }
                 },
             )
         },
         bottomBar = {
-            if (!expanded) NavigationBar {
-                Destination.entries.forEach { destination ->
-                    NavigationBarItem(
-                        selected = selected == destination,
-                        onClick = { selected = destination },
-                        icon = { Icon(destination.icon, null) },
-                        label = { Text(destination.label) },
-                    )
+            if (!expanded) {
+                NavigationBar(containerColor = colors.tabStrip, contentColor = colors.textSecondary) {
+                    Destination.entries.forEach { destination ->
+                        NavigationBarItem(
+                            selected = selected == destination,
+                            onClick = { selected = destination },
+                            icon = { Icon(destination.icon, null) },
+                            label = { Text(destination.label) },
+                            colors = navItemColors,
+                        )
+                    }
                 }
             }
         },
     ) { padding ->
         Row(Modifier.fillMaxSize().padding(padding)) {
-            if (expanded) NavigationRail {
-                Spacer(Modifier.height(8.dp))
-                Destination.entries.forEach { destination ->
-                    NavigationRailItem(
-                        selected = selected == destination,
-                        onClick = { selected = destination },
-                        icon = { Icon(destination.icon, null) },
-                        label = { Text(destination.label) },
-                    )
+            if (expanded) {
+                NavigationRail(containerColor = colors.tabStrip, contentColor = colors.textSecondary) {
+                    Spacer(Modifier.height(8.dp))
+                    Destination.entries.forEach { destination ->
+                        NavigationRailItem(
+                            selected = selected == destination,
+                            onClick = { selected = destination },
+                            icon = { Icon(destination.icon, null) },
+                            label = { Text(destination.label) },
+                            colors = NavigationRailItemDefaults.colors(
+                                selectedIconColor = colors.accent,
+                                selectedTextColor = colors.accent,
+                                indicatorColor = colors.accentSoft,
+                                unselectedIconColor = colors.controlGlyph,
+                                unselectedTextColor = colors.controlGlyph,
+                            ),
+                        )
+                    }
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
@@ -306,19 +356,20 @@ private fun SignedInApp(model: AppViewModel, state: ClientState) {
 
 @Composable
 private fun RemotePaywall(onPlans: () -> Unit) {
+    val colors = LocalTsColors.current
     Column(
         Modifier.fillMaxSize().padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Remote is on Patron", style = MaterialTheme.typography.headlineSmall)
+        Text("Remote is on Patron", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary)
         Spacer(Modifier.height(8.dp))
         Text(
             "This phone already shares the account and sees the usage from every device on it. Opening folders and terminals on the computer is a paid feature.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = colors.textSecondary,
         )
         Spacer(Modifier.height(20.dp))
-        Button(onClick = onPlans) { Text("See plans") }
+        TsAccentButton(label = "See plans", onClick = onPlans)
     }
 }
 
@@ -583,17 +634,24 @@ private fun DevicesScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            item { Text("Devices", style = MaterialTheme.typography.headlineSmall) }
             item {
-                Card(Modifier.fillMaxWidth().clickable { sshOpen = true }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Terminal, null, tint = tsAccent())
+                Text(
+                    "Devices",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = LocalTsColors.current.textPrimary,
+                )
+            }
+            item {
+                val colors = LocalTsColors.current
+                TsCard(Modifier.clickable { sshOpen = true }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Terminal, null, tint = colors.accent)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("SSH hosts", fontWeight = FontWeight.SemiBold)
-                            Text("Connect to a saved server", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("SSH hosts", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                            Text("Connect to a saved server", color = colors.textSecondary)
                         }
-                        Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(ActionIcon.Next.vector, null, tint = colors.controlGlyph)
                     }
                 }
             }
@@ -601,24 +659,33 @@ private fun DevicesScreen(
                 val value = machine.jsonObject
                 val isHost = value.string("kind") != "client"
                 val online = value.bool("online")
-                Card(Modifier.fillMaxWidth().clickable { selectedId = value.string("id") }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(if (value.string("kind") == "client") Icons.Default.PhoneAndroid else Icons.Default.Computer, null)
+                val colors = LocalTsColors.current
+                TsCard(Modifier.clickable { selectedId = value.string("id") }) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (value.string("kind") == "client") Icons.Default.PhoneAndroid else Icons.Default.Laptop,
+                            null,
+                            tint = colors.controlGlyph,
+                        )
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(value.string("label") ?: value.string("id") ?: "Device", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                value.string("label") ?: value.string("id") ?: "Device",
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textPrimary,
+                            )
                             Text(
                                 when {
                                     isHost && online && !value.string("publicIdentity").isNullOrEmpty() ->
                                         "Awake. Open work from this phone."
                                     else -> listOfNotNull(value.string("platform"), value.string("lastSeenAt")).joinToString(" · ")
                                 },
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = colors.textSecondary,
                             )
                         }
                         Box(
                             Modifier.size(10.dp).background(
-                                if (online) Color(0xFF34D399) else Color.Gray,
+                                if (online) colors.success else colors.stateIdle,
                                 RoundedCornerShape(5.dp),
                             ),
                         )
@@ -887,12 +954,21 @@ private fun AndroidSSHScreen(
         if (rows.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 if (vaultAllowed) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null, tint = tsAccent(), modifier = Modifier.size(38.dp))
-                        Text("No ${tabs[tab].lowercase()} yet", style = MaterialTheme.typography.titleMedium)
-                        Text(if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { if (tab == 0) addHost = true else if (tab == 2) addSnippet = true else error = "Android secure key import is being prepared." }) { Text("Add ${tabs[tab].dropLast(if (tab == 2) 1 else 1).lowercase()}") }
-                    }
+                    EmptyState(
+                        icon = if (tab == 0) ActionIcon.Device.vector else if (tab == 1) ActionIcon.Token.vector else ActionIcon.Docs.vector,
+                        title = "No ${tabs[tab].lowercase()} yet",
+                        message = if (tab == 0) "Save a server address and choose authentication when connecting." else if (tab == 1) "Generated and imported keys are protected on this device." else "Save commands you use often.",
+                        action = {
+                            TsAccentButton(
+                                label = "Add ${tabs[tab].lowercase().trimEnd('s')}",
+                                onClick = {
+                                    if (tab == 0) addHost = true
+                                    else if (tab == 2) addSnippet = true
+                                    else error = "Android secure key import is being prepared."
+                                },
+                            )
+                        },
+                    )
                 }
             }
         } else {
@@ -902,31 +978,21 @@ private fun AndroidSSHScreen(
                     val folderName = item.string("folderId")?.let { id ->
                         folders.firstOrNull { it.jsonObject.string("id") == id }?.jsonObject?.string("name")
                     }
-                    val port = item.jsonObject["port"]?.toString() ?: "22"
-                    ElevatedCard(Modifier.fillMaxWidth()) {
-                        ListItem(
-                            headlineContent = {
-                                Text(item.string(if (tab == 2) "title" else "label") ?: "SSH item")
-                            },
-                            supportingContent = {
-                                Text(
-                                    when (tab) {
-                                        0 -> "${item.string("username") ?: "root"}@${item.string("hostname") ?: ""}:$port"
-                                        1 -> item.string("fingerprint")?.takeIf { it.isNotBlank() }
-                                            ?: item.string("algorithm") ?: "Key"
-                                        else -> item.string("command") ?: ""
-                                    },
-                                    maxLines = 1,
-                                )
-                            },
-                            trailingContent = {
-                                if (tab == 0 && folderName != null) {
-                                    Text(folderName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            },
-                            leadingContent = { Icon(if (tab == 0) Icons.Default.Dns else if (tab == 1) Icons.Default.Key else Icons.Default.Code, null) },
-                        )
-                    }
+                    val port = item["port"]?.toString() ?: "22"
+                    TsCard(
+                        title = item.string(if (tab == 2) "title" else "label") ?: "SSH item",
+                        subtitle = when (tab) {
+                            0 -> "${item.string("username") ?: "root"}@${item.string("hostname") ?: ""}:$port"
+                            1 -> item.string("fingerprint")?.takeIf { it.isNotBlank() }
+                                ?: item.string("algorithm") ?: "Key"
+                            else -> item.string("command") ?: ""
+                        },
+                        accessory = {
+                            if (tab == 0 && folderName != null) {
+                                Text(folderName, style = MaterialTheme.typography.labelSmall, color = LocalTsColors.current.textSecondary)
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -1343,11 +1409,12 @@ private fun WorkspaceDetail(
         // Section picker in the app's own capsule language.
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
             workspaceParts.forEach { part ->
-                TsAccentButton(
-                    label = part.label,
-                    small = true,
-                    onClick = { section = part.label },
-                )
+                val selectedChip = section == part.label
+                if (selectedChip) {
+                    TsAccentButton(label = part.label, small = true, onClick = { section = part.label })
+                } else {
+                    TsSecondaryButton(label = part.label, small = true, onClick = { section = part.label })
+                }
             }
         }
         Spacer(Modifier.height(Space.m))
@@ -1518,8 +1585,8 @@ private fun VaultEmptyArt() {
     }
 }
 
-@Composable private fun EmptyCard(title: String, message: String) = Card(Modifier.fillMaxWidth()) {
-    Column(Modifier.padding(16.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+@Composable private fun EmptyCard(title: String, message: String) {
+    EmptyState(icon = ActionIcon.Help.vector, title = title, message = message)
 }
 @Composable private fun ErrorCard(message: String) = Banner(message, BannerSeverity.DANGER, Modifier.fillMaxWidth())
 

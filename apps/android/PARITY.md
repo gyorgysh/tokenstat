@@ -44,26 +44,27 @@ tests in `PortedLogicTest.kt`.
 | `Skeleton.Bar/Rows/CardPlaceholder` + phase-staggered pulse (0.95s autoreverse) | `components/Skeleton.kt` (infiniteTransition, StartOffset phases) | done |
 | `smoothIn` content arrival (opacity + 4pt rise; fade under Reduce Motion) | `theme/smoothEnter` + `Arrive` wrapper | done |
 | Reduce Motion | `rememberReduceMotion()` (animator duration scale == 0) | done |
-| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark, Avatar (name-hashed tint) | `marks/Marks.kt` (geometry from the 64-unit artboard preserved), `UiSignals.beganRefreshing` | done |
+| `Marks.swift`: LogoMark bars (rise loop 0.62s staggered 0.14s, refresh pulse), Wordmark (`token` + accent `stat`), Avatar | `marks/Marks.kt`; Wordmark splits the accent the same way; LogoMark one-shot lands over 1.2s | done |
+| App icon (three bars on dark paper) | Adaptive `mipmap/ic_launcher` + `drawable/app_icon.xml` from `store/play-icon.svg`; notification glyph is the bars, not a T | done |
 | `RelativeTimeText.swift` single shared 15s tick | pending (`RelativeClock` equivalent not yet needed on-screen) | gap |
 | `MiniGraph`, `WorkflowStepStrip`, layering | step-capsule FlowRow reading of workflows (`workspace/WorkspaceSections.kt`) | simplified |
 | `RunVisuals` outcome tints, RunHistoryStrip, DurationBar | pending (needed with workflow runs UI) | gap |
 | `CadenceGlyph`, `CountdownRing`, `SlotGauge` | pending (automations show cadence text) | gap |
 | `FriendlyError.swift` translation table | `logic/TsLogic.kt` `friendlyError` (core rows only) | partial |
 | `HistoryLockBanner` | `TokenstatApp.HistoryLockBanner` (same copy, opens pricing) | done |
-| `ActionIcon` (~55 glyphs) | Material extended icon mapping at call sites | partial |
+| `ActionIcon` (~55 glyphs) | `components/ActionIcon.kt` enum, same case names, Material mapping | done |
 
 ## Client screen map (Apple `Sources/Client` → Android)
 
 | Apple screen | Android counterpart | Motion parity |
 | --- | --- | --- |
-| Onboarding (10 pages) + art | `auth/Onboarding.kt` pager, same copy/order, progress bar, skip | spring mark entrance per page; full hand-drawn scenes gap |
-| Login | restyled login: animated LogoMark rise-and-land, Wordmark, pending copy | done |
-| Root chrome (avatar leading, wordmark centre) | Scaffold TopAppBar avatar + Wordmark + LogoMark refresh pulse | done |
+| Onboarding (10 pages) + art | `auth/Onboarding.kt` + `OnboardingArt.kt` scenes | heatmap wave, spend springs, sessions typewriter, privacy lock; Reduce Motion lands on last frame |
+| Login | LogoMark rise-and-land, Wordmark, `TsAccentButton` / `TsSecondaryButton` | done |
+| Root chrome (avatar leading, wordmark centre) | Themed TopAppBar / NavigationBar from `TsColors` including light; door fade 280ms | done |
+| DevicesView (rows, awake dot, detail) | `TsCard` rows; online dot is accent (`success`), not green | done |
 | HomeView (greeting, totals, heatmap card, limits, lock banner) | `HomeScreen` with `HomeGreeting` port, Stat tiles, Canvas heatmap, lock banner, skeleton→Arrive | done |
 | PhoneHeatmap (fixed cell, scroll-to-latest-week, month marks, locked alpha, press focus) + DayDetailSheet | `heatmap/Heatmap.kt` YearHeatmap (Canvas, pointer press-focus ring, tap sheet) | done |
 | InsightsView (Models/Tools/Days cuts, search) | rebuilt with SegmentedCapsulePicker, search, accent share bars animating in | done |
-| DevicesView (rows, awake dot, detail) | existing rows restyled onto theme surfaces; detail sheet kept | partial |
 | Workspace sections (Sessions list, Changes w/ DiffView, Tasks composer/archive, Notes, Workflows board, Automations, Files tree) | `workspace/WorkspaceSections.kt` real renderers replacing the JSON dump | done (runs/transcripts pending) |
 | TerminalSession + accessory keys | `terminal/TerminalScreen.kt` + bundled xterm.js WebView, pty spawn/read/write/resize/detach, long-poll loop | core done; custom key row gap |
 | AccountSheet (tier badge, products, sign out) | AccountDialog as ModalBottomSheet with Avatar/TierBadge/accent product buttons | done |

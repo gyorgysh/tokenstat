@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme.swift paper. Launch flash and system bars read this before Compose. -->
+    <color name="ts_window">#FBFBFD</color>
+    <!-- Play listing / adaptive-icon paper. Always dark; the bars sit on it. -->
+    <color name="ts_icon_paper">#0D0A18</color>
+</resources>

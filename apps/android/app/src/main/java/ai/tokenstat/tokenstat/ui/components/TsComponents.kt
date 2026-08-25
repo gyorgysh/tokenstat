@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -110,6 +111,21 @@ fun TsCard(
         }
         content?.invoke()
     }
+}
+
+/// A panel without a title row, for clickable device rows and similar.
+@Composable
+fun TsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val colors = LocalTsColors.current
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(colors.panel)
+            .tsCardBorder()
+            .padding(cardPaddingDp),
+        content = content,
+    )
 }
 
 /// One headline number with its label.

@@ -2,6 +2,9 @@
 package ai.tokenstat.tokenstat.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
@@ -129,6 +132,49 @@ fun TsColors.shadow(opacity: Float): Color = Color.Black.copy(alpha = if (isDark
 
 @Composable
 fun rememberTsColors(): TsColors = if (isSystemInDarkTheme()) DarkColors else LightColors
+
+/// Material widgets that have not been restyled still read this scheme, so
+/// light paper cannot sit under a forced `darkColorScheme`.
+fun TsColors.toColorScheme(): ColorScheme {
+    val onAccent = Color.White
+    return if (isDark) {
+        darkColorScheme(
+            primary = accent,
+            onPrimary = onAccent,
+            secondary = secondary,
+            onSecondary = onAccent,
+            background = background,
+            onBackground = textPrimary,
+            surface = panel,
+            onSurface = textPrimary,
+            surfaceVariant = sidebar,
+            onSurfaceVariant = textSecondary,
+            outline = border,
+            error = danger,
+            onError = onAccent,
+            tertiary = secondary,
+            onTertiary = onAccent,
+        )
+    } else {
+        lightColorScheme(
+            primary = accent,
+            onPrimary = onAccent,
+            secondary = secondary,
+            onSecondary = onAccent,
+            background = background,
+            onBackground = textPrimary,
+            surface = panel,
+            onSurface = textPrimary,
+            surfaceVariant = sidebar,
+            onSurfaceVariant = textSecondary,
+            outline = border,
+            error = danger,
+            onError = onAccent,
+            tertiary = secondary,
+            onTertiary = onAccent,
+        )
+    }
+}
 
 @Composable
 fun TsTheme(colors: TsColors = rememberTsColors(), content: @Composable () -> Unit) {

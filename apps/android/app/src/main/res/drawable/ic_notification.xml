@@ -1,9 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- White-alpha silhouette of the three bars. Status-bar icons are a mask. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
+    android:viewportWidth="24"
+    android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M24,24h60v16h-22v44h-16v-44h-22z" />
+        android:pathData="M4.80,12.65 h1.64 a1.14,1.14 0 0 1 1.14,1.14 v3.59 a1.14,1.14 0 0 1 -1.14,1.14 h-1.64 a1.14,1.14 0 0 1 -1.14,-1.14 v-3.59 a1.14,1.14 0 0 1 1.14,-1.14 z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.04,8.74 h1.64 a1.14,1.14 0 0 1 1.14,1.14 v7.51 a1.14,1.14 0 0 1 -1.14,1.14 h-1.64 a1.14,1.14 0 0 1 -1.14,-1.14 v-7.51 a1.14,1.14 0 0 1 1.14,-1.14 z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M15.28,4.82 h1.64 a1.14,1.14 0 0 1 1.14,1.14 v11.42 a1.14,1.14 0 0 1 -1.14,1.14 h-1.64 a1.14,1.14 0 0 1 -1.14,-1.14 v-11.42 a1.14,1.14 0 0 1 1.14,-1.14 z" />
 </vector>

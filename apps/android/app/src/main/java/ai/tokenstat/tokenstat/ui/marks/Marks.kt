@@ -7,13 +7,19 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,9 +95,17 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
                 )
                 v
             } else {
-                var landed by remember { mutableStateOf(!animated) }
-                LaunchedEffectLand(animated) { landed = true }
-                if (landed) 1f else 0.35f
+                val land = remember { Animatable(if (animated) 0.35f else 1f) }
+                LaunchedEffect(animated, index) {
+                    if (animated) {
+                        land.snapTo(0.35f)
+                        kotlinx.coroutines.delay(index * 150L)
+                        land.animateTo(1f, tween(1200, easing = TsMotion.easeInOut))
+                    } else {
+                        land.snapTo(1f)
+                    }
+                }
+                land.value
             }
             val scale = if (pulse) 0.35f else looped
             Box(
@@ -114,24 +128,30 @@ fun LogoMark(size: Int = 18, animated: Boolean = false, loops: Boolean = true) {
 private fun LaunchedEffectPulse(key: Boolean, block: suspend () -> Unit) =
     androidx.compose.runtime.LaunchedEffect(key) { block() }
 
+/// The lowercase wordmark. `token` in primary, `stat` in the accent, matching
+/// `Marks.swift`. The phone toolbar passes a larger size; the bars are optional
+/// so a lockup that already placed the mark does not draw it twice.
 @Composable
-private fun LaunchedEffectLand(enabled: Boolean, block: () -> Unit) =
-    androidx.compose.runtime.LaunchedEffect(enabled) {
-        if (enabled) {
-            delay(150)
-            block()
+fun Wordmark(
+    modifier: Modifier = Modifier,
+    size: Int = 18,
+    fills: Boolean = false,
+    showsMark: Boolean = false,
+) {
+    val colors = LocalTsColors.current
+    val face = TextStyle(fontSize = (size * 0.88).sp, fontWeight = FontWeight.Bold)
+    Row(
+        modifier.then(if (fills) Modifier.fillMaxWidth() else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (showsMark) {
+            LogoMark(size = size)
+            Spacer(Modifier.width((size * 0.75f).dp))
         }
+        Text("token", style = face, color = colors.textPrimary)
+        Text("stat", style = face, color = colors.accent)
+        if (fills) Spacer(Modifier.weight(1f))
     }
-
-/// The lowercase wordmark.
-@Composable
-fun Wordmark(modifier: Modifier = Modifier) {
-    Text(
-        "tokenstat",
-        modifier = modifier,
-        style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-        color = LocalTsColors.current.textPrimary,
-    )
 }
 
 /// A person's avatar seat, tinted deterministically from their name over the

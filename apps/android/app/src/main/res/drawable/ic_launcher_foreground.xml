@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Three bars from apps/android/store/play-icon.svg, scaled into the
+     adaptive-icon safe zone (inner 72 of 108). Same geometry as LogoMark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- short bar -->
+    <path
+        android:fillColor="#C3B0FF"
+        android:pathData="M36.70,55.96 h4.89 a3.43,3.43 0 0 1 3.43,3.43 v10.76 a3.43,3.43 0 0 1 -3.43,3.43 h-4.89 a3.43,3.43 0 0 1 -3.43,-3.43 v-10.76 a3.43,3.43 0 0 1 3.43,-3.43 z" />
+    <!-- mid bar -->
+    <path
+        android:fillColor="#8B5CF6"
+        android:pathData="M51.56,44.21 h4.89 a3.43,3.43 0 0 1 3.43,3.43 v22.50 a3.43,3.43 0 0 1 -3.43,3.43 h-4.89 a3.43,3.43 0 0 1 -3.43,-3.43 v-22.50 a3.43,3.43 0 0 1 3.43,-3.43 z" />
+    <!-- tall bar -->
+    <path
+        android:fillColor="#E879F9"
+        android:pathData="M66.42,32.47 h4.89 a3.43,3.43 0 0 1 3.43,3.43 v34.25 a3.43,3.43 0 0 1 -3.43,3.43 h-4.89 a3.43,3.43 0 0 1 -3.43,-3.43 v-34.25 a3.43,3.43 0 0 1 3.43,-3.43 z" />
+</vector>
