@@ -1824,12 +1824,14 @@ extension Bridge {
         _ = try await background("ssh.snippet.delete", ["id": id], as: Removed.self)
     }
 
-    static func probeSSHHost(_ host: SSHHost) async throws -> SSHHostFingerprint {
-        try await background("ssh.host.probe", [
+    static func probeSSHHost(_ host: SSHHost, jump: [String: Any]? = nil) async throws -> SSHHostFingerprint {
+        var params: [String: Any] = [
             "hostname": host.hostname, "port": host.port, "username": host.username,
             "initialDirectory": host.initialDirectory ?? "~",
             "hostKeys": host.hostKeys,
-        ], as: SSHHostFingerprint.self)
+        ]
+        if let jump { params["jump"] = jump }
+        return try await background("ssh.host.probe", params, as: SSHHostFingerprint.self)
     }
 
     /// Everything `ssh.session.open` needs about a host, in one place.
@@ -1857,6 +1859,16 @@ extension Bridge {
             host, rows: rows, cols: cols,
             auth: ["kind": "password", "password": password], jump: jump
         ), as: SSHSessionHandle.self)
+    }
+
+    /// Publish this machine's record on the account again.
+    ///
+    /// Login does it once, best effort. When that one call did not land, every
+    /// account feature that needs a device refuses from then on with nothing
+    /// to retry it.
+    static func registerThisMachine() async throws {
+        struct Registered: Codable, Sendable { var registered: Bool }
+        _ = try await background("account.registerMachine", [:], as: Registered.self)
     }
 
     static func sshVaultStatus() async throws -> SSHVaultStatus {
@@ -1957,9 +1969,9 @@ extension Bridge {
         try await background("ssh.vault.password.set", ["password": current, "recovery": recovery, "newPassword": newPassword], patience: Patience.standard, as: SSHVaultPasswordChange.self)
     }
 
-    static func lockSSHVault() async {
+    static func lockSSHVault() async throws {
         struct Locked: Codable, Sendable { var locked: Bool }
-        _ = try? await background("ssh.vault.lock", [:], as: Locked.self)
+        _ = try await background("ssh.vault.lock", [:], as: Locked.self)
     }
 
     static func resetSSHVault() async throws {
@@ -1968,18 +1980,6 @@ extension Bridge {
 
     static func rotateSSHVaultRecovery() async throws -> SSHVaultRecovery {
         try await background("ssh.vault.recovery.rotate", as: SSHVaultRecovery.self)
-    }
-
-    static func requestSSHVaultEnrollment() async throws -> SSHVaultEnrollment {
-        try await background("ssh.vault.enrollment.request", as: SSHVaultEnrollment.self)
-    }
-
-    static func sshVaultEnrollmentRequests() async throws -> [SSHVaultEnrollment] {
-        try await background("ssh.vault.enrollment.list", as: SSHVaultEnrollments.self).requests
-    }
-
-    static func approveSSHVaultEnrollment(_ request: SSHVaultEnrollment) async throws -> SSHVaultEnrollmentResult {
-        try await background("ssh.vault.enrollment.approve", ["requestId": request.id, "machineId": request.machineId, "publicIdentity": request.publicIdentity], as: SSHVaultEnrollmentResult.self)
     }
 
     static func sshVaultRecords(recovery: String, tier: String) async throws -> [SSHVaultRecord] {

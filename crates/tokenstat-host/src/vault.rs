@@ -63,6 +63,11 @@ struct VaultStore {
     password_wrap: String,
     #[serde(default)]
     kdf: String,
+    /// Deliberate lock on this device. Survives a helper restart, because a
+    /// flag that lived only in this process was undone the moment the helper
+    /// started again and unwrapped the device wrap with nothing typed.
+    #[serde(default)]
+    locked: bool,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -115,14 +120,6 @@ struct DeleteParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EnrollmentApprovalParams {
-    request_id: String,
-    machine_id: String,
-    public_identity: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct PasswordParams {
     #[serde(default)]
     password: String,
@@ -139,26 +136,56 @@ struct PasswordParams {
 /// Held after a successful unlock so the password is typed once and not on
 /// every record read. In memory only: it is never written anywhere, and it
 /// goes when the process does.
-fn unlocked() -> &'static Mutex<Option<[u8; 32]>> {
-    static UNLOCKED: OnceLock<Mutex<Option<[u8; 32]>>> = OnceLock::new();
-    UNLOCKED.get_or_init(|| Mutex::new(None))
+struct VaultSession {
+    key: Option<[u8; 32]>,
+    locked: bool,
+}
+
+fn vault_session() -> &'static Mutex<VaultSession> {
+    static SESSION: OnceLock<Mutex<VaultSession>> = OnceLock::new();
+    SESSION.get_or_init(|| {
+        Mutex::new(VaultSession {
+            key: None,
+            locked: false,
+        })
+    })
+}
+
+fn hydrate_locked(session: &mut VaultSession) {
+    if session.locked {
+        return;
+    }
+    if read().ok().is_some_and(|store| store.locked) {
+        session.locked = true;
+        session.key = None;
+    }
 }
 
 fn remember_key(vmk: [u8; 32]) {
-    if let Ok(mut held) = unlocked().lock() {
-        *held = Some(vmk);
+    if let Ok(mut session) = vault_session().lock() {
+        session.key = Some(vmk);
     }
-    set_locked(false);
 }
 
 fn forget_key() {
-    if let Ok(mut held) = unlocked().lock() {
-        *held = None;
+    if let Ok(mut session) = vault_session().lock() {
+        session.key = None;
     }
 }
 
 fn cached_key() -> Option<[u8; 32]> {
-    unlocked().lock().ok().and_then(|held| *held)
+    vault_session().lock().ok().and_then(|session| session.key)
+}
+
+/// Cache the key and clear the deliberate lock. Unlocking is this, not
+/// [`remember_key`]: a concurrent lock must not be undone by a device wrap
+/// that was already mid-unwrap.
+fn unlock_session(vmk: [u8; 32]) {
+    if let Ok(mut session) = vault_session().lock() {
+        session.key = Some(vmk);
+        session.locked = false;
+    }
+    persist_locked(false);
 }
 
 /// Whether this device has been deliberately locked.
@@ -167,19 +194,39 @@ fn cached_key() -> Option<[u8; 32]> {
 /// wrap, which opens the vault with nothing typed, so forgetting the cached
 /// key alone would be undone by the very next read. Locking has to be a state
 /// that outranks the wrap, or the button is a lie.
-fn locked_flag() -> &'static Mutex<bool> {
-    static LOCKED: OnceLock<Mutex<bool>> = OnceLock::new();
-    LOCKED.get_or_init(|| Mutex::new(false))
+fn set_locked(value: bool) {
+    if let Ok(mut session) = vault_session().lock() {
+        session.locked = value;
+        if value {
+            session.key = None;
+        }
+    }
+    persist_locked(value);
 }
 
-fn set_locked(value: bool) {
-    if let Ok(mut held) = locked_flag().lock() {
-        *held = value;
+fn persist_locked(value: bool) {
+    let Ok(mut store) = read() else {
+        return;
+    };
+    // A missing file is an empty default. Writing it would create a vault
+    // store just to remember a lock, which tests and a machine with no vault
+    // must not do.
+    if store.schema_version == 0 && store.ciphertext.is_empty() {
+        return;
     }
+    if store.locked == value {
+        return;
+    }
+    store.locked = value;
+    let _ = write(&store);
 }
 
 fn is_locked() -> bool {
-    locked_flag().lock().is_ok_and(|held| *held)
+    if let Ok(mut session) = vault_session().lock() {
+        hydrate_locked(&mut session);
+        return session.locked;
+    }
+    read().ok().is_some_and(|store| store.locked)
 }
 
 fn mutation_stamp() -> Result<(u64, String), String> {
@@ -536,38 +583,55 @@ fn cache_remote(remote: &tokenstat_sync::vault::RemoteVault) -> Result<(), Strin
     store.recovery_salt.clone_from(&remote.recovery_salt);
     store.recovery_wrap.clone_from(&remote.recovery_wrap);
     store.device_wrap = remote.device_wrap.clone().unwrap_or_default();
+    if let Some(salt) = remote.password_salt.as_deref() {
+        store.password_salt = salt.to_string();
+    }
+    if let Some(wrap) = remote.password_wrap.as_deref() {
+        store.password_wrap = wrap.to_string();
+    }
+    if let Some(kdf) = remote.kdf.as_deref() {
+        store.kdf = kdf.to_string();
+    }
     write(&store)
 }
 
 /// The remote snapshot and the key that opens it.
 ///
-/// Three ways to the key, cheapest first: the one already unlocked this run,
-/// this device's own wrap, or a recovery code the caller supplied. There is no
-/// fourth: a device with none of those has to be unlocked with the password,
-/// which is a thing a person does and not something a record read can do.
+/// Two ways to the key, cheapest first: the one already unlocked this run, or
+/// this device's own wrap. A recovery code resets the password through
+/// `password.set`. It is not a second unlock path for a record read.
 fn remote_and_key(
     recovery: &str,
 ) -> Result<(tokenstat_sync::vault::RemoteVault, [u8; 32]), String> {
-    let mut remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
-    let key = if !recovery.trim().is_empty() {
-        let key = unwrap_recovery(&remote.recovery_wrap, recovery, &remote.recovery_salt)?;
-        if remote.device_wrap.is_none() {
-            enroll_self(&key)?;
-            remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
+    if !recovery.trim().is_empty() {
+        return Err("a recovery code resets the password. It cannot unlock on its own.".into());
+    }
+    let remote = remote_vault().map_err(|e| e.to_string())?;
+    let locked = "the vault is locked. Enter your vault password to open it.";
+    let key = {
+        let mut session = vault_session()
+            .lock()
+            .map_err(|_| "vault session lock poisoned")?;
+        hydrate_locked(&mut session);
+        if session.locked {
+            return Err(locked.into());
         }
-        key
-    } else if is_locked() {
-        // Deliberately locked here. The device wrap below would open it with
-        // nothing typed, which is the whole reason this check comes first.
-        return Err("the vault is locked. Enter your vault password to open it.".into());
-    } else if let Some(key) = cached_key() {
-        key
-    } else if let Some(wrap) = remote.device_wrap.as_deref() {
-        let key = unwrap_for_self(wrap)?;
-        remember_key(key);
-        key
-    } else {
-        return Err("the vault is locked. Enter your vault password to open it.".into());
+        if let Some(key) = session.key {
+            key
+        } else {
+            drop(session);
+            let wrap = remote.device_wrap.as_deref().ok_or(locked)?;
+            let key = unwrap_for_self(wrap)?;
+            let mut session = vault_session()
+                .lock()
+                .map_err(|_| "vault session lock poisoned")?;
+            hydrate_locked(&mut session);
+            if session.locked {
+                return Err(locked.into());
+            }
+            session.key = Some(key);
+            key
+        }
     };
     cache_remote(&remote)?;
     Ok((remote, key))
@@ -593,6 +657,36 @@ fn enroll_self(vmk: &[u8; 32]) -> Result<(), String> {
         return Err("server did not enroll this device".into());
     }
     Ok(())
+}
+
+/// Run one vault call, publishing this machine's record if the account says it
+/// has never heard of it.
+///
+/// The record is published once, at login, and best effort: one failed call
+/// there (offline, a flaky minute, a sign-in that predates the code) left the
+/// machine unknown for good, and every vault call from it answered
+/// `machine_required` forever. Nothing retried it, so the vault was simply
+/// unusable on that computer and the screen said there was no vault rather
+/// than that it could not ask.
+///
+/// One retry, because if the republish did not fix it the cause is the token
+/// rather than the record, and only signing in again replaces that.
+fn with_machine_record<T>(
+    mut call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
+) -> Result<T, tokenstat_sync::vault::VaultError> {
+    match call() {
+        Err(tokenstat_sync::vault::VaultError::MachineNotRegistered) => {
+            tokenstat_sync::profile::publish_machine_profile(None)
+                .map_err(tokenstat_sync::vault::VaultError::Profile)?;
+            call()
+        }
+        other => other,
+    }
+}
+
+/// The account's copy of the vault, registering this machine if it has to.
+fn remote_vault() -> Result<tokenstat_sync::vault::RemoteVault, tokenstat_sync::vault::VaultError> {
+    with_machine_record(tokenstat_sync::vault::get)
 }
 
 fn create_error(e: tokenstat_sync::vault::VaultError) -> String {
@@ -657,6 +751,7 @@ fn create_v3(password: &str) -> Result<String, String> {
         password_salt,
         password_wrap,
         kdf,
+        locked: false,
     })?;
     remember_key(vmk);
     Ok(recovery)
@@ -669,7 +764,7 @@ fn create_v3(password: &str) -> Result<String, String> {
 /// the key, wrapped to its identity, so later launches need nothing typed. That
 /// is the whole of what enrolment used to be, and it happens by itself.
 fn unlock_with(password: &str, recovery: &str) -> Result<[u8; 32], String> {
-    let remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
+    let remote = remote_vault().map_err(|e| e.to_string())?;
     let vmk = if !recovery.trim().is_empty() {
         unwrap_recovery(&remote.recovery_wrap, recovery, &remote.recovery_salt)?
     } else if password.is_empty() {
@@ -693,7 +788,7 @@ fn unlock_with(password: &str, recovery: &str) -> Result<[u8; 32], String> {
         enroll_self(&vmk)?;
     }
     cache_remote(&remote)?;
-    remember_key(vmk);
+    unlock_session(vmk);
     Ok(vmk)
 }
 
@@ -706,7 +801,20 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         match method {
             "ssh.vault.status" => {
                 let local = read()?;
-                let remote = tokenstat_sync::vault::get().ok();
+                // What the account said, kept rather than discarded. Swallowing
+                // this made every failure to *reach* the vault look like the
+                // account not having one, so a machine the account did not know
+                // was told to create a second vault and then refused when it
+                // tried. The screen can only be honest if it is given the
+                // difference.
+                let answer = remote_vault();
+                let unreachable = match &answer {
+                    Ok(_) => None,
+                    // No vault on the account is an answer, not a failure.
+                    Err(tokenstat_sync::vault::VaultError::NotFound) => None,
+                    Err(error) => Some(error.to_string()),
+                };
+                let remote = answer.ok();
                 let created = remote.is_some() || local.schema_version == SCHEMA;
                 let enrolled = remote
                     .as_ref()
@@ -724,7 +832,9 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 let locked = !needs_recreate
                     && remote.is_some()
                     && (is_locked() || (cached_key().is_none() && !enrolled));
-                let record_count = if let Some(remote) = remote {
+                let record_count = if is_locked() {
+                    0
+                } else if let Some(remote) = remote {
                     if let Some(wrap) = remote.device_wrap.as_deref() {
                         unwrap_for_self(wrap)
                             .and_then(|key| {
@@ -749,7 +859,8 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     "recordCount": record_count,
                     "enrolled": enrolled,
                     "locked": locked,
-                    "needsRecreate": needs_recreate
+                    "needsRecreate": needs_recreate,
+                    "unreachable": unreachable
                 }))
             }
             "ssh.vault.create" => {
@@ -760,11 +871,17 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 tokenstat_sync::vault::remove().map_err(|e| e.to_string())?;
                 clear_local()?;
                 forget_key();
+                set_locked(false);
                 Ok(json!({"reset": true}))
             }
             "ssh.vault.unlock" => {
                 let p: PasswordParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-                unlock_with(&p.password, &p.recovery)?;
+                if !p.recovery.trim().is_empty() {
+                    return Err(
+                        "a recovery code resets the password. It cannot unlock on its own.".into(),
+                    );
+                }
+                unlock_with(&p.password, "")?;
                 Ok(json!({"unlocked": true}))
             }
             "ssh.vault.lock" => {
@@ -816,52 +933,11 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 write(&local)?;
                 Ok(json!({"changed": true, "recovery": recovery}))
             }
-            "ssh.vault.enrollment.request" => {
-                let nonce = hex(&random32());
-                let request =
-                    tokenstat_sync::vault::request_enrollment(&nonce).map_err(|e| e.to_string())?;
-                Ok(
-                    json!({"id": request.id, "machineId": request.machine_id, "publicIdentity": request.public_identity, "nonce": request.nonce, "expiresAt": request.expires_at}),
-                )
-            }
-            "ssh.vault.enrollment.list" => {
-                let requests =
-                    tokenstat_sync::vault::list_enrollments().map_err(|e| e.to_string())?;
-                Ok(
-                    json!({"requests": requests.into_iter().map(|r| json!({"id": r.id, "machineId": r.machine_id, "publicIdentity": r.public_identity, "nonce": r.nonce, "expiresAt": r.expires_at})).collect::<Vec<_>>() }),
-                )
-            }
-            "ssh.vault.enrollment.approve" => {
-                let p: EnrollmentApprovalParams =
-                    serde_json::from_str(params).map_err(|e| e.to_string())?;
-                let request = tokenstat_sync::vault::list_enrollments()
-                    .map_err(|e| e.to_string())?
-                    .into_iter()
-                    .find(|r| r.id == p.request_id && r.machine_id == p.machine_id)
-                    .ok_or("enrollment request is missing or expired")?;
-                if request.public_identity != p.public_identity {
-                    return Err("enrollment identity changed before approval".into());
-                }
-                let target: [u8; 32] = unhex(&request.public_identity)?
-                    .try_into()
-                    .map_err(|_| "invalid enrollment public identity")?;
-                let remote = tokenstat_sync::vault::get().map_err(|e| e.to_string())?;
-                let vmk = unwrap_for_self(
-                    remote
-                        .device_wrap
-                        .as_deref()
-                        .ok_or("this device is not enrolled")?,
-                )?;
-                let wrap = wrap_for_device(&vmk, &target)?;
-                let result = tokenstat_sync::vault::approve_enrollment(
-                    &request.machine_id,
-                    &request.id,
-                    &wrap,
-                    WRAP_VERSION,
-                )
-                .map_err(|e| e.to_string())?;
-                Ok(json!({"enrolled": result.enrolled, "machineId": request.machine_id}))
-            }
+            "ssh.vault.enrollment.request"
+            | "ssh.vault.enrollment.list"
+            | "ssh.vault.enrollment.approve" => Err(
+                "enrollment is gone. Unlock the vault with your password on this device.".into(),
+            ),
             "ssh.vault.record.list" => {
                 let p: RecoveryParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let (remote, vmk) = remote_and_key(&p.recovery)?;
@@ -873,6 +949,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 Ok(json!({"records": snapshot.records}))
             }
             "ssh.vault.record.put" => {
+                verify_paid_account()?;
                 let p: PutParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let mut last_conflict = None;
                 for _ in 0..4 {
@@ -918,6 +995,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 ))
             }
             "ssh.vault.record.delete" => {
+                verify_paid_account()?;
                 let p: DeleteParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
                 let mut last_conflict = None;
                 for _ in 0..4 {
@@ -984,7 +1062,16 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                         recovery_salt: Some(&recovery_salt),
                         recovery_wrap: Some(&recovery_wrap),
                     }) {
-                        Ok(_) => return Ok(json!({"recovery": recovery})),
+                        Ok(_) => {
+                            let mut local = read()?;
+                            local.revision = next_revision;
+                            local.ciphertext = ciphertext;
+                            local.nonce = nonce;
+                            local.recovery_salt = recovery_salt;
+                            local.recovery_wrap = recovery_wrap;
+                            write(&local)?;
+                            return Ok(json!({"recovery": recovery}));
+                        }
                         Err(tokenstat_sync::vault::VaultError::Conflict(revision)) => {
                             last_conflict = Some(revision)
                         }
@@ -1083,8 +1170,10 @@ mod tests {
         forget_key();
         set_locked(true);
         assert!(is_locked());
-        // And unlocking clears it again, so the state cannot get stuck shut.
+        // Caching a key must not clear a lock another thread just set.
         remember_key(random32());
+        assert!(is_locked());
+        unlock_session(random32());
         assert!(!is_locked());
     }
 
@@ -1118,6 +1207,34 @@ mod tests {
             .unwrap()
             .expect_err("migrate was never shipped");
         assert!(err.contains("unknown"), "{err}");
+    }
+
+    #[test]
+    fn enrollment_public_methods_are_gone() {
+        for method in [
+            "ssh.vault.enrollment.request",
+            "ssh.vault.enrollment.list",
+            "ssh.vault.enrollment.approve",
+        ] {
+            let err = call(method, "{}").unwrap().expect_err(method);
+            assert!(err.contains("password"), "{method}: {err}");
+        }
+    }
+
+    #[test]
+    fn unlock_does_not_accept_a_recovery_code() {
+        let err = call("ssh.vault.unlock", r#"{"recovery":"ABCD-EFGH"}"#)
+            .unwrap()
+            .expect_err("recovery is a reset, not an unlock");
+        assert!(err.contains("resets the password"), "{err}");
+    }
+
+    #[test]
+    fn record_methods_do_not_accept_a_recovery_code() {
+        let err = call("ssh.vault.record.list", r#"{"recovery":"ABCD-EFGH"}"#)
+            .unwrap()
+            .expect_err("recovery is a reset, not a record unlock");
+        assert!(err.contains("resets the password"), "{err}");
     }
 
     #[test]

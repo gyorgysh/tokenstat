@@ -18,8 +18,8 @@ import SwiftUI
 @Observable
 final class SSHVaultModel {
     var status: SSHVaultStatus?
-    /// Set only between generating recovery words and confirming them. While
-    /// it holds words, they have not been written down yet, and that is the
+    /// Set only between generating a recovery code and confirming it. While
+    /// it holds a code, it has not been written down yet, and that is the
     /// one vault state that is allowed to look urgent.
     var recovery: String?
     var error: String?
@@ -32,11 +32,45 @@ final class SSHVaultModel {
     /// Made before password unlock existed. It cannot be opened at all.
     var needsRecreate: Bool { status?.needsRecreate == true }
     var recordCount: Int { status?.recordCount ?? 0 }
-    /// Words generated and not yet confirmed. The only warning here.
+    /// Code generated and not yet confirmed. The only warning here.
     var unconfirmedRecovery: Bool { recovery != nil }
+    /// The account could not be asked. Not the same as having no vault, and
+    /// the screen must not offer to create one while this is set: the vault
+    /// that may already exist is simply out of reach.
+    var unreachable: String? { status?.unreachable }
 
     func refresh() async {
         status = try? await Bridge.sshVaultStatus()
+    }
+
+    /// Keep the state honest while somebody is looking at it.
+    ///
+    /// The vault lives on the account, so it changes on other devices. Reading
+    /// it once when the screen appeared meant a vault made on a phone stayed
+    /// invisible on a Mac that had the screen open, for as long as it stayed
+    /// open. Slow on purpose: this is a network call, and nothing here is
+    /// worth a tighter loop than the pace somebody sets up a vault at.
+    func watch() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(20))
+            if Task.isCancelled { return }
+            await refresh()
+        }
+    }
+
+    /// Say what this computer is, then ask again.
+    ///
+    /// The vault calls already republish the machine record when the account
+    /// does not recognise it, so this is mostly the same work behind a button.
+    /// It exists because being told your computer is not on your account and
+    /// having nothing to press is the state this screen was in.
+    func registerAndRefresh() async {
+        do {
+            try await Bridge.registerThisMachine()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        await refresh()
     }
 
     func rotateRecovery() async {
@@ -48,8 +82,10 @@ final class SSHVaultModel {
 
     /// Forget the key held for this run, so the password is asked for again.
     func lock() async {
-        await Bridge.lockSSHVault()
-        status = try? await Bridge.sshVaultStatus()
+        do {
+            try await Bridge.lockSSHVault()
+            status = try await Bridge.sshVaultStatus()
+        } catch { self.error = error.localizedDescription }
     }
 
     func reset() async {
@@ -122,7 +158,7 @@ struct SSHVaultRow: View {
     }
 
     private var label: String {
-        if vault.unconfirmedRecovery { return "Recovery words not confirmed" }
+        if vault.unconfirmedRecovery { return "Recovery code not confirmed" }
         if vault.needsRecreate { return "Encrypted vault · has to be recreated" }
         if vault.locked { return "Encrypted vault · locked" }
         if vault.created {
@@ -145,6 +181,7 @@ struct SSHVaultRow: View {
 /// The row that opens it is not a control panel, which is what it had become.
 struct SSHVaultScreen: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var vault: SSHVaultModel
     let tier: String
     let canWrite: Bool
@@ -160,7 +197,7 @@ struct SSHVaultScreen: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Encrypted vault").font(.title3.weight(.semibold))
-                    Text("Hosts, keys and snippets, readable only by your devices and your 24 recovery words.")
+                    Text("Hosts, keys and snippets, readable only by your devices, your password and your recovery code.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -179,19 +216,31 @@ struct SSHVaultScreen: View {
                     }
                     if vault.unconfirmedRecovery {
                         action(
-                            title: "Confirm your recovery words",
-                            detail: "The words have been generated but not written down. They are the only way back in if every enrolled device is lost.",
-                            button: "Show words",
+                            title: "Confirm your recovery code",
+                            detail: "The code has been generated but not written down. It is the only way back in if the password is forgotten and every device is lost.",
+                            button: "Show code",
                             icon: .reveal,
                             prominent: true
                         ) { showingRecovery = true }
                     }
 
-                    if !vault.created {
+                    // Out of reach beats absent. Offering "set up" here is
+                    // what sent people into a create that the account then
+                    // refused, and the sentence they got back was about a
+                    // machine id rather than about the vault they already had.
+                    if let unreachable = vault.unreachable {
+                        action(
+                            title: "The account could not be asked about your vault",
+                            detail: "\(FriendlyError.from(unreachable).message)\n\nAnything already saved on this computer still works.",
+                            button: "Try again",
+                            icon: .refresh,
+                            prominent: true
+                        ) { Task { await vault.registerAndRefresh() } }
+                    } else if !vault.created {
                         action(
                             title: "Set up the vault",
                             detail: canWrite
-                                ? "Creates a key on this device and 24 recovery words. Nothing leaves the machine unencrypted."
+                                ? "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted."
                                 : "Creating a vault needs Supporter or above. Existing vaults stay readable.",
                             button: "Set up vault",
                             icon: .security,
@@ -231,7 +280,7 @@ struct SSHVaultScreen: View {
                             ) { confirmingRotation = true }
                             action(
                                 title: "Lock on this Mac",
-                                detail: "Forgets the key held for this session. The password is asked for again next time the vault is read.",
+                                detail: "This computer will ask for the password again, including after the helper restarts, until you unlock it here.",
                                 button: "Lock",
                                 icon: .signOut
                             ) { Task { await vault.lock() } }
@@ -270,14 +319,14 @@ struct SSHVaultScreen: View {
             }
         }
         .confirmationDialog(
-            "Replace the current recovery words?",
+            "Replace the current recovery code?",
             isPresented: $confirmingRotation,
             titleVisibility: .visible
         ) {
-            Button("Generate new recovery words", role: .destructive) { Task { await vault.rotateRecovery() } }
+            Button("Generate a new recovery code", role: .destructive) { Task { await vault.rotateRecovery() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The current words will stop working as soon as the encrypted update succeeds.")
+            Text("The current code will stop working as soon as the encrypted update succeeds.")
         }
         .confirmationDialog("Delete this vault?", isPresented: $confirmingReset, titleVisibility: .visible) {
             Button("Delete vault", role: .destructive) { Task { await vault.reset() } }
@@ -287,6 +336,12 @@ struct SSHVaultScreen: View {
         }
         .onChange(of: vault.recovery) { _, value in if value != nil { showingRecovery = true } }
         .task { await vault.refresh() }
+        .task { await vault.watch() }
+        // Coming back to the app is the moment somebody has most likely just
+        // done something on another device.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await vault.refresh() } }
+        }
     }
 
     private var status: some View {

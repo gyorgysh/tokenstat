@@ -816,7 +816,30 @@ pub fn call(session: &mut Session, method: &str, params: &str) -> String {
     }
 }
 
+/// Account mutations, login, and update downloads belong to the person at
+/// this machine. An approved phone can work in a folder. It cannot log the
+/// host out, admit another peer's update, or unlink a device.
+fn owner_only_method(method: &str) -> bool {
+    method.starts_with("app.update")
+        || matches!(
+            method,
+            "account.logout"
+                | "account.appleActivate"
+                | "account.appleRenewal"
+                | "account.googleActivate"
+                | "account.deviceStart"
+                | "account.devicePoll"
+                | "account.cancelLogin"
+                | "account.renameMachine"
+                | "account.unlinkMachine"
+                | "account.registerMachine"
+        )
+}
+
 fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, DispatchError> {
+    if owner_only_method(method) {
+        crate::request_context::refuse_remote("account and update methods")?;
+    }
     match method {
         // Re-open against a different archive or timezone. Also the hook a
         // future remote transport uses to point at another machine.
@@ -2239,6 +2262,11 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
 /// has. It deliberately takes the *buffer*, not a workspace path, so an unsaved
 /// file colours correctly and so highlighting never reads the disk.
 fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
+    if owner_only_method(method)
+        && let Err(e) = crate::request_context::refuse_remote("account and update methods")
+    {
+        return Some(Err(e));
+    }
     // Who is answering, without opening an archive to say it.
     //
     // A front end prefers a running daemon, and that daemon outlives the app
@@ -2432,6 +2460,22 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
             }
             crate::account_activity::invalidate();
             Ok(json!({"renamed": true, "id": p.id, "name": p.name.trim()}))
+        }
+
+        // Say what this computer is, again.
+        //
+        // The record is published at login and never retried, so one failed
+        // call there left the machine unknown to the account and every call
+        // that needs a device (the vault, above all) refused from then on. The
+        // vault heals this by itself now; this is the button for a person who
+        // has been told their computer is not on their account and wants to do
+        // something about it.
+        "account.registerMachine" => {
+            if let Err(e) = tokenstat_sync::profile::publish_machine_profile(None) {
+                return Some(Err(e.to_string()));
+            }
+            crate::account_activity::invalidate();
+            Ok(json!({"registered": true}))
         }
 
         "account.unlinkMachine" => {
@@ -4312,5 +4356,32 @@ mod tests {
 
         let v: Value = serde_json::from_str(&call(&mut s, "info", "{}")).unwrap();
         assert_eq!(v["result"]["timezone"], "Europe/Budapest");
+    }
+
+    #[test]
+    fn a_remote_peer_cannot_log_the_host_out_or_fetch_updates() {
+        crate::request_context::with_remote_peer("phone", || {
+            let mut s = session();
+            let logout: Value =
+                serde_json::from_str(&call(&mut s, "account.logout", "{}")).unwrap();
+            assert_eq!(logout["ok"], false, "{logout}");
+            assert!(
+                logout["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("local-only"),
+                "{logout}"
+            );
+            let update = call_sessionless("app.updateCheck", "{}").expect("sessionless");
+            let v: Value = serde_json::from_str(&update).unwrap();
+            assert_eq!(v["ok"], false, "{update}");
+            assert!(
+                v["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("local-only"),
+                "{update}"
+            );
+        });
     }
 }

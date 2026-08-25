@@ -144,6 +144,11 @@ pub enum VaultError {
     NotSignedIn,
     #[error("this device is not enrolled in the SSH vault")]
     NotEnrolled,
+    /// The account does not know this machine, so nothing it holds can be
+    /// reached from here. Recoverable without the user doing anything: the
+    /// machine record is published at login and can be published again.
+    #[error("this machine is not registered on the account")]
+    MachineNotRegistered,
     #[error("a vault already exists")]
     AlreadyExists,
     #[error("no SSH vault exists")]
@@ -176,6 +181,9 @@ fn read_error(status: reqwest::StatusCode, bytes: &[u8]) -> VaultError {
     });
     match error.error.as_str() {
         "not_enrolled" => VaultError::NotEnrolled,
+        // Typed rather than left as a server sentence, because the host acts
+        // on this one: it republishes the machine record and tries again.
+        "machine_required" | "machine_not_registered" => VaultError::MachineNotRegistered,
         "already_exists" => VaultError::AlreadyExists,
         "not_found" => VaultError::NotFound,
         "revision_conflict" => VaultError::Conflict(error.revision.unwrap_or(0)),

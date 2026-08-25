@@ -179,6 +179,13 @@ struct SSHVaultStatus: Codable, Sendable, Hashable {
     /// so the screen offers to recreate it rather than asking for a password
     /// nothing will accept.
     var needsRecreate: Bool?
+    /// Why the account could not be asked, when it could not be asked.
+    ///
+    /// `created: false` means "this account has no vault". It used to mean
+    /// that *or* "the question never reached the account", which are opposite
+    /// situations: the first invites you to make one, the second means the one
+    /// you already have is out of reach and making another would be refused.
+    var unreachable: String?
 }
 struct SSHVaultReset: Codable, Sendable, Hashable { var reset: Bool }
 struct SSHVaultRecovery: Codable, Sendable, Hashable { var recovery: String }
@@ -197,9 +204,6 @@ struct SSHVaultRecord: Codable, Sendable, Hashable, Identifiable {
 }
 struct SSHVaultPut: Codable, Sendable, Hashable { var id: String; var version: UInt64 }
 struct SSHVaultDelete: Codable, Sendable, Hashable { var id: String; var version: UInt64; var deleted: Bool }
-struct SSHVaultEnrollment: Codable, Sendable, Hashable, Identifiable { var id: String; var machineId: String; var publicIdentity: String; var nonce: String; var expiresAt: String }
-struct SSHVaultEnrollments: Codable, Sendable, Hashable { var requests: [SSHVaultEnrollment] }
-struct SSHVaultEnrollmentResult: Codable, Sendable, Hashable { var enrolled: Bool; var machineId: String }
 struct SSHVaultRecords: Codable, Sendable, Hashable { var records: [SSHVaultRecord] }
 struct SSHHostImport: Codable, Sendable, Hashable { var imported: Int; var hosts: [SSHHost] }
 struct ScreenPermission: Codable, Sendable, Hashable, Identifiable {

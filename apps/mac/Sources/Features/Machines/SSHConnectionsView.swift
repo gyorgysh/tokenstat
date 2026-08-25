@@ -449,7 +449,21 @@ struct SSHVaultSetupSheet: View {
             }
             status = try await Bridge.sshVaultStatus()
             dismiss()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            self.error = error.localizedDescription
+            // "A vault already exists" means this screen was showing the wrong
+            // half of itself: something made one elsewhere while this was open.
+            // Re-reading the status flips it to unlock, so the next thing
+            // typed is the password rather than a second attempt at a create
+            // that cannot succeed.
+            if error.localizedDescription.lowercased().contains("vault already exists"),
+               let fresh = try? await Bridge.sshVaultStatus() {
+                status = fresh
+                password = ""
+                confirmPassword = ""
+                self.error = "That account already has a vault. Enter its password to open it here."
+            }
+        }
         working = false
     }
 
