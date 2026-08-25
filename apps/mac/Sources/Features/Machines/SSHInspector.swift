@@ -21,6 +21,17 @@ struct SSHInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
+                // The one action this column is for, where a person can see
+                // it. Connecting used to live in the list's context menu and
+                // nowhere else, so the screen with the whole server on it had
+                // no way to reach the server.
+                if let host = selectedHost {
+                    Button("Connect", .connect) { model.connectRequest = host }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .padding(.trailing, Theme.Space.xs)
+                        .keyboardShortcut(.return, modifiers: [])
+                }
+            } content: {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
@@ -34,6 +45,13 @@ struct SSHInspector: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.background)
+    }
+
+    /// The server the inspector is showing, when it is showing one. A new
+    /// server has nothing to connect to yet, so it does not count.
+    private var selectedHost: SSHHost? {
+        guard case let .host(id) = model.selection else { return nil }
+        return model.hosts.first { $0.id == id }
     }
 
     /// Clearing the selection is what closes an editor. One assignment, so a

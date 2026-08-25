@@ -27,7 +27,6 @@ struct SSHSectionView: View {
     /// the list and clicking it in the sidebar mean the same thing.
     var onOpenFolder: (String) -> Void
 
-    @State private var connecting: SSHHost?
     @State private var terminal: SSHLiveTerminal?
     @State private var expanded: Set<String> = []
     @State private var vault = SSHVaultModel()
@@ -74,7 +73,7 @@ struct SSHSectionView: View {
             content
         }
         .background(Theme.background)
-        .sheet(item: $connecting) { host in
+        .sheet(item: $model.connectRequest) { host in
             SSHConnectForm(host: host, model: model) { terminal = $0 }
         }
         .sheet(item: $terminal) {
@@ -293,13 +292,22 @@ struct SSHSectionView: View {
     }
 
     private func hostRow(_ host: SSHHost, depth: Int) -> some View {
-        SSHHostRow(host: host, folder: model.folderName(host.folderID), searching: model.searching)
+        SSHHostRow(
+            host: host,
+            folder: model.folderName(host.folderID),
+            searching: model.searching,
+            onConnect: { model.connectRequest = host }
+        )
             .padding(.leading, CGFloat(depth) * 14)
             .listRowBackground(rowBackground(selected: model.selection == .host(host.id)))
             .contentShape(.rect)
+            // Double click connects, single click selects. Declared in this
+            // order because the two-tap gesture has to be offered first or the
+            // single one swallows every click before it can count to two.
+            .onTapGesture(count: 2) { model.connectRequest = host }
             .onTapGesture { model.selection = .host(host.id) }
             .contextMenu {
-                Button("Connect") { connecting = host }
+                Button("Connect") { model.connectRequest = host }
                 Button(host.favorite ? "Remove from favourites" : "Add to favourites") {
                     var updated = host
                     updated.favorite.toggle()

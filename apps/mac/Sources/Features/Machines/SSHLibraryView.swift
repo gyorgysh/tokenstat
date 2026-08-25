@@ -104,6 +104,15 @@ struct SSHLibraryView: View {
         switch route {
         case let .host(id):
             SSHHostEditor(model: model, hostID: id, folderID: nil, onDone: close)
+                .toolbar {
+                    // Same reason as the Mac inspector: the screen showing the
+                    // whole server had no way to reach it.
+                    if let host = model.hosts.first(where: { $0.id == id }) {
+                        ToolbarItem(placement: .primaryAction) {
+                            Button("Connect", .connect) { connecting = host }
+                        }
+                    }
+                }
         case let .newHost(folder):
             SSHHostEditor(model: model, hostID: nil, folderID: folder, onDone: close)
         case let .key(id):
@@ -284,7 +293,12 @@ struct SSHLibraryView: View {
     }
 
     private func hostRow(_ host: SSHHost, depth: Int) -> some View {
-        SSHHostRow(host: host, folder: model.folderName(host.folderID), searching: model.searching)
+        SSHHostRow(
+            host: host,
+            folder: model.folderName(host.folderID),
+            searching: model.searching,
+            onConnect: { connecting = host }
+        )
             .padding(.leading, CGFloat(depth) * 14)
             .contentShape(.rect)
             .onTapGesture { open(.host(host.id)) }
@@ -300,6 +314,9 @@ struct SSHLibraryView: View {
             }
             .swipeActions(edge: .trailing) {
                 Button("Delete", role: .destructive) { Task { await model.delete(host: host) } }
+            }
+            .swipeActions(edge: .leading) {
+                Button("Connect") { connecting = host }.tint(Theme.accent)
             }
     }
 
@@ -432,6 +449,15 @@ struct SSHHostRow: View {
     let host: SSHHost
     let folder: String?
     let searching: Bool
+    /// Connect to this server. Nil where the row is not a place to do it.
+    ///
+    /// The row used to carry no way to connect at all: it was in the context
+    /// menu and nowhere else, which on a phone is a long press nobody finds,
+    /// and on the Mac is a right click on a screen whose whole purpose is
+    /// reaching a server.
+    var onConnect: (() -> Void)?
+
+    @State private var hovering = false
 
     var body: some View {
         HStack(spacing: Theme.Space.s) {
@@ -460,8 +486,22 @@ struct SSHHostRow: View {
                 }
             }
             Spacer(minLength: 0)
+            if let onConnect {
+                Button("Connect", .connect, action: onConnect)
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                    // The Mac has a pointer, so the button waits for it and
+                    // the list stays a list. The phone has no hover state, so
+                    // a button that appeared on one would never appear.
+                    #if os(macOS)
+                    .opacity(hovering ? 1 : 0)
+                    .allowsHitTesting(hovering)
+                    #endif
+            }
         }
         .frame(height: Theme.Control.rowHeight)
+        #if os(macOS)
+        .onHover { hovering = $0 }
+        #endif
     }
 }
 

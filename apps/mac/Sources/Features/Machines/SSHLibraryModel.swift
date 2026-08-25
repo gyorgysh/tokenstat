@@ -41,6 +41,14 @@ final class SSHLibraryModel {
     /// selection the other has to be handed.
     var selection: SSHLibraryRoute?
 
+    /// A server somebody has asked to connect to.
+    ///
+    /// On the model rather than in the list view, because on the Mac the list
+    /// and the inspector are two columns and the inspector is where the
+    /// primary Connect button belongs. A request set in either one is picked
+    /// up by the one screen that presents the connect sheet.
+    var connectRequest: SSHHost?
+
     /// The tier that may write to the vault, or nil when this device can only
     /// read from it.
     private(set) var vaultTier: String?
