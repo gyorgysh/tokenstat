@@ -58,6 +58,18 @@ final class SSHSessionsModel {
         sessions(for: hostID).filter(\.alive).count
     }
 
+    /// The session a host's pane is showing, or nil when it has none.
+    ///
+    /// Host-scoped on purpose. `selected` is global, so on a server whose pane
+    /// has not been touched yet it names a shell on a different machine, and
+    /// anything that types into it would type into the wrong server. The
+    /// inspector and the pane both read this rather than each deciding, so a
+    /// snippet cannot land somewhere other than the tab in front.
+    func activeSession(for hostID: String) -> SSHLiveTerminal? {
+        let mine = sessions(for: hostID)
+        return mine.first { $0.id == selectedID } ?? mine.last
+    }
+
     // MARK: - Reconciling with the host
 
     /// Adopt what the host is holding and let go of what it is not.

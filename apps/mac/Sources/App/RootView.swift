@@ -923,12 +923,17 @@ struct RootView: View {
                 MachinesInspector(model: machines) { closeInspector() }
             case let .sshTerminals(hostID):
                 #if os(macOS)
-                // The server's own settings, beside its shells. Editing the
-                // record while a session is running on it is the ordinary
-                // case: somebody has just learned what the keepalive should
-                // have been.
-                SSHInspector(model: ssh, section: .hosts(folder: nil)) { closeInspector() }
-                    .task(id: hostID) { ssh.selection = .host(hostID) }
+                // The saved commands for this server, beside its shells.
+                // Settings used to be forced open here on the reasoning that
+                // somebody had just learned what the keepalive should have
+                // been, which is a thing people do once. Reaching for a
+                // command they have already saved is a thing they do all day,
+                // and on the Mac there was no way to reach one at all.
+                SSHSessionInspector(
+                    model: ssh,
+                    sessions: sshSessions,
+                    hostID: hostID
+                ) { closeInspector() }
                 #else
                 EmptyView()
                 #endif

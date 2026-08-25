@@ -554,6 +554,20 @@ final class SSHLibraryModel {
         matching(snippets) { [$0.title, $0.command] + $0.tags }
     }
 
+    /// The snippets worth offering while connected to one server.
+    ///
+    /// Scoped ones first, then the ones that name no server at all. A snippet
+    /// scoped to a *different* server is left out: that scoping is somebody
+    /// saying where the command belongs, and a `systemctl restart` meant for
+    /// one machine has no business being one click away on another.
+    func snippets(for hostID: String) -> [SSHSnippet] {
+        let ordered = snippets.sorted {
+            $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+        }
+        return ordered.filter { $0.hostIDs.contains(hostID) }
+            + ordered.filter { $0.hostIDs.isEmpty }
+    }
+
     /// The handful somebody actually returns to. Favourites first, then the
     /// most recently used, because a list of forty servers is a list nobody
     /// scans twice.

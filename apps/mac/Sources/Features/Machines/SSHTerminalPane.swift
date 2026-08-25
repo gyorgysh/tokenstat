@@ -45,7 +45,7 @@ struct SSHTerminalPane: View {
     }
 
     private var active: SSHLiveTerminal? {
-        mine.first { $0.id == sessions.selectedID } ?? mine.last
+        sessions.activeSession(for: host.id)
     }
 
     var body: some View {
