@@ -19,6 +19,7 @@ struct ClientWorkspacesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
     @Environment(ClientStore.self) private var store
+    @Environment(ClientNavigationModel.self) private var navigation
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: ClientWorkspacesModel
     @State private var pendingClose: PtySessionInfo?
@@ -275,14 +276,33 @@ struct ClientWorkspacesView: View {
                 }
             }
             if model.connectedKey == host.peerKey {
-                Text("Connected. Tap a folder for sessions, files and ports.")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
+                // What the machine is doing, rather than a sentence saying it
+                // is connected. The row already says that: the dot is lit and
+                // the button says Disconnect.
+                HostStatsStrip(peer: host.peerKey)
             }
         }
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+        .overlay(alignment: .bottomTrailing) {
+            if host.machineID != nil {
+                Image(systemName: "chevron.right")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(Theme.Space.m)
+                    .accessibilityHidden(true)
+            }
+        }
+        // The whole card, minus the button, opens that machine on Devices.
+        // `contentShape` so the padding is part of the target, and a plain
+        // background gesture rather than a `NavigationLink` because Connect
+        // and Disconnect live inside this card and a link would swallow them.
+        .contentShape(Rectangle())
+        .onTapGesture { navigation.openDevice(machineID: host.machineID) }
+        .accessibilityAction(named: "Show this device") {
+            navigation.openDevice(machineID: host.machineID)
+        }
     }
 }
 

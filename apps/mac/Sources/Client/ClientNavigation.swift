@@ -33,11 +33,32 @@ final class ClientNavigationModel {
     /// the detail column draws one section rather than the sections again.
     var section: WorkspaceSection = .sessions
 
+    /// The machine Devices should be showing, when something outside that tab
+    /// asked for it.
+    ///
+    /// A machine id rather than a `Machine`, because the account list is
+    /// reloaded underneath and the row that opened this may not be the same
+    /// value by the time the push happens. `ClientDevicesView` clears it when
+    /// the push ends, so returning to Devices later lands on the list.
+    var deviceMachineID: String?
+
     /// Selecting a folder implies the workspace plane, so both move together.
     func open(folderID: String?, section: WorkspaceSection = .sessions) {
         self.folderID = folderID
         self.section = section
         if folderID != nil { destination = .workspaces }
+    }
+
+    /// Show one machine on Devices, from anywhere.
+    ///
+    /// Workspaces lists the same computers it can reach, and the readings on
+    /// that row are a summary of a screen that already exists. Tapping the row
+    /// goes there rather than growing a second device screen inside
+    /// Workspaces.
+    func openDevice(machineID: String?) {
+        guard let machineID, !machineID.isEmpty else { return }
+        deviceMachineID = machineID
+        destination = .machines
     }
 }
 

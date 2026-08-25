@@ -26,6 +26,7 @@ import SwiftUI
 struct ClientDevicesView: View {
     @Environment(AccountModel.self) private var account
     @Environment(ConnectivityModel.self) private var connectivity
+    @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientDevicesModel()
 
     private var machines: [Machine] { account.account?.machines ?? [] }
@@ -98,6 +99,27 @@ struct ClientDevicesView: View {
             .padding(.bottom, 96)
         }
         .background(Theme.background)
+        // One push, driven from outside this tab: Workspaces sends a machine
+        // here rather than growing a device screen of its own. A binding
+        // rather than a path because the stack belongs to `ClientRootView`,
+        // and clearing the id on dismiss is what lets Devices open on its
+        // list the next time somebody taps the tab.
+        .navigationDestination(
+            isPresented: Binding(
+                get: { requestedMachine != nil },
+                set: { if !$0 { navigation.deviceMachineID = nil } }
+            )
+        ) {
+            if let machine = requestedMachine {
+                ClientDeviceDetailView(
+                    machine: machine,
+                    usage: model.usage(for: machine),
+                    accountTotal: model.total,
+                    isThisDevice: isThisDevice(machine),
+                    onRenamed: { await account.load() }
+                )
+            }
+        }
         // Always, not based on size. `basedOnSize` stops a short screen from
         // bouncing, and a screen that cannot bounce cannot be pulled: the
         // refresh gesture quietly disappeared exactly when the page was empty,
@@ -111,6 +133,15 @@ struct ClientDevicesView: View {
                     days: DeviceHistory.days(for: account.account?.tier),
                     force: true
                 )
+            }
+        }
+        // An id that matches nothing would otherwise sit in the model
+        // forever, and the push it was asking for can never happen. Clearing
+        // it lets Devices open on its list next time instead of on nothing.
+        .onChange(of: machines) { _, _ in
+            if let wanted = navigation.deviceMachineID,
+               !machines.contains(where: { $0.machineID == wanted }) {
+                navigation.deviceMachineID = nil
             }
         }
         .task {
@@ -153,6 +184,16 @@ struct ClientDevicesView: View {
     /// This device first, then the busiest. Somebody scanning this list is
     /// looking for one of two things: the computer they are holding, or the one
     /// doing the work.
+    /// The machine another tab asked for, if the account still lists it.
+    ///
+    /// Resolved on every read rather than captured, because the account is
+    /// reloaded underneath this screen and a stale `Machine` would push a row
+    /// that no longer matches what the list shows.
+    private var requestedMachine: Machine? {
+        guard let wanted = navigation.deviceMachineID else { return nil }
+        return machines.first { $0.machineID == wanted }
+    }
+
     private var sorted: [Machine] {
         machines.sorted { a, b in
             if isThisDevice(a) != isThisDevice(b) { return isThisDevice(a) }
