@@ -163,7 +163,10 @@ struct ScreenInputSurface: NSViewRepresentable {
         }
 
         override func magnify(with event: NSEvent) {
-            guard enabled, let actions else { return }
+            // Zoom changes only this viewer. It is useful while watching and
+            // must not require permission to send mouse or keyboard input to
+            // the far end.
+            guard let actions else { return }
             actions.magnify(1 + event.magnification)
         }
 
@@ -266,7 +269,10 @@ struct ScreenInputSurface: UIViewRepresentable {
             self.actions = actions
             self.enabled = enabled
             self.mode = mode
-            isUserInteractionEnabled = enabled
+            // Pinch is local viewing, not remote control. Keep the surface in
+            // the gesture chain in view mode and let every input-sending
+            // handler enforce `enabled` itself.
+            isUserInteractionEnabled = true
         }
 
         func apply(modifiers value: UInt64) { modifiers = value }
@@ -532,49 +538,56 @@ struct ScreenKeyBar: View {
     ]
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Theme.Space.s) {
-                if let pointer {
-                    Button("click") { pointer.click(0, 1) }
-                        .buttonStyle(ScreenKeyStyle(active: false))
-                    Button("double") { pointer.click(0, 2) }
-                        .buttonStyle(ScreenKeyStyle(active: false))
-                    Button("right") { pointer.click(1, 1) }
-                        .buttonStyle(ScreenKeyStyle(active: false))
-                    // Latched rather than held: a finger cannot hold a button
-                    // on screen and drag with the same hand, which is what a
-                    // long press was asking for.
-                    Button(pointer.dragLatched ? "drop" : "drag") { pointer.toggleDrag() }
-                        .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched))
-                    Button("fine") { pointer.toggleFine() }
-                        .buttonStyle(ScreenKeyStyle(active: pointer.fine))
-                    if pointer.zoom > 1.01 {
-                        Button(String(format: "%.1fx", pointer.zoom)) { pointer.resetZoom() }
-                            .buttonStyle(ScreenKeyStyle(active: true))
+        HStack(spacing: 0) {
+            if let pointer {
+                // A held mouse button cannot scroll off screen: releasing it
+                // is the one pointer action that always has to be reachable.
+                Button(action: pointer.toggleDrag) {
+                    ActionIcon.move.label(pointer.dragLatched ? "Release" : "Hold")
+                }
+                .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched))
+                .padding(.leading, Theme.Space.m)
+                .padding(.trailing, Theme.Space.s)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Space.s) {
+                    if let pointer {
+                        Button("click") { pointer.click(0, 1) }
+                            .buttonStyle(ScreenKeyStyle(active: false))
+                        Button("double") { pointer.click(0, 2) }
+                            .buttonStyle(ScreenKeyStyle(active: false))
+                        Button("right") { pointer.click(1, 1) }
+                            .buttonStyle(ScreenKeyStyle(active: false))
+                        Button("fine") { pointer.toggleFine() }
+                            .buttonStyle(ScreenKeyStyle(active: pointer.fine))
+                        if pointer.zoom > 1.01 {
+                            Button(String(format: "%.1fx", pointer.zoom)) { pointer.resetZoom() }
+                                .buttonStyle(ScreenKeyStyle(active: true))
+                        }
+                        Divider().frame(height: 20)
+                    }
+                    ForEach(sticky, id: \.0) { name, flag in
+                        Button(name) { modifiers ^= flag }
+                            .buttonStyle(ScreenKeyStyle(active: modifiers & flag != 0))
                     }
                     Divider().frame(height: 20)
-                }
-                ForEach(sticky, id: \.0) { name, flag in
-                    Button(name) { modifiers ^= flag }
-                        .buttonStyle(ScreenKeyStyle(active: modifiers & flag != 0))
-                }
-                Divider().frame(height: 20)
-                ForEach(specials) { special in
-                    Button {
-                        send(special.code, modifiers)
-                        modifiers = 0
-                    } label: {
-                        if let symbol = special.symbol {
-                            Image(systemName: symbol)
-                        } else {
-                            Text(special.id)
+                    ForEach(specials) { special in
+                        Button {
+                            send(special.code, modifiers)
+                            modifiers = 0
+                        } label: {
+                            if let symbol = special.symbol {
+                                Image(systemName: symbol)
+                            } else {
+                                Text(special.id)
+                            }
                         }
+                        .buttonStyle(ScreenKeyStyle(active: false))
                     }
-                    .buttonStyle(ScreenKeyStyle(active: false))
                 }
+                .padding(.trailing, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
             }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.vertical, Theme.Space.s)
         }
         .background(.ultraThinMaterial)
     }

@@ -37,6 +37,9 @@ struct ScreenViewerView: View {
     @State private var keyboardWanted = false
     #if os(macOS)
     @State private var mode: ScreenPointerMode = .direct
+    @State private var viewerWindowWidth: CGFloat = 0
+    @State private var viewerIsFullScreen = false
+    @State private var viewerTitlebarInset: CGFloat = 0
     #else
     @State private var mode: ScreenPointerMode = .trackpad
     #endif
@@ -120,6 +123,14 @@ struct ScreenViewerView: View {
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             }
+            #if os(macOS)
+            ToolbarItem {
+                Button(viewerIsFullScreen ? "Exit full screen" : "Full screen", .external) {
+                    NSApp.keyWindow?.toggleFullScreen(nil)
+                }
+                .help(viewerIsFullScreen ? "Return this viewer to its window" : "Fill this display")
+            }
+            #endif
             #if !os(macOS)
             if controlling {
                 ToolbarItem {
@@ -156,9 +167,37 @@ struct ScreenViewerView: View {
                 ProgressView(value: progress).padding().background(.ultraThinMaterial, in: Capsule())
             }
         }
+        .overlay(alignment: .bottom) {
+            if dragLatched {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: ActionIcon.move.symbol)
+                    Text("Holding the left button — move the pointer, then Release")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.vertical, Theme.Space.s)
+                .background(Theme.accent, in: Capsule())
+                .padding(.bottom, Theme.Space.s)
+                .allowsHitTesting(false)
+            }
+        }
+        #if os(macOS)
+        .background {
+            WindowScreenObserver(
+                contentWidth: $viewerWindowWidth,
+                isFullScreen: $viewerIsFullScreen,
+                titlebarInset: $viewerTitlebarInset
+            )
+        }
+        #endif
         #if !os(macOS)
         .safeAreaInset(edge: .bottom) {
-            if controlling {
+            // Landscape is the full-screen viewing surface on a phone. The
+            // key row consumes too much of its short edge; rotate back for the
+            // keyboard controls, while pinch remains available in either
+            // view or control mode.
+            if controlling, !isCompactHeight {
                 ScreenKeyBar(
                     modifiers: $heldModifiers,
                     send: { code, flags in
