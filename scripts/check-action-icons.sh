@@ -67,6 +67,10 @@ ALLOWED = [
     # the label is the key, and a glyph beside "cmd" would be a second symbol
     # for one keystroke.
     ("Features/Machines/ScreenInputSurface.swift", "modifiers ^= flag"),
+    # A session tab on the phone's SSH terminal. The whole button is the
+    # session's name and its live dot, and every tab carrying the same glyph
+    # would be one symbol repeated across a strip that is already a strip.
+    ("Features/Machines/SSHLiveTerminal.swift", "sessions.select(other)"),
     # A colour swatch. The whole button is the colour, and a glyph on top of it
     # would hide the one thing it is showing.
     ("Features/Machines/SSHLibraryEditors.swift", "selection = selection == name ? nil : name"),

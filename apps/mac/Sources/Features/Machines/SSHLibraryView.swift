@@ -54,7 +54,12 @@ struct SSHLibraryView: View {
     @State private var section = Section.hosts
     @State private var route: SSHLibraryRoute?
     @State private var connecting: SSHHost?
-    @State private var terminal: SSHLiveTerminal?
+    /// Live sessions. Recreated with this screen, and that is fine: the shells
+    /// belong to the host process, so `reconcile` finds them again and reading
+    /// from offset zero replays what is still buffered. Leaving the screen
+    /// leaves them running, which is the whole change.
+    @State private var sessions = SSHSessionsModel()
+    @State private var showingTerminal = false
     @State private var vault = SSHVaultModel()
     @State private var showingVault = false
     @State private var expanded: Set<String> = []
@@ -75,10 +80,33 @@ struct SSHLibraryView: View {
                     library: model
                 )
             }
+            .task { await sessions.watch() }
             .sheet(item: $connecting) { host in
-                SSHConnectForm(host: host, model: model) { terminal = $0 }
+                SSHConnectForm(host: host, model: model) { session in
+                    sessions.adopt(session)
+                    showingTerminal = true
+                }
             }
-            .fullScreenCover(item: $terminal) { SSHLiveTerminalScreen(session: $0, library: model) }
+            .fullScreenCover(isPresented: $showingTerminal) {
+                if let session = sessions.selected {
+                    SSHLiveTerminalScreen(
+                        sessions: sessions,
+                        session: session,
+                        library: model,
+                        onNewSession: {
+                            guard let hostID = session.hostID,
+                                  let host = model.hosts.first(where: { $0.id == hostID })
+                            else { return }
+                            showingTerminal = false
+                            connecting = host
+                        }
+                    )
+                    // Keyed on the session, so switching tabs rebuilds the
+                    // screen around the new one rather than leaving the old
+                    // emulator mounted under a new title.
+                    .id(session.id)
+                }
+            }
     }
 
     // MARK: - The screen
@@ -198,6 +226,15 @@ struct SSHLibraryView: View {
         List {
             switch section {
             case .hosts:
+                // Live shells, above everything. A session outlives this
+                // screen now, so there has to be a way back to one: without
+                // this row a shell somebody left running is running with
+                // nothing on any screen that mentions it.
+                if !model.searching, !sessions.sessions.isEmpty {
+                    SwiftUI.Section("Open sessions") {
+                        ForEach(sessions.sessions) { session in sessionRow(session) }
+                    }
+                }
                 if !model.searching, !model.recentHosts.isEmpty {
                     SwiftUI.Section("Recent") {
                         ForEach(model.recentHosts) { host in hostRow(host, depth: 0) }
@@ -289,6 +326,31 @@ struct SSHLibraryView: View {
             Button("Delete folder", role: .destructive) {
                 Task { await model.delete(folder: folder) }
             }
+        }
+    }
+
+    /// One live session, as a way back into it.
+    private func sessionRow(_ session: SSHLiveTerminal) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            Circle()
+                .fill(session.alive ? Theme.accent : Theme.stateIdle)
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.title).lineLimit(1)
+                Text(session.alive ? "Running" : "Ended")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+        }
+        .frame(height: Theme.Control.rowHeight)
+        .contentShape(.rect)
+        .onTapGesture {
+            sessions.select(session)
+            showingTerminal = true
+        }
+        .swipeActions(edge: .trailing) {
+            Button("End", role: .destructive) { Task { await sessions.close(session) } }
         }
     }
 

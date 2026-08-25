@@ -187,24 +187,49 @@ private struct SSHNativeTerminal: UIViewRepresentable {
 }
 #endif
 
+/// One SSH session, full screen, with every other session on the same server
+/// a tab away.
+///
+/// Leaving does not end it. The shell belongs to the host process, and this
+/// screen used to stop it on `onDisappear`, which meant backing out to check
+/// an address killed whatever was running. Ending one is now something you
+/// ask for.
 struct SSHLiveTerminalScreen: View {
     @Environment(\.dismiss) private var dismiss
+    /// Which session is in front. The screen shows one of the model's, so a
+    /// tab is a change of selection rather than a new screen.
+    @Bindable var sessions: SSHSessionsModel
     let session: SSHLiveTerminal
     /// Saved snippets, so the bar can offer them. Nil where the screen was
     /// opened without a library beside it.
     var library: SSHLibraryModel?
+    /// Open another shell on the same server.
+    var onNewSession: (() -> Void)?
 
     @State private var asking: SSHSnippet?
+    @State private var confirmingClose = false
+
+    /// Every session on this session's server, which is what the strip shows.
+    private var siblings: [SSHLiveTerminal] {
+        guard let hostID = session.hostID else { return [session] }
+        return sessions.sessions(for: hostID)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Text(session.title).font(.headline)
+                if !session.alive {
+                    Text("ended").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                if session.closed { Text("Disconnected").foregroundStyle(.secondary) }
-                Button("Done", .done) { session.stop(); dismiss() }
+                Button("End session", .disconnect) { confirmingClose = true }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+                // "Done" leaves it running, which is why it is not "Close".
+                Button("Done", .done) { dismiss() }
             }
             .padding(Theme.Space.s)
+            if siblings.count > 1 { tabs }
             Divider()
             SSHNativeTerminal(session: session)
             #if !os(macOS)
@@ -224,12 +249,69 @@ struct SSHLiveTerminalScreen: View {
             #endif
         }
         .background(Color.black)
-        .onDisappear { session.stop() }
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in
                 session.sendBytes(Array(command.utf8))
             }
         }
+        .confirmationDialog("End this session?", isPresented: $confirmingClose, titleVisibility: .visible) {
+            Button("End session", role: .destructive) {
+                let doomed = session
+                dismiss()
+                Task { await sessions.close(doomed) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Whatever is running in it stops. Nothing else on the server changes.")
+        }
+    }
+
+    /// The other shells on this server, as a strip.
+    ///
+    /// A phone has no room for a split, so tabs are the whole of it. Same
+    /// idea as the Mac's pane: switching is a selection, and a session that
+    /// has ended keeps its tab because its last screenful is usually why
+    /// somebody is looking.
+    private var tabs: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: Theme.Space.xs) {
+                ForEach(siblings) { other in
+                    Button {
+                        sessions.select(other)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(other.alive ? Theme.accent : Theme.stateIdle)
+                                .frame(width: 6, height: 6)
+                            Text(other.title)
+                                .font(.caption)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, Theme.Space.s)
+                        .padding(.vertical, 5)
+                        .background(
+                            other.id == session.id ? Theme.panel : Color.clear,
+                            in: Capsule()
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(
+                                other.id == session.id ? Theme.border : .clear,
+                                lineWidth: 1
+                            )
+                        )
+                        .foregroundStyle(other.id == session.id ? Color.primary : Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let onNewSession {
+                    Button("New session", .create, action: onNewSession)
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
+            }
+            .padding(.horizontal, Theme.Space.s)
+            .padding(.bottom, Theme.Space.xs)
+        }
+        .scrollIndicators(.hidden)
     }
 
     /// Saved commands, as one key. Nil when there is nothing to offer, because
