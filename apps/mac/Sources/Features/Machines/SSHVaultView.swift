@@ -229,9 +229,10 @@ struct SSHVaultScreen: View {
                     // refused, and the sentence they got back was about a
                     // machine id rather than about the vault they already had.
                     if let unreachable = vault.unreachable {
+                        let friendly = FriendlyError.from(unreachable)
                         action(
-                            title: "The account could not be asked about your vault",
-                            detail: "\(FriendlyError.from(unreachable).message)\n\nAnything already saved on this computer still works.",
+                            title: friendly.title,
+                            detail: "\(friendly.message)\n\nAnything already saved on this computer still works.",
                             button: "Try again",
                             icon: .refresh,
                             prominent: true

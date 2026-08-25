@@ -704,7 +704,7 @@ fn with_machine_record<T>(
     mut call: impl FnMut() -> Result<T, tokenstat_sync::vault::VaultError>,
 ) -> Result<T, tokenstat_sync::vault::VaultError> {
     match call() {
-        Err(tokenstat_sync::vault::VaultError::MachineNotRegistered) => {
+        Err(tokenstat_sync::vault::VaultError::MachineNotRegistered(_)) => {
             tokenstat_sync::profile::publish_machine_profile(None)
                 .map_err(tokenstat_sync::vault::VaultError::Profile)?;
             call()
