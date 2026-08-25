@@ -35,6 +35,8 @@ struct SSHSessionInspector: View {
     /// selection on a screen nobody is looking at and draw nothing on this
     /// one.
     @State private var editing: SSHLibraryRoute?
+    /// The snippet whose deletion is waiting to be confirmed.
+    @State private var deleting: SSHSnippet?
 
     private var host: SSHHost? { model.hosts.first { $0.id == hostID } }
     private var available: [SSHSnippet] { model.snippets(for: hostID) }
@@ -79,6 +81,21 @@ struct SSHSessionInspector: View {
         .onChange(of: hostID) { _, _ in
             editing = nil
             asking = nil
+            deleting = nil
+        }
+        .confirmationDialog(
+            "Delete this snippet?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let doomed = deleting else { return }
+                deleting = nil
+                Task { await model.delete(snippet: doomed) }
+            }
+            Button("Cancel", role: .cancel) { deleting = nil }
+        } message: {
+            Text("It is removed from every device signed in to this account. Nothing on the server changes.")
         }
     }
 
@@ -199,6 +216,12 @@ struct SSHSessionInspector: View {
             }
             Divider()
             Button("Edit", .edit) { editing = .snippet(snippet.id) }
+            // Deleting from here used to mean opening the editor and finding
+            // the button in its footer, which is a long way round for a card
+            // that is right under the pointer. Behind a confirmation, unlike
+            // the library's own rows: this menu sits beside a live shell and a
+            // mis-click here is a mis-click during work.
+            Button("Delete", .delete, role: .destructive) { deleting = snippet }
         }
     }
 
