@@ -109,19 +109,24 @@ struct SSHSessionInspector: View {
     @ViewBuilder
     private var list: some View {
         if available.isEmpty {
-            VStack(spacing: Theme.Space.m) {
-                InspectorEmptyState(
-                    systemImage: "text.append",
-                    title: "No snippets yet",
-                    subtitle: "Save a command you run often and it lands here, one click from the prompt."
-                )
-                .fixedSize(horizontal: false, vertical: true)
+            // The button is handed to the empty state rather than stacked
+            // under it. Stacked, it was wrapped in a `fixedSize` to stop the
+            // empty state's infinite maximum height from pushing it to the
+            // floor of the pane, and asking a view with an infinite maximum
+            // for its ideal height resolves to something enormous: the pane
+            // grew taller than the window, the window's content overflowed,
+            // and the tab strip, the sidebar's Home row and the account
+            // footer were all clipped off the edges.
+            InspectorEmptyState(
+                systemImage: "text.append",
+                title: "No snippets yet",
+                subtitle: "Save a command you run often and it lands here, one click from the prompt."
+            ) {
                 Button("Add snippet", .create) { editing = .newSnippet }
                     .buttonStyle(AccentButtonStyle(small: true))
-                Spacer(minLength: 0)
+                    .padding(.top, Theme.Space.xs)
             }
             .padding(Theme.Space.m)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {

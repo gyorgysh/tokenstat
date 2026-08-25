@@ -10,13 +10,21 @@ import SwiftUI
 // MARK: - Shared empty-state chrome
 
 /// Centred icon + title + subtitle used by all three inspector tabs.
-struct InspectorEmptyState: View {
+///
+/// The whole thing is one centred group on purpose, including the optional
+/// call to action. A caller that stacked its own button under this view got a
+/// button pinned to the floor of the pane, because this view claims the height
+/// it is centred in, and a caller that reached for `fixedSize` to stop that got
+/// an infinite ideal height and a pane taller than the window. Hand the button
+/// in instead and it lands where the sentence it belongs to is.
+struct InspectorEmptyState<Action: View>: View {
     var systemImage: String = "circle"
     /// Product mark. Preferred over `systemImage` so the pane matches cards.
     var mark: String? = nil
     let title: String
     let subtitle: String
     var tint: Color = .secondary
+    @ViewBuilder var action: () -> Action
 
     var body: some View {
         VStack(spacing: 10) {
@@ -41,8 +49,28 @@ struct InspectorEmptyState: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 360)
+            action()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+extension InspectorEmptyState where Action == EmptyView {
+    init(
+        systemImage: String = "circle",
+        mark: String? = nil,
+        title: String,
+        subtitle: String,
+        tint: Color = .secondary
+    ) {
+        self.init(
+            systemImage: systemImage,
+            mark: mark,
+            title: title,
+            subtitle: subtitle,
+            tint: tint,
+            action: { EmptyView() }
+        )
     }
 }
 
