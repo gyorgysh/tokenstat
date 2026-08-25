@@ -168,7 +168,7 @@ final class SSHLibraryModel {
                     let synced = SSHVaultSyncedKey(
                         id: saved.id, label: saved.label, algorithm: saved.algorithm,
                         publicKey: saved.publicKey, privateKey: material,
-                        hardwareBacked: saved.hardwareBacked
+                        hardwareBacked: saved.hardwareBacked, updatedMs: saved.updatedMs
                     )
                     await mirror(id: "key:\(saved.id)", envelope: SSHVaultEnvelope(kind: "key", key: synced))
                 }
@@ -179,6 +179,53 @@ final class SSHLibraryModel {
             self.error = error.localizedDescription
             return nil
         }
+    }
+
+    /// Put everything on this device into a vault that has just been made.
+    ///
+    /// The other half of deleting a vault nobody can open. Deleting used to be
+    /// the end of the road: the account lost its vault and the person was left
+    /// on a screen offering to create an empty one, with their forty saved
+    /// servers sitting in `connections.json` a foot away. Those records are
+    /// not secrets, they are still here, and this is what carries them across.
+    ///
+    /// Keys come too when this device still holds the private half. One that
+    /// only ever existed in the deleted vault cannot be recovered by anybody,
+    /// which is said before the delete rather than discovered after it.
+    func seedVaultFromThisDevice(tier: String) async {
+        vaultTier = tier
+        vaultError = nil
+        // Folders before the hosts that name them, for the same reason the
+        // pull orders them: a client reading this back rejects a host whose
+        // folder it has not seen.
+        for folder in folders {
+            await mirror(id: "folder:\(folder.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: folder))
+        }
+        for host in hosts {
+            await mirror(id: "host:\(host.id)", envelope: SSHVaultEnvelope(kind: "host", host: host))
+        }
+        for snippet in snippets {
+            await mirror(id: "snippet:\(snippet.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: snippet))
+        }
+        for key in keys {
+            guard let material = try? SSHSecretStore.load(reference: key.secretRef) else { continue }
+            await mirror(id: "key:\(key.id)", envelope: SSHVaultEnvelope(
+                kind: "key",
+                key: SSHVaultSyncedKey(
+                    id: key.id, label: key.label, algorithm: key.algorithm,
+                    publicKey: key.publicKey, privateKey: material,
+                    hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
+                )
+            ))
+        }
+    }
+
+    /// Keys whose private half is not on this device.
+    ///
+    /// Named before a vault is deleted, because these are the ones nothing can
+    /// bring back: the row is here, the material was only in the vault.
+    var keysOnlyInTheVault: [SSHKeyRecord] {
+        keys.filter { (try? SSHSecretStore.load(reference: $0.secretRef)) == nil }
     }
 
     func delete(host: SSHHost) async {
@@ -218,10 +265,16 @@ final class SSHLibraryModel {
     /// Record that somebody actually used this host, so the list can lead with
     /// what they reach for. Never fails loudly: a bookkeeping write must not
     /// take a working connection away from anybody.
+    ///
+    /// Written without moving the merge stamp, and not mirrored. Connecting is
+    /// not an edit to the record: stamping it would make this device the
+    /// newest writer of a host somebody had just renamed elsewhere, and the
+    /// rename would lose to a connection nobody thinks of as a change. Which
+    /// server you reached for last is local recency and stays local.
     func noteConnection(_ host: SSHHost) async {
         var updated = host
         updated.lastConnectedMs = Int64(Date().timeIntervalSince1970 * 1000)
-        _ = try? await Bridge.saveSSHHost(updated)
+        _ = try? await Bridge.applySSHHost(updated)
         await reload()
     }
 
@@ -270,6 +323,18 @@ final class SSHLibraryModel {
 
     // MARK: - Reading the vault back
 
+    /// Merge the vault into what is on this device.
+    ///
+    /// A merge and not an overwrite. This used to write every arriving record
+    /// straight over the local one, which meant the oldest copy on the account
+    /// won: a device that had not been opened in a week put every host back in
+    /// the top level, forgot its colour and forgot which key it used, on every
+    /// launch. Worse, a save whose mirror had failed was reverted by the very
+    /// next load, so the edit looked like it had never been made.
+    ///
+    /// `updatedMs` decides it now. Newer wins, and a local record that is
+    /// newer is pushed back, so the account converges instead of disagreeing
+    /// quietly.
     private func pullVault(tier: String) async {
         guard let records = try? await Bridge.sshVaultRecords(recovery: "", tier: tier) else { return }
         var changed = false
@@ -279,6 +344,10 @@ final class SSHLibraryModel {
         // rest of the session. Sub-folders have the same rule about parents.
         for record in ordered(records) {
             if record.deleted == true {
+                // A tombstone carries no timestamp, so there is nothing to
+                // compare it against. Deleting is explicit and re-creating is
+                // cheap, where ignoring a delete would leave a host somebody
+                // removed on their phone alive on every other device forever.
                 changed = await applyDeletion(record.id) || changed
                 continue
             }
@@ -287,23 +356,102 @@ final class SSHLibraryModel {
             else { continue }
             do {
                 if let host = envelope.host {
-                    _ = try await Bridge.saveSSHHost(host); changed = true
+                    switch verdict(remote: host.updatedMs, local: hosts.first { $0.id == host.id }?.updatedMs) {
+                    case .takeRemote:
+                        _ = try await Bridge.applySSHHost(host)
+                        changed = true
+                    case .pushLocal:
+                        if let mine = hosts.first(where: { $0.id == host.id }) {
+                            await mirror(id: "host:\(mine.id)", envelope: SSHVaultEnvelope(kind: "host", host: mine))
+                        }
+                    case .same:
+                        break
+                    }
                 } else if let folder = envelope.folder {
-                    _ = try await Bridge.saveSSHFolder(folder); changed = true
+                    switch verdict(remote: folder.updatedMs, local: folders.first { $0.id == folder.id }?.updatedMs) {
+                    case .takeRemote:
+                        _ = try await Bridge.applySSHFolder(folder)
+                        changed = true
+                    case .pushLocal:
+                        if let mine = folders.first(where: { $0.id == folder.id }) {
+                            await mirror(id: "folder:\(mine.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: mine))
+                        }
+                    case .same:
+                        break
+                    }
                 } else if let snippet = envelope.snippet {
-                    _ = try await Bridge.saveSSHSnippet(snippet); changed = true
+                    switch verdict(remote: snippet.updatedMs, local: snippets.first { $0.id == snippet.id }?.updatedMs) {
+                    case .takeRemote:
+                        _ = try await Bridge.applySSHSnippet(snippet)
+                        changed = true
+                    case .pushLocal:
+                        if let mine = snippets.first(where: { $0.id == snippet.id }) {
+                            await mirror(id: "snippet:\(mine.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: mine))
+                        }
+                    case .same:
+                        break
+                    }
                 } else if let key = envelope.key {
-                    let reference = try SSHSecretStore.store(key.privateKey, id: key.id)
-                    _ = try await Bridge.saveSSHKey(SSHKeyRecord(
-                        id: key.id, label: key.label, algorithm: key.algorithm,
-                        publicKey: key.publicKey, secretRef: reference,
-                        hardwareBacked: key.hardwareBacked
-                    ))
-                    changed = true
+                    changed = await applyKey(key) || changed
                 }
             } catch { self.error = error.localizedDescription }
         }
         if changed { await reload() }
+    }
+
+    /// A key is the one record where an equal stamp still means work: the row
+    /// can be here while the private half is not, which is what a freshly
+    /// enrolled device looks like.
+    private func applyKey(_ key: SSHVaultSyncedKey) async -> Bool {
+        let local = keys.first { $0.id == key.id }
+        let havePrivate = local.map { (try? SSHSecretStore.load(reference: $0.secretRef)) != nil } ?? false
+        let take = verdict(remote: key.updatedMs, local: local?.updatedMs)
+        if take == .takeRemote || (take == .same && !havePrivate) {
+            do {
+                let reference = try SSHSecretStore.store(key.privateKey, id: key.id)
+                _ = try await Bridge.applySSHKey(SSHKeyRecord(
+                    id: key.id, label: key.label, algorithm: key.algorithm,
+                    publicKey: key.publicKey, secretRef: reference,
+                    hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
+                ))
+                return true
+            } catch {
+                self.error = error.localizedDescription
+                return false
+            }
+        }
+        if take == .pushLocal, let mine = local,
+           let material = try? SSHSecretStore.load(reference: mine.secretRef) {
+            await mirror(id: "key:\(mine.id)", envelope: SSHVaultEnvelope(
+                kind: "key",
+                key: SSHVaultSyncedKey(
+                    id: mine.id, label: mine.label, algorithm: mine.algorithm,
+                    publicKey: mine.publicKey, privateKey: material,
+                    hardwareBacked: mine.hardwareBacked, updatedMs: mine.updatedMs
+                )
+            ))
+        }
+        return false
+    }
+
+    /// What to do with one arriving record.
+    enum MergeVerdict {
+        /// The vault's copy is newer, or this device has never seen the record.
+        case takeRemote
+        /// This device's copy is newer, so the vault is the one that is behind.
+        case pushLocal
+        /// The same revision on both sides.
+        case same
+    }
+
+    /// Newer wins. A record this device does not have is always taken, and a
+    /// record written by a build from before stamps existed reads as 0, which
+    /// loses to anything stamped and ties with anything else that never was.
+    func verdict(remote: Int64, local: Int64?) -> MergeVerdict {
+        guard let local else { return .takeRemote }
+        if remote > local { return .takeRemote }
+        if local > remote { return .pushLocal }
+        return .same
     }
 
     /// Folder records first, each after its own parent, then the rest in the
@@ -451,6 +599,9 @@ struct SSHVaultSyncedKey: Codable {
     var publicKey: String
     var privateKey: String
     var hardwareBacked: Bool
+    /// Missing on records written by a build without merge stamps, which reads
+    /// as 0 and loses to anything stamped.
+    var updatedMs: Int64 = 0
 }
 
 private extension String {

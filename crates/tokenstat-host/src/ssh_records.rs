@@ -66,6 +66,14 @@ pub struct SshHost {
     /// still lists in a stable order.
     #[serde(default)]
     pub sort: u32,
+    /// When this record last changed, as milliseconds since the epoch.
+    ///
+    /// The vault merges on this and nothing else. Without it a pull applied
+    /// every remote record over the local one regardless of age, so a device
+    /// holding a stale copy put a host back in the top level and forgot its
+    /// colour and its key every time the app started.
+    #[serde(default)]
+    pub updated_ms: i64,
 }
 
 /// One environment variable for a saved host.
@@ -93,6 +101,8 @@ pub struct SshFolder {
     pub color: Option<String>,
     #[serde(default)]
     pub sort: u32,
+    #[serde(default)]
+    pub updated_ms: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -127,6 +137,8 @@ pub struct SshKey {
     /// passphrase itself is never stored here or anywhere else.
     #[serde(default)]
     pub passphrase_protected: bool,
+    #[serde(default)]
+    pub updated_ms: i64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -147,6 +159,8 @@ pub struct SshSnippet {
     pub variables: Vec<String>,
     #[serde(default)]
     pub run_on_connect: bool,
+    #[serde(default)]
+    pub updated_ms: i64,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -248,6 +262,39 @@ struct IdParam {
     id: String,
 }
 
+/// Rides alongside a record on a save. Off, which is every save a person
+/// makes, the record is stamped with the time it was written here. On, a
+/// caller that is applying somebody else's already-timestamped record keeps
+/// the stamp that record arrived with.
+///
+/// Only the vault pull sets it. Stamping a pulled record with the local clock
+/// would make this device look like the author of a change it merely received,
+/// and it would push that record straight back over the newer one it just
+/// declined to overwrite.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveFlags {
+    #[serde(default)]
+    keep_updated_ms: bool,
+}
+
+impl SaveFlags {
+    fn read(params: &str) -> Self {
+        serde_json::from_str(params).unwrap_or_default()
+    }
+
+    /// The stamp a save should end up with. A caller that asked to keep one
+    /// and sent nothing still gets a stamp: a zero would sort below every
+    /// record ever written and lose every merge it ever entered.
+    fn stamp(&self, current: i64) -> i64 {
+        if self.keep_updated_ms && current > 0 {
+            current
+        } else {
+            now_ms()
+        }
+    }
+}
+
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("ssh.host.")
         && !method.starts_with("ssh.key.")
@@ -295,6 +342,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             if item.id.is_empty() {
                 item.id = id("host")?;
             }
+            item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.hosts, item.clone(), |x| &x.id);
             save_to(&path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
@@ -324,6 +372,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             if item.created_ms == 0 {
                 item.created_ms = now_ms();
             }
+            item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.keys, item.clone(), |x| &x.id);
             save_to(&path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
@@ -343,6 +392,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             if item.id.is_empty() {
                 item.id = id("snippet")?;
             }
+            item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.snippets, item.clone(), |x| &x.id);
             save_to(&path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
@@ -376,6 +426,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                     return Err("that move would put a folder inside itself".into());
                 }
             }
+            item.updated_ms = SaveFlags::read(params).stamp(item.updated_ms);
             upsert(&mut store.folders, item.clone(), |x| &x.id);
             save_to(&path, &store)?;
             serde_json::to_value(item).map_err(|e| e.to_string())
@@ -393,14 +444,21 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             store.folders.retain(|f| f.id != p.id);
             let removed = before != store.folders.len();
             if removed {
+                // Reparenting is a change to each child, not only to the
+                // folder that went. Stamping them is what lets the vault carry
+                // the move: without it the other devices merge the children
+                // back under a folder that no longer exists.
+                let now = now_ms();
                 for folder in store.folders.iter_mut() {
                     if folder.parent_id.as_deref() == Some(p.id.as_str()) {
                         folder.parent_id = parent.clone();
+                        folder.updated_ms = now;
                     }
                 }
                 for host in store.hosts.iter_mut() {
                     if host.folder_id.as_deref() == Some(p.id.as_str()) {
                         host.folder_id = parent.clone();
+                        host.updated_ms = now;
                     }
                 }
                 save_to(&path, &store)?;
@@ -433,6 +491,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                 .ok_or("that host no longer exists")?;
             host.folder_id = p.folder_id;
             host.sort = p.sort;
+            host.updated_ms = now_ms();
             let moved = host.clone();
             save_to(&path, &store)?;
             serde_json::to_value(moved).map_err(|e| e.to_string())
@@ -756,6 +815,31 @@ mod tests {
             std::process::id(),
             SEQ.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn a_save_stamps_the_record_and_keep_flag_preserves_it() {
+        let flags = SaveFlags::read(r#"{"label":"VPS"}"#);
+        assert!(!flags.keep_updated_ms);
+        let fresh = flags.stamp(1_000);
+        assert!(fresh > 1_000, "a plain save stamps with the local clock");
+
+        let keeping = SaveFlags::read(r#"{"label":"VPS","keepUpdatedMs":true}"#);
+        assert!(keeping.keep_updated_ms);
+        assert_eq!(
+            keeping.stamp(1_000),
+            1_000,
+            "a record applied from the vault keeps the stamp it arrived with"
+        );
+    }
+
+    #[test]
+    fn an_unstamped_record_is_stamped_even_when_the_stamp_is_kept() {
+        // Records written before merge stamps existed carry 0. Keeping that
+        // would leave them below every stamped record forever, so they lose
+        // every merge they ever enter.
+        let keeping = SaveFlags::read(r#"{"keepUpdatedMs":true}"#);
+        assert!(keeping.stamp(0) > 0);
     }
 
     #[test]

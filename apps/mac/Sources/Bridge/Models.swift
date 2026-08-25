@@ -39,6 +39,9 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
     var lastConnectedMs: Int64?
     var favorite: Bool = false
     var sort: Int = 0
+    /// When this record last changed. The vault merges on this: a pulled
+    /// record is applied only when it is newer than the one already here.
+    var updatedMs: Int64 = 0
 
     /// The address as somebody would type it into a terminal.
     var address: String { "\(username)@\(hostname):\(port)" }
@@ -56,6 +59,9 @@ struct SSHFolder: Codable, Sendable, Hashable, Identifiable {
     var parentID: String?
     var color: String?
     var sort: Int = 0
+    /// When this record last changed. The vault merges on this: a pulled
+    /// record is applied only when it is newer than the one already here.
+    var updatedMs: Int64 = 0
 }
 
 /// The fixed palette both ends agree on.
@@ -90,6 +96,9 @@ struct SSHKeyRecord: Codable, Sendable, Hashable, Identifiable {
     var fingerprint: String = ""
     var createdMs: Int64 = 0
     var passphraseProtected: Bool = false
+    /// When this record last changed. The vault merges on this: a pulled
+    /// record is applied only when it is newer than the one already here.
+    var updatedMs: Int64 = 0
 }
 
 struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
@@ -102,6 +111,9 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
     /// never stored: the useful ones are secrets.
     var variables: [String] = []
     var runOnConnect: Bool = false
+    /// When this record last changed. The vault merges on this: a pulled
+    /// record is applied only when it is newer than the one already here.
+    var updatedMs: Int64 = 0
 
     /// `{{name}}` occurrences, in the order they appear. The editor keeps
     /// `variables` in step with this so a client never has to parse it.

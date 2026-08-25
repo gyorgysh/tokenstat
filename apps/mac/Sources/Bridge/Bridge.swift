@@ -1744,6 +1744,35 @@ extension Bridge {
         try await background("ssh.host.save", try payload(host), as: SSHHost.self)
     }
 
+    /// Write a record that arrived from the vault, keeping the timestamp it
+    /// came with.
+    ///
+    /// The plain save stamps the record with this machine's clock, which is
+    /// right for something a person just typed and wrong for something this
+    /// machine only received: it would make the copy look newer than the one
+    /// it was copied from and push it straight back.
+    static func applySSHHost(_ host: SSHHost) async throws -> SSHHost {
+        try await background("ssh.host.save", try keepingStamp(host), as: SSHHost.self)
+    }
+
+    static func applySSHFolder(_ folder: SSHFolder) async throws -> SSHFolder {
+        try await background("ssh.folder.save", try keepingStamp(folder), as: SSHFolder.self)
+    }
+
+    static func applySSHSnippet(_ snippet: SSHSnippet) async throws -> SSHSnippet {
+        try await background("ssh.snippet.save", try keepingStamp(snippet), as: SSHSnippet.self)
+    }
+
+    static func applySSHKey(_ key: SSHKeyRecord) async throws -> SSHKeyRecord {
+        try await background("ssh.key.save", try keepingStamp(key), as: SSHKeyRecord.self)
+    }
+
+    private static func keepingStamp<T: Encodable>(_ value: T) throws -> [String: Any] {
+        var object = try payload(value)
+        object["keepUpdatedMs"] = true
+        return object
+    }
+
     static func deleteSSHHost(id: String) async throws {
         _ = try await background("ssh.host.delete", ["id": id], as: Removed.self)
     }
