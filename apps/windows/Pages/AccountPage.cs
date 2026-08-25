@@ -86,6 +86,22 @@ internal sealed class AccountPage : Page
                     },
                 });
             }
+            body.Children.Add(ActionIconGlyph.Button("Sync", ActionIcon.Refresh, async (_, _) =>
+            {
+                try
+                {
+                    await AppServices.Host.CallAsync(
+                        "sync.run",
+                        new JsonObject(),
+                        TimeSpan.FromMinutes(5));
+                }
+                catch (Exception ex)
+                {
+                    _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+                    return;
+                }
+                await LoadAsync();
+            }));
             body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
             {
                 try { await AppServices.Host.CallAsync("account.logout"); }

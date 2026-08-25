@@ -65,13 +65,14 @@ case-insensitive, and `tokenstat.exe` would overwrite the app.
 
 ## Design
 
-Colours and IA match the Mac app (`Theme`, Home / Insights / Devices / Tasks /
+Colours and IA match the Mac app (`Theme`, Home / Insights / Devices / SSH / Tasks /
 Notes / Workflows / Automations / Account, plus folders). Buttons pick glyphs
 from `Design/ActionIcon.cs`, the same vocabulary as
 `apps/mac/Sources/Design/ActionIcon.swift`.
 
-Terminal, the canvas editor, and live screen share are not in this first cut.
-The boards and reports are.
+Terminals, SSH password and key connect, Notes, Workflows, Automations,
+Browser, and Legend screen share (JPEG stills) are in this cut. The canvas
+editor is not. The boards and reports are.
 
 ## Icon
 

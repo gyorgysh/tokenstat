@@ -159,4 +159,26 @@ internal static class Chrome
             Margin = new Thickness(1),
         };
     }
+
+    /// <summary>
+    /// Show a dialog owned by a page. Returns <see cref="ContentDialogResult.None"/>
+    /// when the page is not in the tree yet, rather than throwing.
+    /// </summary>
+    public static async Task<ContentDialogResult> ShowDialog(UIElement owner, ContentDialog dialog)
+    {
+        var root = owner.XamlRoot;
+        if (root is null)
+        {
+            return ContentDialogResult.None;
+        }
+        dialog.XamlRoot = root;
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        catch
+        {
+            return ContentDialogResult.None;
+        }
+    }
 }

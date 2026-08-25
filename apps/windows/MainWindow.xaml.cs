@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window
         SelectsOnInvoked = false,
         IsEnabled = false,
     };
+    private UIElement? _hostSplash;
 
     public MainWindow()
     {
@@ -66,6 +67,28 @@ public sealed partial class MainWindow : Window
         _nav.SelectionChanged += NavOnSelectionChanged;
         RootGrid.Children.Add(_nav);
 
+        AppServices.OpenTerminal = (workspaceId, sessionId) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _frame.Content = new TerminalPage(workspaceId, sessionId);
+            });
+        };
+        AppServices.OpenBrowser = (url, host, port, unlisten) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _frame.Content = new BrowserPage(url, host, port, unlisten);
+            });
+        };
+        AppServices.OpenScreen = (peer, name) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _frame.Content = new ScreenPage(peer, name);
+            });
+        };
+
         if (_nav.MenuItems[0] is NavigationViewItem first)
         {
             _nav.SelectedItem = first;
@@ -88,63 +111,95 @@ public sealed partial class MainWindow : Window
     private async Task LoadWorkspacesAsync()
     {
         JsonNode listed;
-        try
+        while (true)
         {
-            listed = await AppServices.Host.CallAsync("workspace.list");
-        }
-        catch
-        {
-            return;
+            try
+            {
+                listed = await AppServices.Host.CallAsync("workspace.list");
+                break;
+            }
+            catch
+            {
+                DispatcherQueue.TryEnqueue(ShowHostSplash);
+                try
+                {
+                    await Task.Delay(1000);
+                }
+                catch
+                {
+                    return;
+                }
+            }
         }
         var array = listed as JsonArray
             ?? listed["folders"] as JsonArray
             ?? listed["workspaces"] as JsonArray;
-        if (array is null)
-        {
-            return;
-        }
 
         DispatcherQueue.TryEnqueue(() =>
         {
-            var keep = new List<object>();
-            foreach (var item in _nav.MenuItems)
+            if (array is not null)
             {
-                if (item is NavigationViewItem nav && (nav.Tag as string)?.StartsWith("ws:") == true)
+                var keep = new List<object>();
+                foreach (var item in _nav.MenuItems)
                 {
-                    continue;
-                }
-                keep.Add(item);
-            }
-            _nav.MenuItems.Clear();
-            foreach (var item in keep)
-            {
-                _nav.MenuItems.Add(item);
-            }
-            foreach (var folder in array)
-            {
-                var id = Format.Text(folder, "id");
-                var name = Format.Text(folder, "name", Format.Text(folder, "path", id));
-                if (string.IsNullOrEmpty(id))
-                {
-                    continue;
-                }
-                var parent = new NavigationViewItem
-                {
-                    Content = name,
-                    Tag = "ws:" + id + ":Files",
-                    Icon = new SymbolIcon { Symbol = Symbol.Folder },
-                };
-                foreach (var section in Enum.GetValues<WorkspaceSection>())
-                {
-                    parent.MenuItems.Add(new NavigationViewItem
+                    if (item is NavigationViewItem nav && (nav.Tag as string)?.StartsWith("ws:") == true)
                     {
-                        Content = section.Label(),
-                        Tag = "ws:" + id + ":" + section,
-                    });
+                        continue;
+                    }
+                    keep.Add(item);
                 }
-                _nav.MenuItems.Add(parent);
+                _nav.MenuItems.Clear();
+                foreach (var item in keep)
+                {
+                    _nav.MenuItems.Add(item);
+                }
+                foreach (var folder in array)
+                {
+                    var id = Format.Text(folder, "id");
+                    var name = Format.Text(folder, "name", Format.Text(folder, "path", id));
+                    if (string.IsNullOrEmpty(id))
+                    {
+                        continue;
+                    }
+                    var parent = new NavigationViewItem
+                    {
+                        Content = name,
+                        Tag = "ws:" + id + ":Files",
+                        Icon = new SymbolIcon { Symbol = Symbol.Folder },
+                    };
+                    foreach (var section in Enum.GetValues<WorkspaceSection>())
+                    {
+                        parent.MenuItems.Add(new NavigationViewItem
+                        {
+                            Content = section.Label(),
+                            Tag = "ws:" + id + ":" + section,
+                        });
+                    }
+                    _nav.MenuItems.Add(parent);
+                }
             }
+            if (_frame.Content == _hostSplash
+                && _nav.SelectedItem is NavigationViewItem selected
+                && selected.Tag is string tag)
+            {
+                Show(tag);
+            }
+            _hostSplash = null;
         });
+    }
+
+    private void ShowHostSplash()
+    {
+        if (_hostSplash is not null && _frame.Content != _hostSplash)
+        {
+            return;
+        }
+        _hostSplash = new ScrollViewer
+        {
+            Padding = new Thickness(Theme.SpaceL),
+            Content = Chrome.Banner("Host is starting…", Theme.Accent, Symbol.Refresh),
+        };
+        _frame.Content = _hostSplash;
     }
 
     private void NavOnSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -168,19 +223,11 @@ public sealed partial class MainWindow : Window
                     GlobalSection.Home => new HomePage(),
                     GlobalSection.Insights => new InsightsPage(),
                     GlobalSection.Machines => new MachinesPage(),
+                    GlobalSection.Ssh => new SshPage(),
                     GlobalSection.Todo => new TodoPage(),
-                    GlobalSection.Notes => new ListPage(
-                        "todo.list", "Notes", "No notes yet",
-                        "Notes share the tasks store on this machine.",
-                        Symbol.OpenFile, kindEquals: "note"),
-                    GlobalSection.Workflows => new ListPage(
-                        "workflow.list", "Workflows", "No workflows yet",
-                        "Design a workflow on a Mac, then it shows up here.",
-                        Symbol.Switch, "name"),
-                    GlobalSection.Automations => new ListPage(
-                        "automation.list", "Automations", "No automations yet",
-                        "Scheduled jobs run on this host when Always-on is on.",
-                        Symbol.Flag, "name"),
+                    GlobalSection.Notes => new NotesPage(),
+                    GlobalSection.Workflows => new WorkflowsPage(),
+                    GlobalSection.Automations => new AutomationsPage(),
                     GlobalSection.Account => new AccountPage(),
                     GlobalSection.About => new AboutPage(),
                     _ => new AboutPage(),
@@ -195,7 +242,14 @@ public sealed partial class MainWindow : Window
             if (i > 0
                 && Enum.TryParse<WorkspaceSection>(rest[(i + 1)..], out var section))
             {
-                _frame.Content = new WorkspacePage(rest[..i], section);
+                var id = rest[..i];
+                _frame.Content = section switch
+                {
+                    WorkspaceSection.Notes => new NotesPage(id),
+                    WorkspaceSection.Workflows => new WorkflowsPage(id),
+                    WorkspaceSection.Automations => new AutomationsPage(id),
+                    _ => new WorkspacePage(id, section),
+                };
             }
         }
     }

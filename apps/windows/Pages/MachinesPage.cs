@@ -55,6 +55,18 @@ internal sealed class MachinesPage : Page
         }
 
         var thisId = Format.Text(account, "thisMachineId");
+        var tier = Format.Text(account, "tier");
+        var isLegend = Format.IsLegend(tier);
+        var thisKey = "";
+        try
+        {
+            var identity = await AppServices.Host.CallAsync("machine.identity");
+            thisKey = Format.Text(identity, "key");
+        }
+        catch
+        {
+            // Viewing still works from publicIdentity on the record.
+        }
         var machines = account["machines"] as JsonArray;
         if (machines is null || machines.Count == 0)
         {
@@ -65,21 +77,182 @@ internal sealed class MachinesPage : Page
             return;
         }
 
-        var list = new StackPanel { Spacing = Theme.SpaceS };
+        var list = new StackPanel { Spacing = Theme.SpaceM };
+        var viewable = 0;
         foreach (var machine in machines)
         {
             var id = Format.Text(machine, "id");
             var name = Format.Text(machine, "label", Format.Text(machine, "name", id));
             var kind = Format.Text(machine, "kind");
-            var online = Format.Flag(machine, "online") ? "online" : "";
-            var mine = id == thisId ? "this device" : "";
-            var bits = new[] { name, kind, online, mine }.Where(s => s.Length > 0);
-            list.Children.Add(new TextBlock
+            var online = Format.Flag(machine, "online");
+            var mine = id == thisId;
+            if (string.IsNullOrEmpty(id))
             {
-                Text = string.Join(" · ", bits),
+                continue;
+            }
+
+            var bits = new List<string>();
+            if (online)
+            {
+                bits.Add("online");
+            }
+            if (mine)
+            {
+                bits.Add("this device");
+            }
+            if (!string.IsNullOrEmpty(kind))
+            {
+                bits.Add(kind);
+            }
+
+            var body = new StackPanel { Spacing = Theme.SpaceS };
+            body.Children.Add(new TextBlock
+            {
+                Text = name,
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextWrapping = TextWrapping.Wrap,
             });
+            if (bits.Count > 0)
+            {
+                body.Children.Add(new TextBlock
+                {
+                    Text = string.Join(" · ", bits),
+                    Opacity = 0.7,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+
+            var machineId = id;
+            var machineName = name;
+            var peer = Format.Text(machine, "publicIdentity");
+            var kindLower = kind.ToLowerInvariant();
+            var isClient = kindLower == "client";
+            var isThis = mine || (!string.IsNullOrEmpty(thisKey) && peer == thisKey);
+            var actions = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = Theme.SpaceS,
+            };
+            if (!isThis && !isClient)
+            {
+                viewable++;
+                var peerKey = peer;
+                var label = machineName;
+                var subtitle = isLegend
+                    ? "End-to-end encrypted from this device."
+                    : "Requires Legend";
+                actions.Children.Add(ActionIconGlyph.Button("View screen", ActionIcon.Preview, (_, _) =>
+                {
+                    if (string.IsNullOrEmpty(peerKey))
+                    {
+                        _root.Children.Insert(1, Chrome.Banner(
+                            "No other host to view. Screen share is for another machine on this account.",
+                            Theme.Accent,
+                            Symbol.View));
+                        return;
+                    }
+                    var open = AppServices.OpenScreen;
+                    if (open is null)
+                    {
+                        _root.Children.Insert(1, Chrome.Banner(
+                            "Screen share is not wired in this window.",
+                            Theme.Danger,
+                            Symbol.Important));
+                        return;
+                    }
+                    open(peerKey, label);
+                }));
+                body.Children.Add(new TextBlock
+                {
+                    Text = subtitle,
+                    Opacity = 0.7,
+                    TextWrapping = TextWrapping.Wrap,
+                });
+            }
+            actions.Children.Add(ActionIconGlyph.Button("Rename", ActionIcon.Edit, async (_, _) =>
+            {
+                await RenameAsync(machineId, machineName);
+            }));
+            actions.Children.Add(ActionIconGlyph.Button("Unlink", ActionIcon.Disconnect, async (_, _) =>
+            {
+                await UnlinkAsync(machineId, machineName);
+            }));
+            body.Children.Add(actions);
+            list.Children.Add(body);
+        }
+        if (viewable == 0)
+        {
+            _root.Children.Add(Chrome.Banner(
+                "No other host to view. Screen share is for another machine on this account.",
+                Theme.Accent,
+                Symbol.View));
         }
         _root.Children.Add(Chrome.Card("Devices", list));
+    }
+
+    private async Task RenameAsync(string id, string current)
+    {
+        var box = new TextBox { Text = current, PlaceholderText = "Device name" };
+        var dialog = new ContentDialog
+        {
+            Title = "Rename device",
+            Content = box,
+            PrimaryButtonText = "Save",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        var name = box.Text.Trim();
+        if (name.Length == 0)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "account.renameMachine",
+                new JsonObject { ["id"] = id, ["name"] = name });
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task UnlinkAsync(string id, string name)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = "Unlink this device?",
+            Content = new TextBlock
+            {
+                Text = $"{name} will leave the account. Sign in again on that machine to link it.",
+                TextWrapping = TextWrapping.Wrap,
+            },
+            PrimaryButtonText = "Unlink",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+        try
+        {
+            await AppServices.Host.CallAsync(
+                "account.unlinkMachine",
+                new JsonObject { ["id"] = id });
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Insert(1, Chrome.Banner(ex.Message, Theme.Danger, Symbol.Important));
+            return;
+        }
+        await LoadAsync();
     }
 }
