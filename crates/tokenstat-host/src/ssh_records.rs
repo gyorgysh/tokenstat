@@ -1087,4 +1087,180 @@ Host db
         assert!(validate_env_name("TE RM").is_err());
         assert!(validate_env_name("").is_err());
     }
+
+    /// The exact keys each record puts on the wire.
+    ///
+    /// Pinned rather than derived, because the clients hard-code the other
+    /// side of this and nothing at runtime notices when the two disagree.
+    /// Serde's camelCase makes `folder_id` into `folderId`; a client asking
+    /// for `folderID` gets a silent `None` on the way in and a dropped field
+    /// on the way out, which is exactly how a saved server kept forgetting
+    /// which folder it was in. Renaming a field here is a protocol change and
+    /// has to be made in the clients in the same commit.
+    #[test]
+    fn record_wire_keys_are_the_ones_clients_expect() {
+        fn keys(value: Value) -> Vec<String> {
+            let mut out: Vec<String> = value
+                .as_object()
+                .expect("record serializes as an object")
+                .keys()
+                .cloned()
+                .collect();
+            out.sort();
+            out
+        }
+
+        let host = SshHost {
+            label: "s".into(),
+            hostname: "h".into(),
+            username: "u".into(),
+            credential_id: Some("k".into()),
+            jump_host_id: Some("j".into()),
+            folder_id: Some("f".into()),
+            color: Some("violet".into()),
+            provider: Some(ProviderRef {
+                kind: "cloud".into(),
+                resource_id: "r".into(),
+                region: Some("eu".into()),
+            }),
+            last_connected_ms: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(
+            keys(serde_json::to_value(&host).expect("host serializes")),
+            vec![
+                "agentForwarding",
+                "color",
+                "credentialId",
+                "env",
+                "favorite",
+                "folderId",
+                "hostKeys",
+                "hostname",
+                "id",
+                "initialDirectory",
+                "jumpHostId",
+                "keepaliveSeconds",
+                "label",
+                "lastConnectedMs",
+                "port",
+                "provider",
+                "sort",
+                "tags",
+                "updatedMs",
+                "username",
+            ]
+        );
+        assert_eq!(
+            keys(serde_json::to_value(host.provider.expect("set above")).expect("ref serializes")),
+            vec!["kind", "region", "resourceId"]
+        );
+
+        let folder = SshFolder {
+            name: "f".into(),
+            parent_id: Some("p".into()),
+            color: Some("blue".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            keys(serde_json::to_value(&folder).expect("folder serializes")),
+            vec!["color", "id", "name", "parentId", "sort", "updatedMs"]
+        );
+
+        let snippet = SshSnippet {
+            title: "t".into(),
+            command: "c".into(),
+            host_ids: vec!["h".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            keys(serde_json::to_value(&snippet).expect("snippet serializes")),
+            vec![
+                "command",
+                "hostIds",
+                "id",
+                "runOnConnect",
+                "tags",
+                "title",
+                "updatedMs",
+                "variables",
+            ]
+        );
+
+        let key = SshKey {
+            label: "k".into(),
+            algorithm: "ssh-ed25519".into(),
+            public_key: "p".into(),
+            secret_ref: "keychain:k".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            keys(serde_json::to_value(&key).expect("key serializes")),
+            vec![
+                "algorithm",
+                "createdMs",
+                "fingerprint",
+                "hardwareBacked",
+                "id",
+                "label",
+                "passphraseProtected",
+                "publicKey",
+                "secretRef",
+                "updatedMs",
+            ]
+        );
+    }
+
+    /// The payload a client sends is the payload that lands in the record.
+    ///
+    /// The regression this pins is not a parser bug: the client sent
+    /// `folderID`, serde ignored the unknown key, and the save reported
+    /// success while dropping the folder, the key and the jump host on every
+    /// write. Reading the misspelling back as `None` is the assertion that
+    /// matters, because that is the half nothing at runtime complains about.
+    #[test]
+    fn a_host_payload_is_read_with_the_camel_case_ids() {
+        let sent = json!({
+            "label": "server-infra-1",
+            "hostname": "example.test",
+            "username": "root",
+            "port": 22,
+            "credentialId": "key_1",
+            "jumpHostId": "host_2",
+            "folderId": "folder_3",
+        });
+        let host: SshHost = serde_json::from_str(&sent.to_string()).expect("payload parses");
+        assert_eq!(host.folder_id.as_deref(), Some("folder_3"));
+        assert_eq!(host.credential_id.as_deref(), Some("key_1"));
+        assert_eq!(host.jump_host_id.as_deref(), Some("host_2"));
+
+        let misspelled = json!({
+            "label": "server-infra-1",
+            "hostname": "example.test",
+            "username": "root",
+            "folderID": "folder_3",
+            "credentialID": "key_1",
+        });
+        let dropped: SshHost =
+            serde_json::from_str(&misspelled.to_string()).expect("payload parses");
+        assert_eq!(
+            dropped.folder_id, None,
+            "the wrong spelling is silently ignored, which is why it has to be tested"
+        );
+        assert_eq!(dropped.credential_id, None);
+    }
+
+    /// A snippet's host scoping survives the wire in both directions.
+    #[test]
+    fn a_snippet_keeps_the_hosts_it_is_scoped_to() {
+        let sent = json!({
+            "title": "tail the log",
+            "command": "tail -f /var/log/syslog",
+            "hostIds": ["host_1", "host_2"],
+        });
+        let snippet: SshSnippet = serde_json::from_str(&sent.to_string()).expect("payload parses");
+        assert_eq!(snippet.host_ids, vec!["host_1", "host_2"]);
+        let back = serde_json::to_value(&snippet).expect("snippet serializes");
+        assert_eq!(back["hostIds"][0], "host_1");
+    }
 }

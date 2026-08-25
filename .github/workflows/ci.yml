@@ -125,6 +125,18 @@ jobs:
       - name: Every control takes its colour from the theme
         run: bash scripts/check-accent-colour.sh
 
+  # Its own job again: this one is a protocol mismatch between two languages,
+  # not a style rule, and it fails silently at runtime rather than loudly at
+  # build time. A red check with its own name is the only warning there is.
+  bridge-keys:
+    name: bridge keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Every bridge model spells its ids the way the host does
+        run: bash scripts/check-bridge-keys.sh
+
   test:
     name: test ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

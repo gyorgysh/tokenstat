@@ -10,10 +10,32 @@ import SwiftUI
 
 // MARK: - SSH connections
 
+// Every SSH record below spells its ids `…Id` on the wire, because the host
+// derives its keys with `#[serde(rename_all = "camelCase")]` and Rust's
+// `resource_id` becomes `resourceId`, never `resourceID`. Swift's synthesized
+// keys use the property name, so a property called `resourceID` silently asks
+// for a key nothing sends.
+//
+// Silently is the problem. An optional field arrives as nil and a save appears
+// to succeed while the host writes nothing, which is how servers went on
+// forgetting their folder and their key every time somebody pressed Save. A
+// non-optional one throws and takes the whole list with it, which is why
+// snippets and trusted servers were always empty.
+//
+// So these maps are load-bearing, not decoration. `scripts/check-bridge-keys.sh`
+// fails the build when a bridge model grows an `…ID` property with no entry
+// here, and `ssh_records.rs` asserts the key sets from the other side.
+
 struct SSHProviderReference: Codable, Sendable, Hashable {
     var kind: String
     var resourceID: String
     var region: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case resourceID = "resourceId"
+        case region
+    }
 }
 
 struct SSHHost: Codable, Sendable, Hashable, Identifiable {
@@ -45,6 +67,16 @@ struct SSHHost: Codable, Sendable, Hashable, Identifiable {
 
     /// The address as somebody would type it into a terminal.
     var address: String { "\(username)@\(hostname):\(port)" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, hostname, port, username, initialDirectory
+        case credentialID = "credentialId"
+        case jumpHostID = "jumpHostId"
+        case tags, provider, hostKeys
+        case folderID = "folderId"
+        case color, keepaliveSeconds, env, agentForwarding, lastConnectedMs
+        case favorite, sort, updatedMs
+    }
 }
 
 struct SSHEnvPair: Codable, Sendable, Hashable, Identifiable {
@@ -62,6 +94,12 @@ struct SSHFolder: Codable, Sendable, Hashable, Identifiable {
     /// When this record last changed. The vault merges on this: a pulled
     /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case parentID = "parentId"
+        case color, sort, updatedMs
+    }
 }
 
 /// The fixed palette both ends agree on.
@@ -115,6 +153,61 @@ struct SSHSnippet: Codable, Sendable, Hashable, Identifiable {
     /// record is applied only when it is newer than the one already here.
     var updatedMs: Int64 = 0
 
+    enum CodingKeys: String, CodingKey {
+        case id, title, command, tags
+        case hostIDs = "hostIds"
+        case variables, runOnConnect, updatedMs
+    }
+
+    /// Spelled out rather than synthesized, to accept `hostIDs` as well.
+    ///
+    /// The vault carries whatever shape this app encoded, and older builds
+    /// encoded the misspelled key. Those records are already in somebody's
+    /// vault, and a snippet that decodes into nothing is a snippet that is
+    /// gone: `pullVault` drops a record it cannot read and never asks again.
+    /// The wrong spelling is only ever read, never written.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        command = try container.decode(String.self, forKey: .command)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
+        if let ids = try container.decodeIfPresent([String].self, forKey: .hostIDs) {
+            hostIDs = ids
+        } else {
+            let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+            hostIDs = try legacy.decodeIfPresent([String].self, forKey: .hostIDs) ?? []
+        }
+        variables = try container.decodeIfPresent([String].self, forKey: .variables) ?? []
+        runOnConnect = try container.decodeIfPresent(Bool.self, forKey: .runOnConnect) ?? false
+        updatedMs = try container.decodeIfPresent(Int64.self, forKey: .updatedMs) ?? 0
+    }
+
+    init(
+        id: String,
+        title: String,
+        command: String,
+        tags: [String],
+        hostIDs: [String],
+        variables: [String] = [],
+        runOnConnect: Bool = false,
+        updatedMs: Int64 = 0
+    ) {
+        self.id = id
+        self.title = title
+        self.command = command
+        self.tags = tags
+        self.hostIDs = hostIDs
+        self.variables = variables
+        self.runOnConnect = runOnConnect
+        self.updatedMs = updatedMs
+    }
+
+    /// The spelling older builds wrote into the vault. Read-only.
+    private enum LegacyKeys: String, CodingKey {
+        case hostIDs
+    }
+
     /// `{{name}}` occurrences, in the order they appear. The editor keeps
     /// `variables` in step with this so a client never has to parse it.
     static func placeholders(in command: String) -> [String] {
@@ -148,6 +241,11 @@ struct SSHKnownHost: Codable, Sendable, Hashable, Identifiable {
     var port: Int
     var fingerprints: [String]
     var id: String { hostID }
+
+    enum CodingKeys: String, CodingKey {
+        case hostID = "hostId"
+        case label, hostname, port, fingerprints
+    }
 }
 
 struct SSHConfigCandidate: Codable, Sendable, Hashable, Identifiable {
