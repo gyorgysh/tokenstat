@@ -53,6 +53,10 @@ internal static class ActionIconGlyph
         ActionIcon.Preview or ActionIcon.Visibility => Microsoft.UI.Xaml.Controls.Symbol.View,
         ActionIcon.Theme => Microsoft.UI.Xaml.Controls.Symbol.Highlight,
         ActionIcon.Layout => Microsoft.UI.Xaml.Controls.Symbol.ViewAll,
+        // Apple and the website both draw a plug for this. The Symbol enum has
+        // no plug in it, and reaching for a raw Segoe glyph for one case would
+        // put a second icon mechanism in this file, so Link stands in. Swap it
+        // the day anything else here needs a FontIcon.
         ActionIcon.Connect => Microsoft.UI.Xaml.Controls.Symbol.Link,
         ActionIcon.Device => Microsoft.UI.Xaml.Controls.Symbol.CellPhone,
         ActionIcon.Run => Microsoft.UI.Xaml.Controls.Symbol.Play,

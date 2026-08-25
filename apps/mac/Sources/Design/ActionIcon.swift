@@ -116,7 +116,12 @@ enum ActionIcon {
         case .theme: return "paintpalette"
         case .layout: return "square.grid.2x2"
 
-        case .connect: return "cable.connector"
+        // A plug, not the USB-C connector outline this used to be: that
+        // glyph is a thin cable end, it reads as a port rather than as an
+        // action, and it was carrying every Connect in the app. The website's
+        // vocabulary already says "plug" for this key, so the two products
+        // show the same picture now.
+        case .connect: return "powerplug.fill"
         case .disconnect: return "xmark.circle"
         case .refresh: return "arrow.clockwise"
         case .revoke: return "minus.circle"
