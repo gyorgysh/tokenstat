@@ -181,9 +181,6 @@ struct ClientDevicesView: View {
         }
     }
 
-    /// This device first, then the busiest. Somebody scanning this list is
-    /// looking for one of two things: the computer they are holding, or the one
-    /// doing the work.
     /// The machine another tab asked for, if the account still lists it.
     ///
     /// Resolved on every read rather than captured, because the account is
@@ -194,6 +191,9 @@ struct ClientDevicesView: View {
         return machines.first { $0.machineID == wanted }
     }
 
+    /// This device first, then the busiest. Somebody scanning this list is
+    /// looking for one of two things: the computer they are holding, or the one
+    /// doing the work.
     private var sorted: [Machine] {
         machines.sorted { a, b in
             if isThisDevice(a) != isThisDevice(b) { return isThisDevice(a) }

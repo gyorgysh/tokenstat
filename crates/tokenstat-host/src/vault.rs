@@ -141,6 +141,9 @@ struct VaultSession {
     locked: bool,
 }
 
+/// Said once, because the row, the record read and the helper all say it.
+const LOCKED: &str = "the vault is locked. Enter your vault password to open it.";
+
 fn vault_session() -> &'static Mutex<VaultSession> {
     static SESSION: OnceLock<Mutex<VaultSession>> = OnceLock::new();
     SESSION.get_or_init(|| {
@@ -151,20 +154,50 @@ fn vault_session() -> &'static Mutex<VaultSession> {
     })
 }
 
+/// Bring this process's idea of the lock in line with the file.
+///
+/// Both directions, because two processes share that file: the app links the
+/// host in-process and the helper runs beside it. Reading it only to *set* the
+/// flag meant a vault unlocked in the app stayed locked in the helper until it
+/// restarted, which is the same "the button is a lie" this flag exists to
+/// prevent, pointed the other way.
+///
+/// A store that is not there yet cannot say anything, so it is left alone: a
+/// lock taken before the vault has been cached locally stays taken.
 fn hydrate_locked(session: &mut VaultSession) {
-    if session.locked {
+    let Ok(store) = read() else {
+        return;
+    };
+    if store.schema_version == 0 && store.ciphertext.is_empty() {
         return;
     }
-    if read().ok().is_some_and(|store| store.locked) {
+    if store.locked && !session.locked {
         session.locked = true;
         session.key = None;
+    } else if !store.locked && session.locked {
+        session.locked = false;
     }
 }
 
-fn remember_key(vmk: [u8; 32]) {
-    if let Ok(mut session) = vault_session().lock() {
-        session.key = Some(vmk);
+/// Cache a key without touching the lock, refusing if one is standing.
+///
+/// The device wrap opens the vault with nothing typed, so a key unwrapped from
+/// it is only allowed into the session while this device is not deliberately
+/// locked, and the check has to happen under the same lock as the write or a
+/// `lock` landing mid-unwrap would be undone by it.
+///
+/// Distinct from [`unlock_session`], which is somebody typing the password and
+/// therefore *is* allowed to clear the lock.
+fn cache_key_unless_locked(vmk: [u8; 32]) -> Result<(), String> {
+    let mut session = vault_session()
+        .lock()
+        .map_err(|_| "vault session lock poisoned")?;
+    hydrate_locked(&mut session);
+    if session.locked {
+        return Err(LOCKED.into());
     }
+    session.key = Some(vmk);
+    Ok(())
 }
 
 fn forget_key() {
@@ -177,9 +210,12 @@ fn cached_key() -> Option<[u8; 32]> {
     vault_session().lock().ok().and_then(|session| session.key)
 }
 
-/// Cache the key and clear the deliberate lock. Unlocking is this, not
-/// [`remember_key`]: a concurrent lock must not be undone by a device wrap
-/// that was already mid-unwrap.
+/// Cache the key and clear the deliberate lock.
+///
+/// The only way a key enters the session deliberately. There used to be a
+/// second one that cached the key and left the lock alone, which is right for
+/// a device wrap unwrapped mid-read and wrong for everything else, and the
+/// create path picked the wrong one.
 fn unlock_session(vmk: [u8; 32]) {
     if let Ok(mut session) = vault_session().lock() {
         session.key = Some(vmk);
@@ -607,30 +643,23 @@ fn remote_and_key(
         return Err("a recovery code resets the password. It cannot unlock on its own.".into());
     }
     let remote = remote_vault().map_err(|e| e.to_string())?;
-    let locked = "the vault is locked. Enter your vault password to open it.";
     let key = {
         let mut session = vault_session()
             .lock()
             .map_err(|_| "vault session lock poisoned")?;
         hydrate_locked(&mut session);
         if session.locked {
-            return Err(locked.into());
+            return Err(LOCKED.into());
         }
-        if let Some(key) = session.key {
-            key
-        } else {
-            drop(session);
-            let wrap = remote.device_wrap.as_deref().ok_or(locked)?;
-            let key = unwrap_for_self(wrap)?;
-            let mut session = vault_session()
-                .lock()
-                .map_err(|_| "vault session lock poisoned")?;
-            hydrate_locked(&mut session);
-            if session.locked {
-                return Err(locked.into());
+        match session.key {
+            Some(key) => key,
+            None => {
+                drop(session);
+                let wrap = remote.device_wrap.as_deref().ok_or(LOCKED)?;
+                let key = unwrap_for_self(wrap)?;
+                cache_key_unless_locked(key)?;
+                key
             }
-            session.key = Some(key);
-            key
         }
     };
     cache_remote(&remote)?;
@@ -753,7 +782,10 @@ fn create_v3(password: &str) -> Result<String, String> {
         kdf,
         locked: false,
     })?;
-    remember_key(vmk);
+    // An unlock, not just a cached key. A lock left over from the vault this
+    // one replaces would otherwise still be standing, and the vault this
+    // device created seconds ago would answer that it is locked.
+    unlock_session(vmk);
     Ok(recovery)
 }
 
@@ -1165,14 +1197,17 @@ mod tests {
         // once holds a wrap that opens the vault with nothing typed, so a lock
         // that only cleared the cache would be undone by the next read.
         set_locked(false);
-        remember_key(random32());
+        unlock_session(random32());
         assert!(!is_locked());
         forget_key();
         set_locked(true);
         assert!(is_locked());
-        // Caching a key must not clear a lock another thread just set.
-        remember_key(random32());
+        // Caching a device-wrap key must not clear a lock another thread
+        // just set, and must refuse rather than quietly succeed.
+        assert!(cache_key_unless_locked(random32()).is_err());
         assert!(is_locked());
+        assert!(cached_key().is_none());
+        // Typing the password is the one thing that does clear it.
         unlock_session(random32());
         assert!(!is_locked());
     }

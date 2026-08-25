@@ -218,6 +218,7 @@ fn start_direct_if_enabled() {
         return;
     }
     std::thread::spawn(|| {
+        await_direct_stopped();
         let identity = match MachineIdentity::load_or_create() {
             Ok(value) => value,
             Err(_) => {
@@ -234,6 +235,7 @@ fn start_direct_if_enabled() {
             }
         };
         let _ = server.set_nonblocking(true);
+        direct_bound().store(true, Ordering::Release);
         while direct_running().load(Ordering::Acquire) {
             match server.accept() {
                 Ok(Ok(connection)) => {
@@ -253,6 +255,8 @@ fn start_direct_if_enabled() {
                 }
             }
         }
+        drop(server);
+        direct_bound().store(false, Ordering::Release);
         direct_running().store(false, Ordering::Release);
     });
 }
@@ -260,6 +264,31 @@ fn start_direct_if_enabled() {
 #[cfg(feature = "local-host")]
 fn stop_direct() {
     direct_running().store(false, Ordering::Release);
+}
+
+/// Wait for the accept loop to let go of port 7878 before binding it again.
+///
+/// The loop polls the flag every 100 ms, so a pause and a resume close
+/// together (a lid closed and opened, the app quit and reopened) used to race:
+/// the replacement bound while the old thread still owned the socket, failed
+/// with "address in use", and both threads then exited leaving no listener at
+/// all. Bounded, because waiting forever for a thread that has already died
+/// would be worse than trying the bind.
+#[cfg(feature = "local-host")]
+fn await_direct_stopped() {
+    for _ in 0..20 {
+        if !direct_bound().load(Ordering::Acquire) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Whether the accept loop still holds the listening socket.
+#[cfg(feature = "local-host")]
+fn direct_bound() -> &'static AtomicBool {
+    static BOUND: std::sync::OnceLock<AtomicBool> = std::sync::OnceLock::new();
+    BOUND.get_or_init(|| AtomicBool::new(false))
 }
 
 fn account_token() -> Result<String, String> {

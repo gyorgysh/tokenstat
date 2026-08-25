@@ -26,10 +26,16 @@ private struct Shake: GeometryEffect {
     }
 
     func effectValue(size: CGSize) -> ProjectionTransform {
-        // Three there-and-back passes over the animation, decaying so it
-        // settles rather than stopping dead.
-        let travel = sin(amount * .pi * 6)
-        let decay = max(0, 1 - amount)
+        // Progress through *this* shake, not the number of shakes so far. The
+        // counter only ever grows, so decaying against it directly made every
+        // shake after the first a no-op: `1 - amount` is already zero by the
+        // time the second one starts, and the field a person had just been
+        // told about sat still.
+        let progress = amount - amount.rounded(.down)
+        // Three there-and-back passes, decaying so it settles rather than
+        // stopping dead.
+        let travel = sin(progress * .pi * 6)
+        let decay = 1 - progress
         return ProjectionTransform(CGAffineTransform(translationX: travel * 7 * decay, y: 0))
     }
 }

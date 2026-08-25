@@ -211,6 +211,17 @@ final class ClientStore {
         purchasingProductID = product.id
         errorMessage = nil
         defer { purchasingProductID = nil }
+        // The intent has been acted on the moment StoreKit is asked, whatever
+        // comes back. Clearing it only on success and cancel left it standing
+        // through "waiting for approval" and through a thrown purchase, and
+        // every later account refresh calls `finishPendingIntent` again: a
+        // child waiting on Ask to Buy would get the purchase sheet put back in
+        // front of them on a loop.
+        //
+        // Deliberately below the guards above. A purchase that never reached
+        // StoreKit because the account had no token yet is worth retrying once
+        // there is one, and that is the case this does not cover.
+        defer { if pendingIntent?.id == product.id { pendingIntent = nil } }
         do {
             var options: Set<Product.PurchaseOption> = [.appAccountToken(token)]
             if #available(iOS 18.0, *), let offer, offer.type == .winBack {
@@ -219,11 +230,10 @@ final class ClientStore {
             let result = try await product.purchase(options: options)
             switch result {
             case .success(let verification):
-                if pendingIntent?.id == product.id { pendingIntent = nil }
                 try await activate(verification)
                 await reportRenewal()
             case .userCancelled:
-                if pendingIntent?.id == product.id { pendingIntent = nil }
+                break
             case .pending:
                 errorMessage = "This purchase is waiting for approval."
             @unknown default:
