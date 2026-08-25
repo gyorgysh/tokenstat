@@ -272,6 +272,12 @@ struct SSHVaultSetupSheet: View {
     @State private var working = false
     @State private var error: String?
     @State private var confirmingReset = false
+    /// Bumped when the button was pressed with something still missing. The
+    /// fields watch it and shake.
+    @State private var refusals = 0
+    @FocusState private var focus: Field?
+
+    private enum Field: Hashable { case password, confirmPassword, recovery }
 
     /// The vault exists, so this is an unlock rather than a creation.
     private var exists: Bool { status?.created == true }
@@ -281,18 +287,36 @@ struct SSHVaultSetupSheet: View {
     private var problems: [String] { VaultPassword.problems(password) }
     private var matches: Bool { password == confirmPassword }
 
-    private var canConfirm: Bool {
-        if working { return false }
-        if stale { return false }
-        if exists {
-            guard forgot else { return !password.isEmpty }
-            // A reset is a code plus the password that replaces the forgotten
-            // one. Unlocking on the code alone would leave every other device
-            // asking for a password nobody knows.
-            return !enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty
-                && problems.isEmpty && matches
+    /// What is stopping the button, as a sentence and a field to point at.
+    ///
+    /// The button stays pressable so this can be said at all. Disabling it
+    /// made the screen silent at exactly the moment somebody was asking it a
+    /// question.
+    private var blocker: (message: String, field: Field)? {
+        if stale { return nil }
+        if exists && !forgot {
+            if password.isEmpty { return ("Enter your vault password.", .password) }
+            return nil
         }
-        return problems.isEmpty && matches
+        if exists, forgot, enteredRecovery.trimmingCharacters(in: .whitespaces).isEmpty {
+            return ("Enter the recovery code you saved.", .recovery)
+        }
+        if password.isEmpty { return ("Choose a password for the vault.", .password) }
+        if let problem = problems.first { return (problem, .password) }
+        if confirmPassword.isEmpty { return ("Type the password again to confirm it.", .confirmPassword) }
+        if !matches { return ("The two passwords do not match.", .confirmPassword) }
+        return nil
+    }
+
+    /// Press it and find out. `blocker` is what comes back when it cannot run.
+    private func attempt() {
+        if let blocker {
+            error = blocker.message
+            focus = blocker.field
+            refusals += 1
+            return
+        }
+        Task { await run() }
     }
 
     private var title: String {
@@ -347,8 +371,12 @@ struct SSHVaultSetupSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             SecureField("Vault password", text: $password)
                 .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .password)
+                .shake(on: refusals)
             SecureField("Type it again", text: $confirmPassword)
                 .textFieldStyle(.roundedBorder)
+                .focused($focus, equals: .confirmPassword)
+                .shake(on: refusals)
             VaultPasswordRules(password: password)
             if !confirmPassword.isEmpty, !matches {
                 Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
@@ -368,10 +396,16 @@ struct SSHVaultSetupSheet: View {
                 TextField("Recovery code", text: $enteredRecovery)
                     .textFieldStyle(.roundedBorder)
                     .font(Theme.mono(12))
+                    .focused($focus, equals: .recovery)
+                    .shake(on: refusals)
                 SecureField("New password", text: $password)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .password)
+                    .shake(on: refusals)
                 SecureField("Type it again", text: $confirmPassword)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .confirmPassword)
+                    .shake(on: refusals)
                 VaultPasswordRules(password: password)
                 if !confirmPassword.isEmpty, !matches {
                     Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
@@ -383,7 +417,9 @@ struct SSHVaultSetupSheet: View {
             } else {
                 SecureField("Vault password", text: $password)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { if canConfirm { Task { await run() } } }
+                    .focused($focus, equals: .password)
+                    .shake(on: refusals)
+                    .onSubmit { attempt() }
                 Button("I forgot the password", .help) { forgot = true }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
@@ -418,15 +454,15 @@ struct SSHVaultSetupSheet: View {
             // do different things and read differently, and a glyph chosen by
             // an expression is a glyph nobody can grep for.
             if exists {
-                Button("Unlock", .signIn) { Task { await run() } }
+                Button("Unlock", .signIn) { attempt() }
                     .buttonStyle(AccentButtonStyle())
                     .frame(minWidth: Theme.Control.pairedWidth)
-                    .disabled(!canConfirm)
+                    .disabled(working)
             } else if !stale {
-                Button("Create vault", .create) { Task { await run() } }
+                Button("Create vault", .create) { attempt() }
                     .buttonStyle(AccentButtonStyle())
                     .frame(minWidth: Theme.Control.pairedWidth)
-                    .disabled(!canConfirm)
+                    .disabled(working)
             }
         }
     }
