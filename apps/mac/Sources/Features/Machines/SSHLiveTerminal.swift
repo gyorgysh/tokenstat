@@ -11,9 +11,13 @@ import UIKit
 
 @MainActor
 @Observable
-final class SSHLiveTerminal: TerminalViewDelegate, Identifiable {
-    let id = UUID()
-    let handle: String
+final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
+    /// The host's session id. Also this object's identity, because the two are
+    /// the same thing: a session is the handle, and a second id would be a
+    /// second answer to "which session is this" for the list to disagree with.
+    let id: String
+    /// Which saved record this came from, when it came from one.
+    let hostID: String?
     let title: String
     private(set) var closed = false
     var error: String?
@@ -21,9 +25,37 @@ final class SSHLiveTerminal: TerminalViewDelegate, Identifiable {
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var terminalView: TerminalView?
 
-    init(handle: SSHSessionHandle, title: String) {
-        self.handle = handle.id
+    /// The handle, under the name the Bridge calls it. Kept so the call sites
+    /// read as what they are rather than as `id` doing double duty.
+    var handle: String { id }
+
+    /// Alive until the far end hangs up. The tab strip greys a dead session
+    /// rather than removing it: output somebody has not read yet is worth more
+    /// than a tidy strip.
+    var alive: Bool { !closed }
+
+    /// The emulator, once it exists. `TerminalStack` reads this and nothing
+    /// else, which is what lets one stack hold both kinds of session.
+    var terminalViewIfLoaded: TerminalView? { terminalView }
+
+    init(handle: SSHSessionHandle, title: String, hostID: String? = nil) {
+        self.id = handle.id
         self.title = title
+        self.hostID = hostID
+        _ = view
+        pollTask = Task { [weak self] in await self?.poll() }
+    }
+
+    /// Adopt a session the host is already holding.
+    ///
+    /// After a relaunch the shells are still up: the host owns them, not the
+    /// app. Reading from offset zero replays whatever is still buffered, so a
+    /// re-adopted tab opens on its scrollback rather than on a blank screen.
+    init(adopting session: SSHSessionSummary) {
+        self.id = session.id
+        self.title = session.label
+        self.hostID = session.hostID
+        self.closed = !session.alive
         _ = view
         pollTask = Task { [weak self] in await self?.poll() }
     }

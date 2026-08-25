@@ -25,14 +25,14 @@ import SwiftUI
 ///   Every view stays mounted and switching is `isHidden`. A split shows two
 ///   frames. Hidden views keep the last size they had, so bringing one back
 ///   to a half it already filled does not SIGWINCH.
-struct TerminalStack: NSViewRepresentable {
-    let sessions: [TerminalSession]
+struct TerminalStack<Session: TerminalPresentable>: NSViewRepresentable {
+    let sessions: [Session]
     /// Left / top session when split, or the only visible session when not.
-    let leading: TerminalSession?
+    let leading: Session?
     /// Right / bottom session when split.
-    var trailing: TerminalSession? = nil
+    var trailing: Session? = nil
     /// The half that should own the keyboard.
-    var focused: TerminalSession? = nil
+    var focused: Session? = nil
     /// `nil` is a single pane. Horizontal is side by side, vertical is stacked.
     var splitAxis: Axis? = nil
     /// Leading (left / top) share of the column, 0.2...0.8.
@@ -41,11 +41,17 @@ struct TerminalStack: NSViewRepresentable {
     /// surface is kept mounted under another destination (Home, Insights, …).
     var claimsFocus: Bool = true
     /// Which visible half last took a click, so first responder follows it.
-    var onActivate: ((TerminalSession) -> Void)? = nil
+    var onActivate: ((Session) -> Void)? = nil
 
     func makeNSView(context: Context) -> TerminalStackView {
         let view = TerminalStackView()
-        view.coordinator = context.coordinator
+        // A closure rather than a reference to the coordinator, because the
+        // coordinator is generic over the session type and this AppKit view is
+        // not. Nothing below this line has ever needed to know what a session
+        // is, and now nothing below it names one.
+        view.onViewClicked = { [weak coordinator = context.coordinator] clicked in
+            coordinator?.activate(view: clicked)
+        }
         return view
     }
 
@@ -103,7 +109,9 @@ final class TerminalStackView: NSView {
     /// while the stack still has a zero frame (fresh `makeNSView`); painting
     /// then marks an empty rect and the buffer never appears.
     private var needsFullPaint = false
-    weak var coordinator: TerminalStack.Coordinator?
+    /// Which of the visible halves took the last click. Set by the
+    /// representable, which is the only piece that knows about sessions.
+    var onViewClicked: ((TerminalView) -> Void)?
     private weak var leadingView: TerminalView?
     private weak var trailingView: TerminalView?
     private var splitAxis: Axis?
@@ -247,9 +255,9 @@ final class TerminalStackView: NSView {
         guard let window, event.window === window else { return }
         let point = convert(event.locationInWindow, from: nil)
         if let leading = leadingView, !leading.isHidden, leading.frame.contains(point) {
-            coordinator?.activate(view: leading)
+            onViewClicked?(leading)
         } else if let trailing = trailingView, !trailing.isHidden, trailing.frame.contains(point) {
-            coordinator?.activate(view: trailing)
+            onViewClicked?(trailing)
         }
     }
 

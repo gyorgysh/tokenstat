@@ -19,6 +19,9 @@ import SwiftUI
 /// search field, the same empty state and the same add button.
 struct SSHSectionView: View {
     @Bindable var model: SSHLibraryModel
+    /// Where a new session goes. The shells outlive this screen, so this view
+    /// hands one over rather than holding it.
+    @Bindable var sessions: SSHSessionsModel
     let section: SSHSection
     /// The account tier, unfiltered. What may write the vault is decided by
     /// `SSHLibraryModel.paidTier(for:)`, in one place.
@@ -26,8 +29,10 @@ struct SSHSectionView: View {
     /// Open a folder in the sidebar's own selection, so clicking a folder in
     /// the list and clicking it in the sidebar mean the same thing.
     var onOpenFolder: (String) -> Void
+    /// Show one server's sessions. Connecting goes there rather than into a
+    /// cover over this screen.
+    var onOpenTerminals: (String) -> Void
 
-    @State private var terminal: SSHLiveTerminal?
     @State private var expanded: Set<String> = []
     @State private var vault = SSHVaultModel()
     @State private var showingVault = false
@@ -74,10 +79,13 @@ struct SSHSectionView: View {
         }
         .background(Theme.background)
         .sheet(item: $model.connectRequest) { host in
-            SSHConnectForm(host: host, model: model) { terminal = $0 }
-        }
-        .sheet(item: $terminal) {
-            SSHLiveTerminalScreen(session: $0, library: model).frame(minWidth: 720, minHeight: 480)
+            SSHConnectForm(host: host, model: model) { session in
+                // Into the model, then to the pane. A session used to be held
+                // by this view and shown in a cover, which is why two shells
+                // on one server meant closing the first.
+                sessions.adopt(session)
+                if let hostID = session.hostID { onOpenTerminals(hostID) }
+            }
         }
         .sheet(isPresented: $showingVault) {
             SSHVaultScreen(vault: vault, tier: vaultTier ?? "", canWrite: paidVaultTier != nil, library: model)

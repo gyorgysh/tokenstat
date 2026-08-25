@@ -74,7 +74,10 @@ fn now_ms() -> i64 {
 /// or a terminal here. List polls and everything else do not.
 pub(crate) fn counts_as_work(method: &str, stream_kind: Option<&str>) -> bool {
     match method {
-        "workspace.list" | "pty.list" => false,
+        // List polls. A client asking what is running is not somebody
+        // working, and `ssh.session.list` runs on a timer: without this line
+        // the poll alone would hold sleep open for as long as the app is open.
+        "workspace.list" | "pty.list" | "ssh.session.list" => false,
         "workflow.list" | "workflow.get" | "workflow.runs" | "workflow.transcript" => false,
         m if m.starts_with("workspace.") => true,
         m if m.starts_with("pty.") => true,
@@ -461,6 +464,7 @@ mod tests {
         assert!(counts_as_work("stream.open", Some("screen.video")));
         assert!(counts_as_work("screen.transfer.open", None));
         assert!(counts_as_work("ssh.session.open", None));
+        assert!(!counts_as_work("ssh.session.list", None));
         assert!(!counts_as_work("stream.open", Some("proxy")));
         assert!(!counts_as_work("stream.open", None));
     }

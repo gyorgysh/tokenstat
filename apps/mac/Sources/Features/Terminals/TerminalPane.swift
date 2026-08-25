@@ -697,7 +697,9 @@ struct TerminalPane: View {
 /// after it, reading as its own control rather than as part of the tab. The
 /// target is 20pt now, still comfortably clickable, with its own hover circle
 /// so the affordance does not depend on the glyph alone.
-private struct TabCloseButton: View {
+/// The small x on a tab. Shared with the SSH pane, which draws the same strip
+/// for the same reason and should not draw a second close button for it.
+struct TabCloseButton: View {
     let help: String
     let action: () -> Void
 

@@ -164,6 +164,28 @@ struct SSHConfigImport: Codable, Sendable, Hashable { var imported: Int; var fou
 struct SSHKnownHostForget: Codable, Sendable, Hashable { var forgotten: Bool }
 
 struct SSHSessionHandle: Codable, Sendable, Hashable { var id: String }
+
+/// One session the host is holding, as `ssh.session.list` reports it.
+///
+/// The sessions live in the host process, not in the app, so this is how a
+/// relaunched app finds the shells it left running. The same relationship
+/// `pty.list` has always had with the workspace terminals.
+struct SSHSessionSummary: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    /// The saved record it was opened from, when it was opened from one.
+    var hostID: String?
+    var label: String
+    var openedMs: Int64
+    var alive: Bool
+    /// Output the host had to drop before anybody read it, in bytes.
+    var droppedBytes: UInt64
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case hostID = "hostId"
+        case label, openedMs, alive, droppedBytes
+    }
+}
 struct SSHHostFingerprint: Codable, Sendable, Hashable { var fingerprint: String }
 struct SSHSessionRead: Codable, Sendable, Hashable {
     var data: [UInt8]

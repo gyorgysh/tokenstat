@@ -1773,6 +1773,11 @@ extension Bridge {
         return object
     }
 
+    /// Every SSH session this host is holding, alive or just closed.
+    static func sshSessions() async throws -> [SSHSessionSummary] {
+        try await background("ssh.session.list", as: [SSHSessionSummary].self)
+    }
+
     static func deleteSSHHost(id: String) async throws {
         _ = try await background("ssh.host.delete", ["id": id], as: Removed.self)
     }
@@ -1878,6 +1883,11 @@ extension Bridge {
             "env": host.env.map { ["name": $0.name, "value": $0.value] },
             "auth": auth,
             "jump": jump as Any,
+            // Carried so `ssh.session.list` can name what it is holding. The
+            // host never dials with either: it reaches the server by hostname
+            // and username the way it always did.
+            "hostId": host.id,
+            "label": host.label,
         ]
     }
 

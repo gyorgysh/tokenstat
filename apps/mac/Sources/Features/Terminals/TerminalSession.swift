@@ -122,7 +122,7 @@ enum TerminalPreferences {
 /// agent boot read as "the app is broken" rather than "the agent is starting".
 @MainActor
 @Observable
-final class TerminalSession: TerminalViewDelegate, Identifiable {
+final class TerminalSession: TerminalViewDelegate, TerminalPresentable {
     /// Stable for the life of this object. SwiftUI `ForEach` and selection use
     /// this, and it must never change: swapping it from `pending-…` to the
     /// host's `pty-N` made every chip and the terminal stack tear down and

@@ -668,7 +668,7 @@ struct SSHConnectForm: View {
             } else {
                 handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80, jump: jump)
             }
-            connected(SSHLiveTerminal(handle: handle, title: host.label))
+            connected(SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id))
             await model.noteConnection(host)
             dismiss()
         } catch { self.error = error.localizedDescription }

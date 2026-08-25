@@ -33,6 +33,12 @@ struct RootView: View {
     /// sidebar draws folders and a host count from it, and the content and
     /// inspector columns are two views over the same records.
     @State private var ssh = SSHLibraryModel()
+    #if os(macOS)
+    /// Live SSH sessions, for the life of the app rather than the life of a
+    /// screen. The shells are the host's, so leaving the screen must not end
+    /// them and coming back must find them again.
+    @State private var sshSessions = SSHSessionsModel()
+    #endif
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
     @State private var todo = TodoModel()
@@ -127,6 +133,10 @@ struct RootView: View {
     @AppStorage("sidebar.sshGroupExpanded") private var isSSHGroupExpanded = false
     /// SSH folders whose hosts are listed under the Hosts row.
     @State private var expandedSSHFolders: Set<String> = []
+    #if os(macOS)
+    /// Servers whose session rows are showing.
+    @State private var expandedSSHHosts: Set<String> = []
+    #endif
     /// The SSH section last left, so clicking the heading (or coming back from
     /// Home) returns to what you were doing rather than resetting to Hosts.
     @State private var lastSSHSection: SSHSection = .hosts(folder: nil)
@@ -362,6 +372,13 @@ struct RootView: View {
                 guard home.isArchiveReady else { return }
                 await warmSecondarySurfaces()
             }
+            #if os(macOS)
+            // SSH sessions live in the host process, so this app finds what a
+            // relaunch left running instead of showing nothing over four live
+            // shells. For the life of the shell, not the life of a screen,
+            // because the sidebar draws them whichever screen is in front.
+            .task { await sshSessions.watch() }
+            #endif
             // Live automations belong on the workspace sidebar, so the run list
             // has to stay current even when the Automations screen is not open.
             .task {
@@ -883,6 +900,17 @@ struct RootView: View {
                 EmptyView()
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
+            case let .sshTerminals(hostID):
+                #if os(macOS)
+                // The server's own settings, beside its shells. Editing the
+                // record while a session is running on it is the ordinary
+                // case: somebody has just learned what the keepalive should
+                // have been.
+                SSHInspector(model: ssh, section: .hosts(folder: nil)) { closeInspector() }
+                    .task(id: hostID) { ssh.selection = .host(hostID) }
+                #else
+                EmptyView()
+                #endif
             case let .ssh(section):
                 #if os(macOS)
                 SSHInspector(model: ssh, section: section) { closeInspector() }
@@ -1304,6 +1332,72 @@ struct RootView: View {
 
     /// The number beside a section row. Trusted servers carries one too: the
     /// list is the point of that screen.
+    /// Servers with at least one session this app is holding.
+    ///
+    /// Only hosts with something live: a sidebar that lists forty servers
+    /// under Hosts and forty again under it is a sidebar nobody scrolls.
+    private var sshLiveHosts: [SSHHost] {
+        let ids = Set(sshSessions.sessions.compactMap(\.hostID))
+        return ssh.hosts
+            .filter { ids.contains($0.id) }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+    }
+
+    /// A server with sessions, and its sessions under it when it is expanded.
+    @ViewBuilder
+    private func sshLiveHostRow(_ host: SSHHost) -> some View {
+        let mine = sshSessions.sessions(for: host.id)
+        let isExpanded = expandedSSHHosts.contains(host.id)
+        let isCurrent = route.sshTerminalHostID == host.id
+        HStack(spacing: 0) {
+            Button {
+                if isExpanded {
+                    expandedSSHHosts.remove(host.id)
+                } else {
+                    expandedSSHHosts.insert(host.id)
+                }
+            } label: {
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
+                    .frame(width: 18, height: 24)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(isExpanded ? "Collapse sessions" : "Expand sessions")
+
+            SidebarRow(
+                label: host.label,
+                symbol: "terminal",
+                trailing: "\(sshSessions.liveCount(for: host.id))",
+                // Collapsed, the row carries the lit state of whatever is
+                // inside it. Expanded, one of the session rows is the lit one,
+                // and two accent bars in one group is the bug the workspace
+                // rows already avoid.
+                isSelected: isCurrent && !isExpanded
+            ) { navigate(to: .sshTerminals(host: host.id)) }
+        }
+        if isExpanded {
+            ForEach(mine) { session in
+                SidebarRow(
+                    label: session.title,
+                    symbol: session.alive ? "terminal" : "terminal.fill",
+                    trailing: session.alive ? nil : "ended",
+                    isSelected: isCurrent && sshSessions.selectedID == session.id
+                ) {
+                    sshSessions.select(session)
+                    navigate(to: .sshTerminals(host: host.id))
+                }
+                .padding(.leading, 18)
+                .contextMenu {
+                    Button("Close", .delete, role: .destructive) {
+                        Task { await sshSessions.close(session) }
+                    }
+                }
+            }
+        }
+    }
+
     private func sshCount(of section: SSHSection) -> String? {
         switch section {
         case .hosts: return "\(ssh.hosts.count)"
@@ -1380,6 +1474,14 @@ struct RootView: View {
                         if case .hosts = section {
                             ForEach(sshFolderRows) { row in
                                 sshFolderRow(row)
+                            }
+                            // Servers with a shell open, and the shells
+                            // themselves. The same shape the workspace rows
+                            // use: a live thing sits under the section that
+                            // owns it, so a running session is found where
+                            // servers are rather than nowhere at all.
+                            ForEach(sshLiveHosts) { host in
+                                sshLiveHostRow(host)
                             }
                         }
                     }
@@ -1944,10 +2046,32 @@ struct RootView: View {
             #if os(macOS)
             SSHSectionView(
                 model: ssh,
+                sessions: sshSessions,
                 section: section,
                 vaultTier: machines.vaultTier,
-                onOpenFolder: { openSSH(.hosts(folder: $0)) }
+                onOpenFolder: { openSSH(.hosts(folder: $0)) },
+                onOpenTerminals: { navigate(to: .sshTerminals(host: $0)) }
             )
+            #else
+            EmptyView()
+            #endif
+        case let .sshTerminals(hostID):
+            #if os(macOS)
+            if let host = ssh.hosts.first(where: { $0.id == hostID }) {
+                SSHTerminalPane(sessions: sshSessions, library: ssh, host: host)
+            } else {
+                // The saved record was deleted while its sessions were in
+                // front. The shells are still the host's, so this says so
+                // rather than pretending the screen is empty.
+                EmptyState(
+                    symbol: "server.rack",
+                    title: "That server is no longer saved",
+                    message: "Any session still running on it is listed under Hosts."
+                ) {
+                    Button("Hosts", .back) { openSSH(.hosts(folder: nil)) }
+                        .buttonStyle(AccentButtonStyle())
+                }
+            }
             #else
             EmptyView()
             #endif

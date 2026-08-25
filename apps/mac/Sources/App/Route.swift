@@ -28,6 +28,17 @@ enum Route: Hashable {
     /// also means every `switch route` in the shell has to answer for it, which
     /// is how the columns stay honest.
     case ssh(SSHSection)
+    /// Every live session on one saved server, with its tabs and its split.
+    ///
+    /// A route rather than a presented cover, which is what it used to be. A
+    /// cover meant one session at a time and closing it killed the shell. The
+    /// sessions belong to the host process and outlive any screen, so the
+    /// screen showing them has to be somewhere you can leave and come back to.
+    ///
+    /// Its own case and not an `SSHSection`, because a section is a list with
+    /// an editor beside it and this is a terminal. Folding it in made six
+    /// switches in the library answer for a case they can never be handed.
+    case sshTerminals(host: String)
 
     var globalSection: GlobalSection? {
         if case let .global(section) = self { return section }
@@ -51,7 +62,14 @@ enum Route: Hashable {
 
     var isWorkspace: Bool { workspaceID != nil }
 
-    var isSSH: Bool { sshSection != nil }
+    /// The server whose sessions are in front, when that is what is in front.
+    var sshTerminalHostID: String? {
+        if case let .sshTerminals(host) = self { return host }
+        return nil
+    }
+
+    /// Both halves of the SSH world. The sidebar group stays open for either.
+    var isSSH: Bool { sshSection != nil || sshTerminalHostID != nil }
 
     /// True when this route is that global screen. Reads better at the call
     /// site than unwrapping the optional, and there are a lot of call sites.

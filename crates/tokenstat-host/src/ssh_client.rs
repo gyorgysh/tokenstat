@@ -54,6 +54,20 @@ struct Output {
 struct LiveSession {
     commands: mpsc::UnboundedSender<Command>,
     output: Arc<Mutex<Output>>,
+    /// What the client called this, and which saved record it came from.
+    ///
+    /// Carried so `ssh.session.list` can answer with something a person
+    /// recognises. The host has no other way to name a session: it knows a
+    /// hostname and a username, and a list of four `root@10.0.0.4` rows is a
+    /// list nobody can use.
+    meta: SessionMeta,
+}
+
+#[derive(Clone)]
+struct SessionMeta {
+    host_id: Option<String>,
+    label: String,
+    opened_ms: i64,
 }
 
 fn sessions() -> &'static Mutex<HashMap<String, LiveSession>> {
@@ -106,6 +120,13 @@ struct OpenParams {
     /// Seconds between keepalives. 0 leaves the default alone.
     #[serde(default)]
     keepalive_seconds: u32,
+    /// The saved record this session came from, when it came from one. Kept
+    /// only to answer `ssh.session.list`, never used to reach the server.
+    #[serde(default)]
+    host_id: Option<String>,
+    /// What to call this session in a list. Falls back to `user@host`.
+    #[serde(default)]
+    label: Option<String>,
 }
 
 fn default_initial_directory() -> String {
@@ -175,16 +196,59 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
             }
             crate::ssh_records::validate_initial_directory(&p.initial_directory)?;
             let id = new_id()?;
-            let live = runtime()?.block_on(open(p, id.clone()))?;
+            let meta = SessionMeta {
+                host_id: p.host_id.clone(),
+                label: p
+                    .label
+                    .clone()
+                    .filter(|label| !label.trim().is_empty())
+                    .unwrap_or_else(|| format!("{}@{}", p.username, p.hostname)),
+                opened_ms: now_ms(),
+            };
+            let live = runtime()?.block_on(open(p, id.clone(), meta))?;
             let mut map = sessions().lock().map_err(|e| e.to_string())?;
             reap_closed(&mut map);
             map.insert(id.clone(), live);
             Ok(json!({"id": id}))
         }
-        "ssh.session.read" => {
-            let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+        // Every session this host is holding, so a client that has been
+        // relaunched can adopt what it left running instead of showing an
+        // empty screen over four live shells. The pty side has had `pty.list`
+        // from the start and SSH never grew the equivalent.
+        "ssh.session.list" => {
             let mut guard = sessions().lock().map_err(|e| e.to_string())?;
             reap_closed(&mut guard);
+            let mut rows: Vec<Value> = guard
+                .iter()
+                .map(|(id, live)| {
+                    let (dropped, closed) = live
+                        .output
+                        .lock()
+                        .map(|out| (out.base, out.closed))
+                        .unwrap_or((0, true));
+                    json!({
+                        "id": id,
+                        "hostId": live.meta.host_id,
+                        "label": live.meta.label,
+                        "openedMs": live.meta.opened_ms,
+                        "alive": !closed,
+                        "droppedBytes": dropped,
+                    })
+                })
+                .collect();
+            // Oldest first, so a list does not reshuffle itself between two
+            // calls the way a hash map's order does.
+            rows.sort_by_key(|row| row["openedMs"].as_i64().unwrap_or_default());
+            serde_json::to_value(rows).map_err(|e| e.to_string())
+        }
+        "ssh.session.read" => {
+            let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            // Deliberately not reaped here. Reaping first meant a session that
+            // had just closed was gone before the read that would have carried
+            // its `closed` flag, so every ordinary logout surfaced as "SSH
+            // session no longer exists". A closed session is cleared by the
+            // next open or list instead.
+            let guard = sessions().lock().map_err(|e| e.to_string())?;
             let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
             let output = live.output.lock().map_err(|e| e.to_string())?;
             let start = p.offset.saturating_sub(output.base) as usize;
@@ -214,8 +278,7 @@ where
     F: FnOnce(SessionParams) -> Command,
 {
     let p: SessionParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-    let mut guard = sessions().lock().map_err(|e| e.to_string())?;
-    reap_closed(&mut guard);
+    let guard = sessions().lock().map_err(|e| e.to_string())?;
     let live = guard.get(&p.id).ok_or("SSH session no longer exists")?;
     live.commands
         .send(make(p))
@@ -335,7 +398,7 @@ async fn probe(p: &OpenParams) -> Result<String, String> {
         .ok_or_else(|| "server offered no host key".into())
 }
 
-async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
+async fn open(p: OpenParams, id: String, meta: SessionMeta) -> Result<LiveSession, String> {
     let (mut handle, _) = connect(&p, false).await?;
     let auth = p.auth.as_ref().ok_or("SSH authentication is required")?;
     let authenticated = authenticate(&mut handle, &p.username, auth).await?;
@@ -412,6 +475,7 @@ async fn open(p: OpenParams, id: String) -> Result<LiveSession, String> {
     Ok(LiveSession {
         commands: tx,
         output,
+        meta,
     })
 }
 
@@ -468,6 +532,13 @@ fn append(output: &Mutex<Output>, data: &[u8]) {
         output.bytes.drain(..remove);
         output.base += remove as u64;
     }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 fn new_id() -> Result<String, String> {

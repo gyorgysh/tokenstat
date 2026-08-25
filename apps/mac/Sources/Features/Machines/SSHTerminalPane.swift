@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: LicenseRef-tokenstat-source-available
+//
+// Source-available for review, NOT open source. See LICENSE: no rights to
+// redistribute, publish, or ship a build are granted. Read it, study it, run
+// your own build of it.
+// "tokenstat" is a trademark of pueev OU. See TRADEMARK.md.
+
+#if os(macOS)
+import AppKit
+import SwiftUI
+
+/// Every session on one server, with tabs and an optional split.
+///
+/// The workspace terminals have had this since the beginning, in
+/// `TerminalPane`. SSH got a full-screen cover holding one session, which is
+/// why two shells on the same server meant closing the first.
+///
+/// The chrome is written here rather than shared with `TerminalPane`: that
+/// view is a launcher, a file editor, a diff viewer and a browser as well as a
+/// tab strip, and dragging all of it behind an SSH tab bar would be worse than
+/// a second small view. What *is* shared is the part that matters, the AppKit
+/// stack that owns the emulators, so the sizing and the no-SIGWINCH switching
+/// learned there are not learned again here.
+struct SSHTerminalPane: View {
+    @Bindable var sessions: SSHSessionsModel
+    let library: SSHLibraryModel
+    /// The saved record this pane belongs to. Layout is remembered per host.
+    let host: SSHHost
+    /// Whether this pane may take the keyboard. False while it is mounted
+    /// under another destination.
+    var claimsFocus: Bool = true
+
+    @State private var closing: SSHLiveTerminal?
+
+    private var mine: [SSHLiveTerminal] { sessions.sessions(for: host.id) }
+    private var layout: TerminalSplitLayout { sessions.layout(for: host.id) }
+
+    private var leading: SSHLiveTerminal? {
+        guard layout.isSplit else { return active }
+        return sessions.leadingSession(in: host.id) ?? active
+    }
+
+    private var trailing: SSHLiveTerminal? {
+        layout.isSplit ? sessions.trailingSession(in: host.id) : nil
+    }
+
+    private var active: SSHLiveTerminal? {
+        mine.first { $0.id == sessions.selectedID } ?? mine.last
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            strip
+            Divider()
+            if mine.isEmpty {
+                empty
+            } else {
+                TerminalStack(
+                    sessions: mine,
+                    leading: leading,
+                    trailing: trailing,
+                    focused: active,
+                    splitAxis: layout.axis,
+                    fraction: sessions.fraction(for: host.id),
+                    claimsFocus: claimsFocus,
+                    onActivate: { sessions.select($0) }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+            }
+        }
+        .background(Theme.background)
+        .task(id: host.id) { sessions.restoreSelection(for: host.id) }
+        .confirmationDialog(
+            "Close this session?",
+            isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Close", role: .destructive) {
+                if let doomed = closing {
+                    closing = nil
+                    Task { await sessions.close(doomed) }
+                }
+            }
+            Button("Cancel", role: .cancel) { closing = nil }
+        } message: {
+            Text("Whatever is running in it stops. Nothing else on the server changes.")
+        }
+    }
+
+    // MARK: - Tabs
+
+    private var strip: some View {
+        HStack(spacing: Theme.Space.s) {
+            ForEach(mine) { session in
+                SSHSessionChip(
+                    session: session,
+                    isSelected: session.id == active?.id,
+                    isOtherHalf: layout.isSplit
+                        && session.id == trailing?.id
+                        && session.id != active?.id
+                ) {
+                    // Option-click puts a tab in the other half, the same
+                    // chord the workspace strip uses. One gesture, two panes,
+                    // and nothing new to learn on this screen.
+                    if NSEvent.modifierFlags.contains(.option) {
+                        sessions.sendToOtherHalf(session, in: host.id)
+                    } else {
+                        sessions.select(session)
+                    }
+                } onClose: {
+                    if session.alive {
+                        closing = session
+                    } else {
+                        Task { await sessions.close(session) }
+                    }
+                } onSplit: {
+                    sessions.sendToOtherHalf(session, in: host.id)
+                }
+            }
+
+            Button("New session", .create) { library.connectRequest = host }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .help("Open another shell on \(host.label)")
+
+            Spacer()
+
+            if !mine.isEmpty {
+                Menu {
+                    Button("Single", .layout) { sessions.setLayout(.single, for: host.id) }
+                    Button("Side by side", .compare) { sessions.setLayout(.side, for: host.id) }
+                    Button("Stacked", .compare) { sessions.setLayout(.stacked, for: host.id) }
+                } label: {
+                    ActionIcon.compare.label("Split")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Show two sessions at once")
+                .disabled(mine.count < 2)
+            }
+        }
+        .padding(.horizontal, Theme.Space.m)
+        .padding(.vertical, Theme.Space.xs)
+        .background(Theme.tabStrip)
+    }
+
+    private var empty: some View {
+        EmptyState(
+            symbol: "terminal",
+            title: "No session on \(host.label)",
+            message: "Open one and it stays open here, with its own tab, until you close it."
+        ) {
+            Button("Connect", .connect) { library.connectRequest = host }
+                .buttonStyle(AccentButtonStyle())
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// One session's tab.
+private struct SSHSessionChip: View {
+    let session: SSHLiveTerminal
+    let isSelected: Bool
+    var isOtherHalf: Bool = false
+    let onSelect: () -> Void
+    let onClose: () -> Void
+    var onSplit: (() -> Void)? = nil
+
+    @State private var isHovering = false
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: onSelect) {
+                HStack(spacing: Theme.Space.xs) {
+                    Image(systemName: session.alive ? "terminal" : "terminal.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(session.alive ? Theme.accent : Theme.stateIdle)
+                        .frame(width: 16, height: 16)
+                    Text(session.title)
+                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    // A session that ended keeps its tab and says so. Its last
+                    // screenful is often the reason somebody is looking.
+                    if !session.alive {
+                        Text("ended")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+
+            if isSelected || isHovering {
+                TabCloseButton(help: "Close this session", action: onClose)
+            } else {
+                // Holds the width the button would take, so a tab does not
+                // resize under the pointer and shove every tab after it along.
+                Color.clear.frame(width: 20, height: 20)
+            }
+        }
+        .padding(.leading, Theme.Space.s)
+        .padding(.trailing, 3)
+        .padding(.vertical, 3)
+        .background(
+            isSelected ? Theme.panel : (isOtherHalf ? Theme.rowHighlight : .clear),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Theme.border : (isOtherHalf ? Theme.accent.opacity(0.4) : .clear),
+                    lineWidth: 1
+                )
+        )
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            if let onSplit {
+                Button("Open in split", .compare) { onSplit() }
+            }
+            Button("Close", .delete) { onClose() }
+        }
+    }
+}
+#endif
