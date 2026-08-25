@@ -257,11 +257,14 @@ struct SSHLibraryView: View {
             }
         }
         .listStyle(.insetGrouped)
-        // The grouped styles paint their own grey behind the rows. Every other
-        // screen in the client is Theme.background with panels on it, so the
-        // list gives its own back and the theme paints instead.
+        // The grouped styles paint their own grey twice: once behind the
+        // scroll view, and once behind every row. Hiding the scroll background
+        // only dealt with the first, so the rows stayed the system's light
+        // neutral card on an almost-black screen. Both have to be said.
         .scrollContentBackground(.hidden)
         .background(Theme.background)
+        .listRowBackground(Theme.panel)
+        .listRowSeparatorTint(Theme.border)
     }
 
     /// One row per visible line, with its depth.

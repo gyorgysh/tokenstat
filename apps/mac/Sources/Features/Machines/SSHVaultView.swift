@@ -131,6 +131,12 @@ struct SSHVaultRow: View {
                 Text(label)
                     .font(.callout)
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Color.primary)
+                    .lineLimit(1)
+                Spacer(minLength: Theme.Space.s)
+                // The badge belongs at the trailing edge with the chevron, not
+                // pinned to the end of the sentence. Beside the text it read as
+                // a second half of the label, and the label already said
+                // "locked", so the row said it twice a few points apart.
                 if vault.locked {
                     Text("Locked")
                         .font(.caption)
@@ -138,7 +144,6 @@ struct SSHVaultRow: View {
                         .background(Theme.accentSoft, in: Capsule())
                         .foregroundStyle(Theme.accent)
                 }
-                Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.tertiary)
@@ -160,7 +165,9 @@ struct SSHVaultRow: View {
     private var label: String {
         if vault.unconfirmedRecovery { return "Recovery code not confirmed" }
         if vault.needsRecreate { return "Encrypted vault · has to be recreated" }
-        if vault.locked { return "Encrypted vault · locked" }
+        // No "· locked" here: the badge on the trailing edge says that, and
+        // the row was saying it twice.
+        if vault.locked { return "Encrypted vault" }
         if vault.created {
             return vault.recordCount == 1
                 ? "Encrypted vault · 1 record"
@@ -400,13 +407,19 @@ struct SSHVaultScreen: View {
             Text(detail)
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // All three at the same size. Prominent and plain were dense and
+            // destructive was not, so Unlock came out visibly smaller than
+            // Delete vault two paragraphs below it and the screen looked like
+            // it had been assembled from two different designs. These are the
+            // one call to action under a paragraph of consequences, which is
+            // the full size everywhere else in the app.
             Group {
                 if destructive {
                     Button(button, icon, action: perform).buttonStyle(DestructiveButtonStyle())
                 } else if prominent {
-                    Button(button, icon, action: perform).buttonStyle(AccentButtonStyle(small: true))
+                    Button(button, icon, action: perform).buttonStyle(AccentButtonStyle())
                 } else {
-                    Button(button, icon, action: perform).buttonStyle(SecondaryButtonStyle(small: true))
+                    Button(button, icon, action: perform).buttonStyle(SecondaryButtonStyle())
                 }
             }
             .disabled(!enabled)

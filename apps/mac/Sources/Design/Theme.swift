@@ -828,6 +828,10 @@ struct EmptyState<Action: View>: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Space.xl)
+        // The message is capped at 420 points and nothing else held it off the
+        // edges, so on a phone narrower than that cap the sentence ran into
+        // both bezels with no margin at all.
+        .padding(.horizontal, Theme.Space.l)
     }
 }
 

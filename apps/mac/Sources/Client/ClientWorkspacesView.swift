@@ -274,6 +274,15 @@ struct ClientWorkspacesView: View {
                     .font(ClientType.caption.weight(.semibold))
                     .disabled(model.isConnecting != nil || host.online == false)
                 }
+                // Inline, after the button. As a bottom-trailing overlay this
+                // landed on top of Connect whenever the card was a single row,
+                // which is every card that is not the connected one.
+                if host.machineID != nil {
+                    Image(systemName: "chevron.right")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
             }
             if model.connectedKey == host.peerKey {
                 // What the machine is doing, rather than a sentence saying it
@@ -285,15 +294,6 @@ struct ClientWorkspacesView: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
-        .overlay(alignment: .bottomTrailing) {
-            if host.machineID != nil {
-                Image(systemName: "chevron.right")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.tertiary)
-                    .padding(Theme.Space.m)
-                    .accessibilityHidden(true)
-            }
-        }
         // The whole card, minus the button, opens that machine on Devices.
         // `contentShape` so the padding is part of the target, and a plain
         // background gesture rather than a `NavigationLink` because Connect
