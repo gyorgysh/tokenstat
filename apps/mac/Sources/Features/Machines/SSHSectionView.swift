@@ -77,7 +77,7 @@ struct SSHSectionView: View {
             SSHConnectForm(host: host, model: model) { terminal = $0 }
         }
         .sheet(item: $terminal) {
-            SSHLiveTerminalScreen(session: $0).frame(minWidth: 720, minHeight: 480)
+            SSHLiveTerminalScreen(session: $0, library: model).frame(minWidth: 720, minHeight: 480)
         }
         .sheet(isPresented: $showingVault) {
             SSHVaultScreen(vault: vault, tier: vaultTier ?? "", canWrite: paidVaultTier != nil, library: model)

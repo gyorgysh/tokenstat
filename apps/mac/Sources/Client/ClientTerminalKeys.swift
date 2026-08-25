@@ -29,6 +29,12 @@ struct ClientTerminalKeys: View {
     let toggleKeyboard: () -> Void
     /// Whether a drag scrolls the buffer instead of reaching the program.
     @Binding var scrolls: Bool
+    /// Keys this session has that others do not, at the head of the bar.
+    ///
+    /// An SSH session has saved snippets and an agent session does not. Rather
+    /// than a second bar, or a copy of this one with one key added, the caller
+    /// hands over what is specific to it and everything else stays shared.
+    var leading: AnyView?
 
     /// Armed for the next key only, like a real modifier tapped once. Sticky
     /// on purpose: a phone cannot hold one key while pressing another.
@@ -67,6 +73,10 @@ struct ClientTerminalKeys: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
+                if let leading {
+                    leading
+                    Divider().frame(height: 20)
+                }
                 // Reading is half of what a phone does with a terminal, and
                 // the keyboard covers half the screen. This is the way out of
                 // it, and the way back: one key, both directions, because the

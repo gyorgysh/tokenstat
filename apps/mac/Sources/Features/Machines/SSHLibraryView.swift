@@ -78,7 +78,7 @@ struct SSHLibraryView: View {
             .sheet(item: $connecting) { host in
                 SSHConnectForm(host: host, model: model) { terminal = $0 }
             }
-            .fullScreenCover(item: $terminal) { SSHLiveTerminalScreen(session: $0) }
+            .fullScreenCover(item: $terminal) { SSHLiveTerminalScreen(session: $0, library: model) }
     }
 
     // MARK: - The screen
