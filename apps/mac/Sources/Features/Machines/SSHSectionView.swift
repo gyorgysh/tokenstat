@@ -39,13 +39,13 @@ struct SSHSectionView: View {
             DetailChromeBar {
                 addMenu
             }
-            HStack(spacing: Theme.Space.s) {
-                SearchField(text: $model.search, prompt: "Search \(section.label.lowercased())")
-                    .frame(maxWidth: 420)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Theme.Space.m)
-            .padding(.bottom, Theme.Space.s)
+            // Full width, like the search box on Automations. Capped at 420
+            // with a spacer after it, this was the one search field in the app
+            // that stopped halfway across its column and left a strip of empty
+            // background beside itself.
+            SearchField(text: $model.search, prompt: "Search \(section.label.lowercased())")
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.bottom, Theme.Space.s)
             // The vault belongs to hosts and keys, not to a fingerprint list,
             // and only when there is an account to hold one.
             if vaultTier != nil, section != .knownHosts {
