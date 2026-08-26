@@ -5,64 +5,56 @@
 
 //! Android's deliberately tiny JNI face.
 
-use jni::JNIEnv;
+use jni::EnvUnowned;
+use jni::errors::{Error, ThrowRuntimeExAndDefault};
 use jni::objects::{JClass, JString};
 use jni::sys::jstring;
 
 use crate::api;
 
-fn java_string(env: &mut JNIEnv<'_>, value: JString<'_>) -> Result<String, String> {
-    env.get_string(&value)
-        .map(|s| s.into())
-        .map_err(|e| e.to_string())
-}
-
-fn response(env: &JNIEnv<'_>, value: impl AsRef<str>) -> jstring {
-    env.new_string(value.as_ref())
-        .map(|s| s.into_raw())
-        .unwrap_or(std::ptr::null_mut())
+fn response(env: &mut jni::Env<'_>, value: impl AsRef<str>) -> Result<jstring, Error> {
+    Ok(env.new_string(value.as_ref())?.into_raw())
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeInit(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    data_dir: JString<'_>,
-    cache_dir: JString<'_>,
-    device_name: JString<'_>,
+pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeInit<'caller>(
+    unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    data_dir: JString<'caller>,
+    cache_dir: JString<'caller>,
+    device_name: JString<'caller>,
 ) -> jstring {
-    let result = (|| {
-        let data = java_string(&mut env, data_dir)?;
-        let cache = java_string(&mut env, cache_dir)?;
-        let name = java_string(&mut env, device_name)?;
-        tokenstat_paths::configure_mobile(data, cache)?;
-        tokenstat_identity::set_machine_label(&name).map_err(|e| e.to_string())?;
-        Ok::<_, String>(serde_json::json!({"ok": true, "result": {}}).to_string())
-    })()
-    .unwrap_or_else(|message| {
-        serde_json::json!({
-            "ok": false,
-            "error": {"code": "android_init", "message": message}
+    unowned_env
+        .with_env(|env| {
+            let result = (|| {
+                tokenstat_paths::configure_mobile(data_dir.to_string(), cache_dir.to_string())?;
+                tokenstat_identity::set_machine_label(&device_name.to_string())
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>(serde_json::json!({"ok": true, "result": {}}).to_string())
+            })()
+            .unwrap_or_else(|message| {
+                serde_json::json!({
+                    "ok": false,
+                    "error": {"code": "android_init", "message": message}
+                })
+                .to_string()
+            });
+            response(env, result)
         })
-        .to_string()
-    });
-    response(&env, result)
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeCall(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
-    method: JString<'_>,
-    params: JString<'_>,
+pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeCall<'caller>(
+    unowned_env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    method: JString<'caller>,
+    params: JString<'caller>,
 ) -> jstring {
-    let result = match (java_string(&mut env, method), java_string(&mut env, params)) {
-        (Ok(method), Ok(params)) => api::call(&method, &params),
-        (Err(message), _) | (_, Err(message)) => serde_json::json!({
-            "ok": false,
-            "error": {"code": "jni_string", "message": message}
+    unowned_env
+        .with_env(|env| {
+            let result = api::call(&method.to_string(), &params.to_string());
+            response(env, result)
         })
-        .to_string(),
-    };
-    response(&env, result)
+        .resolve::<ThrowRuntimeExAndDefault>()
 }
