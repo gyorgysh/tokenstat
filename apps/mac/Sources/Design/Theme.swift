@@ -1324,10 +1324,13 @@ struct SecondaryButtonStyle: ButtonStyle {
 struct ThemedFieldStyle: TextFieldStyle {
     /// Dense variant, for a field sharing a row with small buttons.
     var small = false
+    /// The face for the text. See `ThemedFieldBox.font`: chaining `.font`
+    /// after the style does not reach the text.
+    var font: Font?
 
     // The protocol's requirement is underscored. Nothing to be done about it.
     func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration.themedFieldBox(small: small)
+        configuration.themedFieldBox(small: small, font: font)
     }
 }
 
@@ -1335,6 +1338,10 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
     /// `TextField("Name", text: $name).textFieldStyle(.themed)`
     static var themed: ThemedFieldStyle { ThemedFieldStyle() }
     static var themedSmall: ThemedFieldStyle { ThemedFieldStyle(small: true) }
+    /// For a code or a fingerprint, where the character shapes matter.
+    static func themedMono(_ size: CGFloat) -> ThemedFieldStyle {
+        ThemedFieldStyle(font: Theme.mono(size))
+    }
 }
 
 /// The same box, as a modifier, for the fields a `TextFieldStyle` cannot
@@ -1351,13 +1358,41 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
 /// the same field rather than a feature.
 struct ThemedFieldBox: ViewModifier {
     var small = false
+    /// The face for the text, where the default is wrong.
+    ///
+    /// A recovery code is the case this exists for. The box used to set its
+    /// own font unconditionally, and a font set inside a style sits closer to
+    /// the text than one the caller chains on afterwards, so every field that
+    /// asked for `Theme.mono` silently got the proportional default back. The
+    /// three that did are the vault's code fields, where O against 0 and I
+    /// against 1 is the entire reason the host normalises those characters.
+    var font: Font?
+
+    /// The face when the caller has not named one.
+    ///
+    /// A fixed point size does not grow with Larger Text, and a fixed height
+    /// could not hold it if it did. The Mac has one text size and wants the
+    /// row heights the rest of its chrome uses; the phone has a setting people
+    /// rely on, so it takes a scaling style and a floor rather than a ceiling.
+    private var defaultFont: Font {
+        #if os(macOS)
+        Font.system(size: small ? 12 : 13)
+        #else
+        Font.system(small ? .footnote : .subheadline)
+        #endif
+    }
 
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
-            .font(.system(size: small ? 12 : 13))
+            .font(font ?? defaultFont)
             .padding(.horizontal, Theme.Space.s)
+            #if os(macOS)
             .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            #else
+            .padding(.vertical, small ? 5 : 7)
+            .frame(minHeight: small ? Theme.Control.heightSmall : Theme.Control.height)
+            #endif
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1)
@@ -1367,8 +1402,12 @@ struct ThemedFieldBox: ViewModifier {
 
 extension View {
     /// `SecureField("Password", text: $password).themedFieldBox()`
-    func themedFieldBox(small: Bool = false) -> some View {
-        modifier(ThemedFieldBox(small: small))
+    ///
+    /// Pass `font` for a field whose face matters, such as a recovery code.
+    /// Chaining `.font` after this does not work: the box sets the font
+    /// nearer the text than the caller can.
+    func themedFieldBox(small: Bool = false, font: Font? = nil) -> some View {
+        modifier(ThemedFieldBox(small: small, font: font))
     }
 }
 
