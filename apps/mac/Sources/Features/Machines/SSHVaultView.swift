@@ -195,9 +195,18 @@ struct SSHVaultRow: View {
         // saying it twice.
         if vault.locked { return nil }
         if vault.created {
-            return vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records"
+            let records = vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records"
+            // A vault that exists on a plan that cannot write it is the state
+            // somebody lands in by letting Supporter lapse, and the row used
+            // to look exactly like a vault that was working. The records are
+            // still there and still readable, and that is worth saying, but
+            // not without saying that nothing new is going into them.
+            return canWrite ? records : "\(records) · not syncing"
         }
-        return canWrite ? "not set up" : "Supporter and above"
+        // Not "Supporter and above", which named a plan and left it to the
+        // reader to work out that this meant off. What is happening here is
+        // that servers saved on this device stay on this device.
+        return canWrite ? "not set up" : "not syncing"
     }
 
     private var background: Color {
@@ -213,6 +222,7 @@ struct SSHVaultRow: View {
 struct SSHVaultScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Bindable var vault: SSHVaultModel
     let tier: String
     let canWrite: Bool
@@ -271,17 +281,27 @@ struct SSHVaultScreen: View {
                             icon: .refresh,
                             prominent: true
                         ) { Task { await vault.registerAndRefresh() } }
-                    } else if !vault.created {
+                    } else if !vault.created, canWrite {
                         action(
                             title: "Set up the vault",
-                            detail: canWrite
-                                ? "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted."
-                                : "Creating a vault needs Supporter or above. Existing vaults stay readable.",
+                            detail: "Creates a vault on this account, locked by a password you choose, and one recovery code. Nothing leaves the machine unencrypted.",
                             button: "Set up vault",
                             icon: .security,
-                            prominent: true,
-                            enabled: canWrite
+                            prominent: true
                         ) { showingSetup = true }
+                    } else if !vault.created {
+                        // A greyed-out "Set up vault" was the whole of this
+                        // screen on a Free plan: the one thing on it did
+                        // nothing when pressed, and pressing a dead button is
+                        // how somebody finds out what their plan does. The
+                        // button that is here now is the one that can help.
+                        action(
+                            title: "Syncing needs Supporter",
+                            detail: "Your servers, folders, keys and snippets are saved on this device and work exactly as they do now. A vault is what carries them to your other computers and phones, encrypted so that only your devices can read them.",
+                            button: "See plans",
+                            icon: .plans,
+                            prominent: true
+                        ) { Plans.open(using: openURL) }
                     } else if vault.needsRecreate {
                         action(
                             title: "Recreate the vault",
@@ -320,9 +340,18 @@ struct SSHVaultScreen: View {
                                 icon: .signOut
                             ) { Task { await vault.lock() } }
                         } else {
-                            Text("Your plan can read this vault but not write to it. Hosts and keys still sync in; changes made here stay on this machine.")
-                                .font(Theme.callout).foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            // The state a lapsed, refunded or cancelled
+                            // Supporter lands in, and the one this screen used
+                            // to say least about: the vault is still there,
+                            // still readable, and quietly no longer receiving
+                            // anything. Said plainly, with the way back.
+                            action(
+                                title: "This vault has stopped syncing",
+                                detail: "It still exists on your account and this device can still read it, so nothing has been lost. What has stopped is the other direction: servers and keys you add or change here stay on this device until your plan can write to the vault again.",
+                                button: "See plans",
+                                icon: .plans,
+                                prominent: true
+                            ) { Plans.open(using: openURL) }
                         }
                     }
 
@@ -409,7 +438,12 @@ struct SSHVaultScreen: View {
                 systemImage: "lock.shield.fill"
             )
             .font(Theme.callout.weight(.medium))
-            Text("This device is enrolled and can read and write the vault.")
+            // It said "can read and write" on every plan, directly above the
+            // paragraph explaining that this plan cannot write. One of the two
+            // had to go, and it was not the paragraph.
+            Text(canWrite
+                ? "This device is enrolled and can read and write the vault."
+                : "This device is enrolled and can read the vault. Writing to it needs Supporter or above.")
                 .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
@@ -423,7 +457,6 @@ struct SSHVaultScreen: View {
         icon: ActionIcon,
         prominent: Bool = false,
         destructive: Bool = false,
-        enabled: Bool = true,
         perform: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -446,7 +479,6 @@ struct SSHVaultScreen: View {
                     Button(button, icon, action: perform).buttonStyle(SecondaryButtonStyle())
                 }
             }
-            .disabled(!enabled)
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -465,6 +497,7 @@ struct SSHVaultScreen: View {
 /// that destroys data for every device on the account at once.
 struct SSHVaultDeleteSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Bindable var vault: SSHVaultModel
     let tier: String
     let canWrite: Bool
@@ -607,10 +640,16 @@ struct SSHVaultDeleteSheet: View {
                 .buttonStyle(SecondaryButtonStyle())
                 .frame(minWidth: Theme.Control.pairedWidth)
             Spacer()
-            if deleted {
+            if deleted, !canWrite {
+                // The same dead button as the one on the screen behind this,
+                // in the one place somebody arrives at having just lost the
+                // vault they were trying to get back into.
+                Button("See plans", .plans) { Plans.open(using: openURL) }
+                    .buttonStyle(AccentButtonStyle())
+            } else if deleted {
                 Button("Create a new vault", .create) { creating = true }
                     .buttonStyle(AccentButtonStyle())
-                    .disabled(!canWrite || working)
+                    .disabled(working)
             } else {
                 Button("Delete vault", .delete) { Task { await run() } }
                     .buttonStyle(DestructiveButtonStyle())

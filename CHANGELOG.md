@@ -28,7 +28,14 @@ Everything since 0.6.8, which is the last release anybody received.
   setting it up, replacing the recovery code and deleting it one click away and
   each with room to say what it costs. Recovery is confirmed in two steps: the
   code is on screen to be written down, then off screen while it is typed back,
-  so confirming cannot be done by reading.
+  so confirming cannot be done by reading. The vault is a Supporter feature and
+  says so as a plan rather than as a locked door: on Free the row reads "not
+  syncing", the screen explains that your servers and keys are saved on this
+  device and work exactly as they do now, and the button on it opens plans
+  instead of doing nothing. A vault that outlives the plan that made it stays
+  readable and says out loud that it has stopped receiving changes. Deleting it
+  on one device removes it from every other one, rather than leaving a second
+  device offering to change the password of a vault that is gone.
 - Trusted servers are listed with their fingerprints and any of them can be
   forgotten, so a key that changed can be confirmed again rather than quietly
   accepted. A key shows its own fingerprint, and its public half can be copied

@@ -15,6 +15,26 @@ extension Notification.Name {
     static let tokenstatEntitlementDidChange = Notification.Name("ai.tokenstat.entitlementDidChange")
 }
 
+/// Where "See plans" goes, which is not the same place on the two platforms.
+///
+/// The Mac sends people to the website, because a Mac plan is not an Apple
+/// purchase. iOS has to use the in-app paywall, because an Apple subscription
+/// cannot be sold through a link out of the app. One place that knows which,
+/// so a new call site cannot get it backwards and ship a button that opens
+/// Safari on a phone.
+@MainActor
+enum Plans {
+    static let pricing = URL(string: "https://tokenstat.ai/pricing")!
+
+    static func open(using openURL: OpenURLAction) {
+        #if os(macOS)
+        openURL(pricing)
+        #else
+        NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
+        #endif
+    }
+}
+
 /// The same Free-year note the public profile puts under the heatmap.
 ///
 /// Not a wall. The year is already on screen. This says why the older
@@ -23,7 +43,6 @@ struct HistoryLockBanner: View {
     /// How many recent days stay exact. Free is 30.
     var days: Int = 30
 
-    private static let pricing = URL(string: "https://tokenstat.ai/pricing")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -36,7 +55,7 @@ struct HistoryLockBanner: View {
             )
             .fixedSize(horizontal: false, vertical: true)
             #if os(macOS)
-            Link("Upgrade to see the year", destination: Self.pricing)
+            Link("Upgrade to see the year", destination: Plans.pricing)
                 .font(Theme.font(12, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .underline(false)
