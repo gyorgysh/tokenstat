@@ -5,6 +5,33 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
+## [0.7.0]
+
+### Fixed
+
+- Turning on control while watching a remote desktop no longer drops the
+  session. Control is now handed over on the stream that is already running,
+  so the picture never stops, where it used to close the stream and open a new
+  one. Those two raced each other: one screen session is allowed at a time, and
+  the new one usually arrived before the old one had finished closing, so it
+  was refused and the app spent the next half minute reconnecting.
+- The relay understands the same handover, so a device reopening the same
+  desktop takes over from itself instead of being turned away. A second
+  desktop on one account is still one too many, and says so.
+- A screen session that a viewer left without closing frees up in seconds
+  rather than in up to a minute.
+- Dragging a window, or dragging to select text, follows the pointer instead
+  of jumping to its new place when the button comes up.
+- Input arrives in the order it was made. A fast drag could previously deliver
+  a movement after the release that ended it, leaving the far end holding a
+  button down.
+- A phone coming back to the foreground reconnects to the relay when it finds
+  it has fallen off, instead of looking connected while every call to it says
+  the machine is not there.
+- Reaching a machine no longer waits on a local network address that has
+  stopped answering. The address is remembered from the network it worked on,
+  and off that network it was tried first on every call.
+
 ## [0.6.9] - 2026-08-26
 
 Everything since 0.6.8, which is the last release anybody received.
