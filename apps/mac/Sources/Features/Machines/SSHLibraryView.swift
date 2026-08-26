@@ -217,8 +217,11 @@ struct SSHLibraryView: View {
             if vaultTier != nil {
                 SSHVaultRow(vault: vault, canWrite: paidVaultTier != nil) { showingVault = true }
             }
+            // No label on the container. Applied to a group of buttons it can
+            // stand in for their own, which would announce one "SSH library"
+            // where there are three tabs a person has to be able to tell
+            // apart and select. The tabs say what they are.
             SegmentedTabs(options: Section.allCases, selection: $section)
-                .accessibilityLabel("SSH library")
             SearchField(text: $model.search, prompt: "Search \(section.rawValue.lowercased())")
         }
         .padding(Theme.Space.m)

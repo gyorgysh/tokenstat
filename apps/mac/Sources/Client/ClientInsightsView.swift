@@ -62,7 +62,6 @@ struct ClientInsightsView: View {
             options: ClientInsightsModel.Cut.allCases,
             selection: $model.cut
         ) { $0.label }
-        .accessibilityLabel("Breakdown")
         .onChange(of: model.cut) { _, _ in
             // Each cut keeps its own rows, so going back to one already seen is
             // instant and costs nothing. The host serves them all from one

@@ -274,7 +274,6 @@ private struct ClientAccountContent: View {
                     options: ClientLayoutPreference.allCases.map(\.rawValue),
                     selection: $layoutPreference
                 ) { ClientLayoutPreference(rawValue: $0)?.label ?? $0 }
-                .accessibilityLabel("Layout")
                 Text(
                     (ClientLayoutPreference(rawValue: layoutPreference) ?? .automatic).detail
                 )

@@ -1540,6 +1540,10 @@ struct SegmentedTabs<Value: Hashable>: View {
                 .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
         }
+        // The tabs are the elements, not the row. Without this a label on the
+        // container can stand in for theirs and a screen reader announces one
+        // control where there are three to choose between.
+        .accessibilityElement(children: .contain)
         .padding(2)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
         .overlay(
