@@ -1389,7 +1389,12 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
 /// has an address, through the tunnel otherwise. The same ladder `call_peer`
 /// climbs, exposed so a stream can claim its own connection.
 pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, String> {
-    dial_peer_for(peer_hex, ChannelPurpose::Unknown).map(|value| value.0)
+    // Through the labelled one rather than beside it. The screen and stream
+    // call sites are behind platform gates, so on a build where those compile
+    // out the labelled dial had no callers at all and the Linux lint job
+    // rejected it as dead. Routing the unlabelled case through it keeps one
+    // path for every platform and means the label is the only difference.
+    dial_peer_as(peer_hex, ChannelPurpose::Unknown)
 }
 
 /// The same dial, saying what the connection is for.
