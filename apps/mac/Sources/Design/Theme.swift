@@ -1423,6 +1423,8 @@ struct ThemedEditor: View {
     /// Monospaced by default: everything this is used for is a command.
     var font: Font = Theme.mono(12)
     var minHeight: CGFloat = 88
+    /// Past this it scrolls inside itself rather than asking for more room.
+    var maxHeight: CGFloat = 320
 
     @FocusState private var focused: Bool
 
@@ -1433,7 +1435,11 @@ struct ThemedEditor: View {
             .scrollContentBackground(.hidden)
             .padding(.horizontal, Theme.Space.xs)
             .padding(.vertical, Theme.Space.xs)
-            .frame(minHeight: minHeight)
+            // A floor and a ceiling. A `TextEditor` asked for its content's
+            // height grows with whatever is typed into it, and a caller that
+            // hands it an unbounded maximum is handing that growth straight to
+            // whatever is holding it.
+            .frame(minHeight: minHeight, maxHeight: maxHeight)
             .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)

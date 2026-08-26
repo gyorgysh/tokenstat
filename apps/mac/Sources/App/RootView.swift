@@ -1039,6 +1039,15 @@ struct RootView: View {
             .frame(minWidth: Self.detailMinimumWidth)
             .inspector(isPresented: showsInspector) {
                 belowTitlebar { inspectorContent }
+                    // The pane keeps its own troubles. Three times now a child
+                    // of this column has reported an enormous intrinsic height
+                    // and the hosted column has grown to satisfy it, at which
+                    // point NSSplitView pushes the rest of the window out of
+                    // place: the sidebar rides up under the traffic lights and
+                    // stays wrong until another destination remounts the
+                    // column. Clipping means a view that misbehaves is cut off
+                    // inside its own pane instead of taking the window apart.
+                    .clipped()
                     // Opaque, like the leading sidebar. `.inspector` on a
                     // transparent titlebar otherwise composites the column
                     // against liquid glass, which is what made the Files /
@@ -1114,6 +1123,8 @@ struct RootView: View {
                 belowTitlebar { inspectorContent }
                     .frame(width: DisplayFit.box(400))
                     .frame(maxHeight: .infinity)
+                    // Same reason as the column. See there.
+                    .clipped()
                     .background(Theme.sidebar)
                     .overlay(alignment: .leading) {
                         Rectangle()

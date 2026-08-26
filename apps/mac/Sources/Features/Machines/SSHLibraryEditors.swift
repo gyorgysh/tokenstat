@@ -640,7 +640,16 @@ struct SSHSnippetEditor: View {
                     .padding(.horizontal, Theme.Space.m)
                     .padding(.top, Theme.Space.s)
             }
-            VStack(alignment: .leading, spacing: Theme.Space.s) {
+            // `SSHEditorBody`, like every other editor in this file. This one
+            // was a bare VStack, which is why it and no other could take the
+            // window apart: a stack cannot absorb content taller than the
+            // column it is in, so a long command box, a wrapped explanation
+            // and a checkbox together demanded more height than the inspector
+            // had and the hosted column grew to satisfy them. The split view
+            // then pushed the rest of the window out of place, and it stayed
+            // wrong until a different destination remounted the column. A
+            // scroll view answers the same demand by scrolling.
+            SSHEditorBody(working: working) {
                 TextField("Name", text: $snippet.title)
                     .textFieldStyle(.themed)
                 Text("Command")
@@ -649,8 +658,10 @@ struct SSHSnippetEditor: View {
                 // themed the outline of the platform's grey slab and left the
                 // slab. ThemedEditor hides that background so the fill is the
                 // app's own panel, like the name field above it.
-                ThemedEditor(text: $snippet.command)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // No infinite maximum. Inside a scroll view an unbounded
+                // height is a request for as much as the content wants, and a
+                // text editor's content grows with what is typed into it.
+                ThemedEditor(text: $snippet.command, minHeight: 140)
                 if placeholders.isEmpty {
                     Text("Wrap a value in {{braces}} to be asked for it every time this runs, so one snippet covers every server.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -679,7 +690,6 @@ struct SSHSnippetEditor: View {
                 }
 
             }
-            .padding(Theme.Space.m)
 
             SSHEditorFooter(
                 saveTitle: isNew ? "Add snippet" : "Save",
