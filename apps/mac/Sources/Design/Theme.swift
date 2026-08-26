@@ -1239,6 +1239,13 @@ struct InspectorChromeBar<Content: View, Accessory: View>: View {
             InspectorCloseButton(action: onClose)
                 .padding(.trailing, Theme.Space.s)
         }
+        // The same height as `DetailChromeBar`, which is the bar immediately
+        // to the left of this one. It used to be whatever the close button
+        // made it, 30pt, so the two headers of one window sat at different
+        // heights and their bottom hairlines did not meet at the column
+        // divider. Nothing in here is taller than this, so the content simply
+        // centres.
+        .frame(height: DetailChromeBarHeight)
         .background(Theme.sidebar)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.border).frame(height: 1)
