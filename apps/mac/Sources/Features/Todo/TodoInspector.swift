@@ -34,21 +34,28 @@ struct TodoInspector: View {
 
     private enum Field: Hashable { case title, notes }
 
+    /// The selection, but only while it is a task.
+    ///
+    /// The board and the notes list share one selected card. Notes have their
+    /// own pane now, and a note shown in this one read as a card called "Task"
+    /// with Move to To Do beside it: buttons that set a board column on
+    /// something no column ever lists.
+    private var card: TodoCard? {
+        guard let card = model.selectedCard, !card.isNote else { return nil }
+        return card
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
-                FeatureMark(
-                    name: model.selectedCard?.isNote == true ? "mark_note" : "mark_todo",
-                    tint: model.selectedCard?.isNote == true ? Theme.secondary : Theme.accent,
-                    size: 16
-                )
-                .padding(.leading, Theme.Space.m)
+                FeatureMark(name: "mark_todo", tint: Theme.accent, size: 16)
+                    .padding(.leading, Theme.Space.m)
                 Text("Task")
                     .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             Group {
-                if let card = model.selectedCard {
+                if let card {
                     cardBody(card)
                 } else {
                     InspectorEmptyState(
@@ -76,7 +83,7 @@ struct TodoInspector: View {
         .onChange(of: notesDraft) { _, _ in markDirtyIfNeeded() }
         .onDisappear { Task { await persistDrafts() } }
         .sheet(isPresented: $showDelegate) {
-            if let card = model.selectedCard {
+            if let card {
                 DelegateSheet(
                     model: model,
                     card: card,
@@ -112,9 +119,7 @@ struct TodoInspector: View {
                 }
 
                 labeled("Column", card.columnLabel)
-                if !card.isNote {
-                    agentFields(card)
-                }
+                agentFields(card)
 
                 if let delegate = card.delegate {
                     labeled("Run", delegate.label)
@@ -131,7 +136,7 @@ struct TodoInspector: View {
                     Button("View run transcript", .preview) { onViewRun?(delegate.runId) }
                         .buttonStyle(AccentButtonStyle())
                 }
-                if !card.isNote, card.delegate?.isRunning != true {
+                if card.delegate?.isRunning != true {
                     if canRun {
                         TaskRunBar(
                             canRun: canRun,
@@ -153,10 +158,7 @@ struct TodoInspector: View {
     }
 
     private func notesEditor(_ card: TodoCard) -> some View {
-        let prompt: String = {
-            if card.isNote { return "Note" }
-            return card.backend == "sh" ? "Command" : "Prompt"
-        }()
+        let prompt = card.backend == "sh" ? "Command" : "Prompt"
         return TextEditor(text: $notesDraft)
             .font(Theme.callout)
             .scrollContentBackground(.hidden)
@@ -296,7 +298,7 @@ struct TodoInspector: View {
     }
 
     private func syncDrafts() {
-        guard let card = model.selectedCard else {
+        guard let card else {
             loadedID = nil
             saveState = .idle
             return
@@ -344,7 +346,7 @@ struct TodoInspector: View {
         starting = true
         await persistDrafts()
         await persistAgent(card)
-        guard let latest = model.cards.first(where: { $0.id == card.id }) ?? model.selectedCard else {
+        guard let latest = model.cards.first(where: { $0.id == card.id }) ?? self.card else {
             starting = false
             return
         }
@@ -386,7 +388,7 @@ struct TodoInspector: View {
         if let id {
             card = model.cards.first { $0.id == id }
         } else {
-            card = model.selectedCard
+            card = self.card
         }
         guard let card else { return }
         let title = (title ?? titleDraft).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -204,9 +204,14 @@ struct NotesView: View {
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
+                    // Not selectable any more. Selectable text hit-tests the
+                    // click for a selection, which is most of this card's
+                    // surface: pressing a note where somebody naturally
+                    // presses it did nothing, and only the padding around the
+                    // words opened the pane. The pane is where the text can be
+                    // read and copied now.
                     Text(note.title)
                         .font(Theme.fit(13))
-                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !note.notes.isEmpty {
                         Text(note.notes)

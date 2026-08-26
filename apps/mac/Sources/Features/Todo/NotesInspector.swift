@@ -28,6 +28,7 @@ struct NotesInspector: View {
     @State private var placeID = ""
     @State private var applyingPlace = false
     @State private var converting = false
+    @State private var confirmingDelete = false
     @FocusState private var focused: Field?
 
     private enum Field: Hashable { case title, notes }
@@ -77,6 +78,22 @@ struct NotesInspector: View {
         .onChange(of: titleDraft) { _, _ in markDirtyIfNeeded() }
         .onChange(of: notesDraft) { _, _ in markDirtyIfNeeded() }
         .onDisappear { Task { await persistDrafts() } }
+        .confirmationDialog(
+            "Delete this note?",
+            isPresented: $confirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                guard let note else { return }
+                Task {
+                    await model.remove(note)
+                    model.selectedCardID = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It is gone for good. Archive keeps it and takes it off the list.")
+        }
         .sheet(isPresented: $converting) {
             if let note {
                 ConvertNoteSheet(note: note, folders: folders) { folderID in
@@ -187,13 +204,12 @@ struct NotesInspector: View {
                     }
                     .buttonStyle(SecondaryButtonStyle())
                 }
-                Button("Delete", .delete) {
-                    Task {
-                        await model.remove(note)
-                        model.selectedCardID = nil
-                    }
-                }
-                .buttonStyle(DestructiveButtonStyle())
+                // Archive is beside this and is the reversible one. Deleting
+                // a note is the only permanent thing this pane can do, and a
+                // misclick a few points to the right of Archive must not be
+                // the way somebody finds that out.
+                Button("Delete", .delete) { confirmingDelete = true }
+                    .buttonStyle(DestructiveButtonStyle())
             }
         }
     }
@@ -203,8 +219,8 @@ struct NotesInspector: View {
     private func markDirtyIfNeeded() {
         guard loadedID != nil else { return }
         if titleDraft != baselineTitle || notesDraft != baselineNotes {
-            saveState = .dirty
-        } else if saveState == .dirty {
+            if saveState != .saving { saveState = .dirty }
+        } else if saveState == .dirty || saveState == .failed {
             saveState = .idle
         }
     }
@@ -242,23 +258,50 @@ struct NotesInspector: View {
     /// selection is moving to another note: by the time it does, `model`
     /// already points at the new one and saving against that would put one
     /// note's text into another.
+    ///
+    /// An empty title is not a save that failed, it is a title that was not
+    /// changed. Sending it made the whole write fail, which took the body edit
+    /// typed in the same visit down with it and left Save disabled, because
+    /// Save needs a title: the only way out was Cancel, which threw the body
+    /// away as well. The field goes back to what it was and the body is
+    /// written on its own.
+    ///
+    /// The state at the end belongs to the note on screen. Setting it after
+    /// the selection has moved on is how another note's pane ended up saying
+    /// "Saving" about a write that had already finished somewhere else.
     private func persistDrafts(for id: String?, title: String, notes: String) async {
+        if saveState == .saving { return }
         guard let id, let card = model.cards.first(where: { $0.id == id }), card.isNote else { return }
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != card.title || notes != card.notes else {
+        var trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            trimmed = card.title
+            if loadedID == id { titleDraft = card.title }
+        }
+        let titleChanged = trimmed != card.title
+        let notesChanged = notes != card.notes
+        guard titleChanged || notesChanged else {
             if saveState == .dirty { saveState = .idle }
             return
         }
         saveState = .saving
         var ok = true
-        if trimmed != card.title { ok = await model.updateTitle(card, title: trimmed) }
-        if ok, notes != card.notes { ok = await model.updateNotes(card, notes: notes) }
-        guard loadedID == id else { return }
+        if titleChanged { ok = await model.updateTitle(card, title: trimmed) && ok }
+        if notesChanged { ok = await model.updateNotes(card, notes: notes) && ok }
+        guard loadedID == id else {
+            // The pane is showing a different note now, and that note's own
+            // drafts decide what its bar says.
+            if saveState == .saving { saveState = .idle }
+            return
+        }
         if ok {
             baselineTitle = trimmed
             baselineNotes = notes
             titleDraft = trimmed
             saveState = .saved
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                if saveState == .saved { saveState = .idle }
+            }
         } else {
             saveState = .failed
         }
