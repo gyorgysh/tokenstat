@@ -391,7 +391,17 @@ struct ScreenCaptureInput: Codable, Sendable, Hashable {
 
     var events: [String] { batch ?? data.map { [$0] } ?? [] }
 }
-struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool; var transport: String }
+/// A live viewer session. `id` is this end's handle; `sessionId` is the host's
+/// own id for the same session, which is what `screen.control.set` names.
+///
+/// `sessionId` is optional because a host built before that method answers
+/// without one, and the toggle then falls back to reopening the stream.
+struct ScreenViewerSession: Codable, Sendable, Hashable {
+    var id: String
+    var control: Bool
+    var transport: String
+    var sessionId: String? = nil
+}
 struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var audio: String?; var metadata: String?; var active: Bool; var dropped: UInt64; var error: String? }
 struct ScreenTransferDestination: Codable, Sendable, Hashable { var path: String? }
 struct ScreenTransferOpen: Codable, Sendable, Hashable { var id: String; var offset: UInt64; var chunkBytes: Int }

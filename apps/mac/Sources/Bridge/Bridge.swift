@@ -1974,6 +1974,23 @@ extension Bridge {
         try await background("screen.viewer.open", ["peer": peer, "capability": capability, "control": control], patience: Patience.standard, as: ScreenViewerSession.self)
     }
 
+    /// Hand the mouse over, or take it back, without reopening the stream.
+    ///
+    /// Control used to be fixed when the session opened, so the toggle tore
+    /// the stream down and dialled a fresh one. The relay counts one screen
+    /// channel per account and the old one is still closing when the new one
+    /// asks, which is the `screen_already_open` refusal behind the drop and
+    /// reconnect storm. This flips the flag on the session that is already up.
+    static func setScreenControl(peer: String, sessionID: String, capability: String, control: Bool) async throws {
+        struct Answer: Codable, Sendable { var control: Bool }
+        _ = try await onPeer(
+            peer,
+            "screen.control.set",
+            ["sessionId": sessionID, "capability": capability, "control": control],
+            as: Answer.self
+        )
+    }
+
     static func screenViewerRead(id: String) async throws -> ScreenViewerRead {
         try await background("screen.viewer.read", ["id": id, "waitMs": 250], patience: Patience.interactive, as: ScreenViewerRead.self)
     }
@@ -2221,6 +2238,23 @@ extension Bridge {
         } else {
             _ = try? await background("remote.nudge", as: Nudged.self)
         }
+    }
+
+    /// The nudge for coming back to the foreground.
+    ///
+    /// A plain nudge wakes the supervisor and drops the socket only when it
+    /// has not read in a keepalive. That is right for a machine that was
+    /// awake, and not enough for a phone: iOS suspends the process, the
+    /// socket the relay was talking to is gone, and the app can be back
+    /// inside the keepalive window with a connection that reads as fine and
+    /// answers nothing. Every dial to this device is then `no_such_peer`
+    /// until something else notices, which is what left a phone off the
+    /// tunnel until it was force quit. Asking what the tunnel thinks first
+    /// costs one local call and drops a socket only when the tunnel already
+    /// says it is not connected, so a healthy session keeps its channels.
+    static func nudgeTunnelOnForeground() async {
+        let offline = (try? await remoteStatus())?.tunnelOnline == false
+        await nudgeTunnel(reconnect: offline)
     }
 
     /// Ask hostd to remint after a plan change. A `not_on_this_plan` refusal

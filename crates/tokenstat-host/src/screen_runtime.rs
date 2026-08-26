@@ -166,6 +166,39 @@ pub(crate) fn create(id: String, peer: String, control: bool) -> Result<CaptureR
     Ok(CaptureReceiver { id, receiver: rx })
 }
 
+/// Turn input on or off on a session that is already running.
+///
+/// Control used to be decided once, when the stream opened, so the only way to
+/// hand a phone the mouse was to tear the session down and dial a fresh one.
+/// That reopen is what the relay refuses with `screen_already_open`: it counts
+/// one screen channel per account, and the old channel is still closing when
+/// the new one asks. Flipping the flag on the live session means there is no
+/// second channel to refuse.
+///
+/// The caller has already checked the capability. `peer` is checked here too,
+/// so a capability that verified for one device cannot be aimed at another
+/// device's session id.
+pub(crate) fn set_control(id: &str, peer: &str, control: bool) -> Result<(), String> {
+    let session = sessions()
+        .lock()
+        .map_err(|_| "screen capture registry poisoned")?
+        .get(id)
+        .cloned()
+        .ok_or("screen capture session is no longer active")?;
+    let mut held = session.lock().map_err(|_| "capture session poisoned")?;
+    if held.peer != peer {
+        return Err("that screen session belongs to another device".into());
+    }
+    // Input queued under the old answer is not what the new one means. Handing
+    // control back with a press still in the queue would deliver it after the
+    // viewer believed it had let go.
+    if held.control != control {
+        held.input.clear();
+    }
+    held.control = control;
+    Ok(())
+}
+
 pub(crate) fn queue_input(id: &str, payload: Vec<u8>) -> Result<(), String> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err("screen input batch exceeds 4 KiB".into());
@@ -351,6 +384,56 @@ mod tests {
             !sessions().lock().unwrap().contains_key(&control.id),
             "a control session must end when control is taken away"
         );
+    }
+
+    #[test]
+    fn control_is_handed_over_on_the_live_session() {
+        let session = create("flip".into(), "flip-peer".into(), false).unwrap();
+        assert!(
+            queue_input(&session.id, br#"{"type":"move","x":0.5,"y":0.5}"#.to_vec()).is_err(),
+            "a view-only session must not carry a pointer"
+        );
+        set_control(&session.id, "flip-peer", true).unwrap();
+        assert!(
+            queue_input(&session.id, br#"{"type":"move","x":0.5,"y":0.5}"#.to_vec()).is_ok(),
+            "the same session carries input once control is granted"
+        );
+        set_control(&session.id, "flip-peer", false).unwrap();
+        assert!(
+            queue_input(&session.id, br#"{"type":"move","x":0.5,"y":0.5}"#.to_vec()).is_err(),
+            "handing control back must take the pointer away again"
+        );
+    }
+
+    #[test]
+    fn handing_control_back_drops_what_was_queued() {
+        let session = create("flip-queue".into(), "flip-queue-peer".into(), true).unwrap();
+        queue_input(
+            &session.id,
+            br#"{"type":"mouse","button":0,"down":true}"#.to_vec(),
+        )
+        .unwrap();
+        set_control(&session.id, "flip-queue-peer", false).unwrap();
+        let held = sessions()
+            .lock()
+            .unwrap()
+            .get(&session.id)
+            .cloned()
+            .unwrap();
+        assert!(
+            held.lock().unwrap().input.is_empty(),
+            "a press queued before control went back must not be delivered after it"
+        );
+    }
+
+    #[test]
+    fn one_device_cannot_flip_control_on_another_devices_session() {
+        let session = create("flip-theirs".into(), "flip-owner".into(), false).unwrap();
+        assert!(
+            set_control(&session.id, "flip-intruder", true).is_err(),
+            "a capability verified for one device must not reach another device's session"
+        );
+        assert!(set_control("no-such-session", "flip-owner", true).is_err());
     }
 
     #[test]

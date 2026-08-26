@@ -685,6 +685,10 @@ private final class ScreenViewerModel {
     private var pointerIsDown = false
     private var peer = ""
     private var transferTask: Task<Void, Never>?
+    /// The in-flight close of the session `stop` just ended. See `awaitClose`.
+    private var closeTask: Task<Void, Never>?
+    /// The last input send, so the next one can queue behind it. See `send`.
+    private var inputTail: Task<Void, Never>?
     /// The "still watching" beat. See `startHeartbeat`.
     private var heartbeatTask: Task<Void, Never>?
     private var clipboardChangeCount = -1
@@ -738,6 +742,9 @@ private final class ScreenViewerModel {
     }
 
     private func connect() async {
+        // Whatever the last session left behind has to be gone before this one
+        // dials: the relay allows one screen channel per account.
+        await awaitClose()
         let tier = requestedTier
         let control = requestedControl
         guard tier?.lowercased() == "legend" else {
@@ -777,13 +784,33 @@ private final class ScreenViewerModel {
         heartbeatTask = nil
         task?.cancel()
         task = nil
-        if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
+        if let id = session?.id {
+            // Kept, not discarded. `connect` waits on it before dialling: the
+            // relay allows one screen channel per account, so a fresh dial
+            // that overtakes the close of the old one is refused with
+            // `screen_already_open`, and the retry ladder that follows is the
+            // reconnect storm this used to produce.
+            closeTask = Task { await Bridge.screenViewerClose(id: id) }
+        }
         session = nil
         pointerIsDown = false
+        inputTail = nil
         decoder.reset()
         audio.reset()
         transferTask?.cancel()
         transferTask = nil
+    }
+
+    /// Wait for the previous session's close to land before dialling again.
+    ///
+    /// `screen.viewer.close` is local work: it drops the registry entry and
+    /// closes the writer, which puts a CH_CLOSE on the tunnel's writer thread.
+    /// The bridge caps it at ten seconds either way, so this cannot become the
+    /// thing that hangs a reconnect.
+    private func awaitClose() async {
+        guard let closing = closeTask else { return }
+        closeTask = nil
+        await closing.value
     }
 
     private func readLoop(_ id: String) async {
@@ -853,7 +880,7 @@ private final class ScreenViewerModel {
 
     private func reconnect(after reason: String) {
         guard !stopped else { return }
-        if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
+        if let id = session?.id { closeTask = Task { await Bridge.screenViewerClose(id: id) } }
         session = nil
         connectedSince = nil
         streamingSince = nil
@@ -942,6 +969,7 @@ private final class ScreenViewerModel {
     /// starts streaming as it appears.
     func setControl(_ wanted: Bool) async {
         guard wanted != requestedControl, !peer.isEmpty else { return }
+        if await flipControlOnLiveSession(wanted) { return }
         let tier = requestedTier
         stop()
         stopped = false
@@ -953,6 +981,45 @@ private final class ScreenViewerModel {
         await connect()
         if state != .streaming && state != .connecting {
             requestedControl = false
+        }
+    }
+
+    /// Turn control on or off on the session that is already up.
+    ///
+    /// The picture never stops, which is the point: reopening the stream meant
+    /// a new screen channel, and the relay counts one per account, so the
+    /// toggle raced the old channel's close and lost. Answers false when there
+    /// is nothing live to flip or the host is too old to know the method, and
+    /// the caller then falls back to reopening.
+    private func flipControlOnLiveSession(_ wanted: Bool) async -> Bool {
+        guard let live = session, let hostSession = live.sessionId, !hostSession.isEmpty,
+              state == .streaming || state == .connecting
+        else { return false }
+        do {
+            let identity = try await Bridge.machineIdentity()
+            // A fresh capability every time. The one this session opened with
+            // says what it was opened for, and control is exactly the field
+            // the host checks.
+            let capability = try await Bridge.onPeer(
+                peer,
+                "screen.capability.issue",
+                ["peerId": identity.key, "control": wanted, "tier": requestedTier ?? ""],
+                as: ScreenCapability.self
+            )
+            try await Bridge.setScreenControl(
+                peer: peer,
+                sessionID: hostSession,
+                capability: capability.token,
+                control: wanted
+            )
+            requestedControl = wanted
+            session?.control = wanted
+            return true
+        } catch {
+            // An old host has no such method. Anything else is a real refusal
+            // (the grant was narrowed, the plan lapsed), and reopening will
+            // meet the same answer and report it where somebody can read it.
+            return false
         }
     }
 
@@ -1016,11 +1083,22 @@ private final class ScreenViewerModel {
         }
     }
 
+    /// Every input event, in the order it was made.
+    ///
+    /// One task per event let a move overtake the release that should have
+    /// ended it: independent tasks have no order between them, and a drag that
+    /// arrives after its own mouse-up leaves the far end holding a button
+    /// nothing here will release. This chains each send onto the last, so the
+    /// wire order is the gesture order.
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         let isDisplay = (value["type"] as? String) == "display"
         guard isDisplay || session?.control == true else { return }
-        Task { try? await Bridge.screenViewerInput(id: id, data: data) }
+        let previous = inputTail
+        inputTail = Task {
+            await previous?.value
+            try? await Bridge.screenViewerInput(id: id, data: data)
+        }
     }
 
     func sendFile(_ url: URL) {

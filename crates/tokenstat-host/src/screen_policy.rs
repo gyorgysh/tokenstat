@@ -157,6 +157,19 @@ struct VerifyParams {
     control: bool,
 }
 
+/// A live session, and a capability that grants the answer being asked for.
+///
+/// Host-side only: a device that cannot capture a screen has no session to
+/// name, and answers `screen.control.set` as the unknown method it is.
+#[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ControlParams {
+    session_id: String,
+    capability: String,
+    control: bool,
+}
+
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("screen.") {
         return None;
@@ -246,6 +259,19 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             };
             verify_capability(&peer, &p.token, p.control)?;
             Ok(json!({"allowed":true}))
+        }
+        // Hand the mouse over, or take it back, on a session that is already
+        // running. The alternative was reopening the stream, which the relay
+        // refuses while the old channel is still closing. See
+        // `screen_runtime::set_control`.
+        #[cfg(feature = "local-host")]
+        "screen.control.set" => {
+            let peer = crate::request_context::remote_peer()
+                .ok_or("screen control must arrive over an authenticated remote connection")?;
+            let p: ControlParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            verify_capability(&peer, &p.capability, p.control)?;
+            crate::screen_runtime::set_control(&p.session_id, &peer, p.control)?;
+            Ok(json!({"control":p.control}))
         }
         "screen.direct.candidate" => direct_candidate(),
         _ => Err(format!("unknown screen method: {method}")),

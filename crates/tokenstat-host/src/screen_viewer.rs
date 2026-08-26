@@ -100,6 +100,14 @@ fn open(params: &str) -> Result<Value, String> {
         .get("token")
         .and_then(Value::as_str)
         .ok_or("screen stream returned no claim token")?;
+    // The host's own id for this session, which is what `screen.control.set`
+    // names. Optional, because a host built before that method existed does
+    // not send one and the viewer then falls back to reopening the stream.
+    let host_session = answer
+        .get("sessionID")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
     // Named, because this is the channel the relay meters and caps: a desktop
     // at 1.5 Mbps is the one thing on this tunnel that costs real money, and a
     // channel that does not say so is counted as "unknown" and capped by
@@ -185,7 +193,7 @@ fn open(params: &str) -> Result<Value, String> {
             viewer.changed.notify_all();
         }
     });
-    Ok(json!({"id":id, "control":p.control, "transport":transport}))
+    Ok(json!({"id":id, "control":p.control, "transport":transport, "sessionId":host_session}))
 }
 
 fn lookup(id: &str) -> Result<Arc<Viewer>, String> {
