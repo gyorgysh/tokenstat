@@ -56,9 +56,15 @@ enum TerminalPalette {
     /// platform answers it.
     static var systemIsDark: Bool {
         #if os(macOS)
-        NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        // `NSApp` is nil until the application object is up, and a session
+        // restored at launch can build its view before then. Asking the
+        // system appearance directly answers correctly at any moment; the
+        // optional chain used to fall through to light and paint a dark-mode
+        // user a white terminal until the first update corrected it.
+        let appearance = NSApp?.effectiveAppearance ?? NSAppearance.currentDrawing()
+        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         #else
-        UITraitCollection.current.userInterfaceStyle == .dark
+        return UITraitCollection.current.userInterfaceStyle == .dark
         #endif
     }
 
