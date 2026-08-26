@@ -115,7 +115,32 @@ final class SSHSessionsModel {
     /// soon as a shell exists. Passed in rather than looked up, so the session
     /// model stays ignorant of the record store.
     func adopt(_ session: SSHLiveTerminal, startup: [SSHSnippet] = []) {
-        sessions.append(session)
+        // One object per session id, always.
+        //
+        // Opening a shell and the five-second bookkeeping poll race each
+        // other: `ssh.session.list` reports a new session the moment the host
+        // creates it, which is before `openSSHSession` has returned and before
+        // this method is called. A `reconcile` landing in that window adopts
+        // the same shell, so the list ended up holding two terminals for one
+        // id, each running its own read loop from offset zero and each feeding
+        // its own emulator with the same bytes. The tab strip then showed the
+        // session twice, and a `ForEach` over identifiers that are no longer
+        // unique renders whatever SwiftUI feels like.
+        //
+        // The one already in the list wins: it is what is on screen and what
+        // has already drawn the scrollback. The newcomer lets go of its read
+        // loop and is dropped. It must not be `stop()`ped, which would close
+        // the shell both of them are pointing at.
+        if let existing = sessions.first(where: { $0.id == session.id }), existing !== session {
+            session.detachPoll()
+            select(existing)
+            guard !startup.isEmpty else { return }
+            Task { await Self.runStartup(startup, in: existing) }
+            return
+        }
+        if !sessions.contains(where: { $0 === session }) {
+            sessions.append(session)
+        }
         select(session)
         guard !startup.isEmpty else { return }
         Task { await Self.runStartup(startup, in: session) }

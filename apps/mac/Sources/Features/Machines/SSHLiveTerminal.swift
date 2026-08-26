@@ -142,6 +142,18 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         Task { await Bridge.closeSSHSession(id: handle) }
     }
 
+    /// Stop reading, without touching the shell on the far end.
+    ///
+    /// For a terminal that turned out to be a second object for a session that
+    /// already had one. `stop()` would close the session on the host, which is
+    /// the opposite of what a duplicate wants: the shell is real and the other
+    /// object is still showing it. This only lets go of the read loop, so the
+    /// same bytes stop being fed into a second emulator.
+    func detachPoll() {
+        pollTask?.cancel()
+        pollTask = nil
+    }
+
     /// Keep the terminal and its scrollback, but stop treating it as live.
     ///
     /// `ssh.session.list` reaps a session once its command has exited. The
