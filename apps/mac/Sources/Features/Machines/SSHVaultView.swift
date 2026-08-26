@@ -133,6 +133,25 @@ struct SSHVaultRow: View {
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
+                // The count at the trailing edge, and a wireframe in its place
+                // until the account has answered.
+                //
+                // It used to be the tail of the label, which meant the row
+                // read "Encrypted vault · not set up" for as long as the call
+                // took and then rewrote itself into "· 3 records": a sentence
+                // that was wrong first and jumped when it stopped being wrong.
+                // A placeholder of about the right width says the same thing
+                // honestly and does not move the rest of the row when the real
+                // answer lands.
+                if vault.status == nil {
+                    Skeleton.Bar(width: 62, height: 10)
+                } else if let detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .transition(.opacity)
+                }
                 // The badge belongs at the trailing edge with the chevron, not
                 // pinned to the end of the sentence. Beside the text it read as
                 // a second half of the label, and the label already said
@@ -153,6 +172,7 @@ struct SSHVaultRow: View {
             .background(background, in: RoundedRectangle(cornerRadius: 8))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border))
             .contentShape(.rect)
+            .animation(.smooth(duration: 0.22), value: vault.status)
         }
         .buttonStyle(.plain)
     }
@@ -163,17 +183,21 @@ struct SSHVaultRow: View {
     }
 
     private var label: String {
-        if vault.unconfirmedRecovery { return "Recovery code not confirmed" }
-        if vault.needsRecreate { return "Encrypted vault · has to be recreated" }
-        // No "· locked" here: the badge on the trailing edge says that, and
-        // the row was saying it twice.
-        if vault.locked { return "Encrypted vault" }
+        vault.unconfirmedRecovery ? "Recovery code not confirmed" : "Encrypted vault"
+    }
+
+    /// What this vault is, in the space at the trailing edge. Nil where the
+    /// leading text has already said the whole thing.
+    private var detail: String? {
+        if vault.unconfirmedRecovery { return nil }
+        if vault.needsRecreate { return "has to be recreated" }
+        // No "locked" here: the badge beside this says that, and the row was
+        // saying it twice.
+        if vault.locked { return nil }
         if vault.created {
-            return vault.recordCount == 1
-                ? "Encrypted vault · 1 record"
-                : "Encrypted vault · \(vault.recordCount) records"
+            return vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records"
         }
-        return canWrite ? "Encrypted vault · not set up" : "Encrypted vault · Supporter and above"
+        return canWrite ? "not set up" : "Supporter and above"
     }
 
     private var background: Color {
