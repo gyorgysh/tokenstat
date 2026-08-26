@@ -54,12 +54,12 @@ struct FriendlyError {
         // What the relay says when a screen session is refused or ended. These
         // arrive as the relay's own short codes, which are the right words in
         // its log and no words at all on a screen.
+        // No numbers here. The limits get tuned, and a message naming one is
+        // wrong the week it changes.
         if lower.contains("session_time_limit") {
             return FriendlyError(
-                title: "Session ended after ten minutes",
-                message: "Watching a screen is the most expensive thing this app does, so a "
-                    + "session stops on its own rather than running unattended. Connect again "
-                    + "to carry on.",
+                title: "Session ended",
+                message: "Screen sessions end after a while. Connect again to carry on.",
                 symbol: "clock.badge.exclamationmark",
                 actionTitle: "Connect again",
                 raw: raw
@@ -68,8 +68,8 @@ struct FriendlyError {
         if lower.contains("session_idle") {
             return FriendlyError(
                 title: "Session ended while it was idle",
-                message: "Nothing came from this device for two minutes, so the stream stopped. "
-                    + "Connect again to pick it up.",
+                message: "This device went quiet, so the stream stopped. Connect again to "
+                    + "pick it up.",
                 symbol: "moon.zzz",
                 actionTitle: "Connect again",
                 raw: raw
@@ -86,9 +86,8 @@ struct FriendlyError {
         if lower.contains("quota_exceeded") {
             return FriendlyError(
                 title: "This month's screen sharing is used up",
-                message: "The allowance covers about thirty hours of watching a month. It resets "
-                    + "on a rolling window, so some of it comes back each day. Everything else, "
-                    + "including terminals, is unaffected.",
+                message: "The allowance resets on a rolling window, so some of it comes back "
+                    + "each day. Everything else, including terminals, is unaffected.",
                 symbol: "gauge.with.dots.needle.100percent",
                 raw: raw
             )
