@@ -37,6 +37,7 @@ use tokenstat_remote::{Refused, authorize_with};
 use tokenstat_sync::profile::ProfileError;
 
 use crate::session::Session;
+use tokenstat_remote::tunnel::ChannelPurpose;
 
 /// A response is bounded so a peer cannot ask this end to allocate without
 /// limit. 64 MB is far above any real answer (the largest is a file's text)
@@ -1388,11 +1389,30 @@ pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, S
 /// has an address, through the tunnel otherwise. The same ladder `call_peer`
 /// climbs, exposed so a stream can claim its own connection.
 pub(crate) fn dial_peer(peer_hex: &str) -> Result<tokenstat_remote::Connection, String> {
-    dial_peer_routed(peer_hex).map(|value| value.0)
+    dial_peer_for(peer_hex, ChannelPurpose::Unknown).map(|value| value.0)
+}
+
+/// The same dial, saying what the connection is for.
+///
+/// The label reaches the relay on the channel open. It is what lets a desktop
+/// stream be metered and capped without touching a shell, so the call sites
+/// that know which they are saying it is the whole point.
+pub(crate) fn dial_peer_as(
+    peer_hex: &str,
+    purpose: ChannelPurpose,
+) -> Result<tokenstat_remote::Connection, String> {
+    dial_peer_for(peer_hex, purpose).map(|value| value.0)
 }
 
 pub(crate) fn dial_peer_routed(
     peer_hex: &str,
+) -> Result<(tokenstat_remote::Connection, &'static str), String> {
+    dial_peer_for(peer_hex, ChannelPurpose::Unknown)
+}
+
+pub(crate) fn dial_peer_for(
+    peer_hex: &str,
+    purpose: ChannelPurpose,
 ) -> Result<(tokenstat_remote::Connection, &'static str), String> {
     let key = public_key_from_hex(peer_hex).map_err(|e| e.to_string())?;
     let store = PeerStore::load().map_err(|e| e.to_string())?;
@@ -1422,7 +1442,7 @@ pub(crate) fn dial_peer_routed(
         });
     match direct {
         Ok(connection) => Ok((connection, "direct")),
-        Err(error) => tunnel_dial(&settings(), key, &identity, &label, error)
+        Err(error) => tunnel_dial(&settings(), key, &identity, &label, purpose, error)
             .map(|connection| (connection, "relay")),
     }
 }
@@ -1487,6 +1507,7 @@ fn tunnel_dial(
     peer: tokenstat_identity::PublicKey,
     identity: &MachineIdentity,
     label: &str,
+    purpose: ChannelPurpose,
     direct_error: impl std::fmt::Display,
 ) -> Result<tokenstat_remote::Connection, String> {
     if !settings.tunnel {
@@ -1533,7 +1554,7 @@ fn tunnel_dial(
         if attempt > 0 && started.elapsed() >= DIAL_BUDGET {
             break;
         }
-        match tunnel.open_channel(peer).and_then(|channel| {
+        match tunnel.open_channel(peer, purpose).and_then(|channel| {
             tokenstat_remote::handshake_initiator(Box::new(channel), identity, Some(peer), label)
         }) {
             Ok(connection) => {

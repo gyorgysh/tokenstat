@@ -51,6 +51,49 @@ struct FriendlyError {
         let raw = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let lower = raw.lowercased()
 
+        // What the relay says when a screen session is refused or ended. These
+        // arrive as the relay's own short codes, which are the right words in
+        // its log and no words at all on a screen.
+        if lower.contains("session_time_limit") {
+            return FriendlyError(
+                title: "Session ended after ten minutes",
+                message: "Watching a screen is the most expensive thing this app does, so a "
+                    + "session stops on its own rather than running unattended. Connect again "
+                    + "to carry on.",
+                symbol: "clock.badge.exclamationmark",
+                actionTitle: "Connect again",
+                raw: raw
+            )
+        }
+        if lower.contains("session_idle") {
+            return FriendlyError(
+                title: "Session ended while it was idle",
+                message: "Nothing came from this device for two minutes, so the stream stopped. "
+                    + "Connect again to pick it up.",
+                symbol: "moon.zzz",
+                actionTitle: "Connect again",
+                raw: raw
+            )
+        }
+        if lower.contains("screen_already_open") {
+            return FriendlyError(
+                title: "A screen is already open",
+                message: "One screen at a time on an account. Close the other one and try again.",
+                symbol: "display.2",
+                raw: raw
+            )
+        }
+        if lower.contains("quota_exceeded") {
+            return FriendlyError(
+                title: "This month's screen sharing is used up",
+                message: "The allowance covers about thirty hours of watching a month. It resets "
+                    + "on a rolling window, so some of it comes back each day. Everything else, "
+                    + "including terminals, is unaffected.",
+                symbol: "gauge.with.dots.needle.100percent",
+                raw: raw
+            )
+        }
+
         // A keychain refusal, which arrives as a bare OSStatus and a sentence
         // that says nothing. -34018 is errSecMissingEntitlement: the build is
         // not allowed to write to the keychain at all, which is a signing

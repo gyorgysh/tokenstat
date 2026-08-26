@@ -572,6 +572,8 @@ private final class ScreenViewerModel {
     private var pointerIsDown = false
     private var peer = ""
     private var transferTask: Task<Void, Never>?
+    /// The "still watching" beat. See `startHeartbeat`.
+    private var heartbeatTask: Task<Void, Never>?
     private var clipboardChangeCount = -1
     private var requestedTier: String?
     private var requestedControl = false
@@ -612,6 +614,7 @@ private final class ScreenViewerModel {
     func start(peer: String, tier: String?, control: Bool) async {
         stop()
         stopped = false
+        startHeartbeat()
         self.peer = peer
         requestedTier = tier
         requestedControl = control
@@ -657,6 +660,8 @@ private final class ScreenViewerModel {
 
     func stop() {
         stopped = true
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         task?.cancel()
         task = nil
         if let id = session?.id { Task { await Bridge.screenViewerClose(id: id) } }
@@ -868,6 +873,32 @@ private final class ScreenViewerModel {
         clipboardChangeCount = UIPasteboard.general.changeCount
         #endif
     }
+    /// Say "still here" on a beat, so the relay can tell a session somebody is
+    /// watching from one nobody is.
+    ///
+    /// The relay cannot see inside an encrypted stream and must not try. What
+    /// it can see is which direction bytes are moving, and on a screen channel
+    /// everything flows one way: the host sends video, and the viewer sends
+    /// almost nothing. That makes "the viewer has said nothing for two
+    /// minutes" a usable definition of nobody is there, and this is what keeps
+    /// it honest for somebody who is watching without touching anything.
+    ///
+    /// Deliberately not tied to control mode. A passive watcher is the exact
+    /// case that would otherwise be cut off mid-session.
+    private func startHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, !Task.isCancelled else { return }
+                guard self.state == .streaming, let id = self.session?.id else { continue }
+                let payload = try? JSONSerialization.data(withJSONObject: ["type": "heartbeat"])
+                guard let payload else { continue }
+                try? await Bridge.screenViewerInput(id: id, data: payload)
+            }
+        }
+    }
+
     private func send(_ value: [String: Any]) {
         guard let id = session?.id, let data = try? JSONSerialization.data(withJSONObject: value) else { return }
         let isDisplay = (value["type"] as? String) == "display"

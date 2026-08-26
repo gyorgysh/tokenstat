@@ -31,6 +31,34 @@ use crate::{RemoteError, Transport};
 type Socket = WebSocket<MaybeTlsStream<TcpStream>>;
 
 // Channel frame ops: [op: u8][channel: u32 BE][payload].
+/// What a channel is for, as the relay records it.
+///
+/// A closed set on purpose. The relay meters by this label and refuses a
+/// screen channel on a plan that has none, so it has to be a value both ends
+/// agree on rather than a string somebody typed. Anything the relay does not
+/// recognise is counted as `unknown` rather than refused, so an older client
+/// keeps working.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelPurpose {
+    /// A desktop being streamed. The expensive one, and the only metered one.
+    Screen,
+    /// A terminal on the far machine.
+    Ssh,
+    /// Anything else the app relays. Honest rather than flattering: these are
+    /// a mix, and none of them is big enough yet to be worth splitting.
+    Unknown,
+}
+
+impl ChannelPurpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Screen => "screen",
+            Self::Ssh => "ssh",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 const CH_OPEN: u8 = 1;
 const CH_OPENED: u8 = 2;
 const CH_DATA: u8 = 3;
@@ -281,9 +309,17 @@ impl TunnelSession {
     ///
     /// The returned transport is not yet a Noise session: the caller runs
     /// `handshake_initiator` over it, exactly as it would over a TCP stream.
+    /// Open a channel, telling the relay what it is for.
+    ///
+    /// The purpose rides after the key in the open frame. It is a label from a
+    /// fixed list, never free text: the relay writes it into a usage table and
+    /// shows it on a dashboard, and it is how a desktop stream at 1.5 Mbps is
+    /// told apart from a shell that is keystrokes. A relay built before this
+    /// existed reads the key and ignores the rest.
     pub fn open_channel(
         self: &Arc<Self>,
         peer: PublicKey,
+        purpose: ChannelPurpose,
     ) -> Result<ChannelTransport, RemoteError> {
         if self.stopped.load(Ordering::Relaxed) {
             return Err(RemoteError::Tunnel("tunnel is stopped".into()));
@@ -294,7 +330,8 @@ impl TunnelSession {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id, Arc::clone(&state));
-        if let Err(error) = self.send_channel_frame(CH_OPEN, id, hex(&peer).as_bytes()) {
+        let open_payload = format!("{}:{}", hex(&peer), purpose.as_str());
+        if let Err(error) = self.send_channel_frame(CH_OPEN, id, open_payload.as_bytes()) {
             self.forget_channel(&state);
             return Err(error);
         }

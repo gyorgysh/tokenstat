@@ -100,7 +100,12 @@ fn open(params: &str) -> Result<Value, String> {
         .get("token")
         .and_then(Value::as_str)
         .ok_or("screen stream returned no claim token")?;
-    let (mut connection, transport) = crate::remote::dial_peer_routed(&p.peer)?;
+    // Named, because this is the channel the relay meters and caps: a desktop
+    // at 1.5 Mbps is the one thing on this tunnel that costs real money, and a
+    // channel that does not say so is counted as "unknown" and capped by
+    // nothing.
+    let (mut connection, transport) =
+        crate::remote::dial_peer_for(&p.peer, tokenstat_remote::tunnel::ChannelPurpose::Screen)?;
     connection
         .send(json!({"stream":token}).to_string().as_bytes())
         .map_err(|e| e.to_string())?;

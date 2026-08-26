@@ -247,7 +247,8 @@ pub(crate) fn open_proxy_stream(peer: &str, host: &str, port: u16) -> Result<Con
         .and_then(Value::as_str)
         .ok_or("the peer's stream.open returned no token")?
         .to_string();
-    let mut connection = crate::remote::dial_peer(peer)?;
+    let mut connection =
+        crate::remote::dial_peer_as(peer, tokenstat_remote::tunnel::ChannelPurpose::Ssh)?;
     let handshake = json!({"stream": token});
     connection
         .send(handshake.to_string().as_bytes())
