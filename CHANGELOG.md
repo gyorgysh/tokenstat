@@ -5,7 +5,7 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
-## [0.6.9]
+## [0.6.9] - 2026-08-26
 
 Everything since 0.6.8, which is the last release anybody received.
 
@@ -23,8 +23,11 @@ Everything since 0.6.8, which is the last release anybody received.
 - Import servers from `~/.ssh/config`, from AWS and from DigitalOcean.
   tokenstat reads that file and never writes to it, and shows what it found
   before saving anything.
-- Credentials live in an encrypted vault that can follow the account. It is one
-  quiet row above the server list, saying how many records it holds, with
+- Credentials live in an encrypted vault that can follow the account. Setting
+  one up takes the servers, folders, keys and snippets already saved on this
+  device with it, syncing runs both ways, and Sync now says when it last ran.
+  It is one quiet row above the server list, saying how many records it holds,
+  with
   setting it up, replacing the recovery code and deleting it one click away and
   each with room to say what it costs. Recovery is confirmed in two steps: the
   code is on screen to be written down, then off screen while it is typed back,
@@ -61,6 +64,10 @@ Everything since 0.6.8, which is the last release anybody received.
   picture. Driving a desktop is at sixty pictures a second and every pointer
   move is delivered as it happens, on the same bandwidth a session watched from
   an armchair costs.
+- Notes get an inspector on the Mac, so a note written on a phone can be read
+  and edited on the computer instead of only on the device it was typed on.
+  Deleting one asks first, and clearing the title keeps the edits made in the
+  same visit rather than refusing the whole save.
 - Opening a computer, from its device page or from Workspaces, shows what it is
   doing: power, CPU and memory read over the tunnel and not uploaded with
   usage, with open work and view screen beside them. On the Mac, a workspace
