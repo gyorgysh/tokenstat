@@ -277,7 +277,7 @@ struct SSHLiveTerminalScreen: View {
         .background(Color.black)
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in
-                session.sendBytes(Array(command.utf8))
+                session.sendBytes(SSHSnippet.bytesToRun(command))
             }
         }
         .confirmationDialog("End this session?", isPresented: $confirmingClose, titleVisibility: .visible) {
