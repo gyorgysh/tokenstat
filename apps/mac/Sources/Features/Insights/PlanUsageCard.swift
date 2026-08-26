@@ -26,7 +26,7 @@ struct PlanUsageCard: View {
         ) {
             if rows.isEmpty {
                 Text("No plan-covered usage recorded in this period.")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 0) {
@@ -34,12 +34,12 @@ struct PlanUsageCard: View {
                         HStack(spacing: Theme.Space.s) {
                             HarnessMark(id: row.key, size: 20)
                             Text(harnessName(row.key))
-                                .font(.system(size: 13, weight: .medium))
+                                .font(Theme.font(13, weight: .medium))
                             Spacer(minLength: Theme.Space.s)
                             Text(formatTokens(row.counters.total))
                                 .font(Theme.numeric(13, weight: .medium))
                             Text("tokens")
-                                .font(.system(size: 11))
+                                .font(Theme.font(11))
                                 .foregroundStyle(.tertiary)
                         }
                         .padding(.vertical, Theme.Space.xs)

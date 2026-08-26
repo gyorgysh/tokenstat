@@ -29,7 +29,7 @@ struct HarnessMark: View {
                     .foregroundStyle(Theme.accent)
             } else {
                 Text(initial)
-                    .font(.system(size: size * 0.46, weight: .semibold))
+                    .font(Theme.font(size * 0.46, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             }
         }
@@ -197,11 +197,11 @@ struct Avatar: View {
         Group {
             if let initial = handle?.first {
                 Text(String(initial).uppercased())
-                    .font(.system(size: size * 0.5, weight: .semibold))
+                    .font(Theme.font(size * 0.5, weight: .semibold))
                     .foregroundStyle(tint)
             } else {
                 Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.45))
+                    .font(Theme.font(size * 0.45))
                     .foregroundStyle(.secondary)
             }
         }
@@ -225,7 +225,7 @@ struct AuthorHoverCard: View {
             Avatar(url: url, handle: name, size: 36, tint: tint)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if let email, !email.isEmpty {
@@ -236,7 +236,7 @@ struct AuthorHoverCard: View {
                 }
                 if mine {
                     Text("You")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Theme.font(11, weight: .medium))
                         .foregroundStyle(Theme.accent)
                 }
             }
@@ -468,7 +468,7 @@ struct Wordmark: View {
                 Text("stat")
                     .foregroundStyle(Theme.accent)
             }
-            .font(.system(size: size * 0.88, weight: .bold))
+            .font(Theme.font(size * 0.88, weight: .bold))
             // Lowercase, always. It is the command you type.
             .textCase(.lowercase)
             if fills {

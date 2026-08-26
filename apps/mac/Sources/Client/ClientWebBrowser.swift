@@ -61,7 +61,7 @@ struct ClientWebBrowser: View {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(Theme.font(13, weight: .semibold))
                             .foregroundStyle(Theme.controlGlyph)
                             .frame(width: 28, height: 28)
                             .background(Circle().fill(Theme.controlSeat))
@@ -75,7 +75,7 @@ struct ClientWebBrowser: View {
                         reloadToken += 1
                     } label: {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(Theme.font(14, weight: .medium))
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.accent)

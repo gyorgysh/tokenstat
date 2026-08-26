@@ -28,7 +28,7 @@ struct ClientWorkflowBoard: View {
                 ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                     if index > 0 {
                         Image(systemName: "arrow.right")
-                            .font(.caption.weight(.semibold))
+                            .font(Theme.caption.weight(.semibold))
                             .foregroundStyle(.tertiary)
                             .padding(.top, 22)
                     }

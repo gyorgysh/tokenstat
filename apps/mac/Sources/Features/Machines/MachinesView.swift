@@ -169,9 +169,9 @@ struct MachinesView: View {
         HStack(spacing: Theme.Space.m) {
             Image(systemName: "terminal.fill").foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 2) {
-                Text("SSH hosts").font(.headline)
+                Text("SSH hosts").font(Theme.headline)
                 Text("Saved servers, keys and command snippets")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Image(systemName: "chevron.right").foregroundStyle(.tertiary)
@@ -283,9 +283,9 @@ struct MachinesView: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(deviceTitle(resolved: resolved, machine: machine))
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                 Text(statusLine(for: machine, isSelf: isSelf))
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -312,7 +312,7 @@ struct MachinesView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(Theme.success)
                 Text("Local app mode")
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                 Spacer()
                 Button {
                     Task { await model.setupHelper() }
@@ -354,7 +354,7 @@ struct MachinesView: View {
                                 // key: there is nothing private in them, so
                                 // they are shown plain and selectable.
                                 Text(words)
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(Theme.font(13, weight: .medium))
                                     .foregroundStyle(Theme.accent)
                                     .textSelection(.enabled)
                             }
@@ -390,7 +390,7 @@ struct MachinesView: View {
                         ? "Machines connect through the tokenstat tunnel, so they work from any network. Add a device once with its key and approve the connection on both sides."
                         : "Machines on this account are listed above. Use + only to pair a computer that is not signed in yet."
                 )
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             }
             .animation(.easeOut(duration: 0.22), value: model.identity != nil)
@@ -416,9 +416,9 @@ struct MachinesView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Reach devices from anywhere").font(.callout)
+                            Text("Reach devices from anywhere").font(Theme.callout)
                             Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
-                                .font(.caption)
+                                .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: Theme.Space.m)
@@ -443,15 +443,15 @@ struct MachinesView: View {
                             Text(model.account?.signedIn == true
                                 ? "This computer and a phone already share the account."
                                 : "Remote reach needs a signed-in Patron account.")
-                                .font(.callout.weight(.medium))
+                                .font(Theme.callout.weight(.medium))
                             Text(model.account?.signedIn == true
                                 ? "Free and Supporter add up usage from every device you link. Opening folders and terminals on this Mac from another device is on Patron."
                                 : "Sign in with an account that includes it, then turn the switch on.")
-                                .font(.caption)
+                                .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                             if model.account?.signedIn == true {
                                 Link("See plans", destination: URL(string: "https://tokenstat.ai/pricing")!)
-                                    .font(.caption.weight(.semibold))
+                                    .font(Theme.caption.weight(.semibold))
                             }
                         }
                         .padding(Theme.Space.s)
@@ -548,7 +548,7 @@ struct MachinesView: View {
                     .onTapGesture { model.selectPeer(peer) }
                 }
                 Text("Approve only devices you recognize. You can revoke access later.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -625,17 +625,17 @@ struct MachinesView: View {
                     .disabled(model.isSavingHostPolicy)
                     if policy.alwaysOn && policy.hasInternalBattery {
                         Text("Uses more power.")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     if !policy.alwaysOn {
                         Text("Automations run only while tokenstat is open.")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else {
                     Text("The host helper has not answered yet.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -654,14 +654,14 @@ struct MachinesView: View {
             // Awake or asleep, as a picture. The paragraph beside it is
             // accurate and long, and this is the half somebody reads.
             Image(systemName: isOn.wrappedValue ? "bolt.horizontal.circle.fill" : "moon.zzz.fill")
-                .font(.system(size: 22))
+                .font(Theme.font(22))
                 .foregroundStyle(isOn.wrappedValue ? Theme.accent : Theme.stateIdle)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.callout)
+                    .font(Theme.callout)
                 Text(detail)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Space.m)
@@ -743,11 +743,11 @@ struct MachinesView: View {
                                 }
                             } else {
                                 Text(deviceTitle(resolved: resolved, machine: machine))
-                                    .font(.callout.weight(.medium))
+                                    .font(Theme.callout.weight(.medium))
                             }
                             if let platform = machine.platform, !platform.isEmpty {
                                 Text(platform)
-                                    .font(.caption)
+                                    .font(Theme.caption)
                                     .foregroundStyle(.secondary)
                             }
                             if let id = machine.machineID {
@@ -760,7 +760,7 @@ struct MachinesView: View {
                             // row: the presence light is the quick read, this
                             // is the answer to "when did I last hear from it".
                             Text(statusLine(for: machine, isSelf: isSelf))
-                                .font(.caption)
+                                .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -819,7 +819,7 @@ struct MachinesView: View {
                                 pendingUnlink = machine
                             } label: {
                                 Image(systemName: "trash")
-                                    .font(.system(size: 11))
+                                    .font(Theme.font(11))
                             }
                             .buttonStyle(SecondaryButtonStyle(small: true))
                             .help("Remove from account (deletes its uploaded history)")
@@ -954,16 +954,16 @@ struct MachinesView: View {
                         .foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("End to end encrypted")
-                            .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                            .font(Theme.fit(13, weight: .semibold))
                         Text(encryptionExpanded
                             ? "Keys and fingerprints are visible"
                             : "Keys are hidden until you choose to view them")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: Theme.Space.s)
                     Image(systemName: encryptionExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(Theme.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -984,7 +984,7 @@ struct MachinesView: View {
                     neither can tokenstat. Only aggregate counters are ever \
                     eligible for sync.
                     """)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -1008,7 +1008,7 @@ struct MachinesView: View {
                     Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
                         + "Two machines showing the same words for each other are talking "
                         + "to each other and to nothing in between.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1027,12 +1027,12 @@ struct MachinesView: View {
     private func keyLine(title: String, words: String?, fingerprint: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             Text(title)
-                .font(.callout)
+                .font(Theme.callout)
                 .frame(width: 160, alignment: .leading)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Text(words ?? fingerprint)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Spacer(minLength: Theme.Space.s)
             Text(fingerprint)
                 .font(Theme.mono(11))
@@ -1060,8 +1060,8 @@ private struct ScreenPermissionCard: View {
                     ForEach(peers) { peer in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(peer.label).font(.callout.weight(.medium))
-                                Text(peer.words ?? peer.fingerprint).font(.caption).foregroundStyle(.secondary)
+                                Text(peer.label).font(Theme.callout.weight(.medium))
+                                Text(peer.words ?? peer.fingerprint).font(Theme.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                             Toggle("View", isOn: binding(peer, control: false)).toggleStyle(.switch)
@@ -1072,9 +1072,9 @@ private struct ScreenPermissionCard: View {
                     #if os(macOS)
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Incoming files").font(.callout.weight(.medium))
+                            Text("Incoming files").font(Theme.callout.weight(.medium))
                             Text(transferDestination ?? "Choose a destination before receiving files")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                .font(Theme.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                         }
                         Spacer()
                         Button("Choose folder", .reveal) { chooseTransferDestination() }
@@ -1084,9 +1084,9 @@ private struct ScreenPermissionCard: View {
                     if access.needsRelaunch {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Restart to finish").font(.callout.weight(.medium))
+                                Text("Restart to finish").font(Theme.callout.weight(.medium))
                                 Text("macOS granted Screen Recording after this app started, and capture cannot see it until Tokenstat is restarted.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(Theme.caption).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: Theme.Space.m)
@@ -1100,11 +1100,11 @@ private struct ScreenPermissionCard: View {
                     // app, not in the helper, so a closed app has no screen to
                     // share however always-on the helper is.
                     Text("Capture runs in the app, so Tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     #endif
-                    if let error { Text(error).font(.caption).foregroundStyle(Theme.danger) }
+                    if let error { Text(error).font(Theme.caption).foregroundStyle(Theme.danger) }
                 }
             }
             .task { await load() }
@@ -1127,16 +1127,16 @@ private struct ScreenPermissionCard: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.xs) {
-                    Text(kind.title).font(.callout.weight(.medium))
+                    Text(kind.title).font(Theme.callout.weight(.medium))
                     Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(granted ? Theme.success : Theme.warning)
                     Text(granted ? "Granted" : "Not granted")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(granted ? Theme.success : Theme.warning)
                 }
                 Text(granted ? kind.need : "\(kind.need) \(kind.settingsHint)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: Theme.Space.m)
@@ -1301,7 +1301,7 @@ private struct MachineNameField: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.accent)
                 #endif
-                .font(.caption)
+                .font(Theme.caption)
             }
         }
         .onAppear { draft = identity.label }
@@ -1342,7 +1342,7 @@ private struct AccountNameField: View {
         HStack(spacing: Theme.Space.xs) {
             TextField("Name", text: $draft, prompt: Text(placeholder))
                 .textFieldStyle(.plain)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
                 .focused($editing)
                 .frame(maxWidth: 220)
                 .onSubmit { Task { await commit(draft) } }
@@ -1379,7 +1379,7 @@ private struct PeerRow<Actions: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: Theme.Space.s) {
                     Text(peer.label.isEmpty ? (resolvedName ?? "Unnamed device") : peer.label)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                     TrustBadge(trust: peer.trust)
                 }
                 // The words rather than the key or the fingerprint: this line
@@ -1387,7 +1387,7 @@ private struct PeerRow<Actions: View>: View {
                 // that is the form they will read whole. They derive from a
                 // public key, so there is nothing to hide.
                 Text(peer.words ?? "Approved device")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -1422,7 +1422,7 @@ private struct TrustBadge: View {
 
     var body: some View {
         Text(label)
-            .font(.caption2.weight(.medium))
+            .font(Theme.caption2.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(tint.opacity(0.15), in: Capsule())
@@ -1499,7 +1499,7 @@ private struct PairingForm: View {
                 other machine has to approve this one too, and its own screen \
                 will show this machine waiting.
                 """)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             }
             .textFieldStyle(.themed)

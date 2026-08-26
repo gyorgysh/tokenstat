@@ -44,7 +44,7 @@ struct TodoInspector: View {
                 )
                 .padding(.leading, Theme.Space.m)
                 Text("Task")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             Group {
@@ -93,7 +93,7 @@ struct TodoInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 TextField("Title", text: $titleDraft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                     .focused($focused, equals: .title)
                     .onSubmit { Task { await persistDrafts() } }
                     .onAppear { syncDrafts() }
@@ -120,7 +120,7 @@ struct TodoInspector: View {
                     labeled("Run", delegate.label)
                     if let error = delegate.error, !error.isEmpty {
                         Text(error)
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -158,7 +158,7 @@ struct TodoInspector: View {
             return card.backend == "sh" ? "Command" : "Prompt"
         }()
         return TextEditor(text: $notesDraft)
-            .font(.callout)
+            .font(Theme.callout)
             .scrollContentBackground(.hidden)
             .frame(minHeight: 72, maxHeight: 140)
             .padding(Theme.Space.xs)
@@ -169,7 +169,7 @@ struct TodoInspector: View {
             .overlay(alignment: .topLeading) {
                 if notesDraft.isEmpty {
                     Text(prompt)
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, Theme.Space.s)
                         .padding(.vertical, Theme.Space.s)
@@ -236,7 +236,7 @@ struct TodoInspector: View {
         }
         HStack(spacing: Theme.Space.xs) {
             Text("Time limit")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("180", text: $budgetMinutes)
                 .textFieldStyle(.roundedBorder)
@@ -245,7 +245,7 @@ struct TodoInspector: View {
                 .disabled(noTimeLimit)
                 .onSubmit { Task { await persistAgent(card) } }
             Text("minutes")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                 .onChange(of: noTimeLimit) { _, _ in
@@ -288,10 +288,10 @@ struct TodoInspector: View {
     private func labeled(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.callout)
+                .font(Theme.callout)
         }
     }
 

@@ -57,11 +57,11 @@ struct AutomationsView: View {
                     // collide with it.
                     HStack(spacing: Theme.Space.s) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Theme.font(12, weight: .medium))
                             .foregroundStyle(.tertiary)
                         TextField("Search automations", text: $search)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 13))
+                            .font(Theme.font(13))
                             .focused($searchFocused)
                     }
                     .padding(.horizontal, Theme.Space.s)
@@ -164,9 +164,9 @@ struct AutomationsView: View {
             FeatureMark(name: "mark_automation", tint: Theme.accent, size: 28)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Automations")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(Theme.font(24, weight: .semibold))
                 Text("Schedule an agent a job, a folder, and a time. It runs in the background and stops at your limit.")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -185,7 +185,7 @@ struct AutomationsView: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
                     Text("Time limit")
-                        .font(.callout)
+                        .font(Theme.callout)
                     Spacer()
                     TextField("180", text: $model.queueBudgetMinutes)
                         .textFieldStyle(.roundedBorder)
@@ -196,7 +196,7 @@ struct AutomationsView: View {
                             schedulerJustSaved = false
                         }
                     Text("minutes")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 TimeLimitChips(
@@ -206,7 +206,7 @@ struct AutomationsView: View {
                 )
                 HStack {
                     Text("Max concurrent jobs")
-                        .font(.callout)
+                        .font(Theme.callout)
                     Spacer()
                     // Places at the table, filled by what is running now, so
                     // "the next job waits" is visible rather than inferred.
@@ -224,16 +224,16 @@ struct AutomationsView: View {
                         }
                 }
                 Text("New jobs inherit the time limit. 0 concurrent means no cap. Extra jobs wait in the queue.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: Theme.Space.s) {
                     if model.queueDirty {
                         Text("Unsaved")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.warning)
                     } else if schedulerJustSaved {
                         Label("Saved", systemImage: "checkmark")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.caption.weight(.medium))
                             .foregroundStyle(Theme.success)
                     }
                     Spacer()
@@ -290,16 +290,16 @@ struct AutomationsView: View {
                     FeatureMark(name: "mark_examples", tint: Theme.accent, size: 22)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Examples")
-                            .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                            .font(Theme.fit(13, weight: .semibold))
                         Text(examplesExpanded
                             ? "Create one, then press Run now"
                             : "Ready-made jobs you can create and run yourself")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer(minLength: Theme.Space.s)
                     Image(systemName: examplesExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(Theme.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -333,14 +333,14 @@ struct AutomationsView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         Image(systemName: suggestion.symbol)
-                            .font(.system(size: 16, weight: .medium))
+                            .font(Theme.font(16, weight: .medium))
                             .foregroundStyle(Theme.accent)
                         Text(suggestion.title)
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(Theme.font(13, weight: .semibold))
                             .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(suggestion.subtitle)
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.leading)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -485,7 +485,7 @@ struct AutomationsView: View {
             ) {
                 if folders.isEmpty {
                     Text("Add a folder on the Workspaces screen first. An agent runs somewhere.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 } else {
                     Button("Schedule a job", .create) { creating = true }
@@ -513,7 +513,7 @@ struct AutomationsView: View {
                     Every automation has been deleted. The runs below are what \
                     they left behind.
                     """)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
@@ -566,14 +566,14 @@ struct AutomationsView: View {
                 .fill(Self.statusTint(run.status))
                 .frame(width: 8, height: 8)
             Text(run.name)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
             Text(run.startedAt.formatted(date: .omitted, time: .shortened))
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             StatusPill(status: run.status, text: run.endedLabel)
         }
@@ -635,7 +635,7 @@ private struct AutomationRow: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             header
             Text(job.prompt)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 // Reserved space keeps every row the same height whatever the
                 // prompt length, the same matched-rows rule the cards use.
@@ -673,11 +673,11 @@ private struct AutomationRow: View {
                 summary: model.scheduleSummary(job.schedule)
             )
             Text(job.name)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Text(model.backends.first { $0.id == job.backend }?.label ?? job.backend)
-                .font(.caption2.weight(.medium))
+                .font(Theme.caption2.weight(.medium))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(Theme.accent.opacity(0.12), in: Capsule())
@@ -704,7 +704,7 @@ private struct AutomationRow: View {
         HStack(spacing: Theme.Space.m) {
             if !compact {
                 Label(model.scheduleSummary(job.schedule), systemImage: "clock")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
@@ -723,18 +723,18 @@ private struct AutomationRow: View {
                     // pill up in the header, so repeating the word here would
                     // say it twice.
                     Text("Last ran \(last.startedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 } else {
                     Text("Never run")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
                 if let folder {
                     Label(folder.name, systemImage: "folder")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
@@ -789,7 +789,7 @@ struct StatusPill: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.medium))
+            .font(Theme.caption2.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(AutomationsView.statusTint(status).opacity(0.15), in: Capsule())
@@ -807,8 +807,8 @@ private struct AutomationHistorySheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(job.name).font(.title3.weight(.semibold))
-                    Text("Run history").font(.caption).foregroundStyle(.secondary)
+                    Text(job.name).font(Theme.title3.weight(.semibold))
+                    Text("Run history").font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(
@@ -828,7 +828,7 @@ private struct AutomationHistorySheet: View {
                             HStack(spacing: Theme.Space.s) {
                                 Circle().fill(AutomationsView.statusTint(run.status)).frame(width: 8, height: 8)
                                 Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.callout)
+                                    .font(Theme.callout)
                                 Spacer()
                                 StatusPill(status: run.status, text: run.endedLabel)
                                 Button("View", .preview) {
@@ -922,9 +922,9 @@ struct NewAutomationSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(existing == nil ? "New automation" : "Edit automation")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("An agent run headless in a folder, like a person launching it.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1090,19 +1090,19 @@ struct NewAutomationSheet: View {
                     }
                 }
                 Text("The agent runs on this device, in the selected workspace.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             default:
                 scheduleControls
                 HStack(spacing: 4) {
                     Text("Time limit")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     TextField("180", text: $budgetMinutes)
                         .frame(width: 56)
                         .disabled(noTimeLimit)
                     Text("minutes")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                     BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                 }
@@ -1118,19 +1118,19 @@ struct NewAutomationSheet: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 3) {
                 Text(message)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 // `.link` is AppKit's. Plain plus the accent reads the same
                 // and is the nearest thing iOS has.
                 #if os(macOS)
                 Button(action, action: perform)
                     .buttonStyle(.link)
-                    .font(.caption)
+                    .font(Theme.caption)
                 #else
                 Button(action, action: perform)
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.accent)
-                    .font(.caption)
+                    .font(Theme.caption)
                 #endif
             }
         }
@@ -1152,7 +1152,7 @@ struct NewAutomationSheet: View {
             .overlay(alignment: .topLeading) {
                 if prompt.isEmpty {
                     Text("What the agent should do. Sent as the prompt, e.g. claude -p \"…\"")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.top, 10)
                         .padding(.leading, 10)
@@ -1253,7 +1253,7 @@ struct NewAutomationSheet: View {
                                     }
                                 } label: {
                                     Text(dayShort[bit])
-                                        .font(.caption2.weight(.medium))
+                                        .font(Theme.caption2.weight(.medium))
                                         .frame(width: 28, height: 24)
                                         .background(
                                             on ? Theme.accent.opacity(0.2) : Theme.background,
@@ -1287,7 +1287,7 @@ struct NewAutomationSheet: View {
                 if scheduleKind == .once {
                     Divider()
                     Text("Runs only when you press Run now. Nothing is scheduled.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, Theme.Space.s)
@@ -1302,7 +1302,7 @@ struct NewAutomationSheet: View {
     private func frequencyRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         HStack {
             Text(title)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.primary)
             Spacer(minLength: Theme.Space.s)
             content()
@@ -1314,10 +1314,10 @@ struct NewAutomationSheet: View {
     private func frequencyMenuLabel(_ text: String) -> some View {
         HStack(spacing: 4) {
             Text(text)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
             Image(systemName: "chevron.up.chevron.down")
-                .font(.caption2)
+                .font(Theme.caption2)
                 .foregroundStyle(.tertiary)
         }
         .contentShape(.rect)

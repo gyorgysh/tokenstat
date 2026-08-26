@@ -65,7 +65,7 @@ struct ClientLaunchTile: View {
                 .saturation(isMuted ? 0.3 : 1)
         } else {
             Image(systemName: profile.symbol ?? "terminal")
-                .font(.system(size: 18, weight: .medium))
+                .font(Theme.font(18, weight: .medium))
                 .foregroundStyle(isMuted ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Theme.accent))
                 .frame(height: 34)
         }
@@ -81,7 +81,7 @@ struct ClientMoreTile: View {
         Button(action: action) {
             VStack(spacing: Theme.Space.s) {
                 Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(Theme.font(18, weight: .medium))
                     .foregroundStyle(.tertiary)
                     .frame(height: 34)
                 Text(showing ? "Hide" : "More")

@@ -192,9 +192,9 @@ struct TodoView: View {
                 FeatureMark(name: id == "doing" ? "mark_automation" : (id == "done" ? "mark_note" : "mark_todo"), tint: tint(for: id))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(columnTitle(id, label))
-                        .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                        .font(Theme.fit(13, weight: .semibold))
                     Text("\(model.cards(in: id).count) card\(model.cards(in: id).count == 1 ? "" : "s")")
-                        .font(.caption2)
+                        .font(Theme.caption2)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
@@ -258,7 +258,7 @@ struct TodoView: View {
                         .transition(.opacity)
                     } else if model.cards(in: id).isEmpty {
                         Text(emptyCopy(for: id))
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, Theme.Space.xl)
@@ -450,7 +450,7 @@ private struct CardView: View {
                 if editingTitle {
                     TextField("Title", text: $titleDraft)
                         .textFieldStyle(.plain)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .focused($titleFocused)
                         .onSubmit { saveTitle() }
                         .onChange(of: titleDraft) { _, value in
@@ -466,7 +466,7 @@ private struct CardView: View {
                             cancelTitle()
                         } label: {
                             Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(Theme.font(10, weight: .bold))
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
@@ -475,7 +475,7 @@ private struct CardView: View {
                             saveTitle()
                         } label: {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(Theme.font(10, weight: .bold))
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Theme.accent)
@@ -485,13 +485,13 @@ private struct CardView: View {
                             .controlSize(.mini)
                     } else if titleSaveState == .saved {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(Theme.font(10, weight: .bold))
                             .foregroundStyle(Theme.success)
                             .help("Saved")
                     }
                 } else {
                     Text(card.title)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .lineLimit(2)
                         .onTapGesture {
                             onSelect()
@@ -504,13 +504,13 @@ private struct CardView: View {
                 Spacer()
                 if card.priority == "high" {
                     Image(systemName: "exclamationmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(Theme.font(9, weight: .bold))
                         .foregroundStyle(Theme.warning)
                 }
             }
             if !card.notes.isEmpty {
                 Text(card.notes)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -539,7 +539,7 @@ private struct CardView: View {
                         }
                     }
                 }
-                .font(.caption2)
+                .font(Theme.caption2)
                 Spacer()
                 controls
             }
@@ -636,11 +636,11 @@ private struct CardView: View {
                     .controlSize(.mini)
             }
             Text(delegate.label)
-                .font(.caption2.weight(.medium))
+                .font(Theme.caption2.weight(.medium))
                 .foregroundStyle(tint)
             if let error = delegate.error {
                 Text(error)
-                    .font(.caption2)
+                    .font(Theme.caption2)
                     .foregroundStyle(Theme.danger)
                     .lineLimit(1)
             }
@@ -725,7 +725,7 @@ private struct AddCardTrigger: View {
                 expanded ? "New card" : "Add a card",
                 systemImage: expanded ? "chevron.up" : "plus"
             )
-            .font(.caption.weight(.medium))
+            .font(Theme.caption.weight(.medium))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Theme.Space.s)
             .padding(.vertical, Theme.Space.xs)
@@ -835,7 +835,7 @@ private struct NewCardForm: View {
                     }
                     HStack(spacing: Theme.Space.xs) {
                         Text("Time limit")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                         TextField("180", text: $budgetMinutes)
                             .textFieldStyle(.roundedBorder)
@@ -843,7 +843,7 @@ private struct NewCardForm: View {
                             .multilineTextAlignment(.trailing)
                             .disabled(noTimeLimit)
                         Text("minutes")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                         BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
                         Spacer()
@@ -945,9 +945,9 @@ struct DelegateSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text("Run this task")
-                .font(.system(size: 17, weight: .semibold))
+                .font(Theme.font(17, weight: .semibold))
             Text(card.title)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
             AppMenuPicker(
                 title: "Agent",
@@ -983,14 +983,14 @@ struct DelegateSheet: View {
             }
             HStack {
                 Text("Time limit")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 TextField("180", text: $budgetMinutes)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 56)
                     .disabled(noTimeLimit)
                 Text("minutes")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 BrandToggleChip(title: "No limit", isOn: $noTimeLimit)
             }

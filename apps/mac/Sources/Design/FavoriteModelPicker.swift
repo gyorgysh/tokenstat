@@ -121,7 +121,7 @@ struct FavoriteModelPicker: View {
             favorites.toggle(backend: backendID, model: selection)
         } label: {
             Image(systemName: isFavorite ? "star.fill" : "star")
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(13, weight: .semibold))
                 .foregroundStyle(isFavorite ? Theme.accent : Theme.controlGlyph)
                 .frame(width: 30, height: 30)
                 .background(

@@ -261,7 +261,7 @@ struct ClientDevicesView: View {
                             name: machine.label,
                             isHost: machine.isHost
                         ))
-                        .font(.system(size: 13))
+                        .font(Theme.font(13))
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
                         VStack(alignment: .leading, spacing: 1) {
@@ -322,7 +322,7 @@ private struct DeviceRow: View {
                     name: machine.label,
                     isHost: machine.isHost
                 ))
-                .font(.system(size: 13))
+                .font(Theme.font(13))
                 .foregroundStyle(isThisDevice ? Theme.accent : .secondary)
                 .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
@@ -356,7 +356,7 @@ private struct DeviceRow: View {
                         .foregroundStyle(.tertiary)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
             if usage != nil {
@@ -640,7 +640,7 @@ struct DeviceActionRow: View {
             }
             Spacer(minLength: Theme.Space.s)
             Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .frame(minHeight: 44)

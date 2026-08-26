@@ -109,11 +109,11 @@ struct WorkflowsView: View {
                     }
                     HStack(spacing: Theme.Space.s) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 12, weight: .medium))
+                            .font(Theme.font(12, weight: .medium))
                             .foregroundStyle(.tertiary)
                         TextField("Search workflows", text: $search)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 13))
+                            .font(Theme.font(13))
                             .focused($searchFocused)
                     }
                     .padding(.horizontal, Theme.Space.s)
@@ -189,9 +189,9 @@ struct WorkflowsView: View {
             FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 28)
             VStack(alignment: .leading, spacing: Theme.Space.xs) {
                 Text("Workflows")
-                    .font(.system(size: 24, weight: .semibold))
+                    .font(Theme.font(24, weight: .semibold))
                 Text("A map of agents, automations, HTTP and commands. Describe a run, review the draft, then save. It never starts on its own.")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -242,11 +242,11 @@ struct WorkflowsView: View {
         } label: {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Theme.font(9, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(examplesExpanded ? 0 : -90))
                 Text("Or start from an example")
-                    .font(.caption.weight(.medium))
+                    .font(Theme.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
@@ -267,14 +267,14 @@ struct WorkflowsView: View {
     private var manualCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Build it yourself")
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text("""
             Opens the blank canvas with a Start card. Add a step under any card, \
             drag from the dot on the bottom to join two of them, and pick who runs \
             each step in the inspector. Green joins run on success, red on error. \
             Nothing runs until you press Run.
             """)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: Theme.Space.s) {
@@ -294,9 +294,9 @@ struct WorkflowsView: View {
     private var designCard: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Describe the run")
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text("A cheap local agent turns the description into steps. It writes a draft you review, and it never starts the run.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -360,7 +360,7 @@ struct WorkflowsView: View {
                         .buttonStyle(SecondaryButtonStyle())
                     Spacer()
                     Text("\(draft.nodes.count) nodes")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -472,16 +472,16 @@ struct WorkflowsView: View {
                 .fill(Self.statusTint(run.status))
                 .frame(width: 8, height: 8)
             Text(run.name)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text(run.endedLabel)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             // Against the longest run on screen, so the list answers "which of
             // these was the long one" without anybody doing subtraction.
             DurationBar(seconds: seconds(of: run), longest: longestRunSeconds)
             Text(run.startedAt.formatted(date: .omitted, time: .shortened))
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             StatusPill(status: run.status, text: run.endedLabel)
         }
@@ -533,7 +533,7 @@ private struct WorkflowRow: View {
                     FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 22)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(graph.name)
-                            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+                            .font(Theme.font(13, weight: isSelected ? .semibold : .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                         // The graph itself, and where a live run has got to.
@@ -550,7 +550,7 @@ private struct WorkflowRow: View {
                     Spacer(minLength: 0)
                     if !compact {
                         Text(caption)
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         RunHistoryStrip(ticks: ticks, height: 12)
@@ -628,10 +628,10 @@ struct WorkflowOutline: View {
                         }
                         VStack(alignment: .leading, spacing: 1) {
                             Text(node.displayTitle)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(.primary)
                             Text(node.subtitle)
-                                .font(.caption2)
+                                .font(Theme.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
@@ -640,7 +640,7 @@ struct WorkflowOutline: View {
                             StatusPill(status: step.status, text: step.endedLabel)
                         } else {
                             Text(node.kind.label)
-                                .font(.caption2)
+                                .font(Theme.caption2)
                                 .foregroundStyle(.tertiary)
                         }
                     }
@@ -674,7 +674,7 @@ struct WorkflowOutline: View {
         let incoming = edges.filter { $0.to == node.id }
         if incoming.count > 1 {
             Text("joins \(incoming.count) steps")
-                .font(.caption2)
+                .font(Theme.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(.leading, 28)
         }
@@ -697,9 +697,9 @@ struct RunWorkflowSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Run \(graph.name)")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("The starting prompt fills {{input}} in every node.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -717,7 +717,7 @@ struct RunWorkflowSheet: View {
                 .lineLimit(3...8)
             if folders.isEmpty {
                 Text("Add a workspace first. Agents run in a folder.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else {
                 AppMenuPicker(
@@ -727,7 +727,7 @@ struct RunWorkflowSheet: View {
                     selection: $workspaceID
                 )
                 Text("Agents and commands run in this workspace.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             HStack {

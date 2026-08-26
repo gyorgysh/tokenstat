@@ -24,37 +24,35 @@ import SwiftUI
 enum ClientType {
     /// The one number a screen is about.
     ///
-    /// Monospaced digits, because a figure that changes on refresh must not
+    /// Tabular figures, because a number that changes on refresh must not
     /// make everything beside it jump. Same argument as `Theme.numeric` on the
-    /// Mac, reached differently: a relative style so it scales, rather than a
-    /// point size so it does not.
-    static let figure = Font.system(.largeTitle, design: .rounded)
-        .weight(.semibold)
+    /// Mac, reached differently: a size that scales with Dynamic Type rather
+    /// than one that scales with the window.
+    static let figure = Theme.font(34, weight: .semibold, relativeTo: .largeTitle)
         .monospacedDigit()
 
     /// A figure sharing a row with other figures.
-    static let figureSmall = Font.system(.title2, design: .rounded)
-        .weight(.semibold)
+    static let figureSmall = Theme.font(22, weight: .semibold, relativeTo: .title2)
         .monospacedDigit()
 
     /// A sheet's own heading.
-    static let screenTitle = Font.title3.weight(.semibold)
+    static let screenTitle = Theme.title3.weight(.semibold)
 
     /// A card's heading.
-    static let sectionTitle = Font.headline
+    static let sectionTitle = Theme.headline
 
     /// Sentences.
-    static let body = Font.body
+    static let body = Theme.body
 
     /// A figure's label, a row's name.
-    static let label = Font.subheadline
+    static let label = Theme.subheadline
 
     /// A date, a count, the quiet second line under a name.
-    static let caption = Font.caption
+    static let caption = Theme.caption
 
     /// A number inside a row or a list, where it has to line up with the
     /// numbers above and below it.
-    static let rowFigure = Font.callout.monospacedDigit()
+    static let rowFigure = Theme.callout.monospacedDigit()
 
     /// Source code, and the gutter beside it.
     ///
@@ -62,7 +60,7 @@ enum ClientType {
     /// share metrics or the columns come apart. A text style rather than a
     /// point size, like everything else here, so code scales with Dynamic Type
     /// and stays aligned while it does.
-    static let code = Font.system(.footnote, design: .monospaced)
+    static let code = Theme.monoText(13, relativeTo: .footnote)
 }
 
 #endif

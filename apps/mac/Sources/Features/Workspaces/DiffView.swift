@@ -58,7 +58,7 @@ struct DiffView: View {
         VStack {
             Spacer()
             Text(text)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)

@@ -25,7 +25,7 @@ struct WorkflowsInspector: View {
                 FeatureMark(name: "mark_workflow", tint: Theme.accent, size: 16)
                     .padding(.leading, Theme.Space.m)
                 Text(chromeTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             Group {
@@ -85,7 +85,7 @@ struct WorkflowsInspector: View {
                         )
                     )
                     Text("Green is on success. Red is on error. Always runs either way. A loop leaves on always after the last pass.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     Button("Delete edge", .delete, role: .destructive) {
                         model.deleteSelection()
@@ -112,7 +112,7 @@ struct WorkflowsInspector: View {
                     .textFieldStyle(.roundedBorder)
                     if graph.id.isEmpty {
                         Text("Unsaved draft. It will not run until you save and press Run.")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     AppMenuPicker(
@@ -141,11 +141,11 @@ struct WorkflowsInspector: View {
                     ))
                     .textFieldStyle(.roundedBorder)
                     Text("Unsaved draft. It will not run until you save and press Run.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(graph.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     labeled("Scope", graph.scope.label)
                     if let folder = folders.first(where: { $0.id == graph.workspaceID }) {
                         labeled("Folder", folder.name)
@@ -160,7 +160,7 @@ struct WorkflowsInspector: View {
 
                 if !model.designTranscript.isEmpty {
                     Text("Design transcript")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                     TranscriptView(text: model.designTranscript, empty: "")
                         .frame(maxHeight: 160)
@@ -206,7 +206,7 @@ struct WorkflowsInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
                     Text(run.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Spacer()
                     if run.isWaiting {
                         Button("Continue", .next) { Task { await model.continueRun(run) } }
@@ -221,12 +221,12 @@ struct WorkflowsInspector: View {
                 }
                 if !run.input.isEmpty {
                     Text(run.input)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
                 }
                 Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                 BrandToggleChip(title: "Follow", isOn: $followLive)
                     .help("Keep the transcript pinned to the newest line")
@@ -265,11 +265,11 @@ struct WorkflowsInspector: View {
     private func labeled(_ title: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 72, alignment: .leading)
             Text(value)
-                .font(.callout)
+                .font(Theme.callout)
                 .textSelection(.enabled)
         }
     }
@@ -327,7 +327,7 @@ private struct WorkflowBudgetField: View {
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
             Text("Time limit")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("180", text: $minutes)
                 .textFieldStyle(.roundedBorder)
@@ -336,7 +336,7 @@ private struct WorkflowBudgetField: View {
                 .disabled(noLimit)
                 .onSubmit { commit() }
             Text("minutes")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             BrandToggleChip(title: "No limit", isOn: $noLimit)
                 .onChange(of: noLimit) { _, on in
@@ -477,7 +477,7 @@ private struct WorkflowNodeInspector: View {
     @ViewBuilder
     private func fields(_ node: WorkflowNode) -> some View {
         Text(node.kind.label)
-            .font(.caption.weight(.semibold))
+            .font(Theme.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
         TextField("Title", text: $title)
             .textFieldStyle(.roundedBorder)
@@ -489,7 +489,7 @@ private struct WorkflowNodeInspector: View {
         switch node.kind {
         case .input:
             Text("The starting prompt fills {{input}} when you press Run.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         case .agent:
             agentFields(node)
@@ -501,7 +501,7 @@ private struct WorkflowNodeInspector: View {
             commandFields(node)
         case .gate:
             Text("The run pauses here. Continue or Stop from the canvas.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         case .condition:
             conditionFields(node)
@@ -509,7 +509,7 @@ private struct WorkflowNodeInspector: View {
             loopFields(node)
         case .mcp:
             Text("Reserved. This kind cannot be saved yet.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -586,7 +586,7 @@ private struct WorkflowNodeInspector: View {
             }
         }
         Text("{{input}} is the starting prompt. {{nodeId.output}} is an earlier step.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -610,7 +610,7 @@ private struct WorkflowNodeInspector: View {
             write(node.id) { $0.pattern = next }
         }
         Text("Then is on success. Else is on error. The test reads the previous step.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -623,7 +623,7 @@ private struct WorkflowNodeInspector: View {
             write(node.id) { $0.until = next.isEmpty ? nil : next }
         }
         Text("The green out is the body. The run leaves on the always edge after the last pass, or when Until matches. At most 20 passes.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -643,7 +643,7 @@ private struct WorkflowNodeInspector: View {
             write(node.id) { $0.promptOverride = next.isEmpty ? nil : next }
         }
         Text("A timer cannot commit. This step runs because you press Run.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -669,7 +669,7 @@ private struct WorkflowNodeInspector: View {
             write(node.id) { $0.body = next.isEmpty ? nil : next }
         }
         Text("This leaves the machine only because you press Run. Authorization is a header you type.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -679,7 +679,7 @@ private struct WorkflowNodeInspector: View {
             write(node.id) { $0.command = next }
         }
         Text("Runs in the folder, as you. A timer cannot commit.")
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
     }
 
@@ -691,7 +691,7 @@ private struct WorkflowNodeInspector: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField(
                 title,

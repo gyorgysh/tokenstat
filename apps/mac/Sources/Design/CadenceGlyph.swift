@@ -51,7 +51,7 @@ struct CadenceGlyph: View {
 
     private func symbol(_ name: String) -> some View {
         Image(systemName: name)
-            .font(.system(size: size * 0.82, weight: .regular))
+            .font(Theme.font(size * 0.82, weight: .regular))
             .foregroundStyle(tint)
     }
 
@@ -147,7 +147,7 @@ struct NextRunBadge: View {
         HStack(spacing: Theme.Space.xs) {
             CountdownRing(start: start, end: end)
             Text(RelativeClock.phrase(for: end, style: .abbreviated))
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
@@ -182,7 +182,7 @@ struct SlotGauge: View {
         HStack(spacing: 3) {
             if uncapped {
                 Text("No cap")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(0..<drawn, id: \.self) { index in
@@ -192,7 +192,7 @@ struct SlotGauge: View {
                 }
                 if total > drawn {
                     Text("+\(total - drawn)")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
             }

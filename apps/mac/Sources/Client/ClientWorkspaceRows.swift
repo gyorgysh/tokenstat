@@ -41,7 +41,7 @@ struct ClientFolderRow: View {
             }
             Spacer(minLength: 0)
             Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.m)
@@ -55,7 +55,7 @@ struct ClientFolderRow: View {
             RoundedRectangle(cornerRadius: ClientRowMark.size * 0.28, style: .continuous)
                 .fill(Theme.accent.opacity(0.12))
             Image(systemName: "folder.fill")
-                .font(.system(size: ClientRowMark.size * 0.5, weight: .medium))
+                .font(Theme.font(ClientRowMark.size * 0.5, weight: .medium))
                 .foregroundStyle(Theme.accent)
         }
         .frame(width: ClientRowMark.size, height: ClientRowMark.size)
@@ -91,7 +91,7 @@ struct ClientSessionRow: View {
             Spacer(minLength: 0)
             if showsChevron {
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -110,7 +110,7 @@ struct ClientSessionRow: View {
                 RoundedRectangle(cornerRadius: ClientRowMark.size * 0.28, style: .continuous)
                     .fill(Theme.accent.opacity(0.12))
                 Image(systemName: "terminal")
-                    .font(.system(size: ClientRowMark.size * 0.46, weight: .medium))
+                    .font(Theme.font(ClientRowMark.size * 0.46, weight: .medium))
                     .foregroundStyle(Theme.accent)
             }
             .frame(width: ClientRowMark.size, height: ClientRowMark.size)

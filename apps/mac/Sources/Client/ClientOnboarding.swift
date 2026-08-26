@@ -195,7 +195,7 @@ private struct OnboardingPageView: View {
                 ClientOnboardingArt(kind: page.art, reduceMotion: reduceMotion)
                     .padding(.top, Theme.Space.s)
                 Text(page.title)
-                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .font(Theme.title.weight(.semibold))
                     .multilineTextAlignment(.center)
                 Text(page.body)
                     .font(ClientType.body)

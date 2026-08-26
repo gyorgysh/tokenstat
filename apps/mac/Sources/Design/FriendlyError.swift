@@ -368,13 +368,13 @@ struct ErrorBanner: View {
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Image(systemName: error.symbol)
-                    .font(.system(size: 15))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.warning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(error.title)
-                        .font(.callout.weight(.semibold))
+                        .font(Theme.callout.weight(.semibold))
                     Text(error.message)
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -393,7 +393,7 @@ struct ErrorBanner: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } label: {
                     Text("Details")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
             }

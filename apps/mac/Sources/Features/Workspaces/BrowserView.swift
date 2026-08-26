@@ -189,12 +189,12 @@ private extension BrowserView {
         VStack(spacing: Theme.Space.m) {
             Spacer()
             Image(systemName: "globe")
-                .font(.system(size: 34, weight: .light))
+                .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.7))
             Text("Open a project preview")
-                .font(.title3.weight(.medium))
+                .font(Theme.title3.weight(.medium))
             Text("Enter a local development server or any URL above.")
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
             Spacer()
         }

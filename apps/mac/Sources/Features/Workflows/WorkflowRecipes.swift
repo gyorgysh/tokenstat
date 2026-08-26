@@ -348,7 +348,7 @@ struct WorkflowRecipeChips: View {
                     HStack(spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(recipe.name)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(Theme.font(12, weight: .medium))
                                 .foregroundStyle(.primary)
                             // Named steps, not tiles. An example is read by
                             // somebody who does not know yet what the workflow

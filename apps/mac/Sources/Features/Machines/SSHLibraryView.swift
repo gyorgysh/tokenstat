@@ -315,7 +315,7 @@ struct SSHLibraryView: View {
     private func folderRow(_ folder: SSHFolder, depth: Int) -> some View {
         HStack(spacing: Theme.Space.xs) {
             Image(systemName: expanded.contains(folder.id) ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(Theme.font(10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 12)
             Image(systemName: "folder")
@@ -323,7 +323,7 @@ struct SSHLibraryView: View {
             Text(folder.name)
             Spacer()
             Text("\(model.hosts(in: folder.id).count)")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
         .padding(.leading, CGFloat(depth) * 14)
         .frame(height: Theme.Control.rowHeight)
@@ -351,10 +351,10 @@ struct SSHLibraryView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(session.title).lineLimit(1)
                 Text(session.alive ? "Running" : "Ended")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").font(Theme.caption).foregroundStyle(.tertiary)
         }
         .frame(height: Theme.Control.rowHeight)
         .contentShape(.rect)
@@ -596,7 +596,7 @@ extension View {
 /// a name means the same weight on each.
 enum SSHRowType {
     #if os(macOS)
-    static let name = Font.system(size: 13)
+    static let name = Theme.font(13)
     static let detail = Font.caption
     #else
     static let name = ClientType.label.weight(.medium)
@@ -641,7 +641,7 @@ struct SSHHostRow: View {
                         .lineLimit(1)
                     if host.favorite {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 9))
+                            .font(Theme.font(9))
                             .foregroundStyle(Theme.warning)
                     }
                 }
@@ -653,7 +653,7 @@ struct SSHHostRow: View {
                         .truncationMode(.middle)
                     if searching, let folder {
                         Text(folder)
-                            .font(.caption2)
+                            .font(Theme.caption2)
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Theme.rowHighlight, in: Capsule())
                             .foregroundStyle(.secondary)
@@ -703,7 +703,7 @@ struct SearchField: View {
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12))
+                .font(Theme.font(12))
                 .foregroundStyle(.secondary)
             TextField(prompt, text: $text)
                 .textFieldStyle(.plain)
@@ -738,13 +738,13 @@ struct InlineBanner: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
             Image(systemName: kind == .danger ? "exclamationmark.triangle.fill" : "info.circle")
                 .foregroundStyle(kind == .danger ? Theme.danger : Theme.accent)
-            Text(text).font(.callout).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(Theme.callout).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if let dismiss {
                 Button {
                     dismiss()
                 } label: {
-                    Image(systemName: "xmark").font(.system(size: 10))
+                    Image(systemName: "xmark").font(Theme.font(10))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss")

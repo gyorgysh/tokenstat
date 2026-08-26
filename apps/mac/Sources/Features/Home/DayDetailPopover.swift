@@ -108,12 +108,12 @@ struct DayDetailPopover: View {
     private func card(_ detail: DayDetail) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("SELECTED DAY")
-                .font(.system(size: 9, weight: .semibold))
+                .font(Theme.font(9, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(.tertiary)
 
             Text(Self.friendlyDate(detail.date))
-                .font(.system(size: 15, weight: .semibold))
+                .font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(.primary)
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -121,13 +121,13 @@ struct DayDetailPopover: View {
                     .font(Theme.numeric(14, weight: .medium))
                 if !detail.estimated {
                     Text("at list rates")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
 
             Text("\(formatTokens(detail.tokens)) tokens · \(Self.int(detail.events)) requests")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
 
             if !detail.rows.isEmpty {
@@ -135,7 +135,7 @@ struct DayDetailPopover: View {
                 rows(detail)
                 if detail.rows.count > Self.maxRows {
                     Text("+\(detail.rows.count - Self.maxRows) more")
-                        .font(.caption.weight(.medium))
+                        .font(Theme.caption.weight(.medium))
                         .foregroundStyle(.tertiary)
                 }
                 split(detail)
@@ -165,7 +165,7 @@ struct DayDetailPopover: View {
                             .fill(Self.dotColor(part))
                             .frame(width: 6, height: 6)
                         Text("\(shortModel(part.model)) · \(harnessName(harnessToolKey(part.src)))")
-                            .font(.system(size: 11))
+                            .font(Theme.font(11))
                             .lineLimit(1)
                             .foregroundStyle(.primary)
                         Spacer(minLength: 4)
@@ -218,7 +218,7 @@ struct DayDetailPopover: View {
                 HStack(spacing: 8) {
                     ForEach(segments, id: \.label) { segment in
                         Text("\(segment.label) \(Int(round(100 * Double(segment.value) / Double(grand))))%")
-                            .font(.system(size: 9))
+                            .font(Theme.font(9))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -231,7 +231,7 @@ struct DayDetailPopover: View {
             ProgressView()
                 .controlSize(.small)
             Text("Loading day…")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(12)

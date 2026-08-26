@@ -60,7 +60,7 @@ struct SSHSessionInspector: View {
                         .padding(.leading, Theme.Space.s)
                 } else {
                     Text("Snippets")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.font(13, weight: .semibold))
                         .lineLimit(1)
                         .padding(.leading, Theme.Space.m)
                 }
@@ -153,7 +153,7 @@ struct SSHSessionInspector: View {
                             ? "Open a session on this server to run a snippet in it."
                             : "A snippet runs in the session in front. One with {{braces}} asks for its values first."
                     )
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, Theme.Space.xs)
@@ -174,10 +174,10 @@ struct SSHSessionInspector: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: ActionIcon.run.symbol)
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(target == nil ? Color.secondary : Theme.accent)
                     Text(snippet.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Theme.font(13, weight: .medium))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 0)
@@ -185,7 +185,7 @@ struct SSHSessionInspector: View {
                     // general ones listed under it.
                     if snippet.hostIDs.contains(hostID) {
                         Text("this server")
-                            .font(.system(size: 10))
+                            .font(Theme.font(10))
                             .foregroundStyle(.tertiary)
                     }
                 }

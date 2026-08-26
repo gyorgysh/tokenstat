@@ -145,7 +145,7 @@ struct WorkflowsEditor: View {
             }
             if model.isDirty {
                 Text("Unsaved")
-                    .font(.caption.weight(.medium))
+                    .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.warning)
             }
             Spacer()
@@ -248,7 +248,7 @@ struct WorkflowPalette: View {
                     }
                 }
                 Text("A timer cannot commit. Use an agent, an automation, or a command you press Run on.")
-                    .font(.caption2)
+                    .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, Theme.Space.s)
@@ -280,11 +280,11 @@ struct WorkflowPalette: View {
             leading()
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.caption2)
+                    .font(Theme.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -315,9 +315,9 @@ struct WorkflowDesignSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Design a workflow")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("A cheap local backend drafts the graph. You review it. It does not run.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

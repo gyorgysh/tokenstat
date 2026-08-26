@@ -77,7 +77,7 @@ struct CloudImportForm: View {
                         HStack(spacing: Theme.Space.s) {
                             ProgressView().controlSize(.small)
                             Text("Reading server list…")
-                                .font(.callout)
+                                .font(Theme.callout)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -183,11 +183,11 @@ struct SSHRecoveryWordsSheet: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(step == .read ? "Save your recovery code" : "Type the recovery code")
-                    .font(.title3.weight(.semibold))
+                    .font(Theme.title3.weight(.semibold))
                 Text(step == .read
                     ? "This is the only way back if the password is forgotten and every device is lost."
                     : "The code is off screen on purpose. Type it from where you saved it.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
             }
             Spacer()
             InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close recovery code")
@@ -226,12 +226,12 @@ struct SSHRecoveryWordsSheet: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Recovery code \(groups.joined(separator: ", "))")
             Text("Store this offline in a password manager or on paper. Do not rely on this screen or a screenshot.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(Theme.callout).foregroundStyle(.secondary)
             HStack {
                 Button(copied ? "Copied" : "Copy", .copy) { copyCode() }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 Text("The clipboard may be visible to other apps; clear it after saving.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -239,7 +239,7 @@ struct SSHRecoveryWordsSheet: View {
     private var confirmStep: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text("Enter the recovery code exactly as it was written.")
-                .font(.callout)
+                .font(Theme.callout)
             TextField("Recovery code", text: $typed)
                 .textFieldStyle(.themedMono(14))
                 #if !os(macOS)
@@ -248,7 +248,7 @@ struct SSHRecoveryWordsSheet: View {
                 #endif
             if typedAnything {
                 Text(codesMatch ? "Recovery code matches." : "That is not what was generated.")
-                    .font(.caption).foregroundStyle(codesMatch ? Theme.success : Theme.danger)
+                    .font(Theme.caption).foregroundStyle(codesMatch ? Theme.success : Theme.danger)
             }
             Button("Show the code again", .reveal) {
                 step = .read
@@ -256,7 +256,7 @@ struct SSHRecoveryWordsSheet: View {
             }
             .buttonStyle(SecondaryButtonStyle(small: true))
             Text("Going back is fine. It clears what was typed, so the code still has to be read from where you saved it.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -279,7 +279,7 @@ struct SSHRecoveryWordsSheet: View {
                 }
             }
             Text("Close without confirming to look at the code later. Discard deletes the vault so you can create a new one.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -378,8 +378,8 @@ struct SSHVaultSetupSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.weight(.semibold))
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                    Text(title).font(Theme.title3.weight(.semibold))
+                    Text(subtitle).font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault setup")
@@ -393,7 +393,7 @@ struct SSHVaultSetupSheet: View {
                 createBody
             }
             if let error {
-                Text(FriendlyError.from(error).message).font(.caption).foregroundStyle(Theme.danger)
+                Text(FriendlyError.from(error).message).font(Theme.caption).foregroundStyle(Theme.danger)
             }
             Spacer(minLength: 0)
             footer
@@ -420,10 +420,10 @@ struct SSHVaultSetupSheet: View {
                 .shake(on: refusals)
             VaultPasswordRules(password: password)
             if !confirmPassword.isEmpty, !matches {
-                Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+                Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
             }
             Text("tokenstat never sees this password. It is what decrypts the vault, so nobody here can reset it or read what it protects.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -432,7 +432,7 @@ struct SSHVaultSetupSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if forgot {
                 Text("Enter your recovery code and choose a new password. The code is the line you were given when the vault was created.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 TextField("Recovery code", text: $enteredRecovery)
                     .textFieldStyle(.themedMono(12))
@@ -448,10 +448,10 @@ struct SSHVaultSetupSheet: View {
                     .shake(on: refusals)
                 VaultPasswordRules(password: password)
                 if !confirmPassword.isEmpty, !matches {
-                    Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+                    Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
                 }
                 Text("The code is spent once this works, and you are given a fresh one.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
                 Button("Use the password instead", .back) { forgot = false }
                     .buttonStyle(SecondaryButtonStyle(small: true))
             } else {
@@ -464,17 +464,17 @@ struct SSHVaultSetupSheet: View {
                     .buttonStyle(SecondaryButtonStyle(small: true))
             }
             Text("Checked on this device. The password never leaves it.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
 
     private var staleBody: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Earlier vaults were opened with 24 recovery words. This one is opened with a password you choose, so the old vault cannot be carried across.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(Theme.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("Deleting it loses whatever it holds. Anything saved on this Mac stays where it is.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -621,10 +621,10 @@ struct VaultPasswordRules: View {
                 let met = !outstanding.contains(rule)
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: met ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 10))
+                        .font(Theme.font(10))
                         .foregroundStyle(met ? Theme.success : Color.secondary)
                     Text(rule)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(met ? Color.secondary : Color.primary)
                 }
             }

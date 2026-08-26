@@ -54,9 +54,9 @@ struct WorkingTreeReviewView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Uncommitted changes")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text(folder.name)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -75,7 +75,7 @@ struct WorkingTreeReviewView: View {
                     Text("Working tree")
                         .foregroundStyle(.tertiary)
                 }
-                .font(.caption)
+                .font(Theme.caption)
             }
         }
         .padding(Theme.Space.m)
@@ -86,7 +86,7 @@ struct WorkingTreeReviewView: View {
     private func fileHeader(_ diff: FileDiff) -> some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: "doc.text")
-                .font(.system(size: 11))
+                .font(Theme.font(11))
                 .foregroundStyle(.tertiary)
             Text(diff.path)
                 .font(Theme.mono(12))

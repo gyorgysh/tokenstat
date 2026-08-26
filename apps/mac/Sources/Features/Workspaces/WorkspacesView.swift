@@ -80,7 +80,7 @@ struct WorkspacesView: View {
                 .foregroundStyle(Theme.accent)
             VStack(alignment: .leading, spacing: 1) {
                 Text(folder.name)
-                    .font(.system(size: DisplayFit.dp(13), weight: .semibold))
+                    .font(Theme.fit(13, weight: .semibold))
                 Text(folder.isRemote
                      ? "\(folder.machineLabel ?? "Remote machine") · \(folder.path)"
                      : folder.path)
@@ -124,7 +124,7 @@ struct WorkspacesView: View {
                 Image(systemName: "laptopcomputer")
                     .foregroundStyle(Theme.accent)
                 Text(folder.machineLabel ?? "Remote machine")
-                    .font(.system(size: DisplayFit.dp(12), weight: .medium))
+                    .font(Theme.fit(12, weight: .medium))
                 Spacer(minLength: 0)
                 Button("View screen", .preview) {
                     viewingScreen = RemoteScreenTarget(
@@ -146,20 +146,20 @@ struct WorkspacesView: View {
         VStack(spacing: Theme.Space.m) {
             Spacer()
             Image(systemName: "terminal")
-                .font(.system(size: 34, weight: .light))
+                .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
             Text("No terminal yet")
-                .font(.title3.weight(.medium))
+                .font(Theme.title3.weight(.medium))
             Text("""
             This is where sessions run: Claude Code, Codex, OpenCode and the \
             rest, launched in this folder. Live usage meters are coming next.
             """)
-            .font(.callout)
+            .font(Theme.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 400)
             Text("Sessions are ready when you are")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
 
             if folder.exists {
@@ -170,7 +170,7 @@ struct WorkspacesView: View {
             } else {
                 Label("This folder is missing. It is kept in case it comes back.",
                       systemImage: "exclamationmark.triangle")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(Theme.warning)
                     .padding(.top, Theme.Space.s)
             }
@@ -183,15 +183,15 @@ struct WorkspacesView: View {
     private var empty: some View {
         VStack(spacing: Theme.Space.m) {
             Image(systemName: "square.stack.3d.up")
-                .font(.system(size: 34, weight: .light))
+                .font(Theme.font(34, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
             Text("No workspaces yet")
-                .font(.title3.weight(.medium))
+                .font(Theme.title3.weight(.medium))
             Text("""
             Add a project folder. tokenstat reads its git state and gives you a \
             place to run your agents.
             """)
-            .font(.callout)
+            .font(Theme.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 360)
@@ -215,7 +215,7 @@ struct BranchChip: View {
     var body: some View {
         HStack(spacing: Theme.Space.xs) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 9))
+                .font(Theme.font(9))
             Text(git.branch ?? "detached")
                 .font(Theme.mono(12))
             if git.ahead > 0 {
@@ -348,7 +348,7 @@ struct WorkspaceChangesView: View {
             model.setAllStaged(!all, in: folder)
         }
         .buttonStyle(.plain)
-        .font(.caption)
+        .font(Theme.caption)
         .foregroundStyle(Theme.accent)
     }
     #endif
@@ -363,14 +363,14 @@ struct WorkspaceChangesView: View {
                     .font(Theme.numeric(13, weight: .medium))
                     .foregroundStyle(Theme.danger)
                 Text("· \(git.files.count) file\(git.files.count == 1 ? "" : "s")")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             if git.partial {
                 // Untracked and binary files have no line counts, so saying
                 // "+120" flat would be a number nobody measured.
                 Text("Some files have no line counts, so these totals are a floor.")
-                    .font(.caption2)
+                    .font(Theme.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -379,7 +379,7 @@ struct WorkspaceChangesView: View {
     private func diffControls(_ git: GitStatus, in folder: WorkspaceFolder) -> some View {
         HStack(spacing: Theme.Space.s) {
             Text("Review")
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer()
             Button("Expand all", .more) {
@@ -404,7 +404,7 @@ struct WorkspaceChangesView: View {
             .buttonStyle(AccentButtonStyle(small: true))
             .layoutPriority(1)
         }
-        .font(.caption)
+        .font(Theme.caption)
         .padding(.top, Theme.Space.s)
     }
 
@@ -417,7 +417,7 @@ struct WorkspaceChangesView: View {
                         .font(Theme.sectionHeader)
                         .foregroundStyle(.tertiary)
                     Text("\(files.count)")
-                        .font(.caption2)
+                        .font(Theme.caption2)
                         .foregroundStyle(.tertiary)
                     Spacer()
                 }
@@ -542,19 +542,19 @@ private struct CommitBox: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let outcome = model.gitOutcome {
                 Text(outcome.message.isEmpty ? "Done." : outcome.message)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(outcome.ok ? Theme.success : Theme.danger)
                     .lineLimit(4)
                     .textSelection(.enabled)
             }
             if let notice = automations.noticeMessage {
                 Text(notice)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             if let error = automations.errorMessage {
                 Text(error)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(Theme.danger)
                     .lineLimit(4)
                     .textSelection(.enabled)
@@ -604,12 +604,12 @@ private struct CommitBox: View {
         VStack(spacing: 0) {
             TextField("Commit title", text: title)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(Theme.font(13))
                 .lineLimit(1)
                 .padding(Theme.Space.s)
             hairline
             TextEditor(text: description)
-                .font(.system(size: 12))
+                .font(Theme.font(12))
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 48, maxHeight: 48)
                 .padding(.horizontal, Theme.Space.xs)
@@ -617,7 +617,7 @@ private struct CommitBox: View {
                 .overlay(alignment: .topLeading) {
                     if description.wrappedValue.isEmpty {
                         Text("Description (optional)")
-                            .font(.system(size: 12))
+                            .font(Theme.font(12))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, Theme.Space.s)
                             .padding(.vertical, Theme.Space.s)
@@ -750,7 +750,7 @@ private struct ChangeRow: View {
             #if os(macOS)
             Button(action: onToggle) {
                 Image(systemName: isStaged ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(isStaged ? Theme.accent : Color.secondary)
                     .contentShape(.rect)
             }
@@ -759,11 +759,11 @@ private struct ChangeRow: View {
             #endif
 
             Image(systemName: file.kind.symbol)
-                .font(.system(size: 11))
+                .font(Theme.font(11))
                 .foregroundStyle(file.kind.tint)
             Button(action: onOpen) {
                 Text(file.fileName)
-                    .font(.system(size: 13, weight: isOpen ? .medium : .regular))
+                    .font(Theme.font(13, weight: isOpen ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .contentShape(.rect)
@@ -772,7 +772,7 @@ private struct ChangeRow: View {
             .help("Open the diff")
             Button(action: onToggleDiff) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.caption2.weight(.semibold))
+                    .font(Theme.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)

@@ -36,15 +36,15 @@ struct InspectorEmptyState<Action: View>: View {
                 )
             } else {
                 Image(systemName: systemImage)
-                    .font(.system(size: 28, weight: .light))
+                    .font(Theme.font(28, weight: .light))
                     .foregroundStyle(tint.opacity(0.7))
                     .symbolRenderingMode(.hierarchical)
             }
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(13, weight: .semibold))
                 .foregroundStyle(.primary.opacity(0.75))
             Text(subtitle)
-                .font(.system(size: 11))
+                .font(Theme.font(11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -302,26 +302,26 @@ private struct CommitRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(commit.subject)
-                    .font(.system(size: 13))
+                    .font(Theme.font(13))
                     .lineLimit(2)
                     .truncationMode(.tail)
                 HStack(spacing: Theme.Space.xs) {
                     Text(commit.author)
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
                     Text("·")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                     // One shared tick rather than a live time source per row.
                     // A commit list is the worst case for the latter: every
                     // row installs one, and each one dirties the view graph on
                     // every frame. See `RelativeClock`.
                     RelativeTimeText(date: commit.date)
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                     Text("·")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                     Text(commit.shortID)
                         .font(Theme.mono(11))
@@ -331,7 +331,7 @@ private struct CommitRow: View {
             Spacer(minLength: Theme.Space.xs)
             if commit.unpushed {
                 Image(systemName: "arrow.up.circle")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(Theme.accent)
                     .help("Not pushed yet")
             }

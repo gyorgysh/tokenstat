@@ -82,10 +82,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         if let terminalView { return terminalView }
         #if os(macOS)
         let made = TerminalView(frame: .zero)
-        made.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        made.font = AppFonts.terminal(size: 12)
         #else
         let made = TerminalView(frame: .zero)
-        made.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        made.font = AppFonts.terminal(size: 12)
         made.inputAccessoryView = nil
         #endif
         // Before anything else. A terminal with no native background does not
@@ -469,9 +469,9 @@ struct SSHLiveTerminalScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(session.title).font(.headline)
+                Text(session.title).font(Theme.headline)
                 if !session.alive {
-                    Text("ended").font(.caption).foregroundStyle(.secondary)
+                    Text("ended").font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("End session", .disconnect) { confirmingClose = true }
@@ -535,7 +535,7 @@ struct SSHLiveTerminalScreen: View {
                                 .fill(other.alive ? Theme.accent : Theme.stateIdle)
                                 .frame(width: 6, height: 6)
                             Text(other.title)
-                                .font(.caption)
+                                .font(Theme.caption)
                                 .lineLimit(1)
                         }
                         .padding(.horizontal, Theme.Space.s)
@@ -577,7 +577,7 @@ struct SSHLiveTerminalScreen: View {
                 }
             } label: {
                 Image(systemName: "text.append")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .frame(minWidth: 34, minHeight: 30)
             }
             .accessibilityLabel("Snippets")
@@ -629,9 +629,9 @@ struct SSHSnippetRunSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(snippet.title).font(.title3.weight(.semibold))
+                    Text(snippet.title).font(Theme.title3.weight(.semibold))
                     Text("Values are asked for every time and never saved.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close snippet")

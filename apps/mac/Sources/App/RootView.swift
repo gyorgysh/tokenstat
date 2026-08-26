@@ -1376,7 +1376,7 @@ struct RootView: View {
                     }
                 } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(Theme.font(8, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .frame(width: 18, height: 24)
                         .contentShape(.rect)
@@ -1426,7 +1426,7 @@ struct RootView: View {
                 }
             } label: {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.font(8, weight: .semibold))
                     .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
                     .frame(width: 18, height: 24)
                     .contentShape(.rect)
@@ -1584,7 +1584,7 @@ struct RootView: View {
                         workspaces.requestAdd()
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(Theme.font(9, weight: .semibold))
                             .foregroundStyle(.secondary)
                             // A 9pt glyph is a 9pt target. The frame and the
                             // shape are what make it clickable rather than
@@ -1600,7 +1600,7 @@ struct RootView: View {
 
                 if workspaces.folders.isEmpty {
                     Text("No folders yet.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, Theme.Space.m)
                         .padding(.vertical, Theme.Space.xs)
@@ -1633,7 +1633,7 @@ struct RootView: View {
                                 }
                             } label: {
                                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                                    .font(.system(size: 8, weight: .semibold))
+                                    .font(Theme.font(8, weight: .semibold))
                                     .foregroundStyle(isCurrent ? Theme.accent : Color.secondary)
                                     .frame(width: 18, height: 24)
                                     .contentShape(.rect)
@@ -1759,9 +1759,9 @@ struct RootView: View {
                 } label: {
                     HStack(spacing: Theme.Space.xs) {
                         Image(systemName: "plus.circle")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(Theme.font(11, weight: .semibold))
                         Text("Add workspace…")
-                            .font(.callout)
+                            .font(Theme.callout)
                         Spacer(minLength: 0)
                     }
                     .foregroundStyle(.secondary)
@@ -1860,7 +1860,7 @@ struct RootView: View {
             if let notice = appUpdate.checkNotice,
                notice != AppUpdateModel.upToDateMessage {
                 Text(notice)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, Theme.Space.m)
@@ -1997,12 +1997,12 @@ struct RootView: View {
 
             if account.isSyncing {
                 Text("Syncing…")
-                    .font(.system(size: 13))
+                    .font(Theme.font(13))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
                 Text(account.account?.title ?? "Not signed in")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -2016,7 +2016,7 @@ struct RootView: View {
                 TierBadge(tier: tier, size: 9)
             }
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 8))
+                .font(Theme.font(8))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, Theme.Space.s)
@@ -2803,11 +2803,11 @@ private struct SidebarRow: View {
                     Spacer(minLength: 0).frame(width: CGFloat(indent) * 14)
                 }
                 Image(systemName: symbol)
-                    .font(.system(size: DisplayFit.dp(symbolSize)))
+                    .font(Theme.fit(symbolSize))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(label)
-                    .font(.system(size: DisplayFit.dp(13), weight: isSelected ? .medium : .regular))
+                    .font(Theme.fit(13, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: Theme.Space.xs)
@@ -2937,11 +2937,11 @@ private struct StateBadge: View {
                     .onChange(of: state) { _, _ in startPulse() }
             }
             Text(label)
-                .font(.system(size: DisplayFit.dp(RowMetrics.meta)))
+                .font(Theme.fit(RowMetrics.meta))
                 .foregroundStyle(labelStyle)
                 .lineLimit(1)
             if state == .idle, let since {
-                Text("·").font(.system(size: DisplayFit.dp(RowMetrics.meta))).foregroundStyle(.quaternary)
+                Text("·").font(Theme.fit(RowMetrics.meta)).foregroundStyle(.quaternary)
                 // One shared tick, not a live time source per row. SwiftUI
                 // does keep `Text(_, style: .relative)` current on its own,
                 // and the price is a full window layout pass every frame for
@@ -2996,7 +2996,7 @@ private struct WorkspaceReorder: ViewModifier {
             drop(on: content)
                 .draggable(WorkspaceDrag.payload(id)) {
                     Text((id as NSString).lastPathComponent)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 6))
@@ -3061,10 +3061,7 @@ private struct WorkspaceRow: View {
                 leadingMark
                 VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
                     Text(label)
-                        .font(.system(
-                            size: DisplayFit.dp(RowMetrics.title),
-                            weight: isCurrent ? .semibold : .regular
-                        ))
+                        .font(Theme.fit(RowMetrics.title, weight: isCurrent ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     gitLine
@@ -3099,7 +3096,7 @@ private struct WorkspaceRow: View {
                 // is a bare word in a line of numbers, and `main +562 −46`
                 // reads as though `main` were another count.
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: DisplayFit.dp(RowMetrics.meta - 1), weight: .medium))
+                    .font(Theme.fit(RowMetrics.meta - 1, weight: .medium))
                     .foregroundStyle(.tertiary)
                 Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
                     .font(font)
@@ -3146,7 +3143,7 @@ private struct WorkspaceRow: View {
                     ? "network"
                     : (folder.exists ? "folder.fill" : "questionmark.folder.fill")
             )
-            .font(.system(size: DisplayFit.dp(RowMetrics.mark * 0.5), weight: .medium))
+            .font(Theme.fit(RowMetrics.mark * 0.5, weight: .medium))
             .foregroundStyle(isCurrent ? Theme.accent : Theme.accent.opacity(0.6))
         }
         .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))
@@ -3218,7 +3215,7 @@ private struct SidebarGroupHeader<Trailing: View>: View {
         HStack(spacing: Theme.Space.xs) {
             if let chevron {
                 Image(systemName: chevron)
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.font(8, weight: .semibold))
                     .foregroundStyle(isHovering ? AnyShapeStyle(Color.secondary) : AnyShapeStyle(.tertiary))
                     .frame(width: 8)
             }
@@ -3264,14 +3261,11 @@ private struct WorkspaceSectionRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: section.symbol)
-                    .font(.system(size: DisplayFit.dp(10.5)))
+                    .font(Theme.fit(10.5))
                     .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(section.label)
-                    .font(.system(
-                        size: DisplayFit.dp(12),
-                        weight: isSelected ? .medium : .regular
-                    ))
+                    .font(Theme.fit(12, weight: isSelected ? .medium : .regular))
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.xs)
@@ -3327,10 +3321,7 @@ private struct ActiveWorkflowRow: View {
                 FeatureMark(name: "mark_workflow", tint: Theme.accent, size: DisplayFit.dp(RowMetrics.mark))
                 VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
                     Text(run.name)
-                        .font(.system(
-                            size: DisplayFit.dp(RowMetrics.title),
-                            weight: isSelected ? .semibold : .regular
-                        ))
+                        .font(Theme.fit(RowMetrics.title, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text("\(run.steps.count) steps")
@@ -3395,10 +3386,7 @@ private struct ActiveAutomationRow: View {
                 FeatureMark(name: "mark_automation", tint: Theme.accent, size: DisplayFit.dp(RowMetrics.mark))
                 VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
                     Text(job.name)
-                        .font(.system(
-                            size: DisplayFit.dp(RowMetrics.title),
-                            weight: isSelected ? .semibold : .regular
-                        ))
+                        .font(Theme.fit(RowMetrics.title, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Text(backendLabel)
@@ -3581,10 +3569,7 @@ private struct ActiveSessionRow: View {
                 leadingMark
                 VStack(alignment: .leading, spacing: RowMetrics.lineGap) {
                     Text(title)
-                        .font(.system(
-                            size: DisplayFit.dp(RowMetrics.title),
-                            weight: isSelected ? .semibold : .regular
-                        ))
+                        .font(Theme.fit(RowMetrics.title, weight: isSelected ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     if let used = session.meter?.contextUsed,
@@ -3631,7 +3616,7 @@ private struct ActiveSessionRow: View {
                 RoundedRectangle(cornerRadius: RowMetrics.mark * 0.28, style: .continuous)
                     .fill(Theme.accent.opacity(0.09))
                 Image(systemName: "terminal")
-                    .font(.system(size: DisplayFit.dp(RowMetrics.mark * 0.46), weight: .medium))
+                    .font(Theme.fit(RowMetrics.mark * 0.46, weight: .medium))
                     .foregroundStyle(Theme.accent.opacity(0.75))
             }
             .frame(width: DisplayFit.dp(RowMetrics.mark), height: DisplayFit.dp(RowMetrics.mark))

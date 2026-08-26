@@ -57,7 +57,7 @@ struct ClientSecurityCard: View {
                     }
                     Spacer(minLength: Theme.Space.s)
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
+                        .font(Theme.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,7 +97,7 @@ struct ClientSecurityCard: View {
 
                     Text("Noise XX handshake, X25519 keys, ChaCha20-Poly1305. "
                         + "Compare the words with the other device to be sure.")
-                        .font(.system(size: 10))
+                        .font(Theme.font(10))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

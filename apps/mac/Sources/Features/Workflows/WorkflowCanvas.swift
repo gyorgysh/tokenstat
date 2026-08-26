@@ -96,14 +96,14 @@ struct WorkflowCanvas: View {
         if let graph = model.working, graph.nodes.count <= 1 || graph.edges.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("The run goes top to bottom")
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                 Text("The top card is the starting prompt. Press + under a card to add the next step. Green is on success. Red is on error.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if !exampleRecipes.isEmpty {
                     Text("Or drop in an example")
-                        .font(.caption.weight(.medium))
+                        .font(Theme.caption.weight(.medium))
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
                     WorkflowRecipeChips(recipes: exampleRecipes) { recipe in
@@ -128,7 +128,7 @@ struct WorkflowCanvas: View {
             Button("Fit", .layout) { fit() }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             Text("\(Int((zoom * 100).rounded()))%")
-                .font(.caption.monospacedDigit())
+                .font(Theme.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 36, alignment: .trailing)
         }
@@ -503,16 +503,16 @@ struct WorkflowNodeCard: View {
                     FeatureMark(name: node.kind.mark, tint: ring, size: 22)
                 }
                 Text(node.kind.label)
-                    .font(.caption2.weight(.medium))
+                    .font(Theme.caption2.weight(.medium))
                     .foregroundStyle(.tertiary)
                 Spacer(minLength: 0)
             }
             Text(node.displayTitle)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(13, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
             Text(node.subtitle)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
             if let step {
@@ -617,11 +617,11 @@ struct WorkflowAddMenu: View {
             leading()
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.caption2)
+                    .font(Theme.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }

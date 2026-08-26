@@ -129,7 +129,7 @@ struct SSHVaultRow: View {
                 Image(systemName: symbol)
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Theme.accent)
                 Text(label)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(vault.unconfirmedRecovery ? Theme.warning : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: Theme.Space.s)
@@ -147,7 +147,7 @@ struct SSHVaultRow: View {
                     Skeleton.Bar(width: 62, height: 10)
                 } else if let detail {
                     Text(detail)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .transition(.opacity)
@@ -158,13 +158,13 @@ struct SSHVaultRow: View {
                 // "locked", so the row said it twice a few points apart.
                 if vault.locked {
                     Text("Locked")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Theme.accentSoft, in: Capsule())
                         .foregroundStyle(Theme.accent)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, Theme.Space.m)
@@ -230,9 +230,9 @@ struct SSHVaultScreen: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Encrypted vault").font(.title3.weight(.semibold))
+                    Text("Encrypted vault").font(Theme.title3.weight(.semibold))
                     Text("Hosts, keys and snippets, readable only by your devices, your password and your recovery code.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault")
@@ -321,7 +321,7 @@ struct SSHVaultScreen: View {
                             ) { Task { await vault.lock() } }
                         } else {
                             Text("Your plan can read this vault but not write to it. Hosts and keys still sync in; changes made here stay on this machine.")
-                                .font(.callout).foregroundStyle(.secondary)
+                                .font(Theme.callout).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -408,9 +408,9 @@ struct SSHVaultScreen: View {
                 vault.recordCount == 1 ? "1 record" : "\(vault.recordCount) records",
                 systemImage: "lock.shield.fill"
             )
-            .font(.callout.weight(.medium))
+            .font(Theme.callout.weight(.medium))
             Text("This device is enrolled and can read and write the vault.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -427,9 +427,9 @@ struct SSHVaultScreen: View {
         perform: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            Text(title).font(.callout.weight(.medium))
+            Text(title).font(Theme.callout.weight(.medium))
             Text(detail)
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             // All three at the same size. Prominent and plain were dense and
             // destructive was not, so Unlock came out visibly smaller than
@@ -490,11 +490,11 @@ struct SSHVaultDeleteSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(deleted ? "The vault is gone" : "Delete the vault and start over")
-                        .font(.title3.weight(.semibold))
+                        .font(Theme.title3.weight(.semibold))
                     Text(deleted
                         ? "This account has no vault. Nothing saved on this device was touched."
                         : "For when the password is forgotten and no other device can open it.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close vault deletion")
@@ -503,7 +503,7 @@ struct SSHVaultDeleteSheet: View {
             if deleted { afterBody } else { beforeBody }
             if let error = vault.error {
                 Text(FriendlyError.from(error).message)
-                    .font(.caption).foregroundStyle(Theme.danger)
+                    .font(Theme.caption).foregroundStyle(Theme.danger)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -538,16 +538,16 @@ struct SSHVaultDeleteSheet: View {
                 Text(strandedKeys.count == 1
                     ? "One key has no private half on this device and will be lost:"
                     : "\(strandedKeys.count) keys have no private half on this device and will be lost:")
-                    .font(.caption.weight(.medium))
+                    .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.warning)
                     .padding(.top, Theme.Space.xs)
                 ForEach(strandedKeys) { key in
                     Text("\u{2022} \(key.label)")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
             }
             Text("Type \(Self.word) to confirm.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
                 .padding(.top, Theme.Space.xs)
             TextField(Self.word, text: $typed)
                 .textFieldStyle(.themedMono(12))
@@ -563,15 +563,15 @@ struct SSHVaultDeleteSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if canWrite {
                 Text("Make a new vault and put this device's servers, folders, snippets and keys into it. Your other devices join it with the new password.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let library {
                     Text(summary(of: library))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
             } else {
                 Text("Making a vault needs Supporter or above. Everything saved on this device keeps working without one.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(Theme.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -595,7 +595,7 @@ struct SSHVaultDeleteSheet: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Space.xs) {
             Text("\u{2022}").foregroundStyle(.secondary)
             Text(text)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -654,9 +654,9 @@ struct SSHVaultPasswordSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Change vault password").font(.title3.weight(.semibold))
+                    Text("Change vault password").font(Theme.title3.weight(.semibold))
                     Text("Your saved servers and keys stay exactly as they are.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 InspectorCloseButton(action: { dismiss() }, help: "Close", label: "Close password change")
@@ -670,10 +670,10 @@ struct SSHVaultPasswordSheet: View {
                 .themedFieldBox()
             VaultPasswordRules(password: next)
             if !again.isEmpty, next != again {
-                Text("The two do not match.").font(.caption).foregroundStyle(Theme.danger)
+                Text("The two do not match.").font(Theme.caption).foregroundStyle(Theme.danger)
             }
             if let error = vault.error {
-                Text(FriendlyError.from(error).message).font(.caption).foregroundStyle(Theme.danger)
+                Text(FriendlyError.from(error).message).font(Theme.caption).foregroundStyle(Theme.danger)
             }
             Spacer(minLength: 0)
             HStack {

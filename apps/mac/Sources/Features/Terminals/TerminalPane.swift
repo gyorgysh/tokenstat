@@ -370,7 +370,7 @@ struct TerminalPane: View {
         VStack {
             Spacer()
             Text("Reading \(what)…")
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
             Spacer()
         }
@@ -382,7 +382,7 @@ struct TerminalPane: View {
         VStack {
             Spacer()
             Text(message)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(Theme.danger)
                 .multilineTextAlignment(.center)
                 .padding(Theme.Space.m)
@@ -454,7 +454,7 @@ struct TerminalPane: View {
                             Text(profile.name)
                             if let harness = profile.harnessID {
                                 Text(harnessName(harness))
-                                    .font(.caption)
+                                    .font(Theme.caption)
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -470,7 +470,7 @@ struct TerminalPane: View {
                 }
             } label: {
                 Label("New session", systemImage: "plus")
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -478,7 +478,7 @@ struct TerminalPane: View {
 
             if let error = active?.transportError {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(Theme.warning)
                     .help("Input cannot reach this session: \(error)")
             }
@@ -498,7 +498,7 @@ struct TerminalPane: View {
                     }
                 } label: {
                     ActionIcon.compare.label("Split")
-                        .font(.system(size: 12))
+                        .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -678,7 +678,7 @@ struct TerminalPane: View {
             Spacer()
             Label("This folder is missing. It is kept in case it comes back.",
                   systemImage: "exclamationmark.triangle")
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(Theme.warning)
             Spacer()
         }
@@ -708,7 +708,7 @@ struct TabCloseButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold))
+                .font(Theme.font(9, weight: .bold))
                 .foregroundStyle(isHovering ? Color.primary : Color.secondary)
                 .frame(width: 20, height: 20)
                 .background(
@@ -735,10 +735,10 @@ private struct LaunchChip: View {
         Button(action: onSelect) {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.font(11, weight: .medium))
                     .frame(width: 16, height: 16)
                 Text("Launch")
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                    .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                     .lineLimit(1)
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
@@ -778,12 +778,12 @@ private struct SessionChip: View {
                         HarnessMark(id: harnessID, size: 16)
                     } else {
                         Image(systemName: "terminal")
-                            .font(.system(size: 11))
+                            .font(Theme.font(11))
                             .foregroundStyle(Theme.accent)
                             .frame(width: 16, height: 16)
                     }
                     Text(label)
-                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -860,11 +860,11 @@ private struct FileChip: View {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: symbol)
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
                     Text(label)
-                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.middle)
                     if isDirty {
@@ -929,9 +929,9 @@ private struct SessionStartingView: View {
             ProgressView()
                 .controlSize(.regular)
             Text("Starting \(label)")
-                .font(.title3.weight(.medium))
+                .font(Theme.title3.weight(.medium))
             Text("The session is up. Waiting for the program to draw.")
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
@@ -969,10 +969,10 @@ struct TerminalHost: View {
     private func statusLine(_ code: Int) -> some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: code == 0 ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.system(size: 11))
+                .font(Theme.font(11))
                 .foregroundStyle(code == 0 ? .green : .red)
             Text(code == 0 ? "Process exited" : "Process exited with code \(code)")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
         }
@@ -1025,13 +1025,13 @@ private struct TerminalNotice: View {
             if session.droppedOutput {
                 pill {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(Theme.font(10))
                         .foregroundStyle(Theme.warning)
                     // Plain words for what a person actually sees: a gap in
                     // the scrollback. "The reader fell behind its buffer" is
                     // how this end thinks about it, not how it reads.
                     Text("Some lines are missing here.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.primary)
                 }
                 // It says its piece and goes, like a toast. A pill that waits
@@ -1045,7 +1045,7 @@ private struct TerminalNotice: View {
                 pill {
                     ProgressView().controlSize(.small)
                     Text("Output paused while the terminal catches up.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 // Nothing to press, and it sits over the terminal: a click in
@@ -1154,13 +1154,13 @@ private struct LaunchSurface: View {
                 }
 
                 Image(systemName: "terminal")
-                    .font(.system(size: 34, weight: .light))
+                    .font(Theme.font(34, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.65))
                     .padding(.top, Theme.Space.m)
                 Text("Run something in \(folder.name)")
-                    .font(.title3.weight(.medium))
+                    .font(Theme.title3.weight(.medium))
                 Text("A session runs as its own process, owned by the host, so it keeps going whether or not the window is here to watch it.")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 380)
@@ -1198,14 +1198,14 @@ private struct LaunchSurface: View {
 
                 if let installError {
                     Text(installError)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 480)
                 }
                 if let error = terminals.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                 }
             }
@@ -1260,7 +1260,7 @@ private struct LaunchSurface: View {
                 : "Model and permission bypass are in the bar above.",
             systemImage: "arrow.up"
         )
-        .font(.caption)
+        .font(Theme.caption)
         .foregroundStyle(.tertiary)
     }
 
@@ -1279,7 +1279,7 @@ private struct LaunchSurface: View {
             }
             .controlSize(.small)
         }
-        .font(.caption)
+        .font(Theme.caption)
         .padding(.horizontal, Theme.Space.m)
         .padding(.vertical, 6)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
@@ -1312,11 +1312,11 @@ private struct LaunchSurface: View {
         } label: {
             VStack(spacing: Theme.Space.s) {
                 Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .medium))
+                    .font(Theme.font(18, weight: .medium))
                     .foregroundStyle(.tertiary)
                     .frame(height: 34)
                 Text(showingCatalog ? "Hide" : "More")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -1376,12 +1376,12 @@ private struct LaunchSurface: View {
                     .saturation(0.2)
             } else {
                 Image(systemName: profile.symbol ?? "terminal")
-                    .font(.system(size: 18))
+                    .font(Theme.font(18))
                     .foregroundStyle(.tertiary)
                     .frame(height: 34)
             }
             Text(profile.name)
-                .font(.system(size: 13, weight: .medium))
+                .font(Theme.font(13, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
@@ -1446,11 +1446,11 @@ private struct LaunchSurface: View {
         Button(action: action) {
             VStack(spacing: Theme.Space.s) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18))
+                    .font(Theme.font(18))
                     .foregroundStyle(Theme.accent)
                     .frame(height: 34)
                 Text(label)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity)
@@ -1494,12 +1494,12 @@ private struct LaunchTile: View {
                         HarnessMark(id: harness, size: 34)
                     } else {
                         Image(systemName: profile.symbol ?? "terminal")
-                            .font(.system(size: 18))
+                            .font(Theme.font(18))
                             .foregroundStyle(Theme.accent)
                             .frame(height: 34)
                     }
                     Text(isLaunching ? "Starting…" : profile.name)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(Theme.font(13, weight: .medium))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
@@ -1538,7 +1538,7 @@ private struct LaunchTile: View {
             configuring = true
         } label: {
             Image(systemName: ActionIcon.settings.symbol)
-                .font(.system(size: 11, weight: .semibold))
+                .font(Theme.font(11, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 22, height: 22)
                 .background(
@@ -1583,12 +1583,12 @@ private struct LaunchInstallTile: View {
                         .saturation(0.3)
                 } else {
                     Image(systemName: profile.symbol ?? "arrow.down.circle")
-                        .font(.system(size: 18))
+                        .font(Theme.font(18))
                         .foregroundStyle(.tertiary)
                         .frame(height: 34)
                 }
                 Text(isInstalling ? "Installing…" : profile.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(isInstalling ? .primary : .secondary)
                     .lineLimit(1)
             }
@@ -1628,9 +1628,9 @@ private struct RemotePortForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text("Browse a local port on \(folder.machineLabel ?? "the other machine")")
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text("View a service running on that device's own localhost, like a webserver, a dev server or a dashboard, right here in the app.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("Port", text: $port)
                 .textFieldStyle(.roundedBorder)

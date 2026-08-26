@@ -27,13 +27,13 @@ struct AddWorkspaceSheet: View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             HStack(spacing: Theme.Space.m) {
                 Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 30, weight: .light))
+                    .font(Theme.font(30, weight: .light))
                     .foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Add a workspace")
-                        .font(.title3.weight(.semibold))
+                        .font(Theme.title3.weight(.semibold))
                     Text("A workspace is where your agents work")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -107,9 +107,9 @@ struct AddWorkspaceSheet: View {
                 .background(Theme.accentSoft, in: Circle())
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.callout.weight(.semibold))
+                    .font(Theme.callout.weight(.semibold))
                 Text(text)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

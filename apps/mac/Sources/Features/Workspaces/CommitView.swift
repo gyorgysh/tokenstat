@@ -36,12 +36,12 @@ struct CommitView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             Text(detail.subject)
-                .font(.system(size: 15, weight: .semibold))
+                .font(Theme.font(15, weight: .semibold))
                 .textSelection(.enabled)
 
             if !detail.body.isEmpty {
                 Text(detail.body)
-                    .font(.system(size: 13))
+                    .font(Theme.font(13))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
@@ -49,10 +49,10 @@ struct CommitView: View {
 
             HStack(spacing: Theme.Space.s) {
                 Text(detail.author)
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.secondary)
                 Text(detail.date, format: .dateTime.year().month().day().hour().minute())
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.tertiary)
                 Text(detail.shortID)
                     .font(Theme.mono(12))
@@ -60,7 +60,7 @@ struct CommitView: View {
                     .textSelection(.enabled)
                 if detail.isMerge {
                     Text("merge")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(Theme.font(11, weight: .medium))
                         .foregroundStyle(Theme.secondary)
                 }
                 Spacer(minLength: Theme.Space.xs)
@@ -71,7 +71,7 @@ struct CommitView: View {
                     .font(Theme.numeric(12, weight: .medium))
                     .foregroundStyle(Theme.danger)
                 Text("· \(detail.files.count) file\(detail.files.count == 1 ? "" : "s")")
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             }
         }
@@ -84,7 +84,7 @@ struct CommitView: View {
         Text(detail.isMerge
              ? "A merge, so there is nothing of its own to show. Its changes belong to the commits it brought in."
              : "This commit changed no files.")
-            .font(.callout)
+            .font(Theme.callout)
             .foregroundStyle(.secondary)
             .padding(Theme.Space.m)
     }
@@ -92,7 +92,7 @@ struct CommitView: View {
     private func fileHeader(_ diff: FileDiff) -> some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: "doc.text")
-                .font(.system(size: 11))
+                .font(Theme.font(11))
                 .foregroundStyle(.tertiary)
             Text(diff.path)
                 .font(Theme.mono(12))

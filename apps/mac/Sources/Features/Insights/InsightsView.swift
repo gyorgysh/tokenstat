@@ -91,11 +91,11 @@ struct InsightsView: View {
                 if let day = model.focusedDay {
                     HStack(spacing: Theme.Space.s) {
                         Label(day, systemImage: "calendar")
-                            .font(.callout)
+                            .font(Theme.callout)
                         Spacer()
                         Button("Clear", .dismiss) { model.clearFocusedDay() }
                             .buttonStyle(.plain)
-                            .font(.callout.weight(.medium))
+                            .font(Theme.callout.weight(.medium))
                             .foregroundStyle(Theme.accent)
                     }
                     .padding(.horizontal, Theme.Space.m)
@@ -348,18 +348,18 @@ private struct BreakdownTable: View {
                 visible += Self.pageStep
             }
             .buttonStyle(.plain)
-            .font(.callout.weight(.medium))
+            .font(Theme.callout.weight(.medium))
             .foregroundStyle(Theme.accent)
 
             Text("\(hidden) more hidden")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
 
             Spacer()
 
             Button("Show all", .more) { visible = rows.count }
                 .buttonStyle(.plain)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .help("Draws every remaining row. A long list takes a moment to lay out.")
         }
@@ -407,7 +407,7 @@ private struct BreakdownRow: View {
                 HarnessMark(id: row.key, size: 16)
             }
             Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
-                .font(monospaced ? Theme.mono(12) : .system(size: 13))
+                .font(monospaced ? Theme.mono(12) : Theme.font(13))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -466,7 +466,7 @@ private struct MiniList: View {
                             HarnessMark(id: row.key, size: 15)
                         }
                         Text(isHarness ? harnessName(row.key) : (row.key.isEmpty ? "unknown" : row.key))
-                            .font(monospaced ? Theme.mono(12) : .system(size: 13))
+                            .font(monospaced ? Theme.mono(12) : Theme.font(13))
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -485,7 +485,7 @@ private struct MiniList: View {
                 }
                 if rows.count > limit {
                     Text("and \(rows.count - limit) more")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -554,7 +554,7 @@ private struct DailyChart: View {
                     AxisValueLabel {
                         if let day = value.as(String.self) {
                             Text(shortDay(day))
-                                .font(.caption2)
+                                .font(Theme.caption2)
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -565,7 +565,7 @@ private struct DailyChart: View {
                     AxisGridLine().foregroundStyle(Theme.border)
                     AxisValueLabel {
                         if let tokens = value.as(Double.self) {
-                            Text(formatTokens(UInt64(max(0, tokens)))).font(.caption2)
+                            Text(formatTokens(UInt64(max(0, tokens)))).font(Theme.caption2)
                         }
                     }
                 }
@@ -606,9 +606,9 @@ private struct DailyChart: View {
     private func hoverSummary(for row: Bucket) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(shortDay(row.key))
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
             Text("\(formatTokens(row.counters.total)) tokens")
-                .font(.caption2)
+                .font(Theme.caption2)
                 .foregroundStyle(.secondary)
             Text(row.value.formatted)
                 .font(Theme.numeric(10, weight: .medium))
@@ -638,13 +638,13 @@ struct EmptyHint: View {
                     .fill(Theme.accentSoft)
                     .frame(width: 44, height: 44)
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(Theme.font(18, weight: .medium))
                     .foregroundStyle(Theme.accent)
             }
             Text(title)
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text(text)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)

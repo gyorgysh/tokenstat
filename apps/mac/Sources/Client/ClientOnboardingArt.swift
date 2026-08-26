@@ -146,7 +146,7 @@ private struct DevicesArt: View {
                 }
                 .overlay {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(Theme.font(18, weight: .medium))
                         .foregroundStyle(Theme.accent)
                 }
                 .frame(width: wide, height: tall)
@@ -253,11 +253,11 @@ private struct WorkspacesArt: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
                 HStack(spacing: 8) {
                     Image(systemName: row.icon)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                         .foregroundStyle(Theme.accent)
                         .frame(width: 18)
                     Text(row.name)
-                        .font(.system(.body, design: .monospaced))
+                        .font(Theme.monoText(17, relativeTo: .body))
                         .foregroundStyle(.primary)
                 }
                 .padding(.leading, row.indent)
@@ -302,7 +302,7 @@ private struct SessionsArt: View {
             ForEach(Array(script.enumerated()), id: \.offset) { index, line in
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Text(line)
-                        .font(.system(.footnote, design: .monospaced))
+                        .font(Theme.monoText(13, relativeTo: .footnote))
                         .foregroundStyle(index == 0 ? Theme.accent : .primary)
                         .opacity(lines > index ? 1 : 0)
                     if lines == index + 1 {
@@ -377,7 +377,7 @@ private struct OnTheGoArt: View {
             .fill(Theme.accentSoft)
             .overlay {
                 Image(systemName: icon)
-                    .font(.system(size: size * 0.42, weight: .medium))
+                    .font(Theme.font(size * 0.42, weight: .medium))
                     .foregroundStyle(Theme.accent)
             }
             .frame(width: size + 28, height: size + 28)
@@ -400,7 +400,7 @@ private struct PrivacyArt: View {
                 .frame(width: 132, height: 132)
                 .scaleEffect(reduceMotion || locked ? 1 : 0.86)
             Image(systemName: locked || reduceMotion ? "lock.fill" : "lock.open.fill")
-                .font(.system(size: 44, weight: .medium))
+                .font(Theme.font(44, weight: .medium))
                 .foregroundStyle(Theme.accent)
                 .scaleEffect(reduceMotion || locked ? 1 : 0.88)
         }

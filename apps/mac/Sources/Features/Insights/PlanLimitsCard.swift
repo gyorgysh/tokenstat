@@ -78,7 +78,7 @@ struct PlanLimitPanel: View {
                         // hide what was true an hour ago, and it is not a reason
                         // to pass that off as current either.
                         Text(note)
-                            .font(.system(size: 11))
+                            .font(Theme.font(11))
                             .foregroundStyle(.tertiary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -86,7 +86,7 @@ struct PlanLimitPanel: View {
                     // Words, not a zero bar. "We could not look" and "nothing
                     // used" are different answers and must not look the same.
                     Text(note)
-                        .font(.system(size: 12))
+                        .font(Theme.font(12))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -116,7 +116,7 @@ struct PlanLimitPanel: View {
         HStack(spacing: Theme.Space.xs) {
             if provider.isStale {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(Theme.warning)
                     .help("Cached. The vendor could not be reached on the last refresh.")
             }
@@ -125,7 +125,7 @@ struct PlanLimitPanel: View {
                     ProgressView().controlSize(.small)
                 } else {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -143,7 +143,7 @@ private struct WindowBar: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: Theme.Space.xs) {
                 Text(window.label)
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: Theme.Space.xs)
                 Text("\(Int(window.percent.rounded()))%")
@@ -154,7 +154,7 @@ private struct WindowBar: View {
                     // source per quota window kept the whole window in a
                     // layout pass every frame. See `RelativeClock`.
                     Text("· resets \(RelativeClock.phrase(for: resets))")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                 }
             }

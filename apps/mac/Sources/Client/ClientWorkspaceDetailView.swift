@@ -548,7 +548,7 @@ struct ClientFilesView: View {
                         Spacer()
                         if entry.isDir {
                             Image(systemName: "chevron.right")
-                                .font(.caption)
+                                .font(Theme.caption)
                                 .foregroundStyle(.tertiary)
                         }
                     }

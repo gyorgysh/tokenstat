@@ -41,7 +41,7 @@ struct IOSCodeTextView: UIViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, UITextViewDelegate {
-        static let editorFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        static let editorFont = AppFonts.terminal(size: 14)
 
         private var document: EditorDocument
         private var syncedText = ""

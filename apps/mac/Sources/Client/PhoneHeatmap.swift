@@ -99,18 +99,18 @@ struct PhoneHeatmap: View {
                     .fill(Theme.accent)
                     .frame(width: 7, height: 7)
                 Text(shortDate(focus.day.date))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Text(focus.day.value == 0
                     ? "nothing recorded"
                     : "\(formatSpend(focus.day.value)) at list rates")
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             } else {
                 Image(systemName: "hand.draw")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(.tertiary)
                 Text("Swipe for the whole year, hold a day to read it")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
@@ -196,7 +196,7 @@ struct PhoneHeatmap: View {
             Color.clear.frame(width: gutter, height: monthRow)
             ForEach(0..<7, id: \.self) { row in
                 Text(Self.rowLabel(row))
-                    .font(.system(size: 9))
+                    .font(Theme.font(9))
                     .foregroundStyle(.tertiary)
                     .frame(width: gutter, height: cell, alignment: .leading)
             }
@@ -209,7 +209,7 @@ struct PhoneHeatmap: View {
             Color.clear.frame(height: monthRow)
             ForEach(calendar.months) { month in
                 Text(month.name)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(Theme.font(10, weight: .medium))
                     .foregroundStyle(.secondary)
                     .offset(x: CGFloat(month.column) * step)
             }

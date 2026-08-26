@@ -29,22 +29,22 @@ struct HistoryLockBanner: View {
         VStack(alignment: .leading, spacing: 6) {
             (
                 Text("Older history is locked. ")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(Theme.font(12, weight: .semibold))
                 + Text("Free shows the last \(days) days in full. Older days keep the year shape only.")
-                    .font(.system(size: 12))
+                    .font(Theme.font(12))
                     .foregroundStyle(.secondary)
             )
             .fixedSize(horizontal: false, vertical: true)
             #if os(macOS)
             Link("Upgrade to see the year", destination: Self.pricing)
-                .font(.system(size: 12, weight: .semibold))
+                .font(Theme.font(12, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .underline(false)
             #else
             Button("See plans", .plans) {
                 NotificationCenter.default.post(name: .tokenstatOpenPaywall, object: nil)
             }
-            .font(.system(size: 12, weight: .semibold))
+            .font(Theme.font(12, weight: .semibold))
             .foregroundStyle(Theme.accent)
             .buttonStyle(.plain)
             #endif

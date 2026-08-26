@@ -158,7 +158,7 @@ struct ClientLoginView: View {
                 .multilineTextAlignment(.center)
                 .contentTransition(.opacity)
             Text(pending.userCode)
-                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .font(Theme.monoText(20, relativeTo: .title3).weight(.semibold))
                 .tracking(2)
                 .padding(.vertical, Theme.Space.s)
                 .padding(.horizontal, Theme.Space.m)

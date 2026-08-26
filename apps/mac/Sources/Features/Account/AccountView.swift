@@ -107,7 +107,7 @@ struct AccountView: View {
                 all your machines in one place. Only aggregate counters are \
                 eligible to be sent.
                 """)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
 
                 Button("Sign in to tokenstat.ai", .signIn) {
@@ -142,19 +142,19 @@ struct AccountView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
                     Text(account.title ?? "Signed in")
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(Theme.font(22, weight: .semibold))
                     if let tier = account.tier, !tier.isEmpty {
                         TierMark(tier: tier, size: 17)
                     }
                 }
                 if let handle = account.handle {
                     Text("@\(handle)")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
                 Text(account.host)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
 
@@ -167,7 +167,7 @@ struct AccountView: View {
                     ActionIcon.external.label("View profile")
                 }
                 .buttonStyle(.plain)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(Theme.accent)
             }
         }
@@ -199,7 +199,7 @@ struct AccountView: View {
                         // is the answer to the question; a date and a clock time
                         // makes you work it out.
                         Text(formatRelativeDate(account.lastSyncAt) ?? "Never")
-                            .font(.system(size: 17, weight: .medium))
+                            .font(Theme.font(17, weight: .medium))
                             .help(formatServerDate(account.lastSyncAt) ?? "This account has never synced")
                     }
 
@@ -226,7 +226,7 @@ struct AccountView: View {
                 #if os(macOS)
                 if model.syncCooldownUntil != nil {
                     Text("Syncing again is available shortly.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
 
@@ -331,7 +331,7 @@ struct AccountView: View {
                     // selectable rather than blurred.
                     if let label = machine.label, !label.isEmpty {
                         Text(label)
-                            .font(.callout)
+                            .font(Theme.callout)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     } else if let id = machine.machineID {
@@ -342,12 +342,12 @@ struct AccountView: View {
                             .textSelection(.enabled)
                     } else {
                         Text(machine.displayName)
-                            .font(.callout)
+                            .font(Theme.callout)
                             .foregroundStyle(.secondary)
                     }
                     if isThisMachine {
                         Text("THIS MAC")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(Theme.font(9, weight: .bold))
                             .tracking(0.5)
                             .foregroundStyle(Theme.accent)
                             .padding(.horizontal, 5)
@@ -369,12 +369,12 @@ struct AccountView: View {
 
             if machine.reportsArchiveSync {
                 Text(formatRelativeDate(machine.lastSyncAt) ?? "never synced")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .help(formatServerDate(machine.lastSyncAt) ?? "never synced")
             } else if let seen = formatRelativeDate(machine.lastSeenAt) {
                 Text("last used \(seen)")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -390,7 +390,7 @@ struct AccountView: View {
             by salted hashes. Prompts, replies, file contents, file paths and \
             session ids are never eligible.
             """)
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
         }
     }
@@ -420,7 +420,7 @@ struct AccountView: View {
                     Text(model.isLoadingLimits
                          ? "Looking for vendor readings…"
                          : "No readings yet. Open Home, or wait for the hourly pass, then come back.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     VStack(spacing: 0) {
@@ -442,9 +442,9 @@ struct AccountView: View {
             HarnessMark(id: provider.source, size: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(harnessName(provider.source))
-                    .font(.callout)
+                    .font(Theme.callout)
                 Text(planLimitDetail(provider))
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -502,17 +502,17 @@ struct AccountView: View {
                     .disabled(model.isSavingHostPolicy)
                     if policy.alwaysOn && policy.hasInternalBattery {
                         Text("Uses more power.")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                     if !policy.alwaysOn {
                         Text("Automations run only while tokenstat is open.")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else {
                     Text("The host helper has not answered yet.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -568,7 +568,7 @@ struct AccountView: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 HStack {
                     Text("Nothing is sent to tokenstat. These checks use loopback only. Start the app, load a model, then refresh.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button {
@@ -587,11 +587,11 @@ struct AccountView: View {
 
                 if let error = localModels.errorMessage {
                     Text(error)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                 } else if localModels.providers.isEmpty && !localModels.isLoading {
                     Text("LM Studio (port 1234) and Ollama (port 11434) could not be checked. Start one and tap refresh.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(localModels.providers) { provider in
@@ -612,7 +612,7 @@ struct AccountView: View {
                     .fill(provider.available && localModels.isEnabled(provider.id) ? Theme.accent : Theme.border)
                     .frame(width: 8, height: 8)
                 Text(provider.name)
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { localModels.isEnabled(provider.id) },
@@ -624,14 +624,14 @@ struct AccountView: View {
             }
             if !localModels.isEnabled(provider.id) {
                 Text("Disabled for local model selection")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             } else if provider.available {
                 if provider.models.isEmpty {
                     Text(provider.id == "lmstudio"
                          ? "Server is up. Load a model in LM Studio to use it here."
                          : "Server is up. Pull or run a model in Ollama to use it here.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(provider.models) { model in
@@ -643,7 +643,7 @@ struct AccountView: View {
                             Spacer()
                             if let size = model.sizeDescription {
                                 Text(size)
-                                    .font(.caption)
+                                    .font(Theme.caption)
                                     .foregroundStyle(.tertiary)
                             }
                         }
@@ -651,7 +651,7 @@ struct AccountView: View {
                 }
             } else {
                 Text(localProviderHint(provider))
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(3)
             }
@@ -703,7 +703,7 @@ struct AccountView: View {
                 )
                 if let note = RunNotifications.shared.authorizationNote {
                     Text(note)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.warning)
                 }
                 if RunNotifications.shared.isOn {
@@ -732,7 +732,7 @@ struct AccountView: View {
                 )
                 if let message = PushRegistrar.shared.errorMessage {
                     Text(message)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.warning)
                 }
                 if PushRegistrar.shared.isOn {
@@ -763,7 +763,7 @@ struct AccountView: View {
                 Image(systemName: "doc.text.magnifyingglass")
                     .foregroundStyle(.secondary)
                 Text("tokenstat links open source libraries, each under its own licence. The notices are generated from the resolved dependency graph at build time.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("View", .preview) { showLicenses = true }
@@ -792,7 +792,7 @@ struct AccountView: View {
                 providers, its sessions, and any usage data are removed \
                 outright, not flagged as gone. There is no undo.
                 """)
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
 
                 Button {
@@ -834,9 +834,9 @@ struct AccountView: View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.callout)
+                    .font(Theme.callout)
                 Text(detail)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: Theme.Space.m)
@@ -866,9 +866,9 @@ private struct LicensesSheet: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Open source licenses")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("Third-party notices for bundled dependencies")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -876,7 +876,7 @@ private struct LicensesSheet: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(Theme.font(10, weight: .semibold))
                         .foregroundStyle(Theme.controlGlyph)
                         .frame(width: 22, height: 22)
                         .background(Circle().fill(Theme.controlSeat))
@@ -892,7 +892,7 @@ private struct LicensesSheet: View {
                     NoticesTextPane(text: text)
                     #else
                     Text("Open licenses from the account sheet.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     #endif
@@ -900,7 +900,7 @@ private struct LicensesSheet: View {
                     // A development build that ran without the generating
                     // build phase, or a bundle that lost the file.
                     Text("The third-party notices are generated at build time and were not found in this build.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -973,7 +973,7 @@ private struct NoticesTextPane: NSViewRepresentable {
         // A 565 KB document is searched, not reread.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.font = .monospacedSystemFont(ofSize: DisplayFit.dp(11), weight: .regular)
+        textView.font = AppFonts.terminal(size: DisplayFit.dp(11))
         textView.textColor = .labelColor
         textView.textContainerInset = NSSize(width: 4, height: 6)
         textView.drawsBackground = false
@@ -1014,7 +1014,7 @@ private struct SignInCode: View {
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(device.userCode)
-                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .font(Theme.monoText(30, weight: .semibold))
                     .textSelection(.enabled)
                     .padding(.vertical, Theme.Space.s)
                     .padding(.horizontal, Theme.Space.m)
@@ -1024,13 +1024,13 @@ private struct SignInCode: View {
                     )
 
                 Text("Check that the page shows this code, then approve it there.")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
 
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.small)
                     Text("Waiting for confirmation…")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Cancel", .dismiss, action: onCancel)

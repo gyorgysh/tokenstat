@@ -127,9 +127,9 @@ struct LocalModelControl: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                 Text(buttonLabel)
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .lineLimit(1)
                 if isLoading {
                     ProgressView().controlSize(.mini)
@@ -238,9 +238,9 @@ struct BypassPermissionsControl: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: isOn ? "lock.open.fill" : "lock.fill")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                 Text(isOn ? "Bypass on" : "Bypass off")
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
             }
             .foregroundStyle(isOn ? AnyShapeStyle(Theme.warning) : AnyShapeStyle(.secondary))
         }

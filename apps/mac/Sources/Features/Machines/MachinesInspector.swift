@@ -23,7 +23,7 @@ struct MachinesInspector: View {
         VStack(spacing: 0) {
             InspectorChromeBar(onClose: onClose) {
                 Text("Device")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                     .padding(.leading, Theme.Space.m)
                 Spacer(minLength: 0)
             }
@@ -96,7 +96,7 @@ struct MachinesInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(model.identity?.label ?? "This device")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                 if let words = model.words {
                     labeled("Known as", words)
                 }
@@ -126,14 +126,14 @@ struct MachinesInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(peer.label.isEmpty ? (model.accountName(for: peer) ?? "Unnamed device") : peer.label)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                 if let words = peer.words {
                     labeled("Known as", words)
                 }
                 labeled("Trust", Self.trustLabel(peer.trust))
                 if model.connectedPeerKeys.contains(peer.key) {
                     Text("Workspaces from this device are in the sidebar.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                     HostStatsBar(peer: peer.key, online: true)
                 }
@@ -168,13 +168,13 @@ struct MachinesInspector: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(model.resolvedName(for: machine) ?? machine.displayName)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                 if let id = machine.machineID {
                     labeled("Code", id)
                 }
                 if isSelf {
                     Text("This device.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                     HostStatsBar(local: true)
                 } else if let peer = model.peer(for: machine) {
@@ -223,10 +223,10 @@ struct MachinesInspector: View {
     private func labeled(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.callout)
+                .font(Theme.callout)
                 .textSelection(.enabled)
         }
     }

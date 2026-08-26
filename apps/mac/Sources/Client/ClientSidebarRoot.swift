@@ -114,11 +114,11 @@ struct ClientSidebarRoot: View {
                     } label: {
                         HStack(spacing: Theme.Space.s) {
                             Image(systemName: tab.symbol)
-                                .font(.system(size: 13))
+                                .font(Theme.font(13))
                                 .foregroundStyle(isCurrent(tab) ? Theme.accent : Color.secondary)
                                 .frame(width: 16)
                             Text(tab.label)
-                                .font(.system(size: 15, weight: isCurrent(tab) ? .medium : .regular))
+                                .font(Theme.font(15, weight: isCurrent(tab) ? .medium : .regular))
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }
@@ -299,7 +299,7 @@ struct ClientSidebarRoot: View {
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                     .fill(Theme.accent.opacity(0.14))
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(Theme.font(11, weight: .medium))
                     .foregroundStyle(Theme.accent)
             }
             .frame(width: 22, height: 22)
@@ -337,7 +337,7 @@ struct ClientSidebarRoot: View {
     ) -> some View {
         HStack(spacing: Theme.Space.s) {
             Image(systemName: section.symbol)
-                .font(.system(size: 12))
+                .font(Theme.font(12))
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
             Text(section.label)

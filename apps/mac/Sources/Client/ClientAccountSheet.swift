@@ -334,7 +334,7 @@ private struct ClientAccountContent: View {
     private func deviceRow(_ machine: Machine, isThis: Bool) -> some View {
         HStack(alignment: .center, spacing: Theme.Space.m) {
             Image(systemName: isThis ? "iphone" : "laptopcomputer")
-                .font(.body)
+                .font(Theme.body)
                 .foregroundStyle(isThis ? Theme.accent : .secondary)
                 .frame(width: 22)
 
@@ -471,7 +471,7 @@ private struct ClientAccountContent: View {
                     .foregroundStyle(.primary)
                 Spacer()
                 Image(systemName: "arrow.up.right")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
             .frame(minHeight: 44)
@@ -726,7 +726,7 @@ private struct ClientNoticesTextView: UIViewRepresentable {
 
     /// Monospaced body that follows Dynamic Type, not a fixed 13 pt.
     private static func scaledFont(for traits: UITraitCollection) -> UIFont {
-        let base = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let base = AppFonts.terminal(size: 13)
         return UIFontMetrics(forTextStyle: .body).scaledFont(for: base, compatibleWith: traits)
     }
 }

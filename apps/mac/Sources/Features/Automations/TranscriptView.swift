@@ -130,11 +130,11 @@ private struct ToolRow: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(tint)
                     .frame(width: 16)
                 Text(verb)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(Theme.font(13, weight: .medium))
                     .foregroundStyle(tint)
                 if !arg.isEmpty {
                     Text(arg)

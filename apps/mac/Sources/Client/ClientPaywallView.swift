@@ -197,7 +197,7 @@ struct ClientPaywallView: View {
                 ForEach(item.feats, id: \.self) { feat in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(Theme.font(11, weight: .bold))
                             .foregroundStyle(Theme.accent)
                             .frame(width: 14, height: 16)
                         Text(feat)
@@ -424,7 +424,7 @@ struct ClientPaywallView: View {
                 .minimumScaleFactor(0.7)
             if isCurrent {
                 Text("Your plan")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Theme.font(9, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             }
         }
@@ -439,12 +439,12 @@ struct ClientPaywallView: View {
         Group {
             if value == "Yes" {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(Theme.font(12, weight: .bold))
                     .foregroundStyle(Theme.accent)
                     .accessibilityLabel("Yes")
             } else if value == "No" {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.font(10, weight: .semibold))
                     .foregroundStyle(Color.secondary.opacity(0.4))
                     .accessibilityLabel("No")
             } else {

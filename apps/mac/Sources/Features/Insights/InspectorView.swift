@@ -24,7 +24,7 @@ struct InspectorView: View {
                 FeatureMark(name: "mark_insights", tint: Theme.accent, size: 16)
                     .padding(.leading, Theme.Space.m)
                 Text("Insights")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             ScrollView {
@@ -97,7 +97,7 @@ struct InspectorView: View {
 
             if let caveat = model.periodValue.caveat {
                 Text(caveat)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -119,10 +119,10 @@ struct InspectorView: View {
                     HStack(spacing: Theme.Space.xs) {
                         Circle().fill(Theme.secondary).frame(width: 6, height: 6)
                         Text("Block open")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.caption.weight(.medium))
                     }
                     Text("\(formatTokens(block.counters.total)) since \(block.start.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -162,7 +162,7 @@ struct InspectorView: View {
             Stat(label: "Value", value: row.value.formatted, size: 18)
             if let caveat = row.value.caveat {
                 Text(caveat)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -179,7 +179,7 @@ struct InspectorView: View {
 
             if row.counters.hasUnknown {
                 Text("A dash means the tool does not report that counter, which is not the same as zero.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
 
@@ -195,12 +195,12 @@ struct InspectorView: View {
                 if !harnesses.isEmpty {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         Text("Harnesses here")
-                            .font(.caption.weight(.medium))
+                            .font(Theme.caption.weight(.medium))
                         ForEach(harnesses) { h in
                             HStack(spacing: Theme.Space.s) {
                                 HarnessMark(id: h.split, size: 14)
                                 Text(harnessName(h.split))
-                                    .font(.caption)
+                                    .font(Theme.caption)
                                 Spacer()
                                 Text(formatTokens(h.counters.total))
                                     .font(Theme.numeric(10))
@@ -214,7 +214,7 @@ struct InspectorView: View {
             if !row.unpricedModels.isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Space.xs) {
                     Text("Unpriced models")
-                        .font(.caption.weight(.medium))
+                        .font(Theme.caption.weight(.medium))
                     ForEach(row.unpricedModels, id: \.self) { model in
                         Text(model)
                             .font(Theme.mono(10))
@@ -273,12 +273,12 @@ struct InspectorView: View {
                     KeyValue(key: "Rates from", value: info.priceBookEffectiveFrom)
                 } else {
                     Text("No price book yet, so values are estimated from the model catalog. The app refreshes the price book automatically; the first fetch can take a moment on a fresh install.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.warning)
                 }
             }
             Text("Read from this device. Nothing left it.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.top, Theme.Space.xs)
         }
@@ -292,7 +292,7 @@ private struct CounterRow: View {
     var body: some View {
         HStack {
             Text(label)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value.map { formatTokens($0) } ?? "n/a")
@@ -309,7 +309,7 @@ private struct KeyValue: View {
     var body: some View {
         HStack {
             Text(key)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value)

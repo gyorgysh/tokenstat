@@ -33,7 +33,7 @@ struct SSHInspector: View {
                 }
             } content: {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .padding(.leading, Theme.Space.m)
@@ -103,12 +103,12 @@ struct SSHInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(known.label).font(.headline)
+                        Text(known.label).font(Theme.headline)
                         Text("\(known.hostname):\(known.port)")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(Theme.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                        Text("Fingerprints").font(.caption).foregroundStyle(.secondary)
+                        Text("Fingerprints").font(Theme.caption).foregroundStyle(.secondary)
                         ForEach(known.fingerprints, id: \.self) { print in
                             Text(print)
                                 .font(Theme.mono(10))
@@ -117,7 +117,7 @@ struct SSHInspector: View {
                         }
                     }
                     Text("Forgetting makes the next connection ask you to confirm this server's fingerprint again. Nothing on the server changes.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Forget", .revoke) {
                         Task {

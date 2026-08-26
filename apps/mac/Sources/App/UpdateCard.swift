@@ -74,17 +74,17 @@ struct UpdateCard: View {
                         .tint(tint)
                 } else {
                     Image(systemName: symbol)
-                        .font(.system(size: 15))
+                        .font(Theme.font(15))
                 }
             }
             .foregroundStyle(tint)
             .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
@@ -111,14 +111,14 @@ struct UpdateCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 15))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.warning)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Update didn't finish")
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text("v\(update.latest) could not install itself")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -160,20 +160,20 @@ struct UpdateCard: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: symbol)
-                    .font(.system(size: 15))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(subtitle)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 Spacer(minLength: Theme.Space.s)
                 Image(systemName: "arrow.right")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font(12, weight: .medium))
                     .foregroundStyle(.secondary)
             }
             .padding(.horizontal, Theme.Space.m)

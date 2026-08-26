@@ -259,7 +259,7 @@ struct SSHSectionView: View {
     private func folderRow(_ folder: SSHFolder, depth: Int) -> some View {
         HStack(spacing: Theme.Space.xs) {
             Image(systemName: expanded.contains(folder.id) ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(Theme.font(10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 12)
             Image(systemName: "folder")
@@ -267,7 +267,7 @@ struct SSHSectionView: View {
             Text(folder.name)
             Spacer()
             Text("\(model.hosts.filter { $0.folderID == folder.id }.count)")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
         .padding(.leading, CGFloat(depth) * 14)
         .frame(height: Theme.Control.rowHeight)
@@ -354,7 +354,7 @@ struct SSHSectionView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(known.label)
             Text("\(known.hostname):\(known.port)")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(Theme.caption).foregroundStyle(.secondary)
         }
         .frame(height: Theme.Control.rowHeight)
         .listRowBackground(rowBackground(selected: model.selection == .knownHost(known.id)))

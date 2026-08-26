@@ -176,7 +176,7 @@ struct WorkflowStepStrip: View {
                 HStack(spacing: 5) {
                     if index > 0 {
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(Theme.font(9, weight: .semibold))
                             .foregroundStyle(.tertiary)
                     }
                     HStack(spacing: 5) {
@@ -186,7 +186,7 @@ struct WorkflowStepStrip: View {
                             FeatureMark(name: node.kind.mark, tint: Theme.accent, size: mark)
                         }
                         Text(node.displayTitle)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(Theme.font(11, weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
                     }

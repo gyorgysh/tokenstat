@@ -26,7 +26,7 @@ struct AutomationsInspector: View {
                 FeatureMark(name: "mark_automation", tint: Theme.accent, size: 16)
                     .padding(.leading, Theme.Space.m)
                 Text(chromeTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             Group {
@@ -66,9 +66,9 @@ struct AutomationsInspector: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 Text(job.name)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                 Text(job.prompt)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -110,7 +110,7 @@ struct AutomationsInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 HStack {
                     Text(run.name)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Spacer()
                     if run.isRunning {
                         Button("Stop", .stop) { Task { await model.stop(run) } }
@@ -124,10 +124,10 @@ struct AutomationsInspector: View {
                     StatusPill(status: run.status, text: run.endedLabel)
                 }
                 Text(model.backends.first { $0.id == run.backend }?.label ?? run.backend)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                 Text(run.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                 BrandToggleChip(title: "Follow", isOn: $followLive)
                     .help("Keep the transcript pinned to the newest line")
@@ -168,10 +168,10 @@ struct AutomationsInspector: View {
     private func labeled(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
             Text(value)
-                .font(.callout)
+                .font(Theme.callout)
         }
     }
 }

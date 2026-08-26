@@ -324,7 +324,7 @@ struct ClientSectionRow: View {
     var body: some View {
         HStack(spacing: Theme.Space.m) {
             Image(systemName: section.symbol)
-                .font(.title3)
+                .font(Theme.title3)
                 .foregroundStyle(Theme.accent)
                 .frame(width: 28)
             Text(section.label)
@@ -338,7 +338,7 @@ struct ClientSectionRow: View {
             }
             if showsChevron {
                 Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -476,7 +476,7 @@ private struct ClientChangedFileRow: View {
             Spacer()
             counts
             Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.m)
@@ -968,7 +968,7 @@ struct ClientJobRow: View {
                 }
                 if showsChevron {
                     Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
+                        .font(Theme.caption.weight(.semibold))
                         .foregroundStyle(.tertiary)
                 }
             }

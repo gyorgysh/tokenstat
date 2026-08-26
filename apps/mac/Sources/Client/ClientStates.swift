@@ -154,7 +154,7 @@ struct ClientErrorCard: View {
         return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 Image(systemName: error.symbol)
-                    .font(.system(size: 18, weight: .regular))
+                    .font(Theme.font(18, weight: .regular))
                     .foregroundStyle(Theme.danger)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {

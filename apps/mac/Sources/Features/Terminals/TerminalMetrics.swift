@@ -21,7 +21,7 @@ import AppKit
 /// gets SIGWINCH, and it reprints its prompt, which is the flash on launch this
 /// exists to remove.
 enum TerminalMetrics {
-    static let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    static let font = AppFonts.terminal(size: 12)
 
     /// Width and height of one character cell. Computed once: it changes only
     /// if the font does.

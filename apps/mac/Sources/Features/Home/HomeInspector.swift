@@ -25,7 +25,7 @@ struct HomeInspector: View {
                 FeatureMark(name: "mark_activity", tint: Theme.accent, size: 16)
                     .padding(.leading, Theme.Space.m)
                 Text("Day")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(Theme.font(13, weight: .semibold))
                 Spacer(minLength: 0)
             }
             Group {
@@ -51,20 +51,20 @@ struct HomeInspector: View {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 if day.isLocked {
                     Text("This day is outside the unlocked window.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else if model.isLoadingSelectedDetail, model.selectedDetail == nil {
                     HStack(spacing: Theme.Space.s) {
                         ProgressView().controlSize(.small)
                         Text("Loading day…")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                     }
                 } else if let detail = model.selectedDetail {
                     overview(detail)
                 } else {
                     Text("Nothing recorded on this day.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -81,7 +81,7 @@ struct HomeInspector: View {
                         HStack(spacing: Theme.Space.xs) {
                             Text("Open in Insights")
                             Image(systemName: "arrow.right")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(Theme.font(11, weight: .semibold))
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -99,7 +99,7 @@ struct HomeInspector: View {
         let sessions = extra?.totals?.sessions
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
             Text(Self.friendlyDate(detail.date))
-                .font(.system(size: 15, weight: .semibold))
+                .font(Theme.font(15, weight: .semibold))
 
             Stat(
                 label: "Value at list rates",
@@ -110,7 +110,7 @@ struct HomeInspector: View {
             )
 
             Text(headline(detail, sessions: sessions))
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
 
             counters(detail)
@@ -167,7 +167,7 @@ struct HomeInspector: View {
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.mini)
                     Text("Loading breakdown…")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -199,7 +199,7 @@ struct HomeInspector: View {
     private func counterRow(_ label: String, _ value: UInt64?) -> some View {
         HStack {
             Text(label)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value.map { formatTokens($0) } ?? "n/a")
@@ -218,7 +218,7 @@ struct HomeInspector: View {
         Card(title: title, subtitle: subtitle, mark: isHarness ? "mark_automation" : "mark_insights") {
             if rows.isEmpty {
                 Text("Nothing recorded yet.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             } else {
                 VStack(spacing: Theme.Space.s) {
@@ -228,7 +228,7 @@ struct HomeInspector: View {
                                 HarnessMark(id: row.key, size: 15)
                             }
                             Text(row.label)
-                                .font(row.monospaced ? Theme.mono(12) : .system(size: 12))
+                                .font(row.monospaced ? Theme.mono(12) : Theme.font(12))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -244,7 +244,7 @@ struct HomeInspector: View {
                     }
                     if rows.count > listLimit {
                         Text("and \(rows.count - listLimit) more")
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.tertiary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -400,7 +400,7 @@ struct HomeInspector: View {
                 .frame(height: 4)
                 ForEach(segments, id: \.label) { segment in
                     Text("\(segment.label) \(Int(round(100 * Double(segment.value) / Double(grand))))%")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(.tertiary)
                 }
             }

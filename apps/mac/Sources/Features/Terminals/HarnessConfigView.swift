@@ -29,9 +29,9 @@ struct HarnessConfigView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Configure \(profile.name)")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("Model, effort and compaction for the next session. Saved into this tool's own config.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -76,7 +76,7 @@ struct HarnessConfigView: View {
             } else {
                 Text(config.flatMap { $0.available ? nil : $0.reason } ?? error
                      ?? "This tool has no settings tokenstat can change.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.vertical, Theme.Space.m)
@@ -118,7 +118,7 @@ struct HarnessConfigView: View {
     private func fieldRow(_ field: HarnessConfigField) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(field.label)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             switch field.kind {
             case "bool":
@@ -142,11 +142,11 @@ struct HarnessConfigView: View {
             default:
                 TextField(field.label, text: stringBinding(field.key))
                     .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 13))
+                    .font(Theme.font(13))
             }
             if let hint = field.hint {
                 Text(hint)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }

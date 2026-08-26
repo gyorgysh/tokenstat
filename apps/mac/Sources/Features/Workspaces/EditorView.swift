@@ -82,7 +82,7 @@ struct EditorView: View {
             if document.isDirty {
                 Label("Unsaved", systemImage: "circle.fill")
                     .labelStyle(.titleAndIcon)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .imageScale(.small)
                     .foregroundStyle(Theme.warning)
             }
@@ -92,7 +92,7 @@ struct EditorView: View {
                 // thing for a text file to be, and the file still edits and
                 // saves. It belongs here in grey, not in a banner in red.
                 Text(note)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)

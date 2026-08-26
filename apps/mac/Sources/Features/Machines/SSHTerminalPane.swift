@@ -156,7 +156,7 @@ struct SSHTerminalPane: View {
                     }
                 } label: {
                     ActionIcon.run.label("Snippets")
-                        .font(.system(size: 12))
+                        .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -173,7 +173,7 @@ struct SSHTerminalPane: View {
                     Button("Stacked", .compare) { sessions.setLayout(.stacked, for: host.id) }
                 } label: {
                     ActionIcon.compare.label("Split")
-                        .font(.system(size: 12))
+                        .font(Theme.font(12))
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -240,18 +240,18 @@ private struct SSHSessionChip: View {
             Button(action: onSelect) {
                 HStack(spacing: Theme.Space.xs) {
                     Image(systemName: session.alive ? "terminal" : "terminal.fill")
-                        .font(.system(size: 11))
+                        .font(Theme.font(11))
                         .foregroundStyle(session.alive ? Theme.accent : Theme.stateIdle)
                         .frame(width: 16, height: 16)
                     Text(session.title)
-                        .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                        .font(Theme.font(12, weight: isSelected ? .medium : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                     // A session that ended keeps its tab and says so. Its last
                     // screenful is often the reason somebody is looking.
                     if !session.alive {
                         Text("ended")
-                            .font(.caption2)
+                            .font(Theme.caption2)
                             .foregroundStyle(.tertiary)
                     }
                 }

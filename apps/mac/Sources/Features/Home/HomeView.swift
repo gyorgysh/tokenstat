@@ -245,11 +245,11 @@ struct HomeView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Your phone cannot see these numbers")
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                 Text("Account has a Plan limits card that posts how full each window is, "
                     + "so the phone still shows what is left while this Mac is asleep. "
                     + "Turn a vendor off there if you do not want it shared.")
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -260,7 +260,7 @@ struct HomeView: View {
                 limitsSyncHintDismissed = true
             } label: {
                 Image(systemName: "xmark")
-                    .font(.caption.weight(.semibold))
+                    .font(Theme.caption.weight(.semibold))
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
@@ -303,7 +303,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Theme.Space.s) {
                     Text(greetingTitle)
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(Theme.font(20, weight: .semibold))
                     if let tier = account.account?.tier, !tier.isEmpty {
                         // The glyph the profile page uses, not the written
                         // pill. Beside a 20pt name a crown reads as a mark on
@@ -321,11 +321,11 @@ struct HomeView: View {
                    handle != account.account?.title
                 {
                     Text("@\(handle)")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 } else if !account.signedIn {
                     Text("Working locally")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -435,7 +435,7 @@ struct HomeView: View {
                     .font(Theme.numeric(24, weight: .medium))
                     .foregroundStyle(tint)
                 Text(note)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.tertiary)
             }
         }
@@ -566,7 +566,7 @@ struct HomeView: View {
                 "All devices needs your tokenstat.ai account",
                 systemImage: "person.crop.circle.badge.exclamationmark"
             )
-            .font(.callout)
+            .font(Theme.callout)
             .foregroundStyle(.secondary)
 
             Spacer(minLength: Theme.Space.s)

@@ -168,7 +168,7 @@ struct ClientTerminalKeys: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
+                .font(Theme.font(15, weight: .medium))
                 .frame(minWidth: 44, minHeight: 34)
                 .background(Theme.panel, in: .rect(cornerRadius: 7))
         }
@@ -180,7 +180,7 @@ struct ClientTerminalKeys: View {
     private func key(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                .font(Theme.monoText(15, weight: .medium))
                 .frame(minWidth: 38, minHeight: 34)
                 .background(Theme.panel, in: .rect(cornerRadius: 7))
         }
@@ -192,7 +192,7 @@ struct ClientTerminalKeys: View {
     private func modifier(_ label: String, isOn: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(13, weight: .semibold))
                 .frame(minWidth: 46, minHeight: 34)
                 .background(
                     isOn ? Theme.accent.opacity(0.28) : Theme.panel,

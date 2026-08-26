@@ -29,14 +29,14 @@ struct AboutView: View {
 
             VStack(spacing: Theme.Space.xs) {
                 Text("tokenstat")
-                    .font(.title.bold())
+                    .font(Theme.title.bold())
                 Text("Version \(AppInfo.versionString)")
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
             }
 
             Text("Token usage from every AI coding agent on this Mac, read locally.")
-                .font(.callout)
+                .font(Theme.callout)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -52,7 +52,7 @@ struct AboutView: View {
                 Text("Source-available licence")
                 Text(AppInfo.copyright)
             }
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
         }
@@ -76,12 +76,12 @@ struct AboutView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text("Made by")
-                    .font(.callout)
+                    .font(Theme.callout)
                 Link(AppInfo.Author.name, destination: AppInfo.Author.site)
-                    .font(.title3.weight(.semibold))
+                    .font(Theme.title3.weight(.semibold))
                     .foregroundStyle(Theme.accent)
                 Text(AppInfo.Author.role)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
             }
         }
@@ -100,7 +100,7 @@ struct AboutView: View {
                 destination: AppInfo.repository
             )
         }
-        .font(.callout)
+        .font(Theme.callout)
     }
 
     private var separator: some View {

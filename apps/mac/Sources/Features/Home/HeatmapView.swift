@@ -148,7 +148,7 @@ struct HeatmapView: View {
             Color.clear.frame(height: 11)
             ForEach(calendar.months) { month in
                 Text(month.name)
-                    .font(.system(size: 9))
+                    .font(Theme.font(9))
                     .foregroundStyle(.tertiary)
                     .offset(x: layout.gutter + layout.gap + CGFloat(month.column) * layout.stride)
             }
@@ -160,7 +160,7 @@ struct HeatmapView: View {
         VStack(alignment: .leading, spacing: layout.gap) {
             ForEach(0 ..< calendar.rows.count, id: \.self) { row in
                 Text(Self.rowLabel(row))
-                    .font(.system(size: 9))
+                    .font(Theme.font(9))
                     .foregroundStyle(.tertiary)
                     .frame(width: layout.gutter, height: layout.cell, alignment: .leading)
             }
@@ -324,7 +324,7 @@ struct HeatmapView: View {
                         .foregroundStyle(.tertiary)
                     if let freshness = calendar.freshness {
                         Text("· \(freshness)")
-                            .font(.system(size: 11))
+                            .font(Theme.font(11))
                             .foregroundStyle(calendar.isStaleGrid ? Theme.warning : Color.secondary.opacity(0.8))
                     }
                 }
@@ -332,7 +332,7 @@ struct HeatmapView: View {
                 Spacer()
 
                 Text("Less")
-                    .font(.system(size: 10))
+                    .font(Theme.font(10))
                     .foregroundStyle(.tertiary)
                 ForEach(0 ..< Theme.heat.count, id: \.self) { level in
                     RoundedRectangle(cornerRadius: 2)
@@ -340,7 +340,7 @@ struct HeatmapView: View {
                         .frame(width: 9, height: 9)
                 }
                 Text("More")
-                    .font(.system(size: 10))
+                    .font(Theme.font(10))
                     .foregroundStyle(.tertiary)
             }
         }

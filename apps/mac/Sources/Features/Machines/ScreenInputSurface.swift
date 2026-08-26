@@ -685,7 +685,7 @@ private struct ScreenKeyStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .medium))
+            .font(Theme.font(13, weight: .medium))
             .foregroundStyle(active ? Color.white : Color.primary)
             .lineLimit(1)
             .frame(width: width)

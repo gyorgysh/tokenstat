@@ -363,7 +363,7 @@ final class ClientTerminalSession: TerminalViewDelegate, Identifiable {
         let foreground: UInt32 = dark ? 0xDCDCE0 : 0x1C1C1F
         view.nativeBackgroundColor = uiColor(background)
         view.nativeForegroundColor = uiColor(foreground)
-        view.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        view.font = AppFonts.terminal(size: 12)
         view.optionAsMetaKey = true
         view.getTerminal().changeHistorySize(4_000)
         view.terminalDelegate = delegate

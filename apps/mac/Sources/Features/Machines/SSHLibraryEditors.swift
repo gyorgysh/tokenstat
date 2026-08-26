@@ -137,7 +137,7 @@ struct SSHEditorSection<Content: View>: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             if let title {
                 Text(title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(Theme.font(10, weight: .semibold))
                     .kerning(0.6)
                     .foregroundStyle(.secondary)
             }
@@ -167,7 +167,7 @@ struct SSHEditorField<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             Text(label)
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             content
                 .labelsHidden()
@@ -182,7 +182,7 @@ struct SSHEditorNote: View {
 
     var body: some View {
         Text(text)
-            .font(.caption)
+            .font(Theme.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -481,7 +481,7 @@ struct SSHKeyEditor: View {
                         }
                         if record.passphraseProtected {
                             Label("Protected by a passphrase", systemImage: "lock")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(Theme.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -653,7 +653,7 @@ struct SSHSnippetEditor: View {
                 TextField("Name", text: $snippet.title)
                     .textFieldStyle(.themed)
                 Text("Command")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(Theme.caption).foregroundStyle(.secondary)
                 // The border used to be drawn over a bare TextEditor, which
                 // themed the outline of the platform's grey slab and left the
                 // slab. ThemedEditor hides that background so the fill is the
@@ -664,10 +664,10 @@ struct SSHSnippetEditor: View {
                 ThemedEditor(text: $snippet.command, minHeight: 140)
                 if placeholders.isEmpty {
                     Text("Wrap a value in {{braces}} to be asked for it every time this runs, so one snippet covers every server.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                 } else {
                     HStack(spacing: Theme.Space.xs) {
-                        Text("Asks for:").font(.caption).foregroundStyle(.secondary)
+                        Text("Asks for:").font(Theme.caption).foregroundStyle(.secondary)
                         ForEach(placeholders, id: \.self) { name in
                             Text(name)
                                 .font(Theme.mono(10))
@@ -681,11 +681,11 @@ struct SSHSnippetEditor: View {
                     .disabled(snippet.hostIDs.isEmpty || !placeholders.isEmpty)
                 if snippet.hostIDs.isEmpty {
                     Text("Pick the servers this snippet belongs to before it can run by itself. A snippet kept for every server would fire into every connection.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !placeholders.isEmpty {
                     Text("A snippet that asks for values cannot run by itself: the question would arrive on its own the moment you connected.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -839,7 +839,7 @@ struct SSHKnownHostsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(known.label)
                             Text("\(known.hostname):\(known.port)")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(Theme.caption).foregroundStyle(.secondary)
                             ForEach(known.fingerprints, id: \.self) { print in
                                 Text(print).font(Theme.mono(10)).textSelection(.enabled)
                             }
@@ -910,12 +910,12 @@ struct SSHConfigImportView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(candidate.label)
                                     Text("\(candidate.username)@\(candidate.hostname):\(candidate.port)")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                        .font(Theme.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if candidate.alreadySaved {
                                     Text("Already saved")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                        .font(Theme.caption).foregroundStyle(.secondary)
                                 }
                             }
                             .frame(minHeight: Theme.Control.rowHeight)

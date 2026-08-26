@@ -17,15 +17,15 @@ struct OfflineCard: View {
         if connectivity.isOffline {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "wifi.slash")
-                    .font(.system(size: 15))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.warning)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Offline")
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text("Retrying every \(Self.retrySeconds) seconds")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
@@ -34,7 +34,7 @@ struct OfflineCard: View {
                     Task { await connectivity.checkNow() }
                 }
                 .buttonStyle(.borderless)
-                .font(.caption.weight(.medium))
+                .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
             }
             .padding(.horizontal, Theme.Space.m)
@@ -55,15 +55,15 @@ struct OfflineCard: View {
                 Image(systemName: connection.serviceFailing
                     ? "exclamationmark.icloud"
                     : "laptopcomputer.slash")
-                    .font(.system(size: 15))
+                    .font(Theme.font(15))
                     .foregroundStyle(Theme.warning)
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(connection.title)
-                        .font(.callout.weight(.medium))
+                        .font(Theme.callout.weight(.medium))
                         .foregroundStyle(.primary)
                     Text(connection.detail)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
                 }
@@ -73,7 +73,7 @@ struct OfflineCard: View {
                     connection.reset()
                 }
                 .buttonStyle(.borderless)
-                .font(.caption.weight(.medium))
+                .font(Theme.caption.weight(.medium))
                 .foregroundStyle(Theme.accent)
             }
             .padding(.horizontal, Theme.Space.m)

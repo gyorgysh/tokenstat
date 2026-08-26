@@ -356,7 +356,7 @@ private struct ClientAuthRetryView: View {
             VStack(spacing: Theme.Space.m) {
                 LogoMark(size: 46)
                 Text("Could not reach your account")
-                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .font(Theme.title.weight(.semibold))
                     .multilineTextAlignment(.center)
                 Text(message ?? "Check the connection and try again.")
                     .font(ClientType.body)

@@ -92,7 +92,7 @@ struct CodeTextView: NSViewRepresentable {
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
-        static let editorFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        static let editorFont = AppFonts.terminal(size: 12)
 
         private(set) var document: EditorDocument
         var onSave: () -> Void

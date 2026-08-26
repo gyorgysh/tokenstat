@@ -121,7 +121,7 @@ private struct SessionsScene: View {
                 }
                 HStack(spacing: 6) {
                     Text(">")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(Theme.monoText(12, weight: .semibold))
                         .foregroundStyle(Ink.lead)
                     RoundedRectangle(cornerRadius: 1, style: .continuous)
                         .fill(Ink.lead)
@@ -357,7 +357,7 @@ private struct ChangesScene: View {
             .padding(.top, 16)
 
             Image(systemName: "checkmark")
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(13, weight: .semibold))
                 .foregroundStyle(Ink.lead)
                 .padding(6)
                 .background(Theme.accentSoft, in: Circle())

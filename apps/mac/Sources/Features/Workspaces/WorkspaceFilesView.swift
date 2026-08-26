@@ -147,11 +147,11 @@ private struct TreeRow: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.xs) {
                 Image(systemName: symbol)
-                    .font(.system(size: 11))
+                    .font(Theme.font(11))
                     .foregroundStyle(entry.isDir ? Theme.accent : Color.secondary)
                     .frame(width: 14)
                 Text(entry.name)
-                    .font(.system(size: 13, weight: isOpen ? .medium : .regular))
+                    .font(Theme.font(13, weight: isOpen ? .medium : .regular))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 0)

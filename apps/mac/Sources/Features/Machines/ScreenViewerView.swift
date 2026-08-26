@@ -96,7 +96,7 @@ struct ScreenViewerView: View {
                     Circle().fill(model.transport == "direct" ? Theme.success : Theme.warning).frame(width: 7, height: 7)
                     Text(model.transport == "direct" ? "Direct connection" : "Encrypted relay")
                 }
-                .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
+                .font(Theme.caption).foregroundStyle(.secondary).padding(.vertical, 4)
             }
         }
         .toolbar {
@@ -251,7 +251,7 @@ struct ScreenViewerView: View {
                     }
                     .buttonStyle(SecondaryButtonStyle(small: true))
                 }
-                .font(.caption.weight(.semibold))
+                .font(Theme.caption.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
@@ -411,14 +411,14 @@ struct ScreenViewerView: View {
             if model.state == .connecting {
                 ProgressView()
                 Text(model.message)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
             } else if model.needsLegend {
                 legendRequired
             } else {
                 Text(model.message)
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                 VStack(alignment: .leading, spacing: 8) {
@@ -459,10 +459,10 @@ struct ScreenViewerView: View {
             ClientEmptyArt(kind: .screen)
             #endif
             Text("Screen access is on Legend")
-                .font(.title3.weight(.semibold))
+                .font(Theme.title3.weight(.semibold))
                 .foregroundStyle(.white)
             Text("Mouse and keyboard never travel without the picture, and the picture is end-to-end encrypted between your devices. Legend is the plan that includes it.")
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(Color.white.opacity(0.72))
                 .multilineTextAlignment(.center)
             plansButton
@@ -482,7 +482,7 @@ struct ScreenViewerView: View {
 
     private func readiness(_ title: String, ready: Bool) -> some View {
         Label(title, systemImage: ready ? "checkmark.circle.fill" : "circle")
-            .font(.callout)
+            .font(Theme.callout)
             .foregroundStyle(ready ? Theme.success : Color.white.opacity(0.72))
     }
 
@@ -621,7 +621,7 @@ struct ScreenViewerView: View {
                 .fill(Color.white.opacity(0.55))
                 .frame(width: 44, height: 4)
             Image(systemName: keysRevealed ? "chevron.down" : "chevron.up")
-                .font(.system(size: 9, weight: .bold))
+                .font(Theme.font(9, weight: .bold))
                 .foregroundStyle(Color.white.opacity(0.55))
         }
         // The handle is 4 points tall and a thumb is not. The padding is the

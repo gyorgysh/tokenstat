@@ -114,7 +114,7 @@ struct NotesView: View {
                     .foregroundStyle(Theme.accent)
                 TextField("Something worth remembering", text: $draft)
                     .textFieldStyle(.plain)
-                    .font(.system(size: DisplayFit.dp(14)))
+                    .font(Theme.fit(14))
                     .focused($writing)
                     .onSubmit { save() }
                 Button("Add", .create) { save() }
@@ -122,7 +122,7 @@ struct NotesView: View {
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("Saves to \(destinationName).")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.m)
@@ -165,14 +165,14 @@ struct NotesView: View {
             VStack(spacing: Theme.Space.s) {
                 Spacer()
                 Image(systemName: "note.text")
-                    .font(.system(size: 30, weight: .light))
+                    .font(Theme.font(30, weight: .light))
                     .foregroundStyle(Theme.accent.opacity(0.5))
                 Text(emptyTitle)
-                    .font(.callout)
+                    .font(Theme.callout)
                     .foregroundStyle(.secondary)
                 if !showingArchive {
                     Text("Type above and press return, or the plus.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
@@ -204,27 +204,27 @@ struct NotesView: View {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(note.title)
-                        .font(.system(size: DisplayFit.dp(13)))
+                        .font(Theme.fit(13))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if !note.notes.isEmpty {
                         Text(note.notes)
-                            .font(.caption)
+                            .font(Theme.caption)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     HStack(spacing: 6) {
                         Text(placeName(for: note))
-                            .font(.caption2)
+                            .font(Theme.caption2)
                             .foregroundStyle(.tertiary)
                         Text("·")
-                            .font(.caption2)
+                            .font(Theme.caption2)
                             .foregroundStyle(.tertiary)
                         RelativeTimeText(
                             date: Date(timeIntervalSince1970: Double(note.createdAtMs) / 1000),
                             unitsStyle: .abbreviated
                         )
-                        .font(.caption2)
+                        .font(Theme.caption2)
                         .foregroundStyle(.tertiary)
                     }
                 }
@@ -285,9 +285,9 @@ private struct ConvertNoteSheet: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Make a task")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(Theme.font(15, weight: .semibold))
                     Text("This note becomes a card on the board. Pick a folder, or leave it unassigned.")
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -300,14 +300,14 @@ private struct ConvertNoteSheet: View {
             }
 
             Text(note.title)
-                .font(.system(size: 13))
+                .font(Theme.font(13))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Theme.Space.s)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
 
             Text("Folder")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
             FlowLayout(spacing: 6, rowSpacing: 6) {
                 ChoiceChip(title: "Unassigned", isSelected: folderID.isEmpty) {

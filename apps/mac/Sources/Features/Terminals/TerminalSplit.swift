@@ -134,12 +134,12 @@ struct TerminalSplitPlaceholder: View {
     var body: some View {
         VStack(spacing: Theme.Space.s) {
             Image(systemName: ActionIcon.compare.symbol)
-                .font(.system(size: 22, weight: .light))
+                .font(Theme.font(22, weight: .light))
                 .foregroundStyle(Theme.accent.opacity(0.65))
             Text("Another session")
-                .font(.callout.weight(.medium))
+                .font(Theme.callout.weight(.medium))
             Text("Option-click a tab, or pick Open in split.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 220)

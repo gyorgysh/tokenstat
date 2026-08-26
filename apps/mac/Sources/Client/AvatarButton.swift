@@ -60,7 +60,7 @@ struct AvatarButton: View {
                     .opacity(signedIn ? 1 : 0.14)
                 if signedIn {
                     Text(monogram)
-                        .font(.system(size: drawn * 0.42, weight: .semibold, design: .rounded))
+                        .font(Theme.font(drawn * 0.42, weight: .semibold))
                         .foregroundStyle(.white)
                     if let picture {
                         // Over the monogram, not instead of it, so a slow or
@@ -78,7 +78,7 @@ struct AvatarButton: View {
                     }
                 } else {
                     Image(systemName: "person.fill")
-                        .font(.system(size: drawn * 0.44, weight: .medium))
+                        .font(Theme.font(drawn * 0.44, weight: .medium))
                         .foregroundStyle(Theme.accent)
                 }
                 Circle()

@@ -70,17 +70,17 @@ struct HostStatusCard: View {
                         .tint(Theme.warning)
                 } else {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 15))
+                        .font(Theme.font(15))
                 }
             }
             .foregroundStyle(Theme.warning)
             .frame(width: 18)
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.callout.weight(.medium))
+                    .font(Theme.callout.weight(.medium))
                     .foregroundStyle(.primary)
                 Text(subtitle)
-                    .font(.caption)
+                    .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }

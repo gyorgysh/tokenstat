@@ -85,7 +85,7 @@ struct HostStatsBar: View {
             Text(local
                 ? "Sampled on this machine. Not uploaded with usage."
                 : "Read from this computer over the encrypted tunnel. It is not uploaded with usage.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -114,7 +114,7 @@ struct HostStatsBar: View {
             }
             .labelStyle(.titleAndIcon)
             Text("Power")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -136,7 +136,7 @@ struct HostStatsBar: View {
                     .foregroundStyle(.tertiary)
             }
             Text("CPU")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,7 +160,7 @@ struct HostStatsBar: View {
                     .foregroundStyle(.tertiary)
             }
             Text("Memory")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
