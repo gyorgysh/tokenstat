@@ -193,7 +193,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 // Sent, not drawn. These are the characters that find out
                 // whether the line echoes at all.
                 probing.append(byte)
-                if probing.count > Self.probeLimit {
+                if probing.count >= Self.probeLimit {
                     // Six characters in with nothing echoed back. This is a
                     // prompt that does not echo, and the rest of the line is
                     // never guessed at.
@@ -232,6 +232,13 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// cursor has moved on, nothing is synthesized; whatever the far end sends
     /// repaints the truth instead.
     private func withdrawPredictions() {
+        // The far end's output is the repaint that says where the cursor is,
+        // so by the time this returns the guesses are back in reach. Left set
+        // once, the flag stayed set for the rest of the session: the first
+        // Return raised it and every later guess was then dropped without
+        // being rubbed out, so the echo landed beside it and the line said
+        // each character twice.
+        defer { predictionsDetachedFromCursor = false }
         guard !predicted.isEmpty else { return }
         if predictionsDetachedFromCursor {
             predicted.removeAll()
@@ -688,7 +695,7 @@ struct SSHSnippetRunSheet: View {
 private extension Array where Element == UInt8 {
     /// Whether `other` appears in this array, in order and unbroken.
     ///
-    /// Used on one chunk of terminal output against at most four typed
+    /// Used on a short tail of terminal output against a handful of typed
     /// characters, so the obvious search is the right one.
     func contains(sequence other: [UInt8]) -> Bool {
         guard !other.isEmpty, count >= other.count else { return false }
