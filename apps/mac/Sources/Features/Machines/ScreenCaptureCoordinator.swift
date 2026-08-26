@@ -248,13 +248,38 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         compression = session
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: 4_000_000 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 60 as CFNumber)
+        // 1.5 Mbps, not 4.
+        //
+        // Four megabits is a number for a screen recording somebody keeps.
+        // This is a desktop being watched live, usually on a phone, over a
+        // relay somebody pays for by the gigabyte: four megabits is 1.8 GB an
+        // hour, and the difference on a screen that is mostly text and flat
+        // panels is not something a person notices on a handset.
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: Self.averageBitRate as CFNumber)
+        // A ceiling as well as an average, so a burst of motion cannot spend a
+        // minute's budget in a second. The pair is bytes-per-window: 2x the
+        // average over one second.
+        VTSessionSetProperty(
+            session,
+            key: kVTCompressionPropertyKey_DataRateLimits,
+            value: [Self.averageBitRate / 4, 1] as CFArray
+        )
+        // Every four seconds rather than every two. A keyframe is the
+        // expensive frame, and on a desktop that is not moving it is the only
+        // traffic there is: halving how often one goes out halves the cost of
+        // a session nobody is touching.
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 120 as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: 30 as CFNumber)
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
 
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    /// Bits per second for the video stream.
+    ///
+    /// The single biggest lever on what a relayed session costs, so it is a
+    /// named constant rather than a literal three properties deep.
+    static let averageBitRate = 1_500_000
+
+        func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {
             if let payload = ScreenAudioPCM.encode(sampleBuffer) { output(ScreenWire.audio(payload)) }
             return
