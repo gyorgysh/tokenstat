@@ -81,8 +81,13 @@ settings:
     # inspector that no longer takes the window apart, and the first build
     # that tells the relay what a channel is for so a screen session can be
     # metered and capped.
-    # 54 was spent by an upload that registered the number and produced no
-    # build. App Store Connect answers DUPLICATE for it, so it is gone.
+    # 54 went up and is on TestFlight. 55 is simply the next one.
+    #
+    # Worth knowing for the next upload: the builds list lags behind a
+    # successful upload by minutes. Reading it too soon and finding nothing
+    # looks exactly like a failed upload, and a retry then answers DUPLICATE,
+    # which looks like confirmation. It is not. Give it a few minutes before
+    # concluding anything.
     CURRENT_PROJECT_VERSION: "55"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
