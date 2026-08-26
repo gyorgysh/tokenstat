@@ -159,9 +159,16 @@ struct ScreenViewerView: View {
             }
             #else
             ToolbarItem {
+                // The glyph alone. Spelled out, it was the only word in a row
+                // of icons and took about half the bar on a phone, which on
+                // the screen with the least room to spare is the one place a
+                // label cannot afford to be a word. The title stays as the
+                // accessibility label and the iPad tooltip.
                 Button("Full screen", .external) {
                     withAnimation { immersive = true }
                 }
+                .labelStyle(.iconOnly)
+                .accessibilityLabel("Full screen")
             }
             #endif
             #if !os(macOS)
@@ -230,6 +237,11 @@ struct ScreenViewerView: View {
         #endif
         #if !os(macOS)
         .toolbar(immersive ? .hidden : .visible, for: .navigationBar)
+        // And the app's own tab bar. Hiding the navigation bar and leaving
+        // Home / Workspaces / Insights / Devices across the bottom is most of
+        // a strip of somebody's desktop still spent on chrome, on the screen
+        // that asked for the whole display.
+        .toolbar(immersive ? .hidden : .visible, for: .tabBar)
         .statusBarHidden(immersive)
         .persistentSystemOverlays(immersive ? .hidden : .automatic)
         // A tap on the picture brings the chrome back, but only while merely
