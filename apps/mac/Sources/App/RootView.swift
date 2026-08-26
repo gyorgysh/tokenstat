@@ -878,6 +878,27 @@ struct RootView: View {
         }
     }
 
+    /// The inspector's content, held to the height it has been given.
+    ///
+    /// `GeometryReader` proposes its own size to what it contains rather than
+    /// asking, so a child with an enormous ideal height is handed the pane's
+    /// real height and cannot grow the column with a demand of its own. The
+    /// clip then keeps the drawing inside that frame as well.
+    ///
+    /// This is the part `clipped` alone did not do. Clipping restricts
+    /// rendering; the size request travels regardless, which is why the window
+    /// still came apart with the clip in place.
+    @ViewBuilder
+    private func boundedInspector<Content: View>(
+        @ViewBuilder _ content: @escaping () -> Content
+    ) -> some View {
+        GeometryReader { proxy in
+            belowTitlebar { content() }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                .clipped()
+        }
+    }
+
     /// The pane itself, shared by the fixed column and the floating overlay.
     @ViewBuilder
     private var inspectorContent: some View {
@@ -1038,16 +1059,20 @@ struct RootView: View {
             // detail's demand.
             .frame(minWidth: Self.detailMinimumWidth)
             .inspector(isPresented: showsInspector) {
-                belowTitlebar { inspectorContent }
-                    // The pane keeps its own troubles. Three times now a child
-                    // of this column has reported an enormous intrinsic height
-                    // and the hosted column has grown to satisfy it, at which
-                    // point NSSplitView pushes the rest of the window out of
-                    // place: the sidebar rides up under the traffic lights and
-                    // stays wrong until another destination remounts the
-                    // column. Clipping means a view that misbehaves is cut off
-                    // inside its own pane instead of taking the window apart.
-                    .clipped()
+                // The pane keeps its own troubles. Three times now a child of
+                // this column has reported an enormous intrinsic height and
+                // the hosted column has grown to satisfy it, at which point
+                // NSSplitView pushes the rest of the window out of place: the
+                // sidebar rides up under the traffic lights and stays wrong
+                // until another destination remounts the column.
+                //
+                // A definite maximum, taken from the room the pane actually
+                // has, is what stops that. `clipped` alone was not enough and
+                // was a mistake: it restricts drawing and does nothing to the
+                // size a child asks for, so the demand still travelled and the
+                // window still came apart. The clip stays for the drawing; the
+                // frame is what holds the layout.
+                boundedInspector { inspectorContent }
                     // Opaque, like the leading sidebar. `.inspector` on a
                     // transparent titlebar otherwise composites the column
                     // against liquid glass, which is what made the Files /
@@ -1120,11 +1145,10 @@ struct RootView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { dismissOverlay() }
 
-                belowTitlebar { inspectorContent }
+                // Same reason as the column. See there.
+                boundedInspector { inspectorContent }
                     .frame(width: DisplayFit.box(400))
                     .frame(maxHeight: .infinity)
-                    // Same reason as the column. See there.
-                    .clipped()
                     .background(Theme.sidebar)
                     .overlay(alignment: .leading) {
                         Rectangle()
