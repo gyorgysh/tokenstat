@@ -1481,7 +1481,12 @@ struct BrandCheckboxStyle: ToggleStyle {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+        // A checkbox that does not say whether it is checked is a button.
+        // The stock Toggle this replaces announced "switch, off"; without a
+        // value here somebody using VoiceOver could only learn the state by
+        // changing it. `BrandToggleChip` in this file already says it.
         .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
     }
 }
 
