@@ -261,12 +261,12 @@ struct SSHLibraryView: View {
         }
         .listStyle(.insetGrouped)
         // The grouped styles paint their own grey twice: once behind the
-        // scroll view, and once behind every row. Hiding the scroll background
-        // only dealt with the first, so the rows stayed the system's light
-        // neutral card on an almost-black screen. Both have to be said.
+        // scroll view, and once behind every row. This deals with the first.
+        // The second is `themedRow` on each row builder, because
+        // `listRowBackground` applied to the List itself reaches nothing: it
+        // is a per-row modifier and the rows are what have to carry it.
         .scrollContentBackground(.hidden)
         .background(Theme.background)
-        .listRowBackground(Theme.panel)
         .listRowSeparatorTint(Theme.border)
     }
 
@@ -333,6 +333,7 @@ struct SSHLibraryView: View {
                 Task { await model.delete(folder: folder) }
             }
         }
+        .themedRow()
     }
 
     /// One live session, as a way back into it.
@@ -358,6 +359,7 @@ struct SSHLibraryView: View {
         .swipeActions(edge: .trailing) {
             Button("End", role: .destructive) { Task { await sessions.close(session) } }
         }
+        .themedRow()
     }
 
     private func hostRow(_ host: SSHHost, depth: Int) -> some View {
@@ -386,6 +388,7 @@ struct SSHLibraryView: View {
             .swipeActions(edge: .leading) {
                 Button("Connect") { connecting = host }.tint(Theme.accent)
             }
+        .themedRow()
     }
 
     private func keyRow(_ key: SSHKeyRecord) -> some View {
@@ -411,6 +414,7 @@ struct SSHLibraryView: View {
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
         }
+        .themedRow()
     }
 
     private func snippetRow(_ snippet: SSHSnippet) -> some View {
@@ -428,6 +432,7 @@ struct SSHLibraryView: View {
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
+        .themedRow()
     }
 
     @ToolbarContentBuilder
@@ -528,6 +533,20 @@ struct SSHLibraryView: View {
     }
 }
 #endif
+
+/// The theme's own colours behind a list row.
+///
+/// `scrollContentBackground(.hidden)` deals with the scroll view and nothing
+/// else: an inset-grouped row paints its own light neutral card on top of
+/// whatever is behind it, which on this screen left the host cards as the one
+/// grey thing among the panels. `listRowBackground` is per row and does not
+/// travel down from the List, so every row builder says it.
+extension View {
+    func themedRow() -> some View {
+        listRowBackground(Theme.panel)
+            .listRowSeparatorTint(Theme.border)
+    }
+}
 
 /// The type scale the library's rows share.
 ///
