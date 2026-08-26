@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.9"
+    MARKETING_VERSION: "0.7.0"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
