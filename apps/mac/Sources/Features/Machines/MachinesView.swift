@@ -1085,7 +1085,7 @@ private struct ScreenPermissionCard: View {
                         HStack(alignment: .top) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Restart to finish").font(Theme.callout.weight(.medium))
-                                Text("macOS granted Screen Recording after this app started, and capture cannot see it until Tokenstat is restarted.")
+                                Text("macOS granted Screen Recording after this app started, and capture cannot see it until tokenstat is restarted.")
                                     .font(Theme.caption).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -1099,7 +1099,7 @@ private struct ScreenPermissionCard: View {
                     // somebody would assume the opposite. Capture runs in this
                     // app, not in the helper, so a closed app has no screen to
                     // share however always-on the helper is.
-                    Text("Capture runs in the app, so Tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen.")
+                    Text("Capture runs in the app, so tokenstat has to be open for this screen to be shared. The always-on helper keeps terminals and files working, not the screen.")
                         .font(Theme.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)

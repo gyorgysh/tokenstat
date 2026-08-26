@@ -27,7 +27,7 @@ object CoreClient {
 
     suspend fun call(method: String, params: JsonObject = buildJsonObject {}): JsonElement =
         withContext(Dispatchers.IO) {
-            check(initialized) { "Tokenstat core was not initialized" }
+            check(initialized) { "tokenstat core was not initialized" }
             decodeResponse(NativeBridge.nativeCall(method, params.toString()))
         }
 

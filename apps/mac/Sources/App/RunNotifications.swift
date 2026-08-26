@@ -125,7 +125,7 @@ final class RunNotifications {
         guard isOn else { return nil }
         switch authorization {
         case .denied:
-            return "Notifications are turned off for Tokenstat in System Settings."
+            return "Notifications are turned off for tokenstat in System Settings."
         case .none, .notDetermined:
             return nil
         default:
@@ -317,7 +317,7 @@ final class PushRegistrar {
         guard granted else {
             isOn = false
             UserDefaults.standard.set(false, forKey: Self.onKey)
-            errorMessage = "Notifications are off for Tokenstat in Settings."
+            errorMessage = "Notifications are off for tokenstat in Settings."
             return
         }
         isOn = true

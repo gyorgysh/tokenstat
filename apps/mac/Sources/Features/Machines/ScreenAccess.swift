@@ -196,9 +196,9 @@ final class ScreenAccess {
         var settingsHint: String {
             switch self {
             case .screenRecording:
-                "macOS only asks once. Switch Tokenstat on under Privacy & Security → Screen & System Audio Recording."
+                "macOS only asks once. Switch tokenstat on under Privacy & Security → Screen & System Audio Recording."
             case .accessibility:
-                "macOS only asks once. Switch Tokenstat on under Privacy & Security → Accessibility."
+                "macOS only asks once. Switch tokenstat on under Privacy & Security → Accessibility."
             }
         }
     }

@@ -54,7 +54,7 @@ Or download an archive below, verify \`SHA256SUMS\`, and put \`tokenstat\` on yo
 
 ### macOS desktop app
 
-Download \`tokenstat-${version}-macos.dmg\` below, open it, and drag Tokenstat to
+Download \`tokenstat-${version}-macos.dmg\` below, open it, and drag the app to
 Applications.
 
 The Windows desktop and Android clients are still maturing. Their unsigned

@@ -80,7 +80,7 @@ Everything since 0.6.8, which is the last release anybody received.
 - Share this Mac's screen with another Apple device on the account. Switch
   displays, send the system audio, copy both ways, and send a file without
   leaving the session. macOS is asked for Screen Recording and Accessibility at
-  the moment you turn view or control on, with the prompt that names Tokenstat,
+  the moment you turn view or control on, with the prompt that names tokenstat,
   and the card says which permissions are granted and that the app has to be
   open for its screen to be shared.
 - Control that screen from an iPhone or iPad. One finger moves the pointer, tap

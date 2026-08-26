@@ -858,7 +858,7 @@ private final class ScreenViewerModel {
                     connectedSince = nil
                     streamingSince = nil
                     state = .failed
-                    message = "Connected, but no picture has arrived yet. The host may not have Screen Recording, or Tokenstat may not be open on that Mac."
+                    message = "Connected, but no picture has arrived yet. The host may not have Screen Recording, or tokenstat may not be open on that Mac."
                     return
                 }
                 if let encoded = read.audio, let data = Data(base64Encoded: encoded) {

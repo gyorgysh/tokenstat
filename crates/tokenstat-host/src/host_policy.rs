@@ -50,7 +50,7 @@ pub fn default_always_on(has_internal_battery: bool) -> bool {
 /// Whether inbound workspace / pty work should be accepted right now.
 ///
 /// Always-on hosts regardless of the lid and regardless of the app. Otherwise
-/// this machine is a host only while Tokenstat is open and the lid is open.
+/// this machine is a host only while tokenstat is open and the lid is open.
 pub fn hosting_active(always_on: bool, lid_closed: bool, owner_present: bool) -> bool {
     always_on || (owner_present && !lid_closed)
 }
@@ -371,7 +371,7 @@ fn watch() {
                     continue;
                 }
                 eprintln!(
-                    "tokenstat-hostd: always-on host is off and Tokenstat is not running, so this helper is stopping"
+                    "tokenstat-hostd: always-on host is off and tokenstat is not running, so this helper is stopping"
                 );
                 std::process::exit(0);
             }

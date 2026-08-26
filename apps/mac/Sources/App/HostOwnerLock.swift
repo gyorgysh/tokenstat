@@ -11,7 +11,7 @@ import Foundation
 
 /// Shared lock the host helper watches when Always-on host is off.
 ///
-/// Each Tokenstat process holds a shared flock on `host-owner.lock`. hostd
+/// Each tokenstat process holds a shared flock on `host-owner.lock`. hostd
 /// probes with a non-blocking exclusive lock: if that succeeds, no app is
 /// open and the helper may exit. A clean quit also kills the job. This lock
 /// covers force-quit and crash, where `applicationWillTerminate` never runs.
@@ -28,7 +28,7 @@ enum HostOwnerLock {
         )
         let opened = open(path, O_RDWR | O_CREAT, 0o600)
         guard opened >= 0 else { return }
-        // Shared: two Tokenstat processes (debug and the installed app) must
+        // Shared: two tokenstat processes (debug and the installed app) must
         // both count as an owner. hostd's exclusive probe fails while either
         // holds this.
         guard flock(opened, LOCK_SH) == 0 else {

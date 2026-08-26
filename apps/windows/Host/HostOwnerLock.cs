@@ -36,7 +36,7 @@ internal static class HostOwnerLock
                 FileShare.ReadWrite | FileShare.Delete);
             var overlapped = new NativeOverlapped();
             // Shared lock: flags 0. hostd's exclusive probe then fails while
-            // this process (or another Tokenstat window) is open.
+            // this process (or another tokenstat window) is open.
             if (!LockFileEx(stream.SafeFileHandle, 0, 0, 1, 0, ref overlapped))
             {
                 stream.Dispose();
