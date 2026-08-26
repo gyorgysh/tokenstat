@@ -715,6 +715,18 @@ fn with_machine_record<T>(
 }
 
 /// The account's copy of the vault, registering this machine if it has to.
+/// Whether a vault exists, from what the account said and what this device has
+/// left over from one.
+///
+/// Its own function because the rule is one line and easy to write backwards.
+/// A local record is evidence only while the account could not be asked: once
+/// it answers, it is the answer. Writing this as `remote.is_some() || local`
+/// meant a vault deleted on another device stayed on screen here forever,
+/// because the leftover never expired and nothing else ever contradicted it.
+fn vault_exists(remote_found: bool, unreachable: bool, local_schema: u32) -> bool {
+    remote_found || (unreachable && local_schema == SCHEMA)
+}
+
 fn remote_vault() -> Result<tokenstat_sync::vault::RemoteVault, tokenstat_sync::vault::VaultError> {
     with_machine_record(tokenstat_sync::vault::get)
 }
@@ -848,7 +860,28 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                     Err(error) => Some(error.to_string()),
                 };
                 let remote = answer.ok();
-                let created = remote.is_some() || local.schema_version == SCHEMA;
+                // The account answered, and what it said is that there is no
+                // vault. That is not the same as not being able to ask, which
+                // is what `unreachable` carries, and the difference is the
+                // whole of this: a vault is deleted on one device and every
+                // other device finds out here.
+                //
+                // Local state left over from the vault that used to exist is
+                // not evidence that one still does. It is the thing to clean
+                // up, and until it was, a Mac went on showing "Encrypted
+                // vault, 0 records" and offering to change the password of a
+                // vault an iPhone had deleted an hour earlier.
+                let gone = remote.is_none() && unreachable.is_none();
+                if gone && local.schema_version == SCHEMA {
+                    let _ = clear_local();
+                    forget_key();
+                    set_locked(false);
+                }
+                let created = vault_exists(
+                    remote.is_some(),
+                    unreachable.is_some(),
+                    local.schema_version,
+                );
                 let enrolled = remote
                     .as_ref()
                     .and_then(|value| value.device_wrap.as_ref())
@@ -1211,6 +1244,27 @@ mod tests {
         // Typing the password is the one thing that does clear it.
         unlock_session(random32());
         assert!(!is_locked());
+    }
+
+    #[test]
+    fn a_vault_deleted_elsewhere_stops_existing_here() {
+        // The account answered and has no vault. A local leftover from the one
+        // that used to be there does not keep it alive.
+        assert!(!vault_exists(false, false, SCHEMA));
+    }
+
+    #[test]
+    fn a_vault_out_of_reach_is_still_a_vault() {
+        // The account could not be asked. Saying "no vault" here is what sent
+        // a machine off to create a second one.
+        assert!(vault_exists(false, true, SCHEMA));
+        // Nothing local either, so there is nothing to claim.
+        assert!(!vault_exists(false, true, 0));
+    }
+
+    #[test]
+    fn what_the_account_holds_needs_no_local_record() {
+        assert!(vault_exists(true, false, 0));
     }
 
     #[test]
