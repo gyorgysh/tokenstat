@@ -1404,12 +1404,12 @@ pub(crate) fn dial_peer_as(
     dial_peer_for(peer_hex, purpose).map(|value| value.0)
 }
 
-pub(crate) fn dial_peer_routed(
-    peer_hex: &str,
-) -> Result<(tokenstat_remote::Connection, &'static str), String> {
-    dial_peer_for(peer_hex, ChannelPurpose::Unknown)
-}
-
+/// Dial, and say which route answered and what the connection is for.
+///
+/// There is no purposeless variant of this any more. A channel that does not
+/// name itself is metered as `unknown` and capped by nothing, which is the
+/// right answer for an old client and the wrong one for a call site in this
+/// binary that simply forgot.
 pub(crate) fn dial_peer_for(
     peer_hex: &str,
     purpose: ChannelPurpose,

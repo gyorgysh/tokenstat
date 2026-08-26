@@ -1345,6 +1345,29 @@ mod tests {
         }
     }
 
+    // The open payload is a contract with the relay, which lives in another
+    // repository and parses this by hand: `<64 hex>:<purpose>`, split on the
+    // first colon. If either side drifts, a screen channel silently meters as
+    // `unknown` and is capped by nothing.
+    #[test]
+    fn a_purpose_is_a_word_from_the_fixed_list() {
+        assert_eq!(ChannelPurpose::Screen.as_str(), "screen");
+        assert_eq!(ChannelPurpose::Ssh.as_str(), "ssh");
+        assert_eq!(ChannelPurpose::Unknown.as_str(), "unknown");
+    }
+
+    #[test]
+    fn the_open_payload_is_the_key_then_the_purpose() {
+        let key = "a".repeat(64);
+        let payload = format!("{key}:{}", ChannelPurpose::Screen.as_str());
+        let (left, right) = payload.split_once(':').expect("a colon separates the two");
+        assert_eq!(left, key, "the relay reads the key up to the first colon");
+        assert_eq!(right, "screen");
+        // The key itself must never contain the separator, or the relay would
+        // cut it in the wrong place and refuse a perfectly good dial.
+        assert!(!key.contains(':'));
+    }
+
     #[test]
     fn a_refused_relay_fails_before_the_connect_budget() {
         let started = Instant::now();

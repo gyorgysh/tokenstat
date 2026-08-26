@@ -222,7 +222,9 @@ fn two_machines_pair_and_call_over_one_multiplexed_tunnel() {
     }
     assert!(session_a.status().connected, "session A must reach READY");
 
-    let channel = session_a.open_channel(key_b).expect("open a channel");
+    let channel = session_a
+        .open_channel(key_b, tokenstat_remote::tunnel::ChannelPurpose::Unknown)
+        .expect("open a channel");
     let mut connection = handshake_initiator(Box::new(channel), &ident_a, Some(key_b), "machine b")
         .expect("handshake over the channel");
     connection.send(b"ping").expect("send");
