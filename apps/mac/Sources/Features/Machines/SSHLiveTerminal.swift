@@ -27,6 +27,21 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// What the view is currently painted for, so a redraw is only done when
     /// the appearance actually changed.
     @ObservationIgnored private var colorSchemeIsDark: Bool?
+    /// Characters drawn here the moment they were typed, before the far end
+    /// has echoed them. See `predict`.
+    @ObservationIgnored private var predicted: [UInt8] = []
+    /// Typed, sent, and deliberately not drawn, because this line has not yet
+    /// proved that it echoes at all. See `predict`.
+    @ObservationIgnored private var probing: [UInt8] = []
+    /// This line echoes what is typed into it.
+    @ObservationIgnored private var lineEchoes = false
+    /// This line was tested and does not echo. A password prompt, and the
+    /// reason nothing is guessed on it for the rest of the line.
+    @ObservationIgnored private var lineSilent = false
+    /// The tail of what the far end has sent, for the echo test. Bounded and
+    /// discarded: it exists for a substring search a few bytes long and never
+    /// leaves this object.
+    @ObservationIgnored private var recentOutput: [UInt8] = []
 
     /// The handle, under the name the Bridge calls it. Kept so the call sites
     /// read as what they are rather than as `id` doing double duty.
@@ -101,6 +116,13 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         while !Task.isCancelled && !closed {
             do {
                 let chunk = try await Bridge.readSSHSession(id: handle, offset: offset)
+                if !chunk.data.isEmpty { noteEcho(chunk.data) }
+                // Before anything reaches the emulator, and only here. What
+                // was guessed has to come off the screen before the far end's
+                // own version of it goes on, or the line ends up saying
+                // everything twice. Both happen inside one turn on the main
+                // actor, so there is no frame in which the line is missing.
+                if chunk.dropped || !chunk.data.isEmpty { withdrawPredictions() }
                 if chunk.dropped { view.feed(text: "\r\n[tokenstat: older output was dropped]\r\n") }
                 if !chunk.data.isEmpty {
                     offset = chunk.nextOffset
@@ -118,6 +140,164 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             }
         }
     }
+
+    // MARK: - Local echo
+
+    /// Draw a typed character before the far end has said anything about it.
+    ///
+    /// A key press on a server across an ocean is a round trip before the
+    /// letter appears, and the wait is the whole of what makes a remote shell
+    /// feel remote: the typing itself is not slow, the confirmation is. The
+    /// letter is almost always going to be exactly what the shell echoes back,
+    /// so it is drawn here first and the echo replaces it when it lands.
+    ///
+    /// Three rules keep that from ever being a lie on screen.
+    ///
+    /// **Nothing is drawn until the line has proved it echoes.** The first
+    /// character of every line is sent and not drawn. If the far end echoes
+    /// it, the rest of the line is guessed; if it does not, nothing on that
+    /// line is ever guessed. That is what makes a password prompt safe: a
+    /// prompt with echo turned off never confirms, so no character of a
+    /// password is drawn for even one frame. Every Return starts the test
+    /// again, because the next line may be the prompt.
+    ///
+    /// **Only plain characters, only at the end of a line, only in the normal
+    /// buffer.** A guess is undone with backspaces, which can only take back
+    /// what was appended and cannot cross a line wrap. Anything else, a
+    /// control key, an arrow, an escape sequence, a full-screen program, stops
+    /// the guessing rather than being guessed at.
+    ///
+    /// **Every guess is taken back before the far end's output is drawn.**
+    /// See `withdrawPredictions`.
+    private func predict(_ bytes: [UInt8]) {
+        guard bytes.count == 1, let byte = bytes.first else {
+            // A paste, a chord, or a multi-byte key. Whatever comes back is
+            // not going to be a letter appearing at the cursor.
+            endPredictionLine()
+            return
+        }
+        switch byte {
+        case 0x20...0x7e:
+            guard canPredict else {
+                endPredictionLine()
+                return
+            }
+            if lineEchoes {
+                predicted.append(byte)
+                view.feed(byteArray: ArraySlice([byte]))
+            } else if !lineSilent {
+                // Sent, not drawn. These are the characters that find out
+                // whether the line echoes at all.
+                probing.append(byte)
+                if probing.count > Self.probeLimit {
+                    // Six characters in with nothing echoed back. This is a
+                    // prompt that does not echo, and the rest of the line is
+                    // never guessed at.
+                    lineSilent = true
+                    probing.removeAll()
+                }
+            }
+        case 0x7f, 0x08:
+            if predicted.isEmpty {
+                // Nothing of ours left to take back, and the far end is about
+                // to erase something we never drew.
+                endPredictionLine()
+            } else {
+                predicted.removeLast()
+                view.feed(byteArray: ArraySlice(Self.eraseCell))
+            }
+            if !probing.isEmpty { probing.removeLast() }
+        default:
+            // Return, tab, an arrow, Ctrl-anything. The guesses already on
+            // screen stay until the answer arrives and takes them back: taking
+            // them back now would blank the line for a whole round trip,
+            // which is the flicker this feature exists to remove.
+            endPredictionLine()
+        }
+    }
+
+    /// Take every guess back off the screen.
+    ///
+    /// Backspace, space, backspace per character: the same three bytes a
+    /// terminal itself uses to rub out a character, which is safe precisely
+    /// because a guess is only ever made by appending at the cursor.
+    private func withdrawPredictions() {
+        guard !predicted.isEmpty else { return }
+        var undo: [UInt8] = []
+        undo.reserveCapacity(predicted.count * Self.eraseCell.count)
+        for _ in predicted { undo.append(contentsOf: Self.eraseCell) }
+        predicted.removeAll()
+        view.feed(byteArray: ArraySlice(undo))
+    }
+
+    /// Stop tracking guesses without touching the screen, for the cases where
+    /// a repaint from the far end is the correction.
+    private func forgetPredictions() {
+        predicted.removeAll()
+        probing.removeAll()
+        recentOutput.removeAll()
+        lineEchoes = false
+        lineSilent = false
+    }
+
+    /// This line is no longer one that can be guessed at. Anything already
+    /// drawn stays until the next output withdraws it.
+    private func endPredictionLine() {
+        probing.removeAll()
+        recentOutput.removeAll()
+        lineEchoes = false
+        lineSilent = false
+    }
+
+    /// Learn from the far end whether this line echoes.
+    ///
+    /// The test is deliberately literal: the characters that were sent and not
+    /// drawn have to come back, next to each other, in the order they were
+    /// typed. A prompt that echoes stars, or nothing at all, fails it and
+    /// stays unguessed for the rest of the line.
+    ///
+    /// Two characters, not one, and matched against a running tail of output
+    /// rather than against one chunk. One character is not evidence: a shell
+    /// echoes a letter at a time, so a single letter appearing anywhere in a
+    /// clock ticking beside a password prompt would have been enough to
+    /// convince this, and the next character of the password would have been
+    /// drawn on screen. Two adjacent characters arriving in the order they
+    /// were typed is not something unrelated output produces by accident.
+    private func noteEcho(_ data: [UInt8]) {
+        guard !probing.isEmpty else { return }
+        recentOutput.append(contentsOf: data)
+        if recentOutput.count > Self.echoWindow {
+            recentOutput.removeFirst(recentOutput.count - Self.echoWindow)
+        }
+        guard probing.count >= 2, recentOutput.contains(sequence: probing) else { return }
+        lineEchoes = true
+        probing.removeAll()
+        recentOutput.removeAll()
+    }
+
+    /// Whether the cursor is somewhere a guess can be appended and taken back.
+    private var canPredict: Bool {
+        guard let terminal = terminalView?.getTerminal() else { return false }
+        // A full-screen program owns every cell on the screen, and a letter
+        // typed into one is as likely to be a command as a character.
+        guard !terminal.isCurrentBufferAlternate else { return false }
+        // One column of headroom, so a guess can never be the character that
+        // wraps the line: a backspace at column zero does not go back up.
+        return terminal.getCursorLocation().x + 2 < terminal.cols
+    }
+
+    /// Rub out the cell to the left of the cursor.
+    private static let eraseCell: [UInt8] = [0x08, 0x20, 0x08]
+
+    /// How many characters are typed into an unproven line before the guessing
+    /// gives up on it. Small: a line that has echoed nothing by the sixth
+    /// character is a prompt that never will.
+    private static let probeLimit = 6
+
+    /// How much of the far end's recent output the echo test looks back over.
+    /// Enough to span a few characters echoed one at a time with the escape
+    /// sequences a colouring shell puts between them, and no more.
+    private static let echoWindow = 256
 
     /// Whether a drag scrolls the buffer rather than reaching the program.
     ///
@@ -152,12 +332,16 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     func sendBytes(_ bytes: [UInt8]) {
         guard !bytes.isEmpty else { return }
         let handle = handle
+        // Through the same guess as typing, so a tapped `esc` ends a line's
+        // local echo exactly as a typed one does.
+        predict(bytes)
         Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }
     }
 
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        forgetPredictions()
         let handle = handle
         Task { await Bridge.closeSSHSession(id: handle) }
     }
@@ -184,18 +368,33 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     func markClosed(error: String? = nil) {
         pollTask?.cancel()
         pollTask = nil
+        forgetPredictions()
         closed = true
         if let error { self.error = error }
     }
 
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
-        Task { try? await Bridge.writeSSHSession(id: handle, data: bytes) }
+        // `id`, not `handle`: they are the same string, and this one is a
+        // stored `let` a nonisolated method may read.
+        let handle = id
+        Task { @MainActor [weak self] in
+            self?.predict(bytes)
+            try? await Bridge.writeSSHSession(id: handle, data: bytes)
+        }
     }
 
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         guard newCols > 0, newRows > 0 else { return }
-        Task { try? await Bridge.resizeSSHSession(id: handle, rows: newRows, cols: newCols) }
+        let handle = id
+        Task { @MainActor [weak self] in
+            // Dropped rather than withdrawn. A resize reflows the line and
+            // then the far end repaints it, so the backspaces that would undo
+            // a guess no longer land where the guess was drawn. Letting the
+            // repaint be the correction is the only safe answer.
+            self?.forgetPredictions()
+            try? await Bridge.resizeSSHSession(id: handle, rows: newRows, cols: newCols)
+        }
     }
 
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
@@ -468,5 +667,19 @@ struct SSHSnippetRunSheet: View {
         }
         .padding(Theme.Space.l)
         .sshSheetFrame(width: 480, height: 420)
+    }
+}
+
+private extension Array where Element == UInt8 {
+    /// Whether `other` appears in this array, in order and unbroken.
+    ///
+    /// Used on one chunk of terminal output against at most four typed
+    /// characters, so the obvious search is the right one.
+    func contains(sequence other: [UInt8]) -> Bool {
+        guard !other.isEmpty, count >= other.count else { return false }
+        for start in 0...(count - other.count) {
+            if self[start..<(start + other.count)].elementsEqual(other) { return true }
+        }
+        return false
     }
 }
