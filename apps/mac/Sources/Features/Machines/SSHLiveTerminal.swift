@@ -24,6 +24,9 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     @ObservationIgnored private var offset: UInt64 = 0
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var terminalView: TerminalView?
+    /// What the view is currently painted for, so a redraw is only done when
+    /// the appearance actually changed.
+    @ObservationIgnored private var colorSchemeIsDark: Bool?
 
     /// The handle, under the name the Bridge calls it. Kept so the call sites
     /// read as what they are rather than as `id` doing double duty.
@@ -70,11 +73,28 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         made.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         made.inputAccessoryView = nil
         #endif
+        // Before anything else. A terminal with no native background does not
+        // erase a cell before drawing into it, so every repaint composited on
+        // top of what was already there: old output stayed, new output landed
+        // over it, and clear painted an absent colour over the same pixels and
+        // changed nothing. This view was the one of the three that never set
+        // it. See `TerminalPalette`.
+        TerminalPalette.paint(dark: TerminalPalette.systemIsDark, to: made)
         made.optionAsMetaKey = true
         made.getTerminal().changeHistorySize(4_000)
         made.terminalDelegate = self
         terminalView = made
         return made
+    }
+
+    /// Follow the system between light and dark while the session is open.
+    ///
+    /// The colour is set once at creation from whatever the system was then,
+    /// and a session outlives a change of appearance.
+    func applyColors(dark: Bool) {
+        guard let terminalView, dark != colorSchemeIsDark else { return }
+        colorSchemeIsDark = dark
+        TerminalPalette.paint(dark: dark, to: terminalView)
     }
 
     private func poll() async {
@@ -199,17 +219,23 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
 #if os(macOS)
 private struct SSHNativeTerminal: NSViewRepresentable {
     let session: SSHLiveTerminal
+    @Environment(\.colorScheme) private var colorScheme
     func makeNSView(context: Context) -> TerminalView { session.view }
-    func updateNSView(_ view: TerminalView, context: Context) {}
+    func updateNSView(_ view: TerminalView, context: Context) {
+        session.applyColors(dark: colorScheme == .dark)
+    }
 }
 #else
 private struct SSHNativeTerminal: UIViewRepresentable {
     let session: SSHLiveTerminal
+    @Environment(\.colorScheme) private var colorScheme
     func makeUIView(context: Context) -> TerminalView {
         DispatchQueue.main.async { _ = session.view.becomeFirstResponder() }
         return session.view
     }
-    func updateUIView(_ view: TerminalView, context: Context) {}
+    func updateUIView(_ view: TerminalView, context: Context) {
+        session.applyColors(dark: colorScheme == .dark)
+    }
 }
 #endif
 
