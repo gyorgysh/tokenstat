@@ -30,6 +30,10 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// Characters drawn here the moment they were typed, before the far end
     /// has echoed them. See `predict`.
     @ObservationIgnored private var predicted: [UInt8] = []
+    /// Set once a control key has moved the cursor away from the end of the
+    /// guessed text, after which the guesses can no longer be rubbed out
+    /// with backspaces: the cells behind the cursor are no longer ours.
+    @ObservationIgnored private var predictionsDetachedFromCursor = false
     /// Typed, sent, and deliberately not drawn, because this line has not yet
     /// proved that it echoes at all. See `predict`.
     @ObservationIgnored private var probing: [UInt8] = []
@@ -198,7 +202,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
                 }
             }
         case 0x7f, 0x08:
-            if predicted.isEmpty {
+            if predicted.isEmpty || predictionsDetachedFromCursor {
                 // Nothing of ours left to take back, and the far end is about
                 // to erase something we never drew.
                 endPredictionLine()
@@ -209,10 +213,14 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             if !probing.isEmpty { probing.removeLast() }
         default:
             // Return, tab, an arrow, Ctrl-anything. The guesses already on
-            // screen stay until the answer arrives and takes them back: taking
-            // them back now would blank the line for a whole round trip,
-            // which is the flicker this feature exists to remove.
+            // screen stay until the answer arrives: taking them back now
+            // would blank the line for a whole round trip, which is the
+            // flicker this feature exists to remove. But the cursor has moved
+            // somewhere only the far end knows, so the guesses are marked as
+            // beyond reach rather than left where backspaces could erase the
+            // wrong cells.
             endPredictionLine()
+            predictionsDetachedFromCursor = true
         }
     }
 
@@ -220,9 +228,15 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     ///
     /// Backspace, space, backspace per character: the same three bytes a
     /// terminal itself uses to rub out a character, which is safe precisely
-    /// because a guess is only ever made by appending at the cursor.
+    /// because a guess is only ever made by appending at the cursor. Once the
+    /// cursor has moved on, nothing is synthesized; whatever the far end sends
+    /// repaints the truth instead.
     private func withdrawPredictions() {
         guard !predicted.isEmpty else { return }
+        if predictionsDetachedFromCursor {
+            predicted.removeAll()
+            return
+        }
         var undo: [UInt8] = []
         undo.reserveCapacity(predicted.count * Self.eraseCell.count)
         for _ in predicted { undo.append(contentsOf: Self.eraseCell) }
@@ -234,6 +248,7 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// a repaint from the far end is the correction.
     private func forgetPredictions() {
         predicted.removeAll()
+        predictionsDetachedFromCursor = false
         probing.removeAll()
         recentOutput.removeAll()
         lineEchoes = false

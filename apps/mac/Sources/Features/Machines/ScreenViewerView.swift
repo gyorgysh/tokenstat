@@ -40,9 +40,7 @@ struct ScreenViewerView: View {
     @State private var keyboardWanted = false
     #if os(macOS)
     @State private var mode: ScreenPointerMode = .direct
-    @State private var viewerWindowWidth: CGFloat = 0
     @State private var viewerIsFullScreen = false
-    @State private var viewerTitlebarInset: CGFloat = 0
     #else
     @State private var mode: ScreenPointerMode = .trackpad
     /// The chrome is hidden and the picture has the whole display.
@@ -260,11 +258,14 @@ struct ScreenViewerView: View {
             }
         }
         #if os(macOS)
+        // Only full screen is read here; the width and the titlebar inset
+        // have no viewer of their own, so they are given constants rather
+        // than bindings that would invalidate this view on every resize.
         .background {
             WindowScreenObserver(
-                contentWidth: $viewerWindowWidth,
+                contentWidth: .constant(0),
                 isFullScreen: $viewerIsFullScreen,
-                titlebarInset: $viewerTitlebarInset
+                titlebarInset: .constant(0)
             )
         }
         #endif
