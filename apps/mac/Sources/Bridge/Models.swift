@@ -379,7 +379,11 @@ struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
     }
 }
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
-struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String? }
+/// Everything queued for the capture helper since it last asked.
+///
+/// `data` is the head of `batch` and exists only so a helper built before
+/// batching still gets its one event. Read `batch`.
+struct ScreenCaptureInput: Codable, Sendable, Hashable { var data: String?; var batch: [String] = [] }
 struct ScreenViewerSession: Codable, Sendable, Hashable { var id: String; var control: Bool; var transport: String }
 struct ScreenViewerRead: Codable, Sendable, Hashable { var frame: String?; var audio: String?; var metadata: String?; var active: Bool; var dropped: UInt64; var error: String? }
 struct ScreenTransferDestination: Codable, Sendable, Hashable { var path: String? }

@@ -13,6 +13,13 @@ use crate::screen_stream::{Frame, FrameKind, MAX_INPUT_BYTES};
 
 const FRAME_SLOTS: usize = 3;
 
+/// How many queued input events one poll may take.
+///
+/// High enough that a fast drag is delivered whole rather than a poll at a
+/// time, bounded so an authorized controller flooding the queue cannot make
+/// one response arbitrarily large. The queue itself is already capped.
+const MAX_INPUT_BATCH: usize = 64;
+
 struct CaptureSession {
     peer: String,
     control: bool,
@@ -177,7 +184,9 @@ pub(crate) fn queue_input(id: &str, payload: Vec<u8>) -> Result<(), String> {
     if !held.control && !session_command {
         return Err("this screen session is view-only".into());
     }
-    if held.input.len() >= 64 {
+    // One poll's worth of queue. Beyond that the oldest goes: a pointer
+    // position nobody has read yet is worth less than the one after it.
+    if held.input.len() >= MAX_INPUT_BATCH {
         held.input.pop_front();
     }
     held.input.push_back(payload);
@@ -255,8 +264,24 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                     .cloned()
                     .ok_or("screen capture session is no longer active")?;
                 let mut held = session.lock().map_err(|_| "capture session poisoned")?;
-                let data = held.input.pop_front().map(|v| crate::base64::encode(&v));
-                Ok(json!({"data": data}))
+                // Everything that is waiting, not the oldest one.
+                //
+                // The helper polls this on a timer, so popping a single event
+                // per call capped a controller at one pointer move per poll
+                // and let the rest pile up behind it: the pointer arrived
+                // late and then kept arriving, seconds after the finger had
+                // stopped. A batch is what the queue is for.
+                let mut batch = Vec::with_capacity(held.input.len().min(MAX_INPUT_BATCH));
+                while batch.len() < MAX_INPUT_BATCH {
+                    match held.input.pop_front() {
+                        Some(value) => batch.push(crate::base64::encode(&value)),
+                        None => break,
+                    }
+                }
+                // `data` stays for a helper built before batching existed. It
+                // is the first of the batch, never a second copy of an event
+                // the batch does not carry.
+                Ok(json!({"data": batch.first(), "batch": batch}))
             }
             "screen.capture.close" => {
                 let p: IdParams = serde_json::from_str(params).map_err(|e| e.to_string())?;

@@ -37,13 +37,36 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
         }
     }
 
+    /// How often the helper looks for waiting input.
+    ///
+    /// A tenth of a second is the pace of bookkeeping, not of a pointer. A
+    /// finger moving across a phone produces events at the display's rate, and
+    /// polling ten times a second turned that into ten coarse jumps a
+    /// tenth of a second behind the finger, which is what made control mode
+    /// feel like it was arguing back. Watching costs nothing extra: with no
+    /// controller on the session there is nothing in the queue to find, so the
+    /// loop stays on the slow beat.
+    private static let controlPoll = Duration.milliseconds(8)
+    private static let idlePoll = Duration.milliseconds(100)
+    /// The session list and the pasteboard change count keep the slow beat
+    /// whatever the input loop is doing. Neither changes at pointer rate, and
+    /// both cost a round trip through the host.
+    private static let bookkeepingInterval: TimeInterval = 0.1
+
     private func run() async {
+        var sessions: [ScreenCaptureSession] = []
+        var nextBookkeeping = Date.distantPast
         while !Task.isCancelled {
             do {
-                let sessions = try await Bridge.screenCaptureSessions()
-                try await adopt(sessions)
+                if Date() >= nextBookkeeping {
+                    nextBookkeeping = Date().addingTimeInterval(Self.bookkeepingInterval)
+                    sessions = try await Bridge.screenCaptureSessions()
+                    try await adopt(sessions)
+                    await publishClipboard(to: sessions.filter(\.control).map(\.id))
+                }
                 for session in sessions {
-                    if let input = try? await Bridge.screenCaptureInput(id: session.id) {
+                    guard let inputs = try? await Bridge.screenCaptureInput(id: session.id) else { continue }
+                    for input in inputs {
                         if let display = ScreenInput.displaySelection(input) {
                             try? await encoder(for: session.id)?.selectDisplay(display)
                         } else if let clipboard = ScreenInput.clipboard(input) {
@@ -55,11 +78,12 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                         }
                     }
                 }
-                await publishClipboard(to: sessions.filter(\.control).map(\.id))
             } catch {
                 // hostd may be restarting or no session may exist yet.
+                sessions = []
             }
-            try? await Task.sleep(for: .milliseconds(100))
+            let controlling = sessions.contains(where: \.control)
+            try? await Task.sleep(for: controlling ? Self.controlPoll : Self.idlePoll)
         }
     }
 
@@ -80,7 +104,7 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 self?.frameContinuation?.yield((id, frame))
             }
             do {
-                try await created.start()
+                try await created.start(control: sessions.first { $0.id == id }?.control ?? false)
                 lock.withLock { encoders[id] = created }
             } catch {
                 await fail(id, error: error)
@@ -149,10 +173,27 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// rebuild, must be one even if VideoToolbox would have waited.
     private var forceKey = true
     private(set) var displayID: CGDirectDisplayID?
+    /// Whether this session carries mouse and keyboard.
+    ///
+    /// The only thing it changes is how often a picture is taken. See
+    /// `frameRate`.
+    private var control = false
 
     init(output: @escaping @Sendable (Data) -> Void) { self.output = output }
 
-    func start(displayID requestedID: CGDirectDisplayID? = nil) async throws {
+    /// Pictures per second.
+    ///
+    /// Sixty while somebody is driving, thirty while somebody is watching.
+    /// The bitrate does not move with it: the cost of a session is the budget
+    /// below, and this decides how finely that budget is spread over time. A
+    /// pointer is the one thing on a remote desktop that is judged frame by
+    /// frame, and at thirty a drag arrives in visible steps however good each
+    /// step looks. Watching has no such test, and spending the same budget on
+    /// half as many pictures makes each of them better.
+    private var frameRate: Int32 { control ? 60 : 30 }
+
+    func start(displayID requestedID: CGDirectDisplayID? = nil, control: Bool? = nil) async throws {
+        if let control { self.control = control }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw ScreenCaptureError.permission
         }
@@ -174,7 +215,7 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         let config = SCStreamConfiguration()
         config.width = Int(width)
         config.height = Int(height)
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
         config.queueDepth = 3
         config.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
         config.showsCursor = true
@@ -268,8 +309,14 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         // expensive frame, and on a desktop that is not moving it is the only
         // traffic there is: halving how often one goes out halves the cost of
         // a session nobody is touching.
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: 120 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: 30 as CFNumber)
+        //
+        // In seconds, not in frames. A count of frames would have made a
+        // control session's keyframes twice as frequent as a viewing one's
+        // purely because it takes twice as many pictures, which is the one
+        // way raising the frame rate could have cost real money.
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 4 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (frameRate * 4) as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: frameRate as CFNumber)
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
 

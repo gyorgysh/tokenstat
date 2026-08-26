@@ -1955,9 +1955,14 @@ extension Bridge {
         try await background("screen.capture.push", ["id": id, "frame": frame.base64EncodedString()], patience: Patience.interactive, as: ScreenCapturePush.self)
     }
 
-    static func screenCaptureInput(id: String) async throws -> Data? {
+    /// Everything waiting for the capture helper, oldest first.
+    ///
+    /// One call rather than one per event: this is polled on a timer, and a
+    /// call that could only ever return the oldest event capped the whole
+    /// input path at the poll rate.
+    static func screenCaptureInput(id: String) async throws -> [Data] {
         let result = try await background("screen.capture.input", ["id": id], patience: Patience.interactive, as: ScreenCaptureInput.self)
-        return result.data.flatMap { Data(base64Encoded: $0) }
+        return result.batch.compactMap { Data(base64Encoded: $0) }
     }
 
     static func screenCaptureClose(id: String) async {
