@@ -232,19 +232,33 @@ struct ScreenViewerView: View {
         .toolbar(immersive ? .hidden : .visible, for: .navigationBar)
         .statusBarHidden(immersive)
         .persistentSystemOverlays(immersive ? .hidden : .automatic)
-        // A tap anywhere on the picture brings the chrome back. Deliberately
-        // not a swipe or a corner: somebody who has hidden every control needs
-        // the gesture that gets them back to be the one they would try first.
-        // It runs after the input surface, so a tap in control mode still
-        // clicks the far end and this only fires when nothing else took it.
+        // A tap on the picture brings the chrome back, but only while merely
+        // watching. In control mode a tap is a click on the far end, and the
+        // gesture here is a separate recogniser watching the same touches
+        // rather than something the input surface can consume: every click
+        // would have dropped out of full screen as well as clicking. So
+        // control mode gets the corner button below instead, and this is for
+        // the mode where a tap means nothing else.
         .onTapGesture {
-            guard immersive else { return }
+            guard immersive, !controlling else { return }
             withAnimation { immersive = false }
         }
-        // Rotating a phone onto its side is asking for the picture, so going
-        // sideways hides the chrome once. Turning it back shows it again.
-        // Tracked, so leaving immersive mode by hand while still in landscape
-        // is not undone by the next redraw.
+        // The way out that works in either mode.
+        //
+        // Hiding the chrome hides the button that hid it, so without this the
+        // only way back in control mode would be a gesture that also clicks
+        // somebody's desktop. Quiet enough not to be part of the picture, and
+        // always in the same corner.
+        .overlay(alignment: .topTrailing) {
+            if immersive {
+                Button("Exit full screen", .collapse) {
+                    withAnimation { immersive = false }
+                }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .labelStyle(.iconOnly)
+                .padding(Theme.Space.m)
+            }
+        }
         .safeAreaInset(edge: .bottom) {
             // Landscape is the full-screen viewing surface on a phone. The
             // key row consumes too much of its short edge; rotate back for the
@@ -290,6 +304,16 @@ struct ScreenViewerView: View {
             } else {
                 appliedLandscape = false
                 withAnimation { immersive = false }
+            }
+        }
+        // The orientation the screen opened in never arrives as a change, so
+        // opening the viewer with the phone already sideways left the chrome
+        // up over a landscape picture: the one case the whole thing is for.
+        // Applied once on arrival, then `onChange` keeps up with it.
+        .onAppear {
+            if isCompactHeight {
+                appliedLandscape = true
+                immersive = true
             }
         }
         // A screen somebody is watching must not dim under them.
