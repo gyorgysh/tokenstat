@@ -25,7 +25,8 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -1176,8 +1177,32 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
 /// reused, exactly like the unix socket pool on the client side.
 fn pool() -> &'static Mutex<HashMap<String, Vec<Idle>>> {
     static POOL: OnceLock<Mutex<HashMap<String, Vec<Idle>>>> = OnceLock::new();
-    POOL.get_or_init(|| Mutex::new(HashMap::new()))
+    static REAPER: Once = Once::new();
+    let pool = POOL.get_or_init(|| Mutex::new(HashMap::new()));
+    REAPER.call_once(|| {
+        if thread::Builder::new()
+            .name("pool-reaper".into())
+            .spawn(|| {
+                loop {
+                    thread::sleep(REAP_INTERVAL);
+                    if let Ok(mut map) = pool.lock() {
+                        reap(&mut map);
+                    }
+                }
+            })
+            .is_err()
+        {
+            // The walk also happens on every checkout and checkin, so a
+            // process where the thread could not start still reaps whenever
+            // it has traffic; only a machine idle in both senses keeps the
+            // sockets.
+        }
+    });
+    pool
 }
+
+/// How often the reaper wakes to close pooled connections nobody is using.
+const REAP_INTERVAL: Duration = Duration::from_secs(15);
 
 /// A connection waiting to be used again, and when it stopped being used.
 ///
@@ -1740,10 +1765,10 @@ fn checkin(peer: &str, connection: tokenstat_remote::Connection) {
 /// Close everything that has sat unused past the timeout, and forget any peer
 /// left holding nothing.
 ///
-/// Done on the way past rather than on a timer. The pool is only ever touched
-/// by a call to a peer, so a walk of a map with one key per peer costs nothing
-/// beside the handshake the caller is about to avoid, and a process with no
-/// remote traffic at all has nothing pooled to reap.
+/// Run both on a timer, so the last connections a session leaves behind are
+/// closed even if nothing ever calls that peer again, and on the way past
+/// each call, which keeps a burst of traffic from letting anything idle out
+/// from under the next caller.
 fn reap(map: &mut HashMap<String, Vec<Idle>>) {
     let now = Instant::now();
     for idle in map.values_mut() {

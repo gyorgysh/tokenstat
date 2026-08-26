@@ -309,7 +309,6 @@ impl TunnelSession {
     ///
     /// The returned transport is not yet a Noise session: the caller runs
     /// `handshake_initiator` over it, exactly as it would over a TCP stream.
-    /// Open a channel, telling the relay what it is for.
     ///
     /// The purpose rides after the key in the open frame. It is a label from a
     /// fixed list, never free text: the relay writes it into a usage table and
