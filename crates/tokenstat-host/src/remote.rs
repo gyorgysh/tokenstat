@@ -1232,7 +1232,9 @@ pub(crate) struct LiveSlot {
 
 impl LiveSlot {
     fn take(peer: &str) -> Result<Self, String> {
-        let mut held = live().lock().map_err(|_| "peer connection count poisoned")?;
+        let mut held = live()
+            .lock()
+            .map_err(|_| "peer connection count poisoned")?;
         let count = held.entry(peer.to_string()).or_insert(0);
         if *count >= MAX_LIVE_PER_PEER {
             return Err(format!(
