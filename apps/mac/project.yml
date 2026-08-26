@@ -70,7 +70,13 @@ settings:
     # 52 carries the SSH follow-up review fixes: server-row menu polish,
     # themed prompts, snippet targeting safety, fingerprint persistence
     # recovery, and view-only zoom panning.
-    CURRENT_PROJECT_VERSION: "52"
+    # 53 is the SSH design pass: sheets and form controls on the app's own
+    # surface, branded segmented tabs, the library given a phone's
+    # proportions, snippets that actually run and a run-on-connect flag that
+    # finally does something, progress and a working Cancel on every editor,
+    # full screen on the remote viewer, and the keychain entitlement the key
+    # generator needs.
+    CURRENT_PROJECT_VERSION: "53"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
