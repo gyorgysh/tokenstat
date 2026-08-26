@@ -51,7 +51,7 @@ struct CadenceGlyph: View {
 
     private func symbol(_ name: String) -> some View {
         Image(systemName: name)
-            .font(Theme.font(size * 0.82, weight: .regular))
+            .font(Theme.fixed(size * 0.82, weight: .regular))
             .foregroundStyle(tint)
     }
 

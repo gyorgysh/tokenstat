@@ -263,7 +263,11 @@ enum Theme {
         relativeTo style: Font.TextStyle = .body
     ) -> Font {
         guard AppFonts.registered else {
-            return .system(size: size, weight: weight)
+            // The face failed to load. Fall back to the system style rather
+            // than to a frozen size: the point sizes here are the styles' own
+            // defaults anyway, and text frozen at a fixed size is exactly
+            // the unreadability `relativeTo` exists to prevent.
+            return .system(style, weight: weight)
         }
         return .custom(AppFonts.interface, size: size, relativeTo: style).weight(weight)
     }
@@ -280,7 +284,7 @@ enum Theme {
         relativeTo style: Font.TextStyle = .footnote
     ) -> Font {
         guard AppFonts.registered else {
-            return .system(size: size, weight: weight, design: .monospaced)
+            return .system(style, design: .monospaced, weight: weight)
         }
         return .custom(AppFonts.mono, size: size, relativeTo: style).weight(weight)
     }
@@ -295,6 +299,20 @@ enum Theme {
             return .system(size: size, weight: weight, design: mono ? .monospaced : .default)
         }
         return .custom(mono ? AppFonts.mono : AppFonts.interface, fixedSize: size).weight(weight)
+    }
+
+    /// The interface face at a size that never scales.
+    ///
+    /// For glyphs drawn inside fixed containers — monograms, marks, the
+    /// heatmap's labels — where the box is sized in points and cannot grow
+    /// with the reader's setting. Dynamic Type here pushes the letter out of
+    /// its box rather than making it readable; anything that reads as *text*
+    /// still uses `font`.
+    static func fixed(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        guard AppFonts.registered else {
+            return .system(size: size, weight: weight)
+        }
+        return .custom(AppFonts.interface, fixedSize: size).weight(weight)
     }
 
     /// The interface face at a size that scales with the window.
@@ -1563,6 +1581,17 @@ struct ThemedEditor: View {
 /// these screens wearing somebody else's palette. A tick in an accent box says
 /// the same thing and belongs to this app.
 struct BrandCheckboxStyle: ToggleStyle {
+    /// Same treatment as `ThemedFieldBox.defaultFont`: the Mac has one text
+    /// size and fixed rows, the phone takes a style that grows with Larger
+    /// Text.
+    static var labelFont: Font {
+        #if os(macOS)
+        Font.system(size: 13)
+        #else
+        Font.system(.subheadline)
+        #endif
+    }
+
     func makeBody(configuration: Configuration) -> some View {
         Button {
             configuration.isOn.toggle()
@@ -1583,7 +1612,7 @@ struct BrandCheckboxStyle: ToggleStyle {
                         }
                     }
                 configuration.label
-                    .font(.system(size: 13))
+                    .font(Self.labelFont)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
@@ -1633,7 +1662,13 @@ struct SegmentedTabs<Value: Hashable>: View {
                     withAnimation(.snappy(duration: 0.22)) { selection = option }
                 } label: {
                     Text(title(option))
+                        // Same split as `ThemedFieldBox.defaultFont`: fixed on
+                        // the Mac, growing with Larger Text on the phone.
+                        #if os(macOS)
                         .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                        #else
+                        .font(.system(.subheadline, weight: isSelected ? .semibold : .regular))
+                        #endif
                         .foregroundStyle(isSelected ? Theme.accent : Color.secondary)
                         .frame(maxWidth: .infinity)
                         .frame(height: Theme.Control.height)

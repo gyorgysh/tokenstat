@@ -29,7 +29,7 @@ struct HarnessMark: View {
                     .foregroundStyle(Theme.accent)
             } else {
                 Text(initial)
-                    .font(Theme.font(size * 0.46, weight: .semibold))
+                    .font(Theme.fixed(size * 0.46, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             }
         }
@@ -197,11 +197,11 @@ struct Avatar: View {
         Group {
             if let initial = handle?.first {
                 Text(String(initial).uppercased())
-                    .font(Theme.font(size * 0.5, weight: .semibold))
+                    .font(Theme.fixed(size * 0.5, weight: .semibold))
                     .foregroundStyle(tint)
             } else {
                 Image(systemName: "person.fill")
-                    .font(Theme.font(size * 0.45))
+                    .font(Theme.fixed(size * 0.45))
                     .foregroundStyle(.secondary)
             }
         }
@@ -468,7 +468,7 @@ struct Wordmark: View {
                 Text("stat")
                     .foregroundStyle(Theme.accent)
             }
-            .font(Theme.font(size * 0.88, weight: .bold))
+            .font(Theme.fixed(size * 0.88, weight: .bold))
             // Lowercase, always. It is the command you type.
             .textCase(.lowercase)
             if fills {

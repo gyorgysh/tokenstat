@@ -74,7 +74,7 @@ struct UpdateCard: View {
                         .tint(tint)
                 } else {
                     Image(systemName: symbol)
-                        .font(Theme.font(15))
+                        .font(Theme.fixed(15))
                 }
             }
             .foregroundStyle(tint)
@@ -111,7 +111,7 @@ struct UpdateCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(Theme.font(15))
+                    .font(Theme.fixed(15))
                     .foregroundStyle(Theme.warning)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Update didn't finish")
@@ -160,7 +160,7 @@ struct UpdateCard: View {
         Button(action: action) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: symbol)
-                    .font(Theme.font(15))
+                    .font(Theme.fixed(15))
                     .foregroundStyle(Theme.accent)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)

@@ -196,7 +196,7 @@ struct PhoneHeatmap: View {
             Color.clear.frame(width: gutter, height: monthRow)
             ForEach(0..<7, id: \.self) { row in
                 Text(Self.rowLabel(row))
-                    .font(Theme.font(9))
+                    .font(Theme.fixed(9))
                     .foregroundStyle(.tertiary)
                     .frame(width: gutter, height: cell, alignment: .leading)
             }
@@ -209,7 +209,7 @@ struct PhoneHeatmap: View {
             Color.clear.frame(height: monthRow)
             ForEach(calendar.months) { month in
                 Text(month.name)
-                    .font(Theme.font(10, weight: .medium))
+                    .font(Theme.fixed(10, weight: .medium))
                     .foregroundStyle(.secondary)
                     .offset(x: CGFloat(month.column) * step)
             }

@@ -97,17 +97,23 @@ enum AppFonts {
     /// Falls back to the system monospaced face by the same rule as everything
     /// else: a terminal in a proportional fallback face is unusable, so it is
     /// better to be the wrong monospace than the wrong shape.
+    ///
+    /// Takes no weight on purpose: `NSFont(name:size:)` picks the Regular
+    /// instance of the variable face and has nothing to name a weight with,
+    /// so an argument here would be honoured on the fallback path and
+    /// silently dropped on the real one. If a weighted terminal face is ever
+    /// wanted, select it through the font's `wght` variation axis.
     #if os(macOS)
-    static func terminal(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+    static func terminal(size: CGFloat) -> NSFont {
         guard registered, let font = NSFont(name: mono, size: size) else {
-            return .monospacedSystemFont(ofSize: size, weight: weight)
+            return .monospacedSystemFont(ofSize: size, weight: .regular)
         }
         return font
     }
     #else
-    static func terminal(size: CGFloat, weight: UIFont.Weight = .regular) -> UIFont {
+    static func terminal(size: CGFloat) -> UIFont {
         guard registered, let font = UIFont(name: mono, size: size) else {
-            return .monospacedSystemFont(ofSize: size, weight: weight)
+            return .monospacedSystemFont(ofSize: size, weight: .regular)
         }
         return font
     }

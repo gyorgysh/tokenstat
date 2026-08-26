@@ -83,7 +83,7 @@ struct SyncCard: View {
                         .tint(tint)
                 } else {
                     Image(systemName: symbol)
-                        .font(Theme.font(15))
+                        .font(Theme.fixed(15))
                 }
             }
             .foregroundStyle(tint)

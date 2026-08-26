@@ -1962,7 +1962,7 @@ extension Bridge {
     /// input path at the poll rate.
     static func screenCaptureInput(id: String) async throws -> [Data] {
         let result = try await background("screen.capture.input", ["id": id], patience: Patience.interactive, as: ScreenCaptureInput.self)
-        return result.batch.compactMap { Data(base64Encoded: $0) }
+        return result.events.compactMap { Data(base64Encoded: $0) }
     }
 
     static func screenCaptureClose(id: String) async {

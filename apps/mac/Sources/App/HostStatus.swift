@@ -70,7 +70,7 @@ struct HostStatusCard: View {
                         .tint(Theme.warning)
                 } else {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(Theme.font(15))
+                        .font(Theme.fixed(15))
                 }
             }
             .foregroundStyle(Theme.warning)
