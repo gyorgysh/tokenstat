@@ -13,14 +13,16 @@ Monitor AI work, everywhere
 
 </div>
 
-tokenstat is a local-first app for the AI coding tools you already use. It reads
+tokenstat is a local-first CLI for the AI coding tools you already use. It reads
 their local records, shows tokens, models, projects, sessions, and estimated
 API value in one place, then lets you work with those machines from the desktop
 app or an optional synced account.
 
-The Mac and Windows apps, the iPhone and Android clients, the CLI, and the MCP
-server all share one core. The website at [tokenstat.ai](https://tokenstat.ai)
-is a separate project. This repository is everything that runs on your machine.
+The CLI and macOS desktop app are the stable downloads. Windows desktop, iPhone,
+iPad, and Android clients are under active development and share the same core,
+along with the MCP server. The website at
+[tokenstat.ai](https://tokenstat.ai) is a separate project. This repository is
+everything that runs on your machine.
 
 <p align="center">
   <img src="assets/tui.webp" alt="tokenstat interactive Summary view: headline counters, an activity heatmap, and a per-model table with list-rate equivalents" width="860">
@@ -33,9 +35,9 @@ is a separate project. This repository is everything that runs on your machine.
 ## Highlights
 
 - **Local first.** Counters stay on your machine. Conversation text never reaches the archive
-- **Desktop apps.** Home, Insights, Devices, workspaces, tasks, notes, workflows, and automations, over one host daemon
-- **Mac and Windows.** The Mac app is a signed disk image. The Windows app is a zip: double-click `Tokenstat.exe` to install for this user
-- **Phone clients.** iPhone and Android read the same archive, with a terminal onto a machine you already run
+- **CLI first.** Fast local reports, JSON output, setup, scheduling, updates, and an interactive terminal UI on macOS, Linux, and Windows
+- **macOS desktop.** A signed and notarized disk image with Home, Insights, Devices, workspaces, tasks, notes, workflows, and automations
+- **Clients in development.** Preview Windows desktop and Android builds exercise the shared host and archive while those platforms mature
 - **Many sources.** Claude Code, Codex, Grok, OpenCode, Cline, Antigravity, OpenClaw, Zed, Copilot CLI, Pi, Hermes Agent, Kilo Code, DeepSeek Harness, plus Cursor fetch
 - **One schema.** Daily, weekly, monthly, and per-model views across every tool
 - **MCP.** Agents can ask their own spend over stdio, no hosted server
@@ -78,8 +80,11 @@ stack at all. Front ends call one function, `tokenstat-host::dispatch`.
 
 ## Install
 
-Release builds are on [GitHub Releases](https://github.com/gyorgysh/tokenstat/releases)
-and at [tokenstat.ai](https://tokenstat.ai).
+Stable CLI and macOS desktop builds are on
+[GitHub Releases](https://github.com/gyorgysh/tokenstat/releases) and at
+[tokenstat.ai](https://tokenstat.ai). Windows desktop and Android builds stay in
+the [Preview workflow](https://github.com/gyorgysh/tokenstat/actions/workflows/preview.yml)
+until those clients are ready for stable releases.
 
 ### macOS app
 
@@ -88,14 +93,12 @@ that it keeps itself current. It fetches each release, checks the download
 against the release checksums and against the signature macOS itself would
 check, installs it, and then offers a relaunch. It never restarts on its own.
 
-### Windows app
+### Windows app preview
 
-Download `tokenstat-<version>-windows-x64.zip`, unzip, and double-click
-`Tokenstat.exe`. It copies itself to `%LOCALAPPDATA%\Programs\tokenstat`, writes
-a Start Menu shortcut, and registers Add/Remove Programs. After that it updates
-itself the same way: checksums, and a publisher check once the running build is
-signed. Do not put the CLI in the same folder as the app. Windows paths are
-case-insensitive.
+Run the Preview workflow with `windows` selected, download its artifact, unzip
+it, and double-click `Tokenstat.exe`. Preview builds are unsigned development
+artifacts and are deliberately not attached to GitHub Releases yet. Do not put
+the CLI in the same folder as the app. Windows paths are case-insensitive.
 
 ### Command line
 

@@ -479,7 +479,6 @@ jobs:
           name: tokenstat v${{ needs.verify.outputs.version }}
           prerelease: ${{ needs.verify.outputs.prerelease }}
           body_path: dist/RELEASE_NOTES.md
-          generate_release_notes: true
           files: |
             dist/*.tar.gz
             dist/*.zip
