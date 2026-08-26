@@ -72,12 +72,20 @@ Everything since 0.6.8, which is the last release anybody received.
 - Every control is the app's purple. Switches, pickers, focus rings, selection
   and prominent buttons were system blue everywhere except eight hand-picked
   places.
+- The app is set in its own typefaces, the same two the website uses. Manrope
+  for everything you read as language, and JetBrains Mono for terminals, code,
+  commands and model identifiers, where a lowercase l and a digit 1 have to be
+  different pictures. Both are bundled, so a Mac and an iPhone showing the same
+  screen now show the same screen. Sizes are unchanged and all of it still
+  scales with your text size setting.
 
 ### Fixed
 
 - A long session no longer fails with "Too many open files". The app asked the
   system for a fraction of the descriptors it is allowed, and the first thing
-  to lose the race reported it as a problem with a file.
+  to lose the race reported it as a problem with a file. Connections to another
+  machine are also closed once they have been idle for a minute, rather than
+  being held for as long as the app is open.
 - The app no longer reports "unknown method" when this machine's background
   helper is older than the app. It checks the helper on launch, replaces it,
   and says something a person can act on if it cannot.
