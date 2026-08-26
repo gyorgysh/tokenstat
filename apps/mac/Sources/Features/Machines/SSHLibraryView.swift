@@ -466,15 +466,21 @@ struct SSHLibraryView: View {
 
     private func open(_ destination: SSHLibraryRoute) { route = destination }
 
-    /// The end of a fingerprint, which is the part anybody actually compares.
+    /// A fingerprint without its algorithm prefix.
     ///
     /// Nil for an empty one, so the caller can fall back to the algorithm
     /// rather than print an empty line.
+    ///
+    /// The prefix is dropped in every case, so the column holds one shape
+    /// rather than two. Nothing else is cut here: the row asks for head
+    /// truncation, and a string this trimmed by hand as well came out with
+    /// two ellipses on a narrow phone. Where a fingerprint has to be compared
+    /// in full, that is the editor's job, not a list row's.
     static func shortFingerprint(_ value: String) -> String? {
         guard !value.isEmpty else { return nil }
-        let body = value.hasPrefix("SHA256:") ? String(value.dropFirst("SHA256:".count)) : value
-        guard body.count > 16 else { return value }
-        return "…" + body.suffix(16)
+        guard let separator = value.firstIndex(of: ":") else { return value }
+        let body = String(value[value.index(after: separator)...])
+        return body.isEmpty ? value : body
     }
 
     private var addRoute: SSHLibraryRoute {
