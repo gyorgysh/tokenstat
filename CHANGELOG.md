@@ -5,62 +5,85 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
-## [Unreleased]
+## [0.6.9]
+
+Everything since 0.6.8, which is the last release anybody received.
 
 ### New
 
-- Opening a computer, from its device page or from Workspaces, shows what it is doing: power, CPU, and memory read over the tunnel and not uploaded with usage, with open work and view screen beside them. On the Mac, a workspace that lives on another machine offers that machine's screen without a trip to Devices.
-- Control a shared screen from an iPhone or iPad. One finger moves the pointer, tap clicks, two fingers tap for a right click and drag to scroll, long press then drag holds the button down, and pinch zooms in. A row of keys over the keyboard sends escape, tab, the arrows and sticky ctrl, opt, cmd and shift, and a pull on the bottom edge brings that row back over a full-screen picture. Driving a desktop is at sixty pictures a second and every pointer move is delivered as it happens, on the same bandwidth a session watched from an armchair costs.
-- SSH is a place in the sidebar rather than a panel over Devices. Hosts, keys, snippets and trusted servers are sections you navigate to, folders nest under Hosts, the list gets the whole window and the editor opens beside it. Leaving for Home and coming back keeps you where you were, and the rest of the app stays usable throughout.
-- The encrypted vault is one quiet row above the server list instead of three buttons, two of them destructive, at the top of a screen you open to add a server. Setting it up, replacing the recovery code and deleting it live one click away, each with room to say what it costs.
-- Recovery is confirmed in two steps. The code is on screen to be written down, then off screen while it is typed back, so confirming cannot be done by reading.
-- A saved server carries what it needs to connect: which key to use, which server to reach it through, a starting directory, environment variables, a keepalive, and a colour and folder to find it by. Snippets can ask for `{{values}}` when they run, so one snippet covers every server.
-- Import servers from `~/.ssh/config`. tokenstat reads that file and never writes to it, and shows what it found before saving anything.
-- Trusted servers are listed with their fingerprints, and any of them can be forgotten, so a key that changed can be confirmed again rather than quietly accepted.
-- A key shows its fingerprint, and its public half can be copied in one press for pasting into a server's authorized_keys. On iPhone and iPad, a long press on a key or a snippet offers the same actions as the rest of the list: edit, copy, run a snippet on connect, delete.
-- Android SSH gains search, folders on saved servers, port and starting directory on the add form, and a snippet editor with room for a real command.
-- Every control is the app's purple. Switches, pickers, focus rings, selection and prominent buttons were system blue everywhere except eight hand-picked places.
-
-- SSH typing appears as it is typed rather than a round trip later. A character is drawn locally and replaced by the server's own echo when it arrives, which makes a shell on the other side of the world feel like one in the next room. Nothing is drawn until the line has proved that it echoes, so a password prompt never shows a character of a password.
-
-### Fixed
-
-- A long session no longer fails with "Too many open files". The app asked the system for a fraction of the descriptors it is allowed, and the first thing to lose the race, usually a screen session opening, reported it as a problem with a file.
-- The screen viewer's full-screen control is the glyph every platform draws for it. Spelled out, it was the only sentence in a row of symbols, and it reflowed the toolbar the moment it was used.
-- The held-mouse-button notice no longer sits on top of the key row's own Release button and cut its last key in half. It appears where that row is not on screen, which is where a held button would otherwise be invisible.
-- The encrypted vault row says how many records it holds at the trailing edge, with a placeholder while the account is asked. It used to read "not set up" until the answer arrived and then rewrite itself.
-- The app no longer reports "unknown method" when this machine's background helper is older than the app. It checks the helper on launch, replaces it, and says something a person can act on if it cannot.
-- Screen control can actually be turned on. The toggle was disabled as soon as the picture arrived, which was before anybody could reach it, so sessions were always view only.
-- Turning on view or control asks macOS for the permission it needs, right then, with the prompt that names Tokenstat. Screen Recording used to be requested only once a stream was already failing, and Accessibility was never requested at all, so control silently did nothing. The card now says which permissions are granted, and says out loud that the app has to be open for its screen to be shared.
-- Double clicks, right clicks and scrolling reach the shared Mac, rather than being flattened into a press and a drag.
-- SSH vault setup no longer offers migrate (that path was never in a release). If you did not save the recovery code, or cannot open the vault, you can drop it and create a new one.
-- The unpaid SSH empty state now pitches the vault the same way tasks and notes pitch their screens, with a path to plans.
-- Buttons across the SSH and screen surfaces are one height and line up. A glyph no longer makes a button taller than the one beside it, and destructive actions look like actions rather than links.
-
-## [0.6.9] - 2026-08-24
-
-### New
-
+- SSH from the Mac, the iPhone and the iPad, as a place in the sidebar rather
+  than a panel over Devices. Hosts, keys, snippets and trusted servers are
+  sections you navigate to, folders nest under Hosts, the list gets the whole
+  window and the editor opens beside it. Leaving for Home and coming back keeps
+  you where you were, and the rest of the app stays usable throughout.
+- A saved server carries what it needs to connect: which key to use, which
+  server to reach it through, a starting directory, environment variables, a
+  keepalive, and a colour and folder to find it by. Snippets can ask for
+  `{{values}}` when they run, so one snippet covers every server.
+- Import servers from `~/.ssh/config`, from AWS and from DigitalOcean.
+  tokenstat reads that file and never writes to it, and shows what it found
+  before saving anything.
+- Credentials live in an encrypted vault that can follow the account. It is one
+  quiet row above the server list, saying how many records it holds, with
+  setting it up, replacing the recovery code and deleting it one click away and
+  each with room to say what it costs. Recovery is confirmed in two steps: the
+  code is on screen to be written down, then off screen while it is typed back,
+  so confirming cannot be done by reading.
+- Trusted servers are listed with their fingerprints and any of them can be
+  forgotten, so a key that changed can be confirmed again rather than quietly
+  accepted. A key shows its own fingerprint, and its public half can be copied
+  in one press for pasting into a server's authorized_keys. On iPhone and iPad
+  a long press on a key or a snippet offers edit, copy, run on connect and
+  delete.
+- SSH typing appears as it is typed rather than a round trip later. A character
+  is drawn locally and replaced by the server's own echo when it arrives, which
+  makes a shell on the other side of the world feel like one in the next room.
+  Nothing is drawn until the line has proved that it echoes, so a password
+  prompt never shows a character of a password.
+- Share this Mac's screen with another Apple device on the account. Switch
+  displays, send the system audio, copy both ways, and send a file without
+  leaving the session. macOS is asked for Screen Recording and Accessibility at
+  the moment you turn view or control on, with the prompt that names Tokenstat,
+  and the card says which permissions are granted and that the app has to be
+  open for its screen to be shared.
+- Control that screen from an iPhone or iPad. One finger moves the pointer, tap
+  clicks, two fingers tap for a right click and drag to scroll, long press then
+  drag holds the button down, and pinch zooms in. A row of keys over the
+  keyboard sends escape, tab, the arrows and sticky ctrl, opt, cmd and shift,
+  and a pull on the bottom edge brings that row back over a full-screen
+  picture. Driving a desktop is at sixty pictures a second and every pointer
+  move is delivered as it happens, on the same bandwidth a session watched from
+  an armchair costs.
+- Opening a computer, from its device page or from Workspaces, shows what it is
+  doing: power, CPU and memory read over the tunnel and not uploaded with
+  usage, with open work and view screen beside them. On the Mac, a workspace
+  that lives on another machine offers that machine's screen without a trip to
+  Devices.
 - A preview Windows desktop app. Its development build installs for the current
   user, adds a Start Menu shortcut, and exercises the update path while the
   platform matures outside stable GitHub Releases.
 - A preview Android client. Pair it to an account the way the iPhone does, then
   use this Mac from the phone: terminals, folders, and the rest of the remote
-  surface.
-- SSH from the Mac. Save hosts, open a session, keep credentials in an
-  encrypted vault that can follow the account, and import machines from AWS
-  and DigitalOcean.
-- Share this Mac's screen with another Apple device on the account. Switch
-  displays, send the system audio, copy both ways, and send a file without
-  leaving the session.
-- Install the host as a service on a machine that has no desktop session, so
-  it answers after a reboot the same way Always-on host does on a Mac mini.
+  surface. Android SSH gains search, folders on saved servers, port and
+  starting directory on the add form, and a snippet editor with room for a real
+  command.
+- Install the host as a service on a machine that has no desktop session, so it
+  answers after a reboot the same way Always-on host does on a Mac mini.
+- Every control is the app's purple. Switches, pickers, focus rings, selection
+  and prominent buttons were system blue everywhere except eight hand-picked
+  places.
 
 ### Fixed
 
-- Opening the Mac app on a recent macOS beta no longer aborts while the
-  window is first laid out. The splash used to animate the split view in, and
-  AppKit refused the extra constraint pass.
+- A long session no longer fails with "Too many open files". The app asked the
+  system for a fraction of the descriptors it is allowed, and the first thing
+  to lose the race reported it as a problem with a file.
+- The app no longer reports "unknown method" when this machine's background
+  helper is older than the app. It checks the helper on launch, replaces it,
+  and says something a person can act on if it cannot.
+- Opening the Mac app on a recent macOS beta no longer aborts while the window
+  is first laid out. The splash used to animate the split view in, and AppKit
+  refused the extra constraint pass.
 
 ## [0.6.8] - 2026-08-21
 
