@@ -891,7 +891,11 @@ private final class ScreenViewerModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 guard let self, !Task.isCancelled else { return }
-                guard self.state == .streaming, let id = self.session?.id else { continue }
+                // Any state with a session behind it, not just streaming. The
+                // relay's idle cut does not care why the viewer went quiet,
+                // so staying silent through a reconnect would have it close
+                // the very session the reconnect is trying to resume.
+                guard let id = self.session?.id else { continue }
                 let payload = try? JSONSerialization.data(withJSONObject: ["type": "heartbeat"])
                 guard let payload else { continue }
                 try? await Bridge.screenViewerInput(id: id, data: payload)
