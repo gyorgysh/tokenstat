@@ -125,6 +125,17 @@ jobs:
       - name: Every control takes its colour from the theme
         run: bash scripts/check-accent-colour.sh
 
+  # And again: a control in the wrong typeface is a third rule, and three
+  # rules sharing one red check is one check that says nothing.
+  fonts:
+    name: fonts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Every font comes from the type scale
+        run: bash scripts/check-fonts.sh
+
   # Its own job again: this one is a protocol mismatch between two languages,
   # not a style rule, and it fails silently at runtime rather than loudly at
   # build time. A red check with its own name is the only warning there is.
