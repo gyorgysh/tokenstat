@@ -58,6 +58,8 @@ enum ActionIcon {
     case browser
     case collapse
     case commit
+    case enterFullScreen
+    case exitFullScreen
 
     // Destructive
     case delete
@@ -135,6 +137,12 @@ enum ActionIcon {
         case .restore: return "arrow.uturn.backward"
         case .browser: return "globe"
         case .collapse: return "chevron.up"
+        // The two arrows every platform draws for this, rather than the
+        // generic "leaves this surface" arrow the button used to borrow.
+        // Filling a display is not going somewhere else, and the pair also
+        // says which direction it is about to go in.
+        case .enterFullScreen: return "arrow.up.left.and.arrow.down.right"
+        case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
         case .commit: return "checkmark.circle"
 
         case .delete: return "trash"

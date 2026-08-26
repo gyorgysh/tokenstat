@@ -600,7 +600,11 @@ struct ScreenKeyBar: View {
                 Button(action: pointer.toggleDrag) {
                     ActionIcon.move.label(pointer.dragLatched ? "Release" : "Hold")
                 }
-                .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched))
+                // One width for both words. "Release" is wider than "Hold",
+                // so the pinned button used to grow the moment it was pressed
+                // and shove the whole scrolling row sideways under the
+                // thumb that had just pressed it.
+                .buttonStyle(ScreenKeyStyle(active: pointer.dragLatched, width: 104))
                 .padding(.leading, Theme.Space.m)
                 .padding(.trailing, Theme.Space.s)
             }
@@ -643,6 +647,20 @@ struct ScreenKeyBar: View {
                 .padding(.trailing, Theme.Space.m)
                 .padding(.vertical, Theme.Space.s)
             }
+            // A keycap cut in half at the edge reads as a broken row rather
+            // than as one that scrolls. Fading the last few points says the
+            // same thing and says it on purpose.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0),
+                        .init(color: .black, location: 0.94),
+                        .init(color: .black.opacity(0), location: 1),
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
         }
         .background(.ultraThinMaterial)
     }
@@ -662,11 +680,15 @@ struct ScreenPointerControls {
 
 private struct ScreenKeyStyle: ButtonStyle {
     let active: Bool
+    /// A fixed width, for a key whose label changes while it is on screen.
+    var width: CGFloat?
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(active ? Color.white : Color.primary)
+            .lineLimit(1)
+            .frame(width: width)
             .frame(minWidth: 44, minHeight: Theme.Control.height)
             .background(
                 RoundedRectangle(cornerRadius: 8)

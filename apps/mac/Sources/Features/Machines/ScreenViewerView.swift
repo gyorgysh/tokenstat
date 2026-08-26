@@ -55,6 +55,16 @@ struct ScreenViewerView: View {
     /// Whether the last rotation into landscape has already been acted on, so
     /// leaving immersive mode by hand is not undone on the next redraw.
     @State private var appliedLandscape = false
+    /// The key row has been pulled up over a picture that otherwise has the
+    /// whole display.
+    ///
+    /// Full screen and landscape both hide the row, and in control mode that
+    /// left the only click, right click and modifier keys on the phone behind
+    /// a trip out of full screen and back. The row is what somebody
+    /// controlling a desktop reaches for most, so it gets a way up that does
+    /// not cost the picture: a grab handle on the bottom edge, dragged or
+    /// tapped.
+    @State private var keysRevealed = false
     #endif
 
     var body: some View {
@@ -152,9 +162,18 @@ struct ScreenViewerView: View {
             }
             #if os(macOS)
             ToolbarItem {
-                Button(viewerIsFullScreen ? "Exit full screen" : "Full screen", .external) {
+                // The glyph alone here too. Spelled out it was the only
+                // sentence in a row of symbols, and "Exit full screen" is long
+                // enough that the toolbar reflowed the moment somebody used
+                // it. The title stays as the help tag and the accessibility
+                // label, which is where a word belongs on a Mac toolbar.
+                Button(
+                    viewerIsFullScreen ? "Exit full screen" : "Full screen",
+                    viewerIsFullScreen ? .exitFullScreen : .enterFullScreen
+                ) {
                     NSApp.keyWindow?.toggleFullScreen(nil)
                 }
+                .labelStyle(.iconOnly)
                 .help(viewerIsFullScreen ? "Return this viewer to its window" : "Fill this display")
             }
             #else
@@ -164,7 +183,7 @@ struct ScreenViewerView: View {
                 // the screen with the least room to spare is the one place a
                 // label cannot afford to be a word. The title stays as the
                 // accessibility label and the iPad tooltip.
-                Button("Full screen", .external) {
+                Button("Full screen", .enterFullScreen) {
                     withAnimation { immersive = true }
                 }
                 .labelStyle(.iconOnly)
@@ -183,6 +202,11 @@ struct ScreenViewerView: View {
         // stream rather than being refused.
         .onChange(of: controlling) { _, wanted in
             viewOffset = .zero
+            #if !os(macOS)
+            // Handing control back leaves nothing on the key row worth
+            // showing, so a row pulled up over the picture goes with it.
+            if !wanted { keysRevealed = false }
+            #endif
             // Handing control back with the button still latched down would
             // leave the far end holding a click nothing here can release.
             if !wanted, dragLatched {
@@ -208,8 +232,17 @@ struct ScreenViewerView: View {
                 ProgressView(value: progress).padding().background(.ultraThinMaterial, in: Capsule())
             }
         }
+        // Said once, not twice.
+        //
+        // The key row's first button already reads "Release" while the button
+        // is down, so this capsule sat on top of it saying the same thing in
+        // more words, over a strip too narrow for both: the row's last keycap
+        // was cut in half to make room for a control that was already on the
+        // row. It belongs to the shapes that have no key row instead, which
+        // are exactly the ones where a held button would otherwise be
+        // invisible.
         .overlay(alignment: .bottom) {
-            if dragLatched {
+            if dragLatched, !showsKeyBar {
                 HStack(spacing: Theme.Space.s) {
                     Text("Holding the left button")
                     Button("Release", .move) {
@@ -263,7 +296,7 @@ struct ScreenViewerView: View {
         // always in the same corner.
         .overlay(alignment: .topTrailing) {
             if immersive {
-                Button("Exit full screen", .collapse) {
+                Button("Exit full screen", .exitFullScreen) {
                     withAnimation { immersive = false }
                 }
                 .buttonStyle(SecondaryButtonStyle(small: true))
@@ -272,35 +305,25 @@ struct ScreenViewerView: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            // Landscape is the full-screen viewing surface on a phone. The
-            // key row consumes too much of its short edge; rotate back for the
-            // keyboard controls, while pinch remains available in either
-            // view or control mode.
-            if controlling, !isCompactHeight, !isImmersive {
-                ScreenKeyBar(
-                    modifiers: $heldModifiers,
-                    send: { code, flags in
-                        model.sendKey(code, down: true, flags: flags)
-                        model.sendKey(code, down: false, flags: flags)
-                    },
-                    pointer: ScreenPointerControls(
-                        fine: fine,
-                        dragLatched: dragLatched,
-                        zoom: zoom,
-                        click: { button, count in model.click(button: button, count: count) },
-                        toggleDrag: {
-                            dragLatched.toggle()
-                            model.press(dragLatched)
-                        },
-                        toggleFine: { fine.toggle() },
-                        resetZoom: {
-                            withAnimation {
-                                zoom = 1
-                                viewOffset = .zero
-                            }
-                        }
-                    )
-                )
+            // Full screen and landscape are the shapes somebody chose for the
+            // picture, so the key row does not take a strip of either by
+            // default. It is still what control mode reaches for most, so it
+            // is one pull away rather than a rotation and a trip out of full
+            // screen away.
+            if controlling {
+                VStack(spacing: 0) {
+                    // The way back to the key row, for the two shapes that
+                    // hide it.
+                    //
+                    // A tap on the picture cannot do this job: in control
+                    // mode a tap is a click on somebody's desktop. So the
+                    // handle is its own small surface on the bottom edge, out
+                    // of the picture's way, and it answers to a tap or a drag
+                    // the way a sheet's grabber does. In portrait with the
+                    // chrome up the row is furniture and needs no handle.
+                    if !keyBarIsFurniture { keyBarHandle }
+                    if showsKeyBar { keyBar }
+                }
             }
         }
         // Rotating a phone onto its side is asking for the picture, so going
@@ -308,6 +331,7 @@ struct ScreenViewerView: View {
         // Tracked, so leaving immersive mode by hand while still in landscape
         // is not undone by the next redraw.
         .onChange(of: isCompactHeight) { _, compact in
+            keysRevealed = false
             if compact {
                 keyboardWanted = false
                 guard !appliedLandscape else { return }
@@ -341,6 +365,29 @@ struct ScreenViewerView: View {
         false
         #else
         immersive
+        #endif
+    }
+
+    /// Whether the key row is on screen.
+    ///
+    /// It has a place of its own in portrait with the chrome up. Full screen
+    /// and landscape take that place away, and there it appears only because
+    /// somebody pulled the handle on the bottom edge.
+    private var showsKeyBar: Bool {
+        #if os(macOS)
+        false
+        #else
+        keyBarIsFurniture || keysRevealed
+        #endif
+    }
+
+    /// Whether the key row has a place of its own rather than being pulled up
+    /// over the picture. Portrait with the chrome showing, and nothing else.
+    private var keyBarIsFurniture: Bool {
+        #if os(macOS)
+        false
+        #else
+        !isCompactHeight && !immersive
         #endif
     }
 
@@ -531,6 +578,71 @@ struct ScreenViewerView: View {
             height: min(max(offset.height, -vertical), vertical)
         )
     }
+
+    #if !os(macOS)
+    /// The row of keys and pointer buttons a touch screen has no other way to
+    /// send.
+    private var keyBar: some View {
+        ScreenKeyBar(
+            modifiers: $heldModifiers,
+            send: { code, flags in
+                model.sendKey(code, down: true, flags: flags)
+                model.sendKey(code, down: false, flags: flags)
+            },
+            pointer: ScreenPointerControls(
+                fine: fine,
+                dragLatched: dragLatched,
+                zoom: zoom,
+                click: { button, count in model.click(button: button, count: count) },
+                toggleDrag: {
+                    dragLatched.toggle()
+                    model.press(dragLatched)
+                },
+                toggleFine: { fine.toggle() },
+                resetZoom: {
+                    withAnimation {
+                        zoom = 1
+                        viewOffset = .zero
+                    }
+                }
+            )
+        )
+    }
+
+    /// The grab handle that pulls the key row up over a full-screen picture.
+    ///
+    /// Deliberately quiet and deliberately small. It sits on the bottom edge
+    /// where a phone already expects a handle, it is a couple of points of
+    /// picture at most, and it is the only part of the screen in control mode
+    /// that a touch does not send to the far end.
+    private var keyBarHandle: some View {
+        VStack(spacing: 2) {
+            Capsule()
+                .fill(Color.white.opacity(0.55))
+                .frame(width: 44, height: 4)
+            Image(systemName: keysRevealed ? "chevron.down" : "chevron.up")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Color.white.opacity(0.55))
+        }
+        // The handle is 4 points tall and a thumb is not. The padding is the
+        // target, so the strip that answers is a proper 44.
+        .padding(.horizontal, Theme.Space.l)
+        .padding(.vertical, Theme.Space.s)
+        .contentShape(.rect)
+        .onTapGesture { withAnimation(.snappy(duration: 0.2)) { keysRevealed.toggle() } }
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 8)
+                .onEnded { value in
+                    guard abs(value.translation.height) > 8 else { return }
+                    withAnimation(.snappy(duration: 0.2)) {
+                        keysRevealed = value.translation.height < 0
+                    }
+                }
+        )
+        .accessibilityLabel(keysRevealed ? "Hide the key row" : "Show the key row")
+        .accessibilityAddTraits(.isButton)
+    }
+    #endif
 
     /// Trackpad mode hides the finger from the pointer, so the pointer has to
     /// be visible. Direct mode does not need it: the finger is the pointer.
