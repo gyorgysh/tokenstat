@@ -110,6 +110,17 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 await fail(id, error: error)
             }
         }
+        // A session that stayed but changed hands. Control is flipped on the
+        // live session now, so this is the ordinary way somebody starts
+        // driving, not a rare case: without it the picture rate would stay at
+        // the watching pace for the whole session.
+        for session in sessions where !added.contains(session.id) {
+            await encoder(for: session.id)?.setControl(session.control)
+        }
+        // Nobody is driving any more, either because the session ended or
+        // because control went back. A viewer that vanished mid-drag would
+        // otherwise leave this Mac with the mouse button still down.
+        if !sessions.contains(where: \.control) { ScreenInput.releaseHeld() }
     }
 
     private func encoder(for id: String) -> ScreenVideoEncoder? { lock.withLock { encoders[id] } }
@@ -248,6 +259,20 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         if let compression { VTCompressionSessionInvalidate(compression) }
         compression = nil
         forceKey = true
+    }
+
+    /// Follow a session that was handed the mouse, or had it taken back.
+    ///
+    /// Control is no longer fixed when a session opens: the viewer flips it on
+    /// the live session rather than reopening the stream. The only thing that
+    /// changes here is the picture rate, so the stream is reconfigured in
+    /// place instead of being torn down.
+    func setControl(_ wanted: Bool) async {
+        guard wanted != control else { return }
+        control = wanted
+        guard let stream, let config = configuration else { return }
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
+        try? await stream.updateConfiguration(config)
     }
 
     func setQuality(_ quality: CGFloat) async {
@@ -472,6 +497,49 @@ private enum ScreenAudioPCM {
 }
 
 private enum ScreenInput {
+    /// Which buttons the far end is currently holding down.
+    ///
+    /// macOS does not infer a drag from a move that happens to arrive between
+    /// a press and a release: an application is told about a drag by
+    /// `leftMouseDragged`, and gets `mouseMoved` for a pointer that is merely
+    /// travelling. Posting the wrong one is why a dragged window sat still and
+    /// then jumped to its new place on release, and why dragging to select
+    /// text selected nothing.
+    ///
+    /// Read and written on the capture helper's poll, which is one task, so a
+    /// plain box is enough.
+    nonisolated(unsafe) private static var held: Set<CGMouseButton> = []
+
+    /// The drag event for a button that is down, or a plain move.
+    private static func moveType() -> (CGEventType, CGMouseButton) {
+        if held.contains(.left) { return (.leftMouseDragged, .left) }
+        if held.contains(.right) { return (.rightMouseDragged, .right) }
+        if held.contains(.center) { return (.otherMouseDragged, .center) }
+        return (.mouseMoved, .left)
+    }
+
+    /// Put the pointer somewhere, as a drag when a button is held.
+    private static func postMove(_ source: CGEventSource?, to point: CGPoint) {
+        let (type, button) = moveType()
+        CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
+            .post(tap: .cghidEventTap)
+    }
+
+    /// Forget every held button. Called when a session ends or hands control
+    /// back, so a viewer that vanished mid-drag cannot leave this Mac
+    /// believing the mouse is still down.
+    static func releaseHeld() {
+        guard !held.isEmpty else { return }
+        let source = CGEventSource(stateID: .hidSystemState)
+        let point = CGEvent(source: nil)?.location ?? .zero
+        for button in held {
+            let type: CGEventType = button == .right ? .rightMouseUp : (button == .center ? .otherMouseUp : .leftMouseUp)
+            CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
+                .post(tap: .cghidEventTap)
+        }
+        held.removeAll()
+    }
+
     struct Event: Decodable {
         var type: String
         var x: Double?
@@ -512,12 +580,20 @@ private enum ScreenInput {
         let cg: CGEvent?
         switch event.type {
         case "pointer":
-            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
-            cg = CGEvent(mouseEventSource: source, mouseType: event.down == true ? .leftMouseDown : .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-        case "move": cg = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+            postMove(source, to: point)
+            let down = event.down == true
+            if down { held.insert(.left) } else { held.remove(.left) }
+            cg = CGEvent(mouseEventSource: source, mouseType: down ? .leftMouseDown : .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
+        // A move while a button is held is a drag, and has to be posted as
+        // one. See `held`.
+        case "move":
+            let (type, button) = moveType()
+            cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
         case "mouse":
             let button = CGMouseButton(rawValue: UInt32(event.button ?? 0)) ?? .left
-            let type: CGEventType = event.down == true ? (button == .right ? .rightMouseDown : .leftMouseDown) : (button == .right ? .rightMouseUp : .leftMouseUp)
+            let down = event.down == true
+            let type: CGEventType = down ? (button == .right ? .rightMouseDown : .leftMouseDown) : (button == .right ? .rightMouseUp : .leftMouseUp)
+            if down { held.insert(button) } else { held.remove(button) }
             cg = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
         // Press and release in one message, with the click count the caller
         // means. A touch client cannot rely on two separate messages arriving
@@ -531,8 +607,7 @@ private enum ScreenInput {
             // click would make a double click arrive as three clicks: the first
             // click of the pair has already been sent as its own press.
             let clicks = max(1, min(3, event.clickCount ?? 1))
-            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)?
-                .post(tap: .cghidEventTap)
+            postMove(source, to: point)
             for type in [downType, upType] {
                 let click = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
                 click?.setIntegerValueField(.mouseEventClickState, value: Int64(clicks))
@@ -543,8 +618,7 @@ private enum ScreenInput {
         // Two-finger scrolling. Pixel units rather than lines, so the distance
         // a finger travelled is the distance the content moves.
         case "scroll":
-            CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?
-                .post(tap: .cghidEventTap)
+            postMove(source, to: point)
             cg = CGEvent(
                 scrollWheelEvent2Source: source,
                 units: .pixel,
