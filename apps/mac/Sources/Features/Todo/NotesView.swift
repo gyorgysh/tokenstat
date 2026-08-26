@@ -200,7 +200,8 @@ struct NotesView: View {
     }
 
     private func row(_ note: TodoCard) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
+        let selected = model.selectedCardID == note.id
+        return VStack(alignment: .leading, spacing: Theme.Space.s) {
             HStack(alignment: .top, spacing: Theme.Space.s) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(note.title)
@@ -248,11 +249,19 @@ struct NotesView: View {
             }
         }
         .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .background(
+            selected ? Theme.accentSoft : Theme.panel,
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: Theme.cardRadius)
-                .strokeBorder(Theme.border, lineWidth: 1)
+                .strokeBorder(selected ? Theme.accent : Theme.border, lineWidth: 1)
         }
+        // The whole card, not a disclosure control. A note is one paragraph
+        // and the pane beside it is where the rest of it is, so reaching that
+        // pane has to be the ordinary thing pressing a note does.
+        .contentShape(.rect)
+        .onTapGesture { model.selectCard(note.id) }
     }
 
     private func placeName(for note: TodoCard) -> String {
@@ -272,7 +281,11 @@ struct NotesView: View {
 ///
 /// Capture stays cheap because this decision happens later, in a panel that
 /// says what it is doing, not a hidden menu of folder names.
-private struct ConvertNoteSheet: View {
+///
+/// Not private: the list offers this on a row and the inspector offers it on
+/// the selected note, and two copies of one sheet is how they end up asking
+/// different questions.
+struct ConvertNoteSheet: View {
     let note: TodoCard
     let folders: [WorkspaceFolder]
     let onConvert: (String) -> Void

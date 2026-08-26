@@ -31,6 +31,11 @@ final class SSHLibraryModel {
     /// save that did not happen. Reporting it as `error` is what made adding
     /// and deleting look broken while both were actually working.
     var vaultError: String?
+    /// True while a sync is running, so a screen can say so rather than
+    /// leaving somebody pressing a button that appears to do nothing.
+    private(set) var vaultSyncing = false
+    /// When the last sync finished, whatever it found to do.
+    private(set) var vaultSyncedAt: Date?
     var search = ""
 
     /// What the inspector column is showing, on the Mac shell where the list
@@ -84,7 +89,7 @@ final class SSHLibraryModel {
             self.snippets = try await snippets
             error = nil
             loaded = true
-            if let vaultTier { await pullVault(tier: vaultTier) }
+            if let vaultTier { await syncVault(tier: vaultTier) }
             knownHosts = (try? await Bridge.sshKnownHosts()) ?? []
         } catch { self.error = error.localizedDescription }
     }
@@ -203,29 +208,8 @@ final class SSHLibraryModel {
     func seedVaultFromThisDevice(tier: String) async {
         vaultTier = tier
         vaultError = nil
-        // Folders before the hosts that name them, for the same reason the
-        // pull orders them: a client reading this back rejects a host whose
-        // folder it has not seen.
-        for folder in folders {
-            await mirror(id: "folder:\(folder.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: folder))
-        }
-        for host in hosts {
-            await mirror(id: "host:\(host.id)", envelope: SSHVaultEnvelope(kind: "host", host: host))
-        }
-        for snippet in snippets {
-            await mirror(id: "snippet:\(snippet.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: snippet))
-        }
-        for key in keys {
-            guard let material = try? SSHSecretStore.load(reference: key.secretRef) else { continue }
-            await mirror(id: "key:\(key.id)", envelope: SSHVaultEnvelope(
-                kind: "key",
-                key: SSHVaultSyncedKey(
-                    id: key.id, label: key.label, algorithm: key.algorithm,
-                    publicKey: key.publicKey, privateKey: material,
-                    hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
-                )
-            ))
-        }
+        await pushMissing(to: tier, alreadyInVault: [])
+        vaultSyncedAt = Date()
     }
 
     /// Keys whose private half is not on this device.
@@ -329,6 +313,78 @@ final class SSHLibraryModel {
         }
     }
 
+    // MARK: - Syncing
+
+    /// Both directions, in the one order that converges.
+    ///
+    /// The vault used to be brought up to date by the pull alone, and the pull
+    /// walks the records the vault already has. A record it has never heard of
+    /// is not in that walk, so everything saved before the vault existed
+    /// stayed on this device forever: somebody with forty servers made a vault,
+    /// watched it say "0 records", and had nothing to press. Only records
+    /// edited afterwards ever went in.
+    ///
+    /// So the pull answers with what the vault holds, and everything here that
+    /// is not in that answer is pushed. Newly created vault or not, the two
+    /// sides end up saying the same thing.
+    ///
+    /// `asked` separates a sync somebody pressed from the one every arrival at
+    /// the screen runs. A vault that cannot be read is worth a sentence when
+    /// the answer to a button press would otherwise be nothing at all, and is
+    /// not worth a banner on a screen somebody merely opened: a locked vault
+    /// already says "Locked" on its own row, and reporting it twice on every
+    /// load is how a normal state starts looking like a fault.
+    func syncVault(tier: String, asked: Bool = false) async {
+        guard !vaultSyncing else { return }
+        vaultSyncing = true
+        defer { vaultSyncing = false }
+        vaultTier = tier
+        vaultError = nil
+        guard let known = await pullVault(tier: tier, reporting: asked) else { return }
+        await pushMissing(to: tier, alreadyInVault: known)
+        vaultSyncedAt = Date()
+        await reload()
+    }
+
+    /// Sync because somebody asked, rather than because a screen appeared.
+    ///
+    /// There was no way to ask at all. A vault that had missed something, for
+    /// any reason, stayed that way until the next edit to the same record, and
+    /// the screen offered nothing to press in the meantime.
+    func syncNow() async {
+        guard let vaultTier else { return }
+        await syncVault(tier: vaultTier, asked: true)
+    }
+
+    /// Put everything the vault has not got into it.
+    ///
+    /// Folders before the hosts that name them, for the same reason the pull
+    /// orders them: a client reading this back rejects a host whose folder it
+    /// has not seen. A key with no private half on this device is skipped, not
+    /// pushed as a row nothing can connect with.
+    private func pushMissing(to tier: String, alreadyInVault known: Set<String>) async {
+        for folder in folders where !known.contains("folder:\(folder.id)") {
+            await mirror(id: "folder:\(folder.id)", envelope: SSHVaultEnvelope(kind: "folder", folder: folder))
+        }
+        for host in hosts where !known.contains("host:\(host.id)") {
+            await mirror(id: "host:\(host.id)", envelope: SSHVaultEnvelope(kind: "host", host: host))
+        }
+        for snippet in snippets where !known.contains("snippet:\(snippet.id)") {
+            await mirror(id: "snippet:\(snippet.id)", envelope: SSHVaultEnvelope(kind: "snippet", snippet: snippet))
+        }
+        for key in keys where !known.contains("key:\(key.id)") {
+            guard let material = try? SSHSecretStore.load(reference: key.secretRef) else { continue }
+            await mirror(id: "key:\(key.id)", envelope: SSHVaultEnvelope(
+                kind: "key",
+                key: SSHVaultSyncedKey(
+                    id: key.id, label: key.label, algorithm: key.algorithm,
+                    publicKey: key.publicKey, privateKey: material,
+                    hardwareBacked: key.hardwareBacked, updatedMs: key.updatedMs
+                )
+            ))
+        }
+    }
+
     // MARK: - Reading the vault back
 
     /// Merge the vault into what is on this device.
@@ -343,8 +399,24 @@ final class SSHLibraryModel {
     /// `updatedMs` decides it now. Newer wins, and a local record that is
     /// newer is pushed back, so the account converges instead of disagreeing
     /// quietly.
-    private func pullVault(tier: String) async {
-        guard let records = try? await Bridge.sshVaultRecords(recovery: "", tier: tier) else { return }
+    ///
+    /// Answers with every vault id it saw, tombstones included, which is what
+    /// `pushMissing` needs to know what the vault has never been told about.
+    /// Nil where the vault could not be read at all: that is not an empty
+    /// vault, and treating it as one would push this device's whole library
+    /// at something that had just refused to answer.
+    private func pullVault(tier: String, reporting: Bool = false) async -> Set<String>? {
+        let records: [SSHVaultRecord]
+        do {
+            records = try await Bridge.sshVaultRecords(recovery: "", tier: tier)
+        } catch {
+            if reporting { vaultError = error.localizedDescription }
+            return nil
+        }
+        // Every id the vault holds, decodable or not, tombstones included: a
+        // record this build cannot read is still one the vault has, and
+        // pushing over it would replace what a newer client wrote.
+        let known = Set(records.map(\.id))
         var changed = false
         // Folders first, and shallow before deep. A host names the folder it
         // belongs to and the host refuses a folder it has never heard of, so a
@@ -405,6 +477,7 @@ final class SSHLibraryModel {
             } catch { self.error = error.localizedDescription }
         }
         if changed { await reload() }
+        return known
     }
 
     /// A key is the one record where an equal stamp still means work: the row

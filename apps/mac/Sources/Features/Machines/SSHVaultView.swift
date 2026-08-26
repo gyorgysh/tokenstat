@@ -258,6 +258,14 @@ struct SSHVaultScreen: View {
                             vault.error = nil
                         }
                     }
+                    // What the last sync could not do. It has its own line on
+                    // the library screen, which this sheet covers, so a sync
+                    // started here would otherwise report nothing at all.
+                    if let library, let problem = library.vaultError {
+                        InlineBanner(text: "Not everything synced. \(FriendlyError.from(problem).message)") {
+                            library.vaultError = nil
+                        }
+                    }
                     if vault.unconfirmedRecovery {
                         action(
                             title: "Confirm your recovery code",
@@ -321,6 +329,25 @@ struct SSHVaultScreen: View {
                     } else {
                         status
                         if canWrite {
+                            // First, because it is the one thing on this
+                            // screen somebody opens it to do. The three below
+                            // it are maintenance.
+                            action(
+                                title: "Sync now",
+                                detail: syncDetail,
+                                button: library?.vaultSyncing == true ? "Syncing" : "Sync now",
+                                icon: .refresh,
+                                busy: library?.vaultSyncing == true
+                            ) {
+                                // The count on this screen is the vault's own
+                                // answer, so it has to be asked again or a
+                                // sync that just carried thirty records across
+                                // still reads "0 records".
+                                Task {
+                                    await library?.syncNow()
+                                    await vault.refresh()
+                                }
+                            }
                             action(
                                 title: "Change the password",
                                 detail: "Ask for the one you use now, then the new one. The records are untouched: only the lock around them changes.",
@@ -409,6 +436,18 @@ struct SSHVaultScreen: View {
             SSHVaultDeleteSheet(vault: vault, tier: tier, canWrite: canWrite, library: library)
         }
         .onChange(of: vault.recovery) { _, value in if value != nil { showingRecovery = true } }
+        // Making a vault, and unlocking one, both end with this device able to
+        // write to a vault it could not write to a moment ago. Neither used to
+        // put anything into it: a fresh vault said "0 records" beside a list of
+        // forty servers, and the only thing that ever went in was the next
+        // record somebody happened to edit.
+        .onChange(of: showingSetup) { was, now in
+            guard was, !now, vault.created, canWrite, let library else { return }
+            Task {
+                await library.syncVault(tier: tier, asked: true)
+                await vault.refresh()
+            }
+        }
         .task { await vault.refresh() }
         .task { await vault.watch() }
         // Coming back to the app is the moment somebody has most likely just
@@ -429,6 +468,22 @@ struct SSHVaultScreen: View {
             return "You do not need the password or the recovery code for this. The vault is removed from the account, and anything in it that this device never received is gone for good.\n\n\(kept)"
         }
         return "The vault is removed from the account and every device is asked to set up a new one. This cannot be undone.\n\n\(kept)"
+    }
+
+    /// What Sync now does, and what the last one did.
+    ///
+    /// The sentence about what it does matters as much as the button: this is
+    /// the screen where somebody who has just made a vault and still sees
+    /// "0 records" comes looking for the thing that carries their servers into
+    /// it, and until now there was nothing here to tell them or to press.
+    private var syncDetail: String {
+        let what = "Puts anything saved on this Mac that the vault has not got into it, and takes anything your other devices have added since."
+        guard let library else { return what }
+        if library.vaultSyncing { return "\(what)\n\nSyncing now." }
+        guard let when = library.vaultSyncedAt else {
+            return "\(what)\n\nNot synced yet on this Mac."
+        }
+        return "\(what)\n\nLast synced \(RelativeClock.phrase(for: when, style: .full))."
     }
 
     private var status: some View {
@@ -457,6 +512,7 @@ struct SSHVaultScreen: View {
         icon: ActionIcon,
         prominent: Bool = false,
         destructive: Bool = false,
+        busy: Bool = false,
         perform: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
@@ -479,6 +535,7 @@ struct SSHVaultScreen: View {
                     Button(button, icon, action: perform).buttonStyle(SecondaryButtonStyle())
                 }
             }
+            .disabled(busy)
             .padding(.top, 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

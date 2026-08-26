@@ -907,7 +907,7 @@ struct RootView: View {
             case .workspace(_, .todo):
                 todoInspector
             case .workspace(_, .notes):
-                EmptyView()
+                notesInspector
             case .workspace(_, .workflows), .global(.workflows):
                 WorkflowsInspector(
                     model: workflows,
@@ -946,7 +946,7 @@ struct RootView: View {
             case .global(.todo):
                 todoInspector
             case .global(.notes):
-                EmptyView()
+                notesInspector
             case .global(.machines):
                 MachinesInspector(model: machines) { closeInspector() }
             case let .sshTerminals(hostID):
@@ -994,6 +994,12 @@ struct RootView: View {
                 launchTaskInFront(launch)
             }
         ) { closeInspector() }
+    }
+
+    /// The selected note, beside the list it was picked from. The global list
+    /// and a folder's differ only in what the list is showing.
+    private var notesInspector: some View {
+        NotesInspector(model: todo, folders: workspaces.folders) { closeInspector() }
     }
 
     /// Whether the inspector is a floating overlay rather than a column:

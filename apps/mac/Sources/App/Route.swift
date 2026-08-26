@@ -77,13 +77,15 @@ enum Route: Hashable {
 
     /// Whether the trailing inspector column exists here.
     ///
-    /// Account and Notes have nothing to put beside them. Everything else
-    /// has a panel, so the default is yes, and every SSH section says yes:
-    /// the list is the content column and the editor is the inspector.
+    /// Account is the one screen with nothing to put beside it. Everything
+    /// else has a panel, so the default is yes, and every SSH section says
+    /// yes: the list is the content column and the editor is the inspector.
+    ///
+    /// Notes used to be the other exception, which is why a note's own text
+    /// could be written and then never read again on a wide window while a
+    /// task one list over had a whole pane for the same thing.
     var hasInspector: Bool {
         globalSection != .account
-            && globalSection != .notes
-            && workspaceSection != .notes
     }
 }
 

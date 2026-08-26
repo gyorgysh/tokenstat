@@ -121,16 +121,23 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
             do {
                 let chunk = try await Bridge.readSSHSession(id: handle, offset: offset)
                 if !chunk.data.isEmpty { noteEcho(chunk.data) }
-                // Before anything reaches the emulator, and only here. What
-                // was guessed has to come off the screen before the far end's
-                // own version of it goes on, or the line ends up saying
-                // everything twice. Both happen inside one turn on the main
-                // actor, so there is no frame in which the line is missing.
-                if chunk.dropped || !chunk.data.isEmpty { withdrawPredictions() }
-                if chunk.dropped { view.feed(text: "\r\n[tokenstat: older output was dropped]\r\n") }
+                // A gap in the stream says nothing about where the cursor is,
+                // so there is nothing to reconcile a guess against and every
+                // one of them comes off.
+                if chunk.dropped {
+                    withdrawPredictions()
+                    view.feed(text: "\r\n[tokenstat: older output was dropped]\r\n")
+                }
                 if !chunk.data.isEmpty {
                     offset = chunk.nextOffset
-                    view.feed(byteArray: ArraySlice(chunk.data))
+                    // Before anything reaches the emulator, and only here.
+                    // What was guessed and is not confirmed by this chunk has
+                    // to come off the screen before the far end's own version
+                    // of it goes on, or the line ends up saying everything
+                    // twice. Both happen inside one turn on the main actor, so
+                    // there is no frame in which the line is missing.
+                    let rest = reconcilePredictions(with: chunk.data)
+                    if !rest.isEmpty { view.feed(byteArray: rest) }
                 }
                 if chunk.closed {
                     closed = true
@@ -224,6 +231,53 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
         }
     }
 
+    /// Settle the guesses against what the far end actually sent, and answer
+    /// with the part of that output still to be drawn.
+    ///
+    /// The echo of a guess is not something to draw. It is the same character
+    /// in the same cell, so a chunk that begins with exactly what was guessed
+    /// confirms those guesses and is not fed to the emulator at all: the
+    /// characters are already there, the cursor is already past them, and the
+    /// guesses that follow stay where they are.
+    ///
+    /// This is what typing at speed needs. Taking every guess back on every
+    /// chunk was correct and looked wrong: five characters typed in the time
+    /// one round trip takes were rubbed out the moment the echo of the first
+    /// two arrived, and put back a chunk at a time as the rest caught up. No
+    /// character was lost, but the tail of the word collapsed and regrew while
+    /// somebody was still typing it. Only the guesses this chunk does not
+    /// account for are rubbed out now.
+    ///
+    /// Anything after the confirmed run is the far end saying something else,
+    /// and everything still guessed comes off before it is drawn.
+    private func reconcilePredictions(with data: [UInt8]) -> ArraySlice<UInt8> {
+        // The far end's output is the repaint that says where the cursor is,
+        // so by the time this returns the guesses are back in reach. Left set
+        // once, the flag stayed set for the rest of the session: the first
+        // Return raised it and every later guess was then dropped without
+        // being rubbed out, so the echo landed beside it and the line said
+        // each character twice.
+        defer { predictionsDetachedFromCursor = false }
+        guard !predicted.isEmpty else { return ArraySlice(data) }
+        if predictionsDetachedFromCursor {
+            predicted.removeAll()
+            return ArraySlice(data)
+        }
+        var confirmed = 0
+        while confirmed < predicted.count,
+              confirmed < data.count,
+              predicted[confirmed] == data[confirmed] {
+            confirmed += 1
+        }
+        if confirmed > 0 { predicted.removeFirst(confirmed) }
+        let rest = data[confirmed...]
+        // Every byte was the echo of a guess. Nothing to draw, and whatever
+        // is still guessed is still exactly where it was put.
+        if rest.isEmpty { return rest }
+        eraseRemainingPredictions()
+        return rest
+    }
+
     /// Take every guess back off the screen.
     ///
     /// Backspace, space, backspace per character: the same three bytes a
@@ -232,18 +286,18 @@ final class SSHLiveTerminal: TerminalViewDelegate, TerminalPresentable {
     /// cursor has moved on, nothing is synthesized; whatever the far end sends
     /// repaints the truth instead.
     private func withdrawPredictions() {
-        // The far end's output is the repaint that says where the cursor is,
-        // so by the time this returns the guesses are back in reach. Left set
-        // once, the flag stayed set for the rest of the session: the first
-        // Return raised it and every later guess was then dropped without
-        // being rubbed out, so the echo landed beside it and the line said
-        // each character twice.
         defer { predictionsDetachedFromCursor = false }
         guard !predicted.isEmpty else { return }
         if predictionsDetachedFromCursor {
             predicted.removeAll()
             return
         }
+        eraseRemainingPredictions()
+    }
+
+    /// Rub out every guess that is still standing, in reach of the cursor.
+    private func eraseRemainingPredictions() {
+        guard !predicted.isEmpty else { return }
         var undo: [UInt8] = []
         undo.reserveCapacity(predicted.count * Self.eraseCell.count)
         for _ in predicted { undo.append(contentsOf: Self.eraseCell) }
@@ -521,7 +575,7 @@ struct SSHLiveTerminalScreen: View {
             )
             #endif
         }
-        .background(Color.black)
+        .background(TerminalPalette.surface)
         .sheet(item: $asking) { snippet in
             SSHSnippetRunSheet(snippet: snippet) { command in
                 session.sendBytes(SSHSnippet.bytesToRun(command))

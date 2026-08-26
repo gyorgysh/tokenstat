@@ -80,7 +80,7 @@ struct SSHTerminalPane: View {
                     onActivate: { sessions.select($0) }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.black)
+                .background(TerminalPalette.surface)
             }
         }
         .background(Theme.background)

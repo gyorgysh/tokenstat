@@ -573,7 +573,7 @@ struct ClientTerminalScreen: View {
                 )
             )
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(TerminalPalette.surface.ignoresSafeArea())
         .navigationBarHidden(true)
         .onAppear {
             session.setForeground(true)
