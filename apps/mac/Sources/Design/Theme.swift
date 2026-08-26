@@ -238,22 +238,126 @@ enum Theme {
     /// margins than on content.
     static let cardPadding: CGFloat = 16
 
+    // MARK: - Type
+    //
+    // Every font in the app comes from here, and the two families come from
+    // `AppFonts`. The point sizes below are exactly what the system's own text
+    // styles give on each platform, so adopting a typeface changed the shape
+    // of the words and nothing about the size or position of anything. A Mac
+    // is not a phone at 17 points, and the migration would have been a
+    // relayout of every screen rather than a change of face.
+    //
+    // `scripts/check-fonts.sh` keeps it that way: a bare `.font(.caption)` or
+    // `.system(size:)` in the app's own views is rejected, the way a bare
+    // `Color.blue` is.
+
+    /// The interface face at a given size, with Dynamic Type.
+    ///
+    /// `relativeTo` is what makes the text grow with the reader's setting: a
+    /// custom font without it is frozen at whatever size the developer typed,
+    /// which is the usual way an app with a bundled typeface stops being
+    /// readable for the people who most need it to be.
+    static func font(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular,
+        relativeTo style: Font.TextStyle = .body
+    ) -> Font {
+        guard AppFonts.registered else {
+            return .system(size: size, weight: weight)
+        }
+        return .custom(AppFonts.interface, size: size, relativeTo: style).weight(weight)
+    }
+
+    /// The monospaced face at a given size, with Dynamic Type.
+    ///
+    /// For text read character by character: a command, a model id, a line of
+    /// code. Not for a headline number. A figure a screen is about is
+    /// language, and setting it in a terminal face makes a dashboard look like
+    /// a log.
+    static func monoText(
+        _ size: CGFloat,
+        weight: Font.Weight = .regular,
+        relativeTo style: Font.TextStyle = .footnote
+    ) -> Font {
+        guard AppFonts.registered else {
+            return .system(size: size, weight: weight, design: .monospaced)
+        }
+        return .custom(AppFonts.mono, size: size, relativeTo: style).weight(weight)
+    }
+
+    /// A size that scales with the window rather than with Dynamic Type.
+    ///
+    /// The Mac's chrome, which is laid out against a reference window and
+    /// shrinks with it. See `DisplayFit`.
+    private static func fitted(_ size: CGFloat, weight: Font.Weight, mono: Bool) -> Font {
+        let size = DisplayFit.dp(size)
+        guard AppFonts.registered else {
+            return .system(size: size, weight: weight, design: mono ? .monospaced : .default)
+        }
+        return .custom(mono ? AppFonts.mono : AppFonts.interface, fixedSize: size).weight(weight)
+    }
+
+    /// The interface face at a size that scales with the window.
+    ///
+    /// The Mac's own chrome: sidebar rows, list metadata, the marks beside
+    /// them. Sized against a reference window rather than against the reader's
+    /// Dynamic Type setting, because these sit in a fixed layout that has to
+    /// keep working on a 1024-point display. Content uses `font` instead.
+    static func fit(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        fitted(size, weight: weight, mono: false)
+    }
+
     /// Numbers that sit in columns must not jitter as they update, so anything
-    /// numeric uses tabular figures with a monospaced digit face.
+    /// numeric uses tabular figures.
+    ///
+    /// The interface face, not the terminal one. Manrope's tabular figures
+    /// already hold a column still, which is the whole requirement, and a stat
+    /// tile is a headline rather than a readout.
     static func numeric(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: DisplayFit.dp(size), weight: weight, design: .rounded).monospacedDigit()
+        fitted(size, weight: weight, mono: false).monospacedDigit()
     }
 
     /// Identifiers read character by character: model ids, machine ids, paths.
     /// Monospaced so strings that look alike do not read alike.
     static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: DisplayFit.dp(size), weight: weight, design: .monospaced)
+        fitted(size, weight: weight, mono: true)
     }
 
     /// Small uppercase label above a group.
     static var sectionHeader: Font {
-        .system(size: DisplayFit.dp(12), weight: .semibold)
+        fitted(12, weight: .semibold, mono: false)
     }
+
+    // The system's text styles, in the app's face and at the system's sizes.
+    //
+    // A Mac's body text is 13 points and a phone's is 17, and the rest of each
+    // ladder follows from that. Both are spelled out rather than derived,
+    // because the two ladders are not one ladder times a constant.
+    #if os(macOS)
+    static var largeTitle: Font { font(26, weight: .regular, relativeTo: .largeTitle) }
+    static var title: Font { font(22, weight: .regular, relativeTo: .title) }
+    static var title2: Font { font(17, weight: .regular, relativeTo: .title2) }
+    static var title3: Font { font(15, weight: .regular, relativeTo: .title3) }
+    static var headline: Font { font(13, weight: .semibold, relativeTo: .headline) }
+    static var body: Font { font(13, weight: .regular, relativeTo: .body) }
+    static var callout: Font { font(12, weight: .regular, relativeTo: .callout) }
+    static var subheadline: Font { font(11, weight: .regular, relativeTo: .subheadline) }
+    static var footnote: Font { font(10, weight: .regular, relativeTo: .footnote) }
+    static var caption: Font { font(10, weight: .regular, relativeTo: .caption) }
+    static var caption2: Font { font(10, weight: .regular, relativeTo: .caption2) }
+    #else
+    static var largeTitle: Font { font(34, weight: .regular, relativeTo: .largeTitle) }
+    static var title: Font { font(28, weight: .regular, relativeTo: .title) }
+    static var title2: Font { font(22, weight: .regular, relativeTo: .title2) }
+    static var title3: Font { font(20, weight: .regular, relativeTo: .title3) }
+    static var headline: Font { font(17, weight: .semibold, relativeTo: .headline) }
+    static var body: Font { font(17, weight: .regular, relativeTo: .body) }
+    static var callout: Font { font(16, weight: .regular, relativeTo: .callout) }
+    static var subheadline: Font { font(15, weight: .regular, relativeTo: .subheadline) }
+    static var footnote: Font { font(13, weight: .regular, relativeTo: .footnote) }
+    static var caption: Font { font(12, weight: .regular, relativeTo: .caption) }
+    static var caption2: Font { font(11, weight: .regular, relativeTo: .caption2) }
+    #endif
 
     /// Material for the window's edges: the sidebar and the inspector.
     ///

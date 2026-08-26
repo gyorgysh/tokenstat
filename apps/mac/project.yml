@@ -115,12 +115,22 @@ targets:
       # SwiftTerm is a Swift package, so its notice is a committed file
       # appended here. The generated file lives in Resources so the app can
       # render it in the Account screen's Open source licenses sheet.
+      #
+      # The two typefaces are appended for the same reason and are not
+      # optional: the SIL Open Font License requires its notice to travel with
+      # the font, and the font travels inside this bundle.
       - name: Third-party notices
         basedOnDependencyAnalysis: false
         script: |
           cd "$SRCROOT/../.."
           cargo run -q -p xtask -- notices "apps/mac/Resources/THIRD_PARTY_NOTICES.md" tokenstat-host
           cat "apps/mac/Resources/SwiftTerm-LICENSE.txt" >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
+          {
+            printf '\n\n## Manrope\n\nBundled as the interface typeface.\n\n'
+            cat "apps/mac/Resources/Fonts/Manrope-OFL.txt"
+            printf '\n\n## JetBrains Mono\n\nBundled for terminals, code and identifiers.\n\n'
+            cat "apps/mac/Resources/Fonts/JetBrainsMono-OFL.txt"
+          } >> "apps/mac/Resources/THIRD_PARTY_NOTICES.md"
       # The price book the app ships with, so a fresh install prices something
       # before its first refresh. iPhone and iPad have no CLI to run
       # `tokenstat pricing --refresh` and no daemon to schedule it, and an

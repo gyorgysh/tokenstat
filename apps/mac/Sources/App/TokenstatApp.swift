@@ -95,6 +95,10 @@ struct TokenstatApp: App {
     /// the daemon, so the terminals a session starts with would belong to a
     /// different owner than the ones it ends with.
     init() {
+        // First, and before any view exists. A font registered after the first
+        // Text is built leaves that screen in the fallback face until
+        // something redraws it.
+        AppFonts.register()
         Self.adoptPreferencesFromPreviousBundleID()
         Self.excludeSecretsFromBackup()
         Bridge.connect()
