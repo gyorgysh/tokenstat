@@ -228,7 +228,7 @@ struct ClientRootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
-            Task { await Bridge.nudgeTunnel() }
+            Task { await Bridge.nudgeTunnelOnForeground() }
         }
         .sheet(isPresented: $showAccount) {
             ClientAccountSheet()

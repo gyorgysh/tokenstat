@@ -637,11 +637,18 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         if session.stopped.load(Ordering::Relaxed) {
             return;
         }
+        // One line per attempt, and one per end. A machine that dropped off
+        // the relay and did not come back is the hardest thing here to work
+        // out afterwards, because the relay's own log can only say that a
+        // socket went away: whether this end was asleep, waiting out a
+        // backoff, or being refused is knowable only from here.
+        eprintln!("tunnel: connecting to {}", session.endpoint);
         match connect_once(&session) {
             Ok(()) => {
                 // The socket died; that is the ordinary end of a connection,
                 // not an error to show.
                 *session.status.lock().unwrap_or_else(|e| e.into_inner()) = TunnelStatus::default();
+                eprintln!("tunnel: socket closed, reconnecting");
                 backoff = RECONNECT_FLOOR;
                 renewals = 0;
             }
@@ -693,6 +700,11 @@ fn supervisor(session: Weak<TunnelSession>, wake_rx: mpsc::Receiver<()>) {
         } else {
             (backoff * 2).min(RECONNECT_CEILING)
         };
+        eprintln!(
+            "tunnel: {} next attempt in {}s",
+            if woken { "woken," } else { "backing off," },
+            backoff.as_secs_f32()
+        );
     }
 }
 
@@ -872,6 +884,7 @@ fn connect_once(session: &Arc<TunnelSession>) -> Result<(), RemoteError> {
                 error: None,
             };
             session.mark_read();
+            eprintln!("tunnel: registered, this machine is diallable");
         }
         Message::Text(text) => {
             // A refusal the machine can answer itself is answered here, before

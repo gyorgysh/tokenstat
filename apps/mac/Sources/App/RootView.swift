@@ -216,7 +216,7 @@ struct RootView: View {
             // should reconnect now rather than wait out a backoff sized for a
             // laptop that was off.
             .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-                Task { await Bridge.nudgeTunnel() }
+                Task { await Bridge.nudgeTunnelOnForeground() }
             }
             // One accent for every control in the window. Set here so a toggle,
             // a segmented picker or a prominent button does not have to

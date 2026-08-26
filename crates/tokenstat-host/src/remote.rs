@@ -1443,6 +1443,84 @@ fn clear_all_unreachable() {
     if let Ok(mut state) = unreachable().lock() {
         state.cache.clear();
     }
+    // The network just changed, so a LAN that was not there a moment ago may
+    // be there now. Whatever was learned about direct routes was learned on
+    // the old path.
+    if let Ok(mut misses) = direct_misses().lock() {
+        misses.clear();
+    }
+}
+
+/// How long a direct address is left alone after it failed.
+///
+/// A minute at first, doubling, capped. The remembered address is a
+/// `<host>.local` name, which is exactly right on the LAN it was learned on
+/// and worthless anywhere else, and it is tried first on every dial of every
+/// purpose. Off that LAN each dial paid a DNS lookup and up to a two second
+/// connect before the relay was asked, on calls that happen on timers.
+const DIRECT_MISS_FLOOR_MS: i64 = 60_000;
+const DIRECT_MISS_CEILING_MS: i64 = 600_000;
+
+#[derive(Clone, Copy)]
+struct DirectMiss {
+    since_ms: i64,
+    strikes: u32,
+}
+
+impl DirectMiss {
+    fn age_ms(&self) -> i64 {
+        jiff::Timestamp::now().as_millisecond() - self.since_ms
+    }
+
+    fn ttl_ms(&self) -> i64 {
+        DIRECT_MISS_FLOOR_MS
+            .saturating_mul(1i64 << self.strikes.min(4))
+            .min(DIRECT_MISS_CEILING_MS)
+    }
+
+    /// Skip the direct attempt for now. Unlike an absence, the first miss
+    /// counts: nothing is hidden by skipping it, because the relay is asked
+    /// either way and answers for the same machine.
+    fn suppresses(&self) -> bool {
+        self.age_ms() < self.ttl_ms()
+    }
+}
+
+/// Peers whose remembered direct address did not answer, and when.
+fn direct_misses() -> &'static Mutex<HashMap<String, DirectMiss>> {
+    static STATE: OnceLock<Mutex<HashMap<String, DirectMiss>>> = OnceLock::new();
+    STATE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Whether the direct address is worth a try right now.
+fn direct_is_worth_trying(peer_hex: &str) -> bool {
+    let Ok(mut misses) = direct_misses().lock() else {
+        return true;
+    };
+    misses.retain(|_, miss| miss.age_ms() < DIRECT_MISS_CEILING_MS);
+    !misses.get(peer_hex).is_some_and(DirectMiss::suppresses)
+}
+
+fn note_direct_miss(peer_hex: &str) {
+    if let Ok(mut misses) = direct_misses().lock() {
+        let strikes = misses
+            .get(peer_hex)
+            .filter(|miss| miss.age_ms() < DIRECT_MISS_CEILING_MS)
+            .map_or(0, |miss| miss.strikes.saturating_add(1));
+        misses.insert(
+            peer_hex.to_string(),
+            DirectMiss {
+                since_ms: jiff::Timestamp::now().as_millisecond(),
+                strikes,
+            },
+        );
+    }
+}
+
+fn clear_direct_miss(peer_hex: &str) {
+    if let Ok(mut misses) = direct_misses().lock() {
+        misses.remove(peer_hex);
+    }
 }
 
 /// Call a peer and return its answer's result, unwrapped from the peer's
@@ -1561,15 +1639,26 @@ pub(crate) fn dial_peer_for(
     drop(store);
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
+    let peer_hex = tokenstat_identity::hex(&key);
     let direct = address
         .as_deref()
         .ok_or_else(|| "no direct address".to_string())
         .and_then(|address| {
-            tokenstat_remote::dial(address, &identity, Some(key), &label)
-                .map_err(|error| error.to_string())
+            // A remembered address that has been failing is not tried again on
+            // every dial. See `DirectMiss`.
+            if !direct_is_worth_trying(&peer_hex) {
+                return Err(format!("{address} did not answer recently"));
+            }
+            tokenstat_remote::dial(address, &identity, Some(key), &label).map_err(|error| {
+                note_direct_miss(&peer_hex);
+                error.to_string()
+            })
         });
     match direct {
-        Ok(connection) => Ok((connection, "direct")),
+        Ok(connection) => {
+            clear_direct_miss(&peer_hex);
+            Ok((connection, "direct"))
+        }
         Err(error) => tunnel_dial(&settings(), key, &identity, &label, purpose, error)
             .map(|connection| (connection, "relay")),
     }
@@ -1703,13 +1792,10 @@ fn tunnel_dial(
                     note_unreachable(&peer_hex);
                     break;
                 }
-                let retryable = last.contains("not connected")
-                    || last.contains("closed")
-                    || last.contains("failed to fill whole buffer");
-                if !retryable || attempt == 2 {
+                let Some(pause) = dial_retry_pause(&last, attempt) else {
                     break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200 * (attempt + 1)));
+                };
+                std::thread::sleep(pause);
             }
         }
     }
@@ -1731,6 +1817,31 @@ const ANSWER_IDLE: Duration = Duration::from_secs(45);
 
 /// How long the retry ladder in `tunnel_dial` keeps trying. See there.
 const DIAL_BUDGET: Duration = Duration::from_secs(12);
+
+/// How long to wait before dialling again, or `None` to give up.
+///
+/// `screen_already_open` is a teardown that has not landed yet, not a settled
+/// no. The relay allows one screen channel per account, so a session being
+/// replaced holds the slot until its CH_CLOSE arrives, and the viewer's dial
+/// can beat it there by a second. Failing on that answer is what used to send
+/// the app into its own reconnect ladder and turn one late close into a storm,
+/// so it waits longer than the transport blips do: those come back inside a
+/// couple of hundred milliseconds, a teardown crossing the relay does not.
+fn dial_retry_pause(last: &str, attempt: u32) -> Option<Duration> {
+    let handover = last.contains("screen_already_open");
+    let retryable = handover
+        || last.contains("not connected")
+        || last.contains("closed")
+        || last.contains("failed to fill whole buffer");
+    if !retryable || attempt >= 2 {
+        return None;
+    }
+    Some(Duration::from_millis(if handover {
+        750
+    } else {
+        200 * u64::from(attempt + 1)
+    }))
+}
 
 fn round_trip(
     connection: &mut tokenstat_remote::Connection,
@@ -2408,5 +2519,67 @@ mod tests {
             "a credential this close to expiry must not satisfy the cache check"
         );
         clear_held_credential();
+    }
+
+    #[test]
+    fn a_screen_handover_is_retried_and_a_settled_refusal_is_not() {
+        // The relay's answer while the previous channel is still closing.
+        assert_eq!(
+            dial_retry_pause("channel error: screen_already_open", 0),
+            Some(Duration::from_millis(750)),
+            "a handover has to wait for the old close to land"
+        );
+        // A transport blip comes back sooner than a teardown crosses the relay.
+        assert_eq!(
+            dial_retry_pause("tunnel not connected", 0),
+            Some(Duration::from_millis(200))
+        );
+        // Nothing is retried past the ladder, and a refusal that means what it
+        // says is not retried at all.
+        assert_eq!(
+            dial_retry_pause("channel error: screen_already_open", 2),
+            None
+        );
+        assert_eq!(
+            dial_retry_pause("channel error: over_monthly_limit", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn a_direct_address_that_missed_is_left_alone_and_a_success_forgives_it() {
+        let peer = "direct-miss-test-peer";
+        clear_direct_miss(peer);
+        assert!(direct_is_worth_trying(peer), "an unknown peer is tried");
+        note_direct_miss(peer);
+        assert!(
+            !direct_is_worth_trying(peer),
+            "a remembered address that just failed must not be dialled on every call"
+        );
+        clear_direct_miss(peer);
+        assert!(
+            direct_is_worth_trying(peer),
+            "a direct dial that worked forgives the misses before it"
+        );
+    }
+
+    #[test]
+    fn a_direct_miss_backs_off_but_stays_bounded() {
+        let miss = DirectMiss {
+            since_ms: jiff::Timestamp::now().as_millisecond(),
+            strikes: 0,
+        };
+        assert_eq!(miss.ttl_ms(), DIRECT_MISS_FLOOR_MS);
+        for strikes in 0..8u32 {
+            let miss = DirectMiss {
+                since_ms: jiff::Timestamp::now().as_millisecond(),
+                strikes,
+            };
+            assert!(
+                miss.ttl_ms() <= DIRECT_MISS_CEILING_MS,
+                "{strikes} strikes gave {}",
+                miss.ttl_ms()
+            );
+        }
     }
 }
