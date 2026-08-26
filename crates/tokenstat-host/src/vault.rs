@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use argon2::{Algorithm, Argon2, Params, Version};
-use chacha20poly1305::aead::{Aead, KeyInit, OsRng, Payload, rand_core::RngCore};
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
+use getrandom::fill as os_fill;
 use hkdf::Hkdf;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -345,7 +346,7 @@ fn unhex(value: &str) -> Result<Vec<u8>, String> {
 
 fn random32() -> [u8; 32] {
     let mut value = [0u8; 32];
-    OsRng.fill_bytes(&mut value);
+    os_fill(&mut value).expect("os randomness unavailable");
     value
 }
 
@@ -452,10 +453,10 @@ fn unwrap_password(
 
 fn seal(key: &[u8; 32], plaintext: &[u8], context: &[u8]) -> Result<(String, String), String> {
     let mut nonce = [0u8; 24];
-    OsRng.fill_bytes(&mut nonce);
+    os_fill(&mut nonce).expect("os randomness unavailable");
     let sealed = XChaCha20Poly1305::new(key.into())
         .encrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: plaintext,
                 aad: context,
@@ -468,12 +469,12 @@ fn seal(key: &[u8; 32], plaintext: &[u8], context: &[u8]) -> Result<(String, Str
 fn open(key: &[u8; 32], nonce: &str, ciphertext: &str, context: &[u8]) -> Result<Vec<u8>, String> {
     let nonce = unhex(nonce)?;
     let ciphertext = unhex(ciphertext)?;
-    if nonce.len() != 24 {
-        return Err("invalid vault nonce".into());
-    }
+    let nonce: [u8; 24] = nonce
+        .try_into()
+        .map_err(|_| "invalid vault nonce".to_string())?;
     XChaCha20Poly1305::new(key.into())
         .decrypt(
-            XNonce::from_slice(&nonce),
+            &XNonce::from(nonce),
             Payload {
                 msg: &ciphertext,
                 aad: context,

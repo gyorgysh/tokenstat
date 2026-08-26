@@ -80,7 +80,7 @@ tungstenite = { version = "0.30", default-features = false, features = ["handsha
 russh = { version = "0.63", default-features = false, features = ["ring"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "io-util"] }
 rand = "0.10"
-chacha20poly1305 = "0.10"
+chacha20poly1305 = "0.11"
 # Memory-hard, for the one secret a person types. The vault ciphertext sits on
 # a server, so an offline guess is always available to whoever holds a copy:
 # a fast KDF over a twelve character password would be a formality. RustCrypto,
