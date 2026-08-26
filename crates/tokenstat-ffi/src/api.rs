@@ -46,6 +46,11 @@ pub fn call(method: &str, params: &str) -> String {
     // the hook that names the line has to be in place before the first call
     // rather than after the first successful one.
     crate::crashlog::install();
+    // Before the first connection, and before the first archive open. A
+    // process that runs out of descriptors reports it as whichever file
+    // happened to be next, which is a sentence about the machine key or the
+    // database rather than about the limit. See `open_files`.
+    tokenstat_host::open_files::raise_open_file_limit();
     warm();
 
     // Answered without the lock where the method allows it. A terminal polls

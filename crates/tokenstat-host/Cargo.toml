@@ -67,5 +67,9 @@ argon2.workspace = true
 hkdf.workspace = true
 x25519-dalek.workspace = true
 
+# Only for the process's own open-file limit. See src/open_files.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile.workspace = true

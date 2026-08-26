@@ -68,6 +68,8 @@ pub(crate) mod launcher;
 pub(crate) mod local_models;
 mod machine;
 /// Which daemon speaks for this machine, when more than one is running.
+/// Descriptor headroom. See the module for why 256 is not enough.
+pub mod open_files;
 pub mod ownership;
 pub mod pricing;
 mod proxy_http;

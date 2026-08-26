@@ -31,6 +31,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
+    // The daemon holds a connection per peer, a stream per screen session and
+    // a socket per SSH session at once. See `open_files`.
+    tokenstat_host::open_files::raise_open_file_limit();
+
     let mut args = std::env::args().skip(1);
     let mut socket = None;
 
