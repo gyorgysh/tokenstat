@@ -81,7 +81,15 @@ settings:
     # inspector that no longer takes the window apart, and the first build
     # that tells the relay what a channel is for so a screen session can be
     # metered and capped.
-    # 54 went up and is on TestFlight. 55 is simply the next one.
+    # 54 went up and is on TestFlight.
+    # 55 is the control-mode and typography cut: screen input delivered as a
+    # batch at pointer rate rather than one event per poll, capture at 60 fps
+    # while somebody is driving, local echo on SSH so a typed character does
+    # not wait for a round trip, the key row reachable without leaving full
+    # screen, long press on keys and snippets, the vault row settled while the
+    # account is asked, the process's own open-file limit raised, idle peer
+    # connections closed on a timer, and the whole app drawn in Manrope and
+    # JetBrains Mono.
     #
     # Worth knowing for the next upload: the builds list lags behind a
     # successful upload by minutes. Reading it too soon and finding nothing
