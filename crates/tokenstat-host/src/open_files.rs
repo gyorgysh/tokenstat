@@ -87,9 +87,42 @@ pub fn open_file_limit() -> Option<(u64, u64)> {
     }
 }
 
+/// How many descriptors this process has open right now.
+///
+/// Counted from `/dev/fd`, which both Apple's platforms and Linux provide, and
+/// which is a directory read rather than a syscall table walk. `None` where
+/// that is not readable, because a guess here would be worse than saying
+/// nothing: this number exists to be put in a bug report beside the limit.
+///
+/// The read opens a descriptor of its own, which is counted and then closed.
+/// One is not worth correcting for and pretending otherwise would be a second
+/// number to keep true.
+pub fn open_file_count() -> Option<usize> {
+    #[cfg(unix)]
+    {
+        std::fs::read_dir("/dev/fd").ok().map(Iterator::count)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_count_is_plausible() {
+        let count = open_file_count().expect("unix can count /dev/fd");
+        let (soft, _) = open_file_limit().expect("unix reports a limit");
+        // stdin, stdout, stderr and the directory being read, at least.
+        assert!(count >= 3, "counted {count} open files");
+        assert!(
+            (count as u64) <= soft,
+            "counted {count} open files against a soft limit of {soft}"
+        );
+    }
 
     #[test]
     fn the_soft_limit_is_at_least_what_a_session_needs() {

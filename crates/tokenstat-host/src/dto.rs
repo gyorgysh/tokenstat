@@ -245,6 +245,19 @@ pub struct InfoDto {
     /// False when no price book has been fetched yet, which means every value
     /// in every report will be zero for a reason the user can fix.
     pub has_prices: bool,
+    /// Descriptors open now, and the soft limit they are counted against.
+    ///
+    /// Here because "too many open files" is reported against whichever file
+    /// lost the race, which tells nobody anything. A bug report carrying
+    /// `info` now carries "238 of 10240" beside it, which is the difference
+    /// between a mystery and a number. `None` on a platform with no such
+    /// limit to report.
+    pub open_files: Option<u64>,
+    pub open_file_limit: Option<u64>,
+    /// Calls to other machines in flight, and connections idle in the pool.
+    /// The two numbers behind most of the descriptors this process holds.
+    pub peer_calls_live: usize,
+    pub peer_connections_idle: usize,
 }
 
 /// A device authorization the user has not confirmed yet.

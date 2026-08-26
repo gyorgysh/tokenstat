@@ -858,6 +858,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 timezone: b.timezone().iana_name().unwrap_or("unknown").to_string(),
                 price_book_effective_from: b.prices.effective_from.clone(),
                 has_prices: !b.prices.is_empty(),
+                open_files: crate::open_files::open_file_count().map(|n| n as u64),
+                open_file_limit: crate::open_files::open_file_limit().map(|(soft, _)| soft),
+                peer_calls_live: crate::remote::connection_counts().0,
+                peer_connections_idle: crate::remote::connection_counts().1,
             };
             serde_json::to_value(info).envelope()
         }),

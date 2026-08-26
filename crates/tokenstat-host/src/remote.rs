@@ -24,9 +24,9 @@
 //! approved. See `docs/remote-transport.md`.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1174,13 +1174,106 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
 /// A handshake is three round trips and a Diffie-Hellman, which is far too much
 /// to pay per call when a remote terminal polls for output. Held open and
 /// reused, exactly like the unix socket pool on the client side.
-fn pool() -> &'static Mutex<HashMap<String, Vec<tokenstat_remote::Connection>>> {
-    static POOL: OnceLock<Mutex<HashMap<String, Vec<tokenstat_remote::Connection>>>> =
-        OnceLock::new();
+fn pool() -> &'static Mutex<HashMap<String, Vec<Idle>>> {
+    static POOL: OnceLock<Mutex<HashMap<String, Vec<Idle>>>> = OnceLock::new();
     POOL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// A connection waiting to be used again, and when it stopped being used.
+///
+/// The timestamp is the whole point. Without it a pooled connection was held
+/// open for the life of the process: four per peer, a map key for every peer
+/// ever dialled, and nothing anywhere that ever closed one. That is not a leak
+/// in the sense of a lost handle, and it is still a descriptor count that only
+/// goes up, which is the same thing to a process that has run out of them.
+struct Idle {
+    connection: tokenstat_remote::Connection,
+    since: Instant,
+}
+
 const MAX_IDLE_PER_PEER: usize = 4;
+
+/// How long a connection may sit unused before it is closed.
+///
+/// A handshake is three round trips and a Diffie-Hellman, so the pool has to
+/// outlast the gap between a terminal's polls, which is milliseconds, and the
+/// gap between somebody's glances at a screen, which is seconds. A minute
+/// covers both with room to spare and is far shorter than the hours a machine
+/// sits with the app open and nothing to say.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The safety valve on connections to one peer at once.
+///
+/// Not a queue: a burst of legitimate calls is normal and waiting for a slot
+/// would be a deadlock waiting for a reason. This is far above anything the
+/// app does on purpose, so tripping it means something is looping, and being
+/// told that is better than the process running out of descriptors and
+/// reporting it against whichever file lost the race. See `open_files`.
+const MAX_LIVE_PER_PEER: usize = 64;
+
+/// Connections dialled and not yet finished with, for the ceiling above and
+/// for `info`.
+fn live() -> &'static Mutex<HashMap<String, usize>> {
+    static LIVE: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+    LIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Total live peer connections, read without taking the map's lock.
+static LIVE_TOTAL: AtomicUsize = AtomicUsize::new(0);
+
+/// Holds one peer's slot for as long as the caller holds this.
+///
+/// An RAII guard rather than a matching decrement at every exit, because
+/// `call_peer` has six of them and a counter that leaks on one path is worse
+/// than no counter at all.
+pub(crate) struct LiveSlot {
+    peer: String,
+}
+
+impl LiveSlot {
+    fn take(peer: &str) -> Result<Self, String> {
+        let mut held = live().lock().map_err(|_| "peer connection count poisoned")?;
+        let count = held.entry(peer.to_string()).or_insert(0);
+        if *count >= MAX_LIVE_PER_PEER {
+            return Err(format!(
+                "already {count} connections open to that machine; something is retrying without stopping"
+            ));
+        }
+        *count += 1;
+        LIVE_TOTAL.fetch_add(1, Ordering::Relaxed);
+        Ok(Self {
+            peer: peer.to_string(),
+        })
+    }
+}
+
+impl Drop for LiveSlot {
+    fn drop(&mut self) {
+        LIVE_TOTAL.fetch_sub(1, Ordering::Relaxed);
+        if let Ok(mut held) = live().lock()
+            && let Some(count) = held.get_mut(&self.peer)
+        {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                held.remove(&self.peer);
+            }
+        }
+    }
+}
+
+/// What the peer-call path is holding open, for `info` and for a bug report.
+///
+/// Returns (calls in flight, connections idle in the pool). Streams own their
+/// connection for the life of a session and are counted by the registry that
+/// owns them, not here: this is the path that can loop, and so the one whose
+/// number says whether something is looping.
+pub fn connection_counts() -> (usize, usize) {
+    let idle = pool()
+        .lock()
+        .map(|held| held.values().map(Vec::len).sum())
+        .unwrap_or(0);
+    (LIVE_TOTAL.load(Ordering::Relaxed), idle)
+}
 
 /// How long the first `no_such_peer` is remembered, and the ceiling the
 /// doubling stops at.
@@ -1355,6 +1448,9 @@ pub(crate) fn call_peer_result(
 /// that only remote calls use.
 pub fn call_peer(peer_hex: &str, method: &str, params: &str) -> Result<String, String> {
     let request = json!({"id": 0, "method": method, "params": parse_params(params)}).to_string();
+    // Held for the whole call, pooled connection included: a connection taken
+    // out of the pool is as live as a freshly dialled one while it is in use.
+    let _slot = LiveSlot::take(peer_hex)?;
 
     // One retry on a pooled connection, for a peer daemon that restarted. A
     // fresh connection failing is a real failure and is reported.
@@ -1619,16 +1715,40 @@ fn round_trip(
 }
 
 fn checkout(peer: &str) -> Option<tokenstat_remote::Connection> {
-    pool().lock().ok()?.get_mut(peer)?.pop()
+    let mut map = pool().lock().ok()?;
+    reap(&mut map);
+    let taken = map.get_mut(peer)?.pop().map(|idle| idle.connection);
+    map.retain(|_, idle| !idle.is_empty());
+    taken
 }
 
 fn checkin(peer: &str, connection: tokenstat_remote::Connection) {
     if let Ok(mut map) = pool().lock() {
+        reap(&mut map);
         let idle = map.entry(peer.to_string()).or_default();
         if idle.len() < MAX_IDLE_PER_PEER {
-            idle.push(connection);
+            idle.push(Idle {
+                connection,
+                since: Instant::now(),
+            });
         }
     }
+}
+
+/// Close everything that has sat unused past the timeout, and forget any peer
+/// left holding nothing.
+///
+/// Done on the way past rather than on a timer. The pool is only ever touched
+/// by a call to a peer, so a walk of a map with one key per peer costs nothing
+/// beside the handshake the caller is about to avoid, and a process with no
+/// remote traffic at all has nothing pooled to reap.
+fn reap(map: &mut HashMap<String, Vec<Idle>>) {
+    let now = Instant::now();
+    for idle in map.values_mut() {
+        // Dropping the connection closes it.
+        idle.retain(|held| now.duration_since(held.since) < POOL_IDLE_TIMEOUT);
+    }
+    map.retain(|_, idle| !idle.is_empty());
 }
 
 /// The unix socket sends `params` as a JSON value; so does this. An empty
