@@ -3,6 +3,9 @@
 // Source-available for review, NOT open source. See LICENSE.
 
 import SwiftUI
+#if !os(macOS)
+import UIKit
+#endif
 
 /// What the detail side of the library is showing.
 ///
@@ -414,6 +417,19 @@ struct SSHLibraryView: View {
         .frame(minHeight: 44)
         .contentShape(.rect)
         .onTapGesture { open(.key(key.id)) }
+        // A long press, like every other row in this list. A swipe is the
+        // fastest way to delete and the least discoverable way to find out
+        // that deleting is possible, and it is the only thing a key row
+        // offered: copying the public key, which is the reason to open one at
+        // all, had no shortcut whatsoever.
+        .contextMenu {
+            Button("Edit") { open(.key(key.id)) }
+            Button("Copy public key") { copyToPasteboard(key.publicKey) }
+            if !key.fingerprint.isEmpty {
+                Button("Copy fingerprint") { copyToPasteboard(key.fingerprint) }
+            }
+            Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
+        }
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await model.delete(key: key) } }
         }
@@ -432,10 +448,24 @@ struct SSHLibraryView: View {
         .frame(minHeight: 44)
         .contentShape(.rect)
         .onTapGesture { open(.snippet(snippet.id)) }
+        .contextMenu {
+            Button("Edit") { open(.snippet(snippet.id)) }
+            Button("Copy command") { copyToPasteboard(snippet.command) }
+            Button(snippet.runOnConnect ? "Do not run on connect" : "Run on connect") {
+                var updated = snippet
+                updated.runOnConnect.toggle()
+                Task { _ = await model.save(snippet: updated) }
+            }
+            Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
+        }
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await model.delete(snippet: snippet) } }
         }
         .themedRow()
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        UIPasteboard.general.string = value
     }
 
     @ToolbarContentBuilder
