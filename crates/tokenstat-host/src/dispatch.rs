@@ -850,6 +850,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
         }
 
         "info" => with_session(s, |b| {
+            let peers = crate::remote::connection_counts();
             let info = InfoDto {
                 protocol_version: PROTOCOL_VERSION.to_string(),
                 core_version: tokenstat_core::VERSION.to_string(),
@@ -860,8 +861,10 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                 has_prices: !b.prices.is_empty(),
                 open_files: crate::open_files::open_file_count().map(|n| n as u64),
                 open_file_limit: crate::open_files::open_file_limit().map(|(soft, _)| soft),
-                peer_calls_live: crate::remote::connection_counts().0,
-                peer_connections_idle: crate::remote::connection_counts().1,
+                // One reading, so the two numbers are of the same moment
+                // rather than of two turns of the pool's lock.
+                peer_calls_live: peers.0,
+                peer_connections_idle: peers.1,
             };
             serde_json::to_value(info).envelope()
         }),

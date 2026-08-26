@@ -1744,7 +1744,12 @@ fn round_trip(
 fn checkout(peer: &str) -> Option<tokenstat_remote::Connection> {
     let mut map = pool().lock().ok()?;
     reap(&mut map);
-    let taken = map.get_mut(peer)?.pop().map(|idle| idle.connection);
+    // Not `get_mut(peer)?`: a peer nobody has dialled yet would return before
+    // the empty keys the reap above left behind were dropped.
+    let taken = map
+        .get_mut(peer)
+        .and_then(Vec::pop)
+        .map(|idle| idle.connection);
     map.retain(|_, idle| !idle.is_empty());
     taken
 }
