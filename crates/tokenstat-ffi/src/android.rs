@@ -18,7 +18,7 @@ fn response(env: &mut jni::Env<'_>, value: impl AsRef<str>) -> Result<jstring, E
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeInit<'caller>(
-    unowned_env: EnvUnowned<'caller>,
+    mut unowned_env: EnvUnowned<'caller>,
     _class: JClass<'caller>,
     data_dir: JString<'caller>,
     cache_dir: JString<'caller>,
@@ -46,7 +46,7 @@ pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeInit<
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_ai_tokenstat_tokenstat_core_NativeBridge_nativeCall<'caller>(
-    unowned_env: EnvUnowned<'caller>,
+    mut unowned_env: EnvUnowned<'caller>,
     _class: JClass<'caller>,
     method: JString<'caller>,
     params: JString<'caller>,
