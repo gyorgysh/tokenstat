@@ -779,8 +779,14 @@ struct SSHConnectForm: View {
         }
     }
     private func trust(_ fingerprint: String) async {
+        // Same reason as the connect path: a save that lands after Cancel
+        // would write a trusted fingerprint the person backed out of, and
+        // report its failure onto a view that is gone.
+        guard !Task.isCancelled else { return }
         host.hostKeys = [fingerprint]
-        if await model.save(host: host) != nil {
+        let saved = await model.save(host: host) != nil
+        guard !Task.isCancelled else { return }
+        if saved {
             offeredFingerprint = nil
         } else {
             // The editor follows `host.hostKeys`. Leave it in verification
@@ -811,10 +817,21 @@ struct SSHConnectForm: View {
             } else {
                 handle = try await Bridge.openSSHWithPassword(host, password: password, rows: 24, cols: 80, jump: jump)
             }
+            // Cancelling does not reach the call that is already in flight, so
+            // a connection can land for a sheet somebody has left. Handing
+            // that session to the model would adopt a shell and push the
+            // terminal screen in front of a person who pressed Cancel to
+            // avoid exactly that. The shell is real and stays running: the
+            // bookkeeping poll finds it, and the session list is where it
+            // belongs rather than in front of them.
+            guard !Task.isCancelled else { return }
             connected(SSHLiveTerminal(handle: handle, title: host.label, hostID: host.id))
             await model.noteConnection(host)
             dismiss()
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
+        }
     }
 }
 
