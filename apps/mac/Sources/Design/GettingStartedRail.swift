@@ -169,7 +169,7 @@ private struct GettingStartedDisc: View {
         switch state {
         case .done:
             Image(systemName: "checkmark")
-                .font(.system(size: 12, weight: .bold))
+                .font(Theme.font(12, weight: .bold, relativeTo: .caption))
                 .foregroundStyle(Color.white)
         case .now:
             Text("\(number)")
