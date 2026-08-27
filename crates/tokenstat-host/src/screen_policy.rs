@@ -270,6 +270,21 @@ fn is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
     status.review_demo && status.account_id.as_deref() == Some(REVIEW_DEMO_ACCOUNT_ID)
 }
 
+/// The same question without the plan check, for a grant that is not Legend's.
+///
+/// Watching a screen is Legend and asks `verify_legend_account` anyway. Opening
+/// the work is not, so `workspace_policy` needs the account fact on its own
+/// rather than one welded to a tier it does not require.
+///
+/// Anything other than a positive answer is a no: not signed in, no network for
+/// a moment, an older server that does not name the account. The exception is
+/// worth nothing next to granting by accident.
+pub(crate) fn signed_into_review_demo() -> bool {
+    tokenstat_sync::sync_status(None)
+        .map(|status| is_review_demo(&status))
+        .unwrap_or(false)
+}
+
 /// Write one device's grant, and make the change take effect now.
 ///
 /// Every path that changes a permission goes through here: the toggles in

@@ -5,6 +5,12 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
+## [Unreleased]
+
+### Fixed
+
+- The App Review demo account can open a workspace, not only watch a screen.
+
 ## [0.7.1] - 2026-08-27
 
 ### Added

@@ -206,7 +206,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             store.pending.retain(|request| request.peer_id != peer);
             store.pending.push(PendingRequest {
                 label: crate::remote::account_peer_label_hex(&peer),
-                peer_id: peer,
+                peer_id: peer.clone(),
                 // Workspace access is one grant. There is no half of it to
                 // ask for, so the field the screen request uses for mouse and
                 // keyboard is always false here.
@@ -215,6 +215,28 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 expires_at: asked_at + PENDING_TTL,
             });
             save(&store)?;
+
+            // The same exception the screen carries, and for the same reason:
+            // App Review signs into the website's demo account on a fresh
+            // iPhone and presses Connect, and nobody at Apple has the Mac it
+            // is asking. A request that can never be answered is a feature
+            // that cannot be tested.
+            //
+            // Recorded first and upgraded after, because the check below asks
+            // the account server and that call can take a minute to fail. A
+            // device whose ask was lost to a hung lookup has no way to know it
+            // should ask again.
+            //
+            // Four things have to hold and a user can set none of them: the
+            // account is `REVIEW_DEMO_ACCOUNT_ID`, compiled in rather than
+            // taken from the answer; the server says the round is open; the
+            // device is already approved, which `serve_peer` checks before
+            // dispatch is reached; and the grant is an ordinary row, listed
+            // and revocable in Devices and gone the moment the round closes.
+            if crate::screen_policy::signed_into_review_demo() {
+                set_allowed(&peer, true)?;
+                return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
+            }
             Ok(json!({"pending": true}))
         }
         // Asked before anything is loaded, so a device that is not allowed can
@@ -318,6 +340,16 @@ mod tests {
                 assert!(refused.contains("local-only"), "{refused}");
             }
         });
+    }
+
+    #[test]
+    fn an_ordinary_account_never_reaches_the_automatic_grant() {
+        // The exception is the website's demo account during an open review
+        // round, and the test environment is signed into no account at all.
+        // A lookup that cannot answer has to read as "not the demo account"
+        // rather than as a yes: this is the one path that hands a device the
+        // work on a machine without a person saying so.
+        assert!(!crate::screen_policy::signed_into_review_demo());
     }
 
     #[test]
