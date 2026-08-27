@@ -5,7 +5,22 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
-## [Unreleased]
+## [0.7.2] - 2026-08-28
+
+### Added
+
+- An account with nothing on it says what to do next. Home draws a numbered
+  rail instead of an empty grid: on the Mac the first step arrives done, because
+  you are looking at the app, and the rest is a scan and an optional account.
+  On the phone it is signing in, already done, and adding a computer. Under it,
+  the shape of the heatmap that is coming.
+
+### Changed
+
+- Signing in from the Mac opens the approval on its own, in a sheet over the
+  app, rather than dropping you into the whole website to press one button.
+- The phone's empty screens offer a way to the first step instead of only
+  confirming there is nothing there.
 
 ### Fixed
 

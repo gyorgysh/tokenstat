@@ -29,18 +29,19 @@ struct ClientHomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.m) {
                 greeting
-                if let calendar = model.calendar {
+                // A calendar with no active day in it is a new account, not a
+                // year of doing nothing, and drawing the empty grid says the
+                // wrong one. The rail takes over until the first day lands.
+                //
+                // Only the figures and the grid, though. Plan windows and a
+                // scope notice are answers to different questions and neither
+                // needs a recorded day, so they keep their place below
+                // whichever of the two is drawn.
+                if let calendar = model.calendar, calendar.activeDays > 0 {
                     totals(calendar)
                     heatmapCard(calendar)
-                    // What is left, on the screen that opens, next to what was
-                    // spent. See `ClientLimitsCard` for why this is not a tab.
-                    ClientLimitsCard(
-                        providers: model.planLimits,
-                        isLoading: model.isLoadingLimits
-                    )
-                    if let notice = model.scopeNotice {
-                        NoticeCard(text: notice, showSignIn: model.needsAccountSignIn)
-                    }
+                } else if model.calendar != nil {
+                    ClientGettingStarted()
                 } else if model.isLoading {
                     // Shaped like what is coming, so nothing moves when it
                     // lands. See `ClientWireframe`.
@@ -66,12 +67,25 @@ struct ClientHomeView: View {
                         action: connectivity.isOffline ? nil : { Task { await model.refresh() } }
                     )
                 } else {
-                    ClientEmptyState(
-                        kind: .nothingYet,
-                        title: "Nothing recorded yet",
-                        message: "Sync a device and its usage shows up here.",
-                        mark: "mark_activity"
+                    // Not an empty state. An account with nothing on it is a
+                    // new account, and the useful thing to draw is what to do
+                    // next rather than a card confirming there is nothing.
+                    ClientGettingStarted()
+                }
+
+                // Below either branch. `model.calendar` being nil means the
+                // load failed or has not landed, and neither of these has
+                // anything to say then.
+                if model.calendar != nil {
+                    // What is left, on the screen that opens, next to what was
+                    // spent. See `ClientLimitsCard` for why this is not a tab.
+                    ClientLimitsCard(
+                        providers: model.planLimits,
+                        isLoading: model.isLoadingLimits
                     )
+                    if let notice = model.scopeNotice {
+                        NoticeCard(text: notice, showSignIn: model.needsAccountSignIn)
+                    }
                 }
             }
             .padding(.horizontal, Theme.Space.m)

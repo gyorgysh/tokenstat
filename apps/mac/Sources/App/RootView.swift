@@ -434,6 +434,17 @@ struct RootView: View {
             // shells. For the life of the shell, not the life of a screen,
             // because the sidebar draws them whichever screen is in front.
             .task { await sshSessions.watch() }
+            // Sign-in goes into a sheet over this window rather than into the
+            // whole browser, so the approval is the one-question page and not
+            // the marketing site. See `MacWebAuth`.
+            // Both halves, like the phone sets in `ClientRootView`. Without
+            // the dismisser the sheet is opened by the app and closed by
+            // nobody: cancelling on the Account screen stops the poll and
+            // leaves the window standing there.
+            .onAppear {
+                account.signInPresenter = { MacWebAuth.shared.start($0) }
+                account.signInDismisser = { MacWebAuth.shared.cancel() }
+            }
             #endif
             // Live automations belong on the workspace sidebar, so the run list
             // has to stay current even when the Automations screen is not open.
@@ -2137,7 +2148,12 @@ struct RootView: View {
             HomeView(
                 model: home,
                 account: account,
-                onShowAccount: { navigate(to: .global(.account)) }
+                onShowAccount: { navigate(to: .global(.account)) },
+                // Getting started runs the first scan from the card it asks
+                // on, rather than sending somebody to Insights to find the
+                // button. Same model as that screen's own scan, so the two
+                // cannot be running at once.
+                scanner: model
             )
         case .workspace(_, .automations), .global(.automations):
             AutomationsView(

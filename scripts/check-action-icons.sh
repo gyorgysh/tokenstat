@@ -62,6 +62,10 @@ ALLOWED = [
     ("Client/ClientLaunchTile.swift", "Button(action: action)"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
+    # The rail's step button. The glyph is an ActionIcon like everywhere else,
+    # it just arrives as the step's own field rather than spelled at the call
+    # site, because one component draws every step.
+    ("Design/GettingStartedRail.swift", "Button(title, icon, action: action)"),
     ("Client/ClientSecurityCard.swift", "UIPasteboard.general.string = key"),
     ("Client/ClientStates.swift", 'Button(showingDetail ?'),
     ("Client/ClientWorkspaceDetailView.swift", "openExisting(session)"),

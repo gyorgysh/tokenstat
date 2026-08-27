@@ -21,6 +21,7 @@ import SwiftUI
 /// showing through the interface, which is the correct place for it to show.
 struct ClientInsightsView: View {
     @Environment(ConnectivityModel.self) private var connectivity
+    @Environment(ClientNavigationModel.self) private var navigation
     @State private var model = ClientInsightsModel()
     @State private var search = ""
 
@@ -74,10 +75,16 @@ struct ClientInsightsView: View {
     private var content: some View {
         if let rows = model.rows(for: model.cut) {
             if rows.isEmpty {
+                // Not a dead end. An account with nothing on it has one thing
+                // to do next, and it is on Home: a tab that only confirms the
+                // emptiness leaves somebody to find that on their own.
                 ClientEmptyState(
                     kind: .nothingYet,
                     title: "Nothing recorded yet",
-                    message: "Sync a device and its usage shows up here.",
+                    message: "Add a computer to this account and what it counts shows up here.",
+                    actionTitle: "How to start",
+                    actionIcon: .home,
+                    action: { navigation.destination = .home },
                     mark: "mark_insights"
                 )
             } else {

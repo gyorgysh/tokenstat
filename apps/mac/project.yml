@@ -37,7 +37,7 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.7.1"
+    MARKETING_VERSION: "0.7.2"
     # The build number, and it counts releases: one higher on every tagged
     # version, never reused, never reset by a marketing version change. It sat
     # at "2" through fourteen releases, which the App Store will not take (a
@@ -100,8 +100,9 @@ settings:
     # 0.7.1 and are all spent: 56 carried the per-device workspace grant, 57 the
     # fixes to how a request arrives, 58 the waiting card and Chat on the phone,
     # 59 the local network permission and connecting when the answer lands.
-    # 60 is the next one and has not been used.
-    CURRENT_PROJECT_VERSION: "59"
+    # 60 is 0.7.2, the getting-started rail and the Mac's own sign-in sheet.
+    # 61 is the next one and has not been used.
+    CURRENT_PROJECT_VERSION: "60"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,

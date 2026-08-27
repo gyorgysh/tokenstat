@@ -22,6 +22,9 @@ struct HomeView: View {
     /// Where the account flow lives, for the sign-in prompt when All machines
     /// cannot be shown without one.
     var onShowAccount: () -> Void
+    /// The screen that owns scanning, so the getting-started card can run the
+    /// first one without sending anybody to look for the button.
+    @Bindable var scanner: InsightsModel
 
     var body: some View {
         // Same chrome shape as Insights: a fixed bar above the scrolling
@@ -542,12 +545,18 @@ struct HomeView: View {
             } else if model.isLoading {
                 activityPlaceholder
             } else {
-                // A brand new install, not a failure. Saying so beats an empty
-                // grid that looks like a year of doing nothing.
-                EmptyHint(
-                    symbol: "sparkles",
-                    title: "Nothing scanned yet",
-                    text: "Run a scan from Insights and your first heatmap will fill this grid."
+                // A brand new install, not a failure, and not an empty state
+                // either: what somebody needs here is the next step, not a
+                // sentence confirming there is nothing.
+                GettingStartedCard(
+                    signedIn: account.signedIn,
+                    isScanning: scanner.isScanning,
+                    isCoolingDown: scanner.scanCooldownUntil != nil,
+                    onSignIn: {
+                        account.signIn()
+                        onShowAccount()
+                    },
+                    onScan: { Task { await scanner.scan() } }
                 )
             }
         }

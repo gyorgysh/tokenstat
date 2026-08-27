@@ -57,7 +57,11 @@ struct ClientDevicesView: View {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "No devices yet",
-                            message: "Install tokenstat on a computer and sign in there. Free includes two devices. This phone uses one of them.",
+                            message: "On your Mac, open tokenstat and sign in to this same account. "
+                                + "Free includes two devices, and this phone uses one of them.",
+                            actionTitle: "How to start",
+                            actionIcon: .home,
+                            action: { navigation.destination = .home },
                             mark: "mark_device"
                         )
                     }
