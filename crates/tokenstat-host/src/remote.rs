@@ -25,7 +25,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "local-host")]
-use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::UdpSocket;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
@@ -1649,6 +1650,21 @@ fn start_direct_mapping(generation: usize, port: u16) {
     if let Err(error) = std::thread::Builder::new()
         .name("direct-mapping".into())
         .spawn(move || {
+            // The renewer is the only thing keeping this mapping honest; if
+            // it dies mid-renewal, advertising must stop along with it.
+            struct LiveLease(usize);
+            impl Drop for LiveLease {
+                fn drop(&mut self) {
+                    if let Ok(mut mapping) = direct_mapping().lock()
+                        && mapping
+                            .as_ref()
+                            .is_some_and(|mapping| mapping.generation == self.0)
+                    {
+                        *mapping = None;
+                    }
+                }
+            }
+            let _lease = LiveLease(generation);
             let Some(local_ip) = preferred_route_ipv4() else {
                 return;
             };
@@ -1712,7 +1728,23 @@ fn start_direct_mapping(generation: usize, port: u16) {
             {
                 *mapping = None;
             }
-            let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
+            // A listener restart while this thread sat between one-second polls
+            // may have obtained the very same external port again. Give a
+            // replacement a moment to publish itself, then only take the lease
+            // down when nothing newer advertises that port.
+            if direct_generation().load(Ordering::Acquire) != generation {
+                std::thread::sleep(Duration::from_secs(3));
+            }
+            let reused = direct_mapping()
+                .lock()
+                .ok()
+                .and_then(|mapping| mapping.clone())
+                .is_some_and(|mapping| {
+                    mapping.generation != generation && mapping.address.port() == external.port()
+                });
+            if !reused {
+                let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
+            }
         })
     {
         eprintln!("remote: could not start direct mapping: {error}");
@@ -1750,12 +1782,37 @@ fn usable_direct_ipv4(ip: Ipv4Addr) -> bool {
 
 #[cfg(feature = "local-host")]
 fn local_mdns_hostname() -> Option<String> {
-    let output = std::process::Command::new("hostname").output().ok()?;
-    let host = String::from_utf8(output.stdout)
-        .ok()?
-        .trim()
-        .trim_end_matches(".local")
-        .to_string();
+    // Status polls call this often; a hostname does not change within one
+    // daemon's lifetime often enough to justify asking every time.
+    static HOSTNAME: OnceLock<Option<String>> = OnceLock::new();
+    HOSTNAME.get_or_init(local_hostname).clone()
+}
+
+#[cfg(feature = "local-host")]
+fn local_hostname() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut buffer = [0u8; 256];
+        if unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } != 0 {
+            return None;
+        }
+        let end = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(buffer.len());
+        mdns_hostname(&String::from_utf8_lossy(&buffer[..end]))
+    }
+    #[cfg(not(unix))]
+    {
+        let output = std::process::Command::new("hostname").output().ok()?;
+        let host = String::from_utf8(output.stdout).ok()?;
+        mdns_hostname(&host)
+    }
+}
+
+#[cfg(feature = "local-host")]
+fn mdns_hostname(raw: &str) -> Option<String> {
+    let host = raw.trim().trim_end_matches(".local").to_string();
     (!host.is_empty()
         && host
             .bytes()
@@ -1768,17 +1825,20 @@ fn local_mdns_hostname() -> Option<String> {
 /// unbounded number of connection attempts.
 pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCandidate>) {
     const MAX_CANDIDATES: usize = 8;
-    let mut unique = BTreeSet::new();
     let mut candidates = candidates
         .into_iter()
         .filter(|candidate| {
             !candidate.address.trim().is_empty()
                 && candidate.address.len() <= 255
-                && unique.insert(candidate.address.clone())
+                && direct_candidate_address_is_usable(&candidate.address)
         })
-        .take(MAX_CANDIDATES)
         .collect::<Vec<_>>();
+    // Rank before capping, so a crowded list keeps its best routes instead of
+    // whichever eight arrived first.
     candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.priority));
+    let mut seen = BTreeSet::new();
+    candidates.retain(|candidate| seen.insert(candidate.address.clone()));
+    candidates.truncate(MAX_CANDIDATES);
     if let Ok(mut offered) = offered_direct_candidates().lock() {
         if candidates.is_empty() {
             offered.remove(peer_hex);
@@ -1788,6 +1848,39 @@ pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCand
             clear_direct_miss(peer_hex);
         }
     }
+}
+
+/// Whether a candidate address may be dialled at all. Runs on everything an
+/// authenticated peer offers, because a hint is not proof: a literal address
+/// must be routeable to another machine, and a name must look like one. The
+/// pinned Noise handshake remains the real gate; this only keeps a hint from
+/// pointing sockets at this machine's own loopback or link-local space.
+fn direct_candidate_address_is_usable(address: &str) -> bool {
+    if let Ok(socket) = address.parse::<SocketAddr>() {
+        return match socket.ip() {
+            std::net::IpAddr::V4(ip) => {
+                !(ip.is_unspecified()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_multicast()
+                    || ip == Ipv4Addr::BROADCAST)
+            }
+            std::net::IpAddr::V6(ip) => {
+                !(ip.is_unspecified() || ip.is_loopback() || ip.is_multicast())
+            }
+        };
+    }
+    // Names reach here only when the string is not a bare socket literal,
+    // which is exactly how `.local` candidates look.
+    let Some((host, port)) = address.rsplit_once(':') else {
+        return false;
+    };
+    host != "localhost"
+        && !host.is_empty()
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.'))
+        && port.parse::<u16>().is_ok()
 }
 
 fn candidates_for_peer(peer_hex: &str, remembered: Option<&str>) -> Vec<DirectCandidate> {
@@ -2035,6 +2128,10 @@ fn dial_direct_candidates(
 ) -> Result<(tokenstat_remote::Connection, String), String> {
     const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(900);
     const RACE_TIMEOUT: Duration = Duration::from_millis(1_100);
+    // Screen again at the dial, so even a remembered address written by an
+    // older build or a stale offer cannot send a socket somewhere private.
+    let mut candidates = candidates;
+    candidates.retain(|candidate| direct_candidate_address_is_usable(&candidate.address));
     if candidates.is_empty() {
         return Err("no direct address".into());
     }
@@ -3059,6 +3156,66 @@ mod tests {
                 .count(),
             1,
             "the same socket is never dialled twice"
+        );
+        offer_direct_candidates(peer, Vec::new());
+    }
+
+    #[test]
+    fn offered_candidates_rank_before_the_cap() {
+        let peer = "rank-before-cap-test";
+        let mut offered = (0..9)
+            .map(|index| DirectCandidate {
+                kind: "lan".into(),
+                address: format!("192.168.60.{}:7878", index + 1),
+                priority: 0,
+            })
+            .collect::<Vec<_>>();
+        offered.push(DirectCandidate {
+            kind: "lan".into(),
+            address: "192.168.60.99:7878".into(),
+            priority: u16::MAX,
+        });
+        offer_direct_candidates(peer, offered);
+        let candidates = candidates_for_peer(peer, None);
+        assert_eq!(
+            candidates.first().map(|best| best.address.as_str()),
+            Some("192.168.60.99:7878"),
+            "the best route survives even when it arrived last"
+        );
+        assert_eq!(candidates.len(), 8);
+        offer_direct_candidates(peer, Vec::new());
+    }
+
+    #[test]
+    fn offered_candidate_addresses_are_screened_before_any_dial() {
+        let peer = "screened-offers-test";
+        let rejected = [
+            "127.0.0.1:8080",
+            "169.254.169.254:80",
+            "0.0.0.0:1",
+            "[::1]:9000",
+            "localhost:22",
+            "not a host",
+            ":500",
+        ];
+        let accepted = ["192.168.0.102:7878", "desk-mac.local:7878"];
+        let offered = rejected
+            .iter()
+            .chain(accepted.iter())
+            .map(|address| DirectCandidate {
+                kind: "lan".into(),
+                address: (*address).to_string(),
+                priority: 10,
+            })
+            .collect();
+        offer_direct_candidates(peer, offered);
+        let candidates = candidates_for_peer(peer, None)
+            .into_iter()
+            .map(|candidate| candidate.address)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            candidates,
+            vec!["192.168.0.102:7878", "desk-mac.local:7878"]
         );
         offer_direct_candidates(peer, Vec::new());
     }
