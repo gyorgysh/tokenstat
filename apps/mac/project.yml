@@ -96,11 +96,12 @@ settings:
     # looks exactly like a failed upload, and a retry then answers DUPLICATE,
     # which looks like confirmation. It is not. Give it a few minutes before
     # concluding anything.
-    # 55 went up with v0.6.9 and is on TestFlight. 56, 57 and 58 all went up as
+    # 55 went up with v0.6.9 and is on TestFlight. 56 to 59 all went up as
     # 0.7.1 and are all spent: 56 carried the per-device workspace grant, 57 the
-    # fixes to how a request arrives, 58 the waiting card and Chat on the phone.
-    # 59 is the next one and has not been used.
-    CURRENT_PROJECT_VERSION: "58"
+    # fixes to how a request arrives, 58 the waiting card and Chat on the phone,
+    # 59 the local network permission and connecting when the answer lands.
+    # 60 is the next one and has not been used.
+    CURRENT_PROJECT_VERSION: "59"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
