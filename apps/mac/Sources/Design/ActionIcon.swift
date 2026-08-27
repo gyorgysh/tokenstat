@@ -236,3 +236,27 @@ extension Button where Label == ActionLabel {
         self.init(role: role, action: action) { icon.label(title) }
     }
 }
+
+/// An action's glyph on a tinted square.
+///
+/// The same seat `HarnessMark` draws a product logo on, at the same radius and
+/// the same tint, so a row that leads with an action and a row that leads with
+/// a harness read as one list rather than two. For whole-row targets, where the
+/// glyph has to carry the row's weight and an inline `Label` is too small to
+/// find.
+struct ActionSeat: View {
+    let icon: ActionIcon
+    var size: CGFloat = 34
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28)
+                .fill(Theme.accent.opacity(0.12))
+            Image(systemName: icon.symbol)
+                .font(Theme.font(size * 0.44, weight: .medium))
+                .foregroundStyle(Theme.accent)
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}

@@ -622,13 +622,22 @@ struct ClientDeviceDetailView: View {
     }
 }
 
-/// One row inside the From this phone card: a title, a line of why, a chevron.
+/// One row inside the From this phone card: a glyph, a title, a line of why,
+/// a chevron.
+///
+/// The glyph and the panel under it are what say this is a button. Without
+/// them the two ways into another computer were the only actionable surface in
+/// the app drawn as plain text on a card, and people read past them.
 struct DeviceActionRow: View {
     let title: String
     let subtitle: String
+    /// From the one vocabulary, so an action cannot be a folder here and a
+    /// document on the next screen.
+    let icon: ActionIcon
 
     var body: some View {
-        HStack {
+        HStack(spacing: Theme.Space.m) {
+            ActionSeat(icon: icon)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(ClientType.label.weight(.medium))
@@ -644,6 +653,30 @@ struct DeviceActionRow: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(minHeight: 44)
+    }
+}
+
+/// The surface a device action row sits on, and what it does while held.
+///
+/// A style rather than a modifier on the row, because the pressed fill is the
+/// other half of "this is a button" and only the style can see the press. The
+/// panel and hairline are the ones `HostStatsBar` already nests inside the same
+/// card, so the rows and the readings above them are one family.
+struct DeviceActionRowStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                configuration.isPressed ? Theme.rowHighlight : Theme.panel,
+                in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
+            .contentShape(.rect(cornerRadius: Theme.cardRadius))
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 

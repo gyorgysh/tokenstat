@@ -84,22 +84,37 @@ struct ClientHostHeader: View {
                     title: "Open work",
                     subtitle: online == true
                         ? "Folders, terminals and sessions on this computer."
-                        : "It is asleep. Opening this will wake nothing, but it will try."
+                        : "It is asleep. Opening this will wake nothing, but it will try.",
+                    icon: .reveal
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(DeviceActionRowStyle())
         } else {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Open work")
-                    .font(ClientType.label.weight(.medium))
-                Text("Opening folders and terminals on this computer is on Patron.")
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
-                Button("See plans", .plans) { store.showPaywall = true }
-                    .font(ClientType.caption.weight(.semibold))
+            // The same seat and panel as the row it stands in for. An upsell
+            // drawn as loose text beside two panelled rows reads as a
+            // different component rather than as the locked version of one.
+            HStack(spacing: Theme.Space.m) {
+                ActionSeat(icon: .reveal)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open work")
+                        .font(ClientType.label.weight(.medium))
+                    Text("Opening folders and terminals on this computer is on Patron.")
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("See plans", .plans) { store.showPaywall = true }
+                        .font(ClientType.caption.weight(.semibold))
+                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 44)
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.cardRadius)
+                    .strokeBorder(Theme.border, lineWidth: 1)
+            }
         }
     }
 
@@ -111,10 +126,11 @@ struct ClientHostHeader: View {
         } label: {
             DeviceActionRow(
                 title: "View screen",
-                subtitle: isLegend ? "End-to-end encrypted from this device." : "Requires Legend."
+                subtitle: isLegend ? "End-to-end encrypted from this device." : "Requires Legend.",
+                icon: .preview
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(DeviceActionRowStyle())
     }
 }
 
