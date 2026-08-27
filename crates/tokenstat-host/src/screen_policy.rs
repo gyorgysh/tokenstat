@@ -44,6 +44,14 @@ pub struct PendingRequest {
 /// How long an unanswered request stands.
 const PENDING_TTL: u64 = 15 * 60;
 
+/// The one account whose devices are granted screen access without a person.
+///
+/// pueev's App Review demo account, and nothing else. Not a secret and not a
+/// credential: it is written here in plain so that anybody reading this file
+/// can see exactly which account the exception is for, and that theirs is not
+/// it. See `is_review_demo`.
+const REVIEW_DEMO_ACCOUNT_ID: &str = "u_5ce664fd625c5ea13f51f5d2";
+
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
     permissions: Vec<ScreenPermission>,
@@ -231,6 +239,22 @@ struct QualityParams {
     quality: String,
 }
 
+/// Whether this machine may grant screen access without asking a person.
+///
+/// Two independent conditions, both required. The server has to say the round
+/// is open, and the account it names has to be the one this build was
+/// compiled for. A flag on its own would mean one boolean stood between a
+/// device and somebody's screen: flip it by mistake, point a host at a
+/// different server, and every ordinary account would start granting silently.
+/// Pinning the id means that cannot happen, because no other account can be
+/// the demo account whatever a server says.
+///
+/// A server too old to name the account cannot pass this, which is the right
+/// answer: the exception is worth nothing next to granting by accident.
+fn is_review_demo(status: &tokenstat_sync::profile::StatusResult) -> bool {
+    status.review_demo && status.account_id.as_deref() == Some(REVIEW_DEMO_ACCOUNT_ID)
+}
+
 /// Write one device's grant, and make the change take effect now.
 ///
 /// Every path that changes a permission goes through here: the toggles in
@@ -320,11 +344,11 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // has that Mac to press a button on. An untestable feature is a
             // rejected build.
             //
-            // Four things have to hold, and a user can set none of them. The
-            // account has to be the one id in pueev's own server environment,
-            // during a review round somebody opened by hand: that is what
-            // `review_demo` means, and it is false for every other account
-            // and for this one between rounds. The device has to be approved
+            // Five things have to hold, and a user can set none of them. The
+            // account has to be `REVIEW_DEMO_ACCOUNT_ID`, which is compiled in
+            // rather than taken from the answer. The server has to say the
+            // review round is open, which is false for every other account and
+            // for this one between rounds. The device has to be approved
             // already, which `serve_peer` checks before dispatch is reached,
             // so a stranger never gets this far. The account has to be Legend,
             // checked here as everywhere. And the grant is an ordinary row: it
@@ -332,15 +356,14 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             // round's switch goes off, because the next check re-reads it.
             //
             // No build flag on purpose. A path that only exists in some builds
-            // is a path nobody tests, and the thing guarding this is a
-            // server-side environment variable either way.
+            // is a path nobody tests.
             //
             // A failure here is not a refusal. Not signed in, not Legend, or
             // the account unreachable for a moment all mean "not the demo
             // account", and the request stands for a person as it should. The
             // only way past this line is a positive answer.
             let review_demo = verify_legend_account()
-                .map(|status| status.review_demo)
+                .map(|status| is_review_demo(&status))
                 .unwrap_or(false);
             if review_demo {
                 set_permission(&peer, true, p.control)?;
@@ -540,6 +563,35 @@ mod tests {
                 assert!(refused.contains("answered on the host"), "{refused}");
             }
         });
+    }
+
+    #[test]
+    fn the_automatic_grant_needs_the_flag_and_the_compiled_in_account() {
+        let status =
+            |account: Option<&str>, review_demo: bool| tokenstat_sync::profile::StatusResult {
+                host: String::new(),
+                handle: None,
+                tier: Some("legend".into()),
+                last_sync_at: None,
+                machines: vec![],
+                schema_min_v: None,
+                schema_max_v: None,
+                schema_current: None,
+                account_id: account.map(str::to_string),
+                review_demo,
+                raw: serde_json::Value::Null,
+            };
+        // Somebody else's account, however loudly a server says otherwise.
+        assert!(!is_review_demo(&status(Some("u_someone_else"), true)));
+        // The demo account between rounds.
+        assert!(!is_review_demo(&status(
+            Some(REVIEW_DEMO_ACCOUNT_ID),
+            false
+        )));
+        // A server too old to name the account cannot pass.
+        assert!(!is_review_demo(&status(None, true)));
+        // Both, which is the only way through.
+        assert!(is_review_demo(&status(Some(REVIEW_DEMO_ACCOUNT_ID), true)));
     }
 
     #[test]

@@ -122,6 +122,9 @@ pub struct StatusResult {
     pub schema_min_v: Option<u32>,
     pub schema_max_v: Option<u32>,
     pub schema_current: Option<u32>,
+    /// The account's own id, as the server states it. Absent against a server
+    /// old enough not to send one.
+    pub account_id: Option<String>,
     /// Whether this account is the website's App Review demo account, during
     /// an open review round. False everywhere else, and false against a server
     /// old enough not to send the field: a flag that has to be present to be
@@ -586,6 +589,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .and_then(|s| s.get("current"))
         .and_then(|v| v.as_u64())
         .map(|n| n as u32);
+    let account_id = raw.get("id").and_then(Value::as_str).map(str::to_string);
     let review_demo = raw
         .get("review_demo")
         .and_then(Value::as_bool)
@@ -599,6 +603,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         schema_min_v,
         schema_max_v,
         schema_current,
+        account_id,
         review_demo,
         raw,
     })
