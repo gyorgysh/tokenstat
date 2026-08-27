@@ -21,8 +21,11 @@
 //! record, its staleness window and its pruning, so one person answering two
 //! kinds of question answers them the same way.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -68,12 +71,37 @@ fn save(store: &Store) -> Result<(), String> {
 
 /// Whether one device may reach the work here.
 ///
-/// A read of a small file on every gated inbound request. That is the same
-/// cost `PeerStore::cached` already pays per request on this path, and a
-/// decision this important is worth reading rather than caching: a grant
-/// somebody just took away has to mean the next request.
+/// Cached against the file's own timestamp, the way `PeerStore::cached` is and
+/// for the same reason: this is asked on every gated request, and a phone with
+/// a terminal open polls `pty.read` several times a second. A file stamp is far
+/// cheaper than a read and a parse, and keying on it means a grant somebody
+/// just took away still means the next request rather than the next minute.
 pub(crate) fn is_allowed(peer_id: &str) -> bool {
-    load().is_ok_and(|store| store.allowed.iter().any(|held| held == peer_id))
+    allowed_now().is_some_and(|allowed| allowed.contains(peer_id))
+}
+
+fn allowed_now() -> Option<std::sync::Arc<HashSet<String>>> {
+    type Cached = Mutex<Option<(Option<SystemTime>, std::sync::Arc<HashSet<String>>)>>;
+    static CACHE: OnceLock<Cached> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+
+    let path = path().ok()?;
+    // A file that is not there yet has no grants in it, and a clock that will
+    // not answer means re-reading, which is correct and merely slower.
+    let stamp = fs::metadata(&path).and_then(|m| m.modified()).ok();
+    if let Ok(guard) = cache.lock()
+        && let Some((seen, allowed)) = guard.as_ref()
+        && *seen == stamp
+        && stamp.is_some()
+    {
+        return Some(std::sync::Arc::clone(allowed));
+    }
+
+    let allowed = std::sync::Arc::new(load().ok()?.allowed.into_iter().collect::<HashSet<_>>());
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((stamp, std::sync::Arc::clone(&allowed)));
+    }
+    Some(allowed)
 }
 
 /// Let a device in, or shut it out.
@@ -149,10 +177,6 @@ pub(crate) fn refuse_unpermitted(line: &str, peer: &str) -> Option<String> {
     )
 }
 
-/// What a device asks for. No peer id: that comes from the transport.
-#[derive(Deserialize)]
-struct AskParams {}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SetParams {
@@ -171,7 +195,9 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
         "workspace.access.ask" => {
             let peer = crate::request_context::remote_peer()
                 .ok_or("a request must arrive from the device asking")?;
-            let _: AskParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            // Nothing to read. Workspace access is one grant with no half to
+            // ask for, and the peer comes from the connection, so a device has
+            // nothing it could usefully say here.
             let mut store = load()?;
             if store.allowed.iter().any(|held| held == &peer) {
                 return Ok(json!({"pending": false, "granted": true}));

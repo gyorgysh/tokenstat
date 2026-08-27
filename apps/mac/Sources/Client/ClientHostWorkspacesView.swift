@@ -192,6 +192,10 @@ final class ClientHostWorkspacesModel {
             folders = []
             sessions = []
             reachedHost = false
+            // Unknown again, not refused. A host that could not be reached
+            // this time must not be described as having turned this device
+            // away: those are different screens with different answers.
+            isAllowed = nil
         }
     }
 

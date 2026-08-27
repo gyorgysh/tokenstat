@@ -195,8 +195,23 @@ fn pair(params: &str) -> Result<Value, String> {
     // Pairing by code is a person saying yes to one device by name, in front
     // of the machine, which is exactly the consent workspace access asks for.
     // Appearing on the account is not, and that path grants nothing.
-    crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), true)?;
+    grant_work(&key, true);
     Ok(peer_json(&peer))
+}
+
+/// Move the workspace grant with the trust that carries it.
+///
+/// Best effort on purpose. Trust is already written by the time this runs, and
+/// neither direction is dangerous if the file will not take it: a grant that
+/// did not land means the device asks, and a removal that did not land is held
+/// by a peer this machine now refuses outright. Failing the whole call would
+/// report a pairing that actually happened as an error.
+fn grant_work(key: &tokenstat_identity::PublicKey, allow: bool) {
+    // The canonical hex, not what a caller typed: the policy file is keyed by
+    // the form `remote_peer` hands out.
+    if let Err(error) = crate::workspace_policy::set_allowed(&tokenstat_identity::hex(key), allow) {
+        eprintln!("remote: could not record workspace access: {error}");
+    }
 }
 
 fn set_trust(params: &str, trust: Trust) -> Result<Value, String> {
@@ -215,16 +230,16 @@ fn set_trust(params: &str, trust: Trust) -> Result<Value, String> {
     // Approving in Devices is the same yes as typing a pairing code, and
     // revoking has to take the work back with it: a device nobody trusts
     // enough to reach this machine must not keep a grant waiting for it.
+    //
+    // Granting only on a real change, because approving a peer that was
+    // already approved must not quietly hand back a grant its owner turned off
+    // with the toggle in Devices. Revoking runs either way: taking access back
+    // from a device that already had none costs nothing, and a stale grant is
+    // exactly what this is for.
     match trust {
-        // The canonical hex, not what the caller typed: the policy file is
-        // keyed by the form `remote_peer` hands out.
-        Trust::Approved => {
-            crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), true)?
-        }
-        Trust::Revoked => {
-            crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), false)?
-        }
-        Trust::Pending => {}
+        Trust::Approved if changed => grant_work(&key, true),
+        Trust::Revoked => grant_work(&key, false),
+        _ => {}
     }
     // False rather than an error: approving a peer that just went away is not
     // a failure the user did anything about, and it is racy by nature.
@@ -242,7 +257,7 @@ fn forget(params: &str) -> Result<Value, String> {
     }
     // A device this machine has forgotten must not come back to a grant it
     // was left holding.
-    crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), false)?;
+    grant_work(&key, false);
     Ok(json!({"forgotten": forgotten}))
 }
 
