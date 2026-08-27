@@ -23,9 +23,52 @@ const MAX_INPUT_BATCH: usize = 64;
 struct CaptureSession {
     peer: String,
     control: bool,
+    /// How the viewer reached this machine.
+    ///
+    /// The capture helper reads it and picks how much picture to spend. A
+    /// relay channel is metered bandwidth pueev pays for by the gigabyte; a
+    /// direct one is the person's own network, and the same desktop can be far
+    /// sharper on it for nothing.
+    route: crate::remote::Route,
+    /// What the viewer asked for, when it asked for anything. A name from a
+    /// fixed set, never a number: nothing arbitrary crosses this boundary.
+    quality: Option<ScreenQuality>,
     frames: SyncSender<Vec<u8>>,
     input: VecDeque<Vec<u8>>,
     dropped: u64,
+}
+
+/// The pictures a viewer may ask for.
+///
+/// A closed set, so a device cannot name a bitrate. Auto is the default and
+/// means the host decides from the route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScreenQuality {
+    Auto,
+    Sharp,
+    Smooth,
+    DataSaver,
+}
+
+impl ScreenQuality {
+    fn parse(name: &str) -> Option<Self> {
+        match name {
+            "auto" => Some(Self::Auto),
+            "sharp" => Some(Self::Sharp),
+            "smooth" => Some(Self::Smooth),
+            "dataSaver" => Some(Self::DataSaver),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Sharp => "sharp",
+            Self::Smooth => "smooth",
+            Self::DataSaver => "dataSaver",
+        }
+    }
 }
 
 /// Why a screen session ended.
@@ -144,7 +187,22 @@ impl Drop for CaptureReceiver {
     }
 }
 
-pub(crate) fn create(id: String, peer: String, control: bool) -> Result<CaptureReceiver, String> {
+pub(crate) fn create(
+    id: String,
+    peer: String,
+    control: bool,
+    quality: Option<String>,
+    route: crate::remote::Route,
+) -> Result<CaptureReceiver, String> {
+    // An unrecognised name is a refusal, not a shrug into auto. A viewer that
+    // asked for something this host has never heard of should be told rather
+    // than quietly given a different picture.
+    let quality = match quality {
+        Some(name) => Some(
+            ScreenQuality::parse(&name).ok_or_else(|| format!("unknown screen quality: {name}"))?,
+        ),
+        None => None,
+    };
     // One live session per peer. Dropping the old sender wakes its pump, which
     // closes its stream and stops its capture, so the replacement is a
     // handover rather than a second share.
@@ -158,6 +216,8 @@ pub(crate) fn create(id: String, peer: String, control: bool) -> Result<CaptureR
             Arc::new(Mutex::new(CaptureSession {
                 peer,
                 control,
+                route,
+                quality,
                 frames: tx,
                 input: VecDeque::new(),
                 dropped: 0,
@@ -196,6 +256,29 @@ pub(crate) fn set_control(id: &str, peer: &str, control: bool) -> Result<(), Str
         held.input.clear();
     }
     held.control = control;
+    Ok(())
+}
+
+/// Change what a live session may spend.
+///
+/// No reopen, for the same reason control does not reopen: the relay allows one
+/// screen channel per account and the replacement arrives before the old one
+/// has finished closing. The capture helper reads this off the session list it
+/// already polls, so the picture changes without stopping.
+pub(crate) fn set_quality(id: &str, peer: &str, quality: &str) -> Result<(), String> {
+    let quality = ScreenQuality::parse(quality)
+        .ok_or_else(|| format!("unknown screen quality: {quality}"))?;
+    let session = sessions()
+        .lock()
+        .map_err(|_| "screen capture registry poisoned")?
+        .get(id)
+        .cloned()
+        .ok_or("screen capture session is no longer active")?;
+    let mut held = session.lock().map_err(|_| "capture session poisoned")?;
+    if held.peer != peer {
+        return Err("that screen session belongs to another device".into());
+    }
+    held.quality = Some(quality);
     Ok(())
 }
 
@@ -255,7 +338,14 @@ pub(crate) fn call(method: &str, params: &str) -> Option<Result<Value, String>> 
                 let mut out = Vec::with_capacity(held.len());
                 for (id, session) in held.iter() {
                     let session = session.lock().map_err(|_| "capture session poisoned")?;
-                    out.push(json!({"id": id, "peerId": session.peer, "control": session.control, "dropped": session.dropped}));
+                    out.push(json!({
+                        "id": id,
+                        "peerId": session.peer,
+                        "control": session.control,
+                        "dropped": session.dropped,
+                        "route": session.route.as_str(),
+                        "quality": session.quality.map(ScreenQuality::as_str),
+                    }));
                 }
                 Ok(Value::Array(out))
             }
@@ -340,9 +430,23 @@ mod tests {
 
     #[test]
     fn a_second_session_for_one_peer_replaces_the_first() {
-        let first = create("first".into(), "one-screen-peer".into(), true).unwrap();
+        let first = create(
+            "first".into(),
+            "one-screen-peer".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         assert!(queue_input(&first.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok());
-        let second = create("second".into(), "one-screen-peer".into(), true).unwrap();
+        let second = create(
+            "second".into(),
+            "one-screen-peer".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         // The replacement works and the original is gone, so the peer is not
         // being shown the same desktop twice.
         assert!(queue_input(&second.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok());
@@ -354,8 +458,22 @@ mod tests {
 
     #[test]
     fn one_peer_does_not_end_another_peers_session() {
-        let mine = create("mine".into(), "peer-a".into(), true).unwrap();
-        let _theirs = create("theirs".into(), "peer-b".into(), true).unwrap();
+        let mine = create(
+            "mine".into(),
+            "peer-a".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
+        let _theirs = create(
+            "theirs".into(),
+            "peer-b".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         assert!(
             queue_input(&mine.id, br#"{"type":"display","id":1}"#.to_vec()).is_ok(),
             "another peer connecting must not end this one"
@@ -367,7 +485,14 @@ mod tests {
     // other's sessions and fail for a reason that is not the rule under test.
     #[test]
     fn view_only_session_rejects_control_input() {
-        let receiver = create("view-only".into(), "view-only-peer".into(), false).unwrap();
+        let receiver = create(
+            "view-only".into(),
+            "view-only-peer".into(),
+            false,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         assert!(queue_input(&receiver.id, vec![1]).is_err());
         assert!(queue_input(&receiver.id, br#"{"type":"display","id":2}"#.to_vec()).is_ok());
         assert!(
@@ -378,7 +503,14 @@ mod tests {
 
     #[test]
     fn narrowing_a_grant_to_view_ends_a_control_session() {
-        let control = create("narrow-control".into(), "narrow-peer".into(), true).unwrap();
+        let control = create(
+            "narrow-control".into(),
+            "narrow-peer".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         revoke_peer("narrow-peer", true, false).unwrap();
         assert!(
             !sessions().lock().unwrap().contains_key(&control.id),
@@ -388,7 +520,14 @@ mod tests {
 
     #[test]
     fn control_is_handed_over_on_the_live_session() {
-        let session = create("flip".into(), "flip-peer".into(), false).unwrap();
+        let session = create(
+            "flip".into(),
+            "flip-peer".into(),
+            false,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         assert!(
             queue_input(&session.id, br#"{"type":"move","x":0.5,"y":0.5}"#.to_vec()).is_err(),
             "a view-only session must not carry a pointer"
@@ -407,7 +546,14 @@ mod tests {
 
     #[test]
     fn handing_control_back_drops_what_was_queued() {
-        let session = create("flip-queue".into(), "flip-queue-peer".into(), true).unwrap();
+        let session = create(
+            "flip-queue".into(),
+            "flip-queue-peer".into(),
+            true,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         queue_input(
             &session.id,
             br#"{"type":"mouse","button":0,"down":true}"#.to_vec(),
@@ -428,7 +574,14 @@ mod tests {
 
     #[test]
     fn one_device_cannot_flip_control_on_another_devices_session() {
-        let session = create("flip-theirs".into(), "flip-owner".into(), false).unwrap();
+        let session = create(
+            "flip-theirs".into(),
+            "flip-owner".into(),
+            false,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         assert!(
             set_control(&session.id, "flip-intruder", true).is_err(),
             "a capability verified for one device must not reach another device's session"
@@ -438,7 +591,14 @@ mod tests {
 
     #[test]
     fn narrowing_a_grant_to_view_keeps_a_view_session() {
-        let view = create("keep-view".into(), "keep-peer".into(), false).unwrap();
+        let view = create(
+            "keep-view".into(),
+            "keep-peer".into(),
+            false,
+            None,
+            crate::remote::Route::Relay,
+        )
+        .unwrap();
         revoke_peer("keep-peer", true, false).unwrap();
         assert!(sessions().lock().unwrap().contains_key(&view.id));
         revoke_peer("keep-peer", false, false).unwrap();

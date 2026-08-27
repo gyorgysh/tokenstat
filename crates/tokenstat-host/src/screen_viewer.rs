@@ -42,6 +42,9 @@ struct OpenParams {
     capability: String,
     #[serde(default)]
     control: bool,
+    /// What the picture should be worth, from the fixed set the host knows.
+    /// Absent means the host decides from the route this connection takes.
+    quality: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -119,7 +122,13 @@ fn open(params: &str) -> Result<Value, String> {
     let answer = crate::remote::call_peer_result(
         &p.peer,
         "stream.open",
-        &json!({"kind":"screen.video", "capability":p.capability, "control":p.control}).to_string(),
+        &json!({
+            "kind": "screen.video",
+            "capability": p.capability,
+            "control": p.control,
+            "quality": p.quality,
+        })
+        .to_string(),
     )?;
     let token = answer
         .get("token")

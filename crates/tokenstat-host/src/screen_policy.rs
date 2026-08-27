@@ -221,6 +221,16 @@ struct ControlParams {
     control: bool,
 }
 
+/// The picture a live session should be worth, from the fixed set.
+#[cfg(feature = "local-host")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QualityParams {
+    session_id: String,
+    capability: String,
+    quality: String,
+}
+
 /// Write one device's grant, and make the change take effect now.
 ///
 /// Every path that changes a permission goes through here: the toggles in
@@ -420,6 +430,17 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             verify_capability(&peer, &p.capability, p.control)?;
             crate::screen_runtime::set_control(&p.session_id, &peer, p.control)?;
             Ok(json!({"control":p.control}))
+        }
+        // Same shape as `screen.control.set`, and for the same reason: what a
+        // session spends can change without the picture stopping.
+        #[cfg(feature = "local-host")]
+        "screen.quality.set" => {
+            let peer = crate::request_context::remote_peer()
+                .ok_or("screen quality must arrive over an authenticated remote connection")?;
+            let p: QualityParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            verify_capability(&peer, &p.capability, false)?;
+            crate::screen_runtime::set_quality(&p.session_id, &peer, &p.quality)?;
+            Ok(json!({"quality": p.quality}))
         }
         "screen.direct.candidates" => direct_candidates(),
         // Kept for peers from before candidate lists. New callers never rely

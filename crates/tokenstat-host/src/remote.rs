@@ -311,7 +311,7 @@ fn start_direct_if_enabled() {
             match server.accept() {
                 Ok(Ok(connection)) => {
                     if let Ok(session) = session_for_serving() {
-                        std::thread::spawn(move || serve_peer(connection, &session));
+                        std::thread::spawn(move || serve_peer(connection, &session, Route::Direct));
                     }
                 }
                 Ok(Err(refused)) => report(&refused),
@@ -774,7 +774,9 @@ fn start_tunnel_if_enabled(session: Arc<Mutex<Session>>, settings: &RemoteSettin
                     match authorize_with(connection, "tunnel", Some(&account_peer_label)) {
                         Ok(connection) => {
                             let peer_session = Arc::clone(&session);
-                            std::thread::spawn(move || serve_peer(connection, &peer_session));
+                            std::thread::spawn(move || {
+                                serve_peer(connection, &peer_session, Route::Relay)
+                            });
                         }
                         Err(refused) => report(&refused),
                     }
@@ -1171,7 +1173,37 @@ fn report(refused: &Refused) {
 /// transport adds a handshake and a frame, and asks the same dispatch the
 /// same way. A method cannot exist here and be missing over the socket,
 /// because neither transport knows what a method is.
-fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Session>) {
+/// How a peer reached this machine.
+///
+/// The screen encoder is the one thing that cares, and it cares a lot: a relay
+/// channel is metered bandwidth pueev pays for by the gigabyte, while a direct
+/// one is the person's own network and costs nobody anything. The same desktop
+/// can be far sharper on the second for free. Nothing else in the product
+/// treats the two differently, and nothing here changes that: this says how a
+/// request arrived, never whether it is allowed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// A TCP connection straight to this machine, on the LAN or through a
+    /// router mapping.
+    Direct,
+    /// Through the account's relay.
+    Relay,
+}
+
+impl Route {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Route::Direct => "direct",
+            Route::Relay => "relay",
+        }
+    }
+}
+
+fn serve_peer(
+    mut connection: tokenstat_remote::Connection,
+    session: &Mutex<Session>,
+    route: Route,
+) {
     let peer = connection.peer_key();
     // A machine cannot serve itself. A self-dial through the tunnel, or a
     // mistaken local pair that pinned this machine's own key, would otherwise
@@ -1197,7 +1229,7 @@ fn serve_peer(mut connection: tokenstat_remote::Connection, session: &Mutex<Sess
         // `accept` hands the connection to the pump, or closes it when the
         // token is not a live reservation: nobody gets a stream this machine
         // did not open for them. Either way this connection is spoken for.
-        crate::remote_stream::accept(&token, connection);
+        crate::remote_stream::accept(&token, connection, route);
         return;
     }
 

@@ -1994,8 +1994,32 @@ extension Bridge {
         _ = try? await background("screen.capture.close", ["id": id], patience: Patience.interactive, as: Closed.self)
     }
 
-    static func screenViewerOpen(peer: String, capability: String, control: Bool) async throws -> ScreenViewerSession {
-        try await background("screen.viewer.open", ["peer": peer, "capability": capability, "control": control], patience: Patience.standard, as: ScreenViewerSession.self)
+    static func screenViewerOpen(
+        peer: String,
+        capability: String,
+        control: Bool,
+        quality: ScreenQualityChoice
+    ) async throws -> ScreenViewerSession {
+        var params: [String: Any] = ["peer": peer, "capability": capability, "control": control]
+        // Auto is the absence of an opinion, not a value. Sending it would ask
+        // the host to honour a choice rather than to read the route.
+        if let wire = quality.wire { params["quality"] = wire }
+        return try await background("screen.viewer.open", params, patience: Patience.standard, as: ScreenViewerSession.self)
+    }
+
+    /// Change what a live session spends, without stopping the picture.
+    ///
+    /// The same shape as `setScreenControl`, and for the same reason: the relay
+    /// allows one screen channel per account, so anything that reopens the
+    /// stream races its own teardown.
+    static func setScreenQuality(peer: String, sessionID: String, capability: String, quality: String) async throws {
+        struct Answer: Codable, Sendable { var quality: String }
+        _ = try await onPeer(
+            peer,
+            "screen.quality.set",
+            ["sessionId": sessionID, "capability": capability, "quality": quality],
+            as: Answer.self
+        )
     }
 
     /// Hand the mouse over, or take it back, without reopening the stream.

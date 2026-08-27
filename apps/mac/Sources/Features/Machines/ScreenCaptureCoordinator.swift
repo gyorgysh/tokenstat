@@ -104,7 +104,11 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
                 self?.frameContinuation?.yield((id, frame))
             }
             do {
-                try await created.start(control: sessions.first { $0.id == id }?.control ?? false)
+                let session = sessions.first { $0.id == id }
+                try await created.start(
+                    control: session?.control ?? false,
+                    profile: session?.profile ?? .relay
+                )
                 lock.withLock { encoders[id] = created }
             } catch {
                 await fail(id, error: error)
@@ -116,6 +120,9 @@ final class ScreenCaptureCoordinator: @unchecked Sendable {
         // the watching pace for the whole session.
         for session in sessions where !added.contains(session.id) {
             await encoder(for: session.id)?.setControl(session.control)
+            // The viewer can change what it is willing to spend without
+            // reopening the stream, same as it can take the mouse.
+            await encoder(for: session.id)?.setProfile(session.profile)
         }
         // Nobody is driving any more, either because the session ended or
         // because control went back. A viewer that vanished mid-drag would
@@ -189,22 +196,41 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
     /// The only thing it changes is how often a picture is taken. See
     /// `frameRate`.
     private var control = false
+    /// What this session may spend, and how widely it may draw.
+    ///
+    /// Set from the route the viewer reached this machine on, and from the
+    /// quality it asked for. Relay until told otherwise, which is what every
+    /// session used to be.
+    private var profile = ScreenQualityProfile.relay
+    /// The adaptive backoff, as a fraction of the profile's width. Congestion
+    /// pulls it down and a long clear run puts it back; it is kept here so a
+    /// profile change does not lose a backoff that is still warranted.
+    private var congestionScale: CGFloat = 1
 
     init(output: @escaping @Sendable (Data) -> Void) { self.output = output }
 
     /// Pictures per second.
     ///
-    /// Sixty while somebody is driving, thirty while somebody is watching.
-    /// The bitrate does not move with it: the cost of a session is the budget
-    /// below, and this decides how finely that budget is spread over time. A
-    /// pointer is the one thing on a remote desktop that is judged frame by
-    /// frame, and at thirty a drag arrives in visible steps however good each
-    /// step looks. Watching has no such test, and spending the same budget on
-    /// half as many pictures makes each of them better.
-    private var frameRate: Int32 { control ? 60 : 30 }
+    /// The bitrate does not move with it: the cost of a session is the
+    /// profile's budget, and this decides how finely that budget is spread
+    /// over time. Spending the same budget on half as many pictures makes each
+    /// of them better, which is the right trade for watching and the wrong one
+    /// for driving.
+    private var frameRate: Int32 { control ? profile.controlFPS : profile.viewingFPS }
 
-    func start(displayID requestedID: CGDirectDisplayID? = nil, control: Bool? = nil) async throws {
+    /// The width to encode at, after the profile's cap and any backoff.
+    private var targetWidth: CGFloat {
+        guard sourceWidth > 0 else { return profile.maxWidth }
+        return min(CGFloat(sourceWidth), profile.maxWidth) * congestionScale
+    }
+
+    func start(
+        displayID requestedID: CGDirectDisplayID? = nil,
+        control: Bool? = nil,
+        profile: ScreenQualityProfile? = nil
+    ) async throws {
         if let control { self.control = control }
+        if let profile { self.profile = profile }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw ScreenCaptureError.permission
         }
@@ -217,9 +243,9 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         if let metadata = try? JSONSerialization.data(withJSONObject: ["type": "displays", "selected": display.displayID, "displays": displays]) {
             output(ScreenWire.metadata(metadata))
         }
-        let scale = min(1, 1920 / CGFloat(display.width))
         sourceWidth = display.width
         sourceHeight = display.height
+        let scale = min(1, targetWidth / CGFloat(display.width))
         width = Int32(max(2, Int(CGFloat(display.width) * scale) & ~1))
         height = Int32(max(2, Int(CGFloat(display.height) * scale) & ~1))
 
@@ -275,13 +301,36 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         try? await stream.updateConfiguration(config)
     }
 
+    /// Back off, or come back, under congestion.
+    ///
+    /// A fraction of the profile rather than of a fixed 1920, so a direct
+    /// route that turns out to be a poor Wi-Fi link still narrows and a relay
+    /// session behaves exactly as it did.
     func setQuality(_ quality: CGFloat) async {
-        guard let stream, let config = configuration else { return }
-        let scale = min(1, 1920 / CGFloat(sourceWidth)) * quality
+        guard congestionScale != quality else { return }
+        congestionScale = quality
+        await reconfigure()
+    }
+
+    /// Move to a different budget on a session that is already running.
+    ///
+    /// The same road `setQuality` takes, because the picture must not stop:
+    /// reconfigure the stream, then rebuild the compression session with a
+    /// keyframe forced, since the decoder cannot start again without SPS/PPS.
+    func setProfile(_ next: ScreenQualityProfile) async {
+        guard next != profile else { return }
+        profile = next
+        await reconfigure()
+    }
+
+    private func reconfigure() async {
+        guard let stream, let config = configuration, sourceWidth > 0 else { return }
+        let scale = min(1, targetWidth / CGFloat(sourceWidth))
         let newWidth = Int32(max(2, Int(CGFloat(sourceWidth) * scale) & ~1))
         let newHeight = Int32(max(2, Int(CGFloat(sourceHeight) * scale) & ~1))
-        guard newWidth != width else { return }
-        config.width = Int(newWidth); config.height = Int(newHeight)
+        config.width = Int(newWidth)
+        config.height = Int(newHeight)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(frameRate))
         do {
             try await stream.updateConfiguration(config)
             queue.sync {
@@ -321,14 +370,14 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         // relay somebody pays for by the gigabyte: four megabits is 1.8 GB an
         // hour, and the difference on a screen that is mostly text and flat
         // panels is not something a person notices on a handset.
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: Self.averageBitRate as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: profile.averageBitRate as CFNumber)
         // A ceiling as well as an average, so a burst of motion cannot spend a
         // minute's budget in a second. The pair is bytes-per-window: 2x the
         // average over one second.
         VTSessionSetProperty(
             session,
             key: kVTCompressionPropertyKey_DataRateLimits,
-            value: [Self.averageBitRate / 4, 1] as CFArray
+            value: [profile.averageBitRate / 4, 1] as CFArray
         )
         // Every four seconds rather than every two. A keyframe is the
         // expensive frame, and on a desktop that is not moving it is the only
@@ -339,17 +388,11 @@ private final class ScreenVideoEncoder: NSObject, SCStreamOutput, SCStreamDelega
         // control session's keyframes twice as frequent as a viewing one's
         // purely because it takes twice as many pictures, which is the one
         // way raising the frame rate could have cost real money.
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: 4 as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (frameRate * 4) as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration, value: profile.keyframeSeconds as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: (frameRate * profile.keyframeSeconds) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: frameRate as CFNumber)
         VTCompressionSessionPrepareToEncodeFrames(session)
     }
-
-    /// Bits per second for the video stream.
-    ///
-    /// The single biggest lever on what a relayed session costs, so it is a
-    /// named constant rather than a literal three properties deep.
-    static let averageBitRate = 1_500_000
 
         func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         if type == .audio {

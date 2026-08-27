@@ -3141,6 +3141,7 @@ fn stream_open(params: &str) -> Result<Value, String> {
                     id: id.clone(),
                     peer,
                     control: p.control,
+                    quality: p.quality,
                 },
                 Some(id),
             )
@@ -3326,6 +3327,9 @@ struct StreamOpenParams {
     capability: Option<String>,
     #[serde(default)]
     control: bool,
+    /// Screen streams only. A name from a fixed set, checked where the session
+    /// is made. Absent means the host decides from the route.
+    quality: Option<String>,
 }
 
 #[cfg(feature = "local-host")]

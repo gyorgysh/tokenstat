@@ -137,6 +137,18 @@ struct ScreenViewerView: View {
                 Toggle(isOn: $controlling) { Label("Control", systemImage: "cursorarrow.motionlines") }
                     .disabled(model.state == .connecting)
             }
+            ToolbarItem {
+                Picker("Quality", selection: Binding(
+                    get: { model.quality },
+                    set: { choice in Task { await model.setQuality(choice) } }
+                )) {
+                    ForEach(ScreenQualityChoice.allCases) { choice in
+                        Text(choice.title).tag(choice)
+                    }
+                }
+                .pickerStyle(.menu)
+                .help("How much of the connection this picture may use")
+            }
             if controlling {
                 ToolbarItem {
                     Picker("Pointer", selection: $mode) {
@@ -724,6 +736,11 @@ private final class ScreenViewerModel {
     /// permission had arrived and take the button away in the same breath.
     private(set) var requestNotice: String?
     private(set) var isRequesting = false
+    /// What the picture is asked to be worth. Automatic lets the host read the
+    /// route, which is the right answer for almost everybody: a direct link
+    /// pays for a much better picture out of the person's own bandwidth, and
+    /// the relay stays where it was.
+    var quality: ScreenQualityChoice = .auto
     var needsPermission: Bool {
         let value = message.lowercased()
         return value.contains("permission") || value.contains("screen access") || value.contains("allowed")
@@ -794,7 +811,12 @@ private final class ScreenViewerModel {
                 ["peerId": identity.key, "control": control, "tier": tier ?? ""],
                 as: ScreenCapability.self
             )
-            let session = try await Bridge.screenViewerOpen(peer: peer, capability: capability.token, control: control)
+            let session = try await Bridge.screenViewerOpen(
+                peer: peer,
+                capability: capability.token,
+                control: control,
+                quality: quality
+            )
             self.session = session
             transport = session.transport
             connectedSince = Date()
@@ -1025,6 +1047,40 @@ private final class ScreenViewerModel {
     /// toggle raced the old channel's close and lost. Answers false when there
     /// is nothing live to flip or the host is too old to know the method, and
     /// the caller then falls back to reopening.
+    /// Move a live session to a different budget.
+    ///
+    /// Never by reopening. The relay allows one screen channel per account, so
+    /// a reopen races its own teardown, which is the whole reason control is
+    /// flipped in place as well. A host too old to know the method keeps the
+    /// picture it has, which is a worse picture and not a broken one.
+    func setQuality(_ wanted: ScreenQualityChoice) async {
+        guard wanted != quality else { return }
+        quality = wanted
+        guard let live = session, let hostSession = live.sessionId, !hostSession.isEmpty,
+              state == .streaming || state == .connecting
+        else { return }
+        do {
+            let identity = try await Bridge.machineIdentity()
+            let capability = try await Bridge.onPeer(
+                peer,
+                "screen.capability.issue",
+                ["peerId": identity.key, "control": requestedControl, "tier": requestedTier ?? ""],
+                as: ScreenCapability.self
+            )
+            try await Bridge.setScreenQuality(
+                peer: peer,
+                sessionID: hostSession,
+                capability: capability.token,
+                // Automatic on a live session has to be said out loud: there is
+                // no way to unsay a choice the host is already holding.
+                quality: wanted.wire ?? ScreenQualityChoice.auto.rawValue
+            )
+        } catch {
+            // Not worth a failed state. The session is still running and still
+            // showing a picture, just not the one that was asked for.
+        }
+    }
+
     private func flipControlOnLiveSession(_ wanted: Bool) async -> Bool {
         guard let live = session, let hostSession = live.sessionId, !hostSession.isEmpty,
               state == .streaming || state == .connecting

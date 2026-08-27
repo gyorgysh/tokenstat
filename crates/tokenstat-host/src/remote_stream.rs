@@ -46,11 +46,16 @@ pub(crate) enum StreamKind {
         id: String,
         peer: String,
         control: bool,
+        /// What the viewer asked the picture to be worth, from a fixed set.
+        /// None means let the host decide from the route it came in on.
+        quality: Option<String>,
     },
 }
 
 struct PendingStream {
-    tx: mpsc::Sender<Connection>,
+    /// The connection, and how it reached this machine. The route is only
+    /// known when the reservation is claimed, not when it is made.
+    tx: mpsc::Sender<(Connection, crate::remote::Route)>,
 }
 
 fn registry() -> &'static Mutex<HashMap<String, PendingStream>> {
@@ -64,15 +69,15 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
     let mut bytes = [0u8; 8];
     getrandom::fill(&mut bytes).map_err(|e| e.to_string())?;
     let token = tokenstat_identity::hex(&bytes);
-    let (tx, rx) = mpsc::channel::<Connection>();
+    let (tx, rx) = mpsc::channel::<(Connection, crate::remote::Route)>();
     registry()
         .lock()
         .map_err(|e| e.to_string())?
         .insert(token.clone(), PendingStream { tx });
     let answer = token.clone();
     std::thread::spawn(move || {
-        let connection = match rx.recv_timeout(CLAIM_TIMEOUT) {
-            Ok(connection) => connection,
+        let (connection, route) = match rx.recv_timeout(CLAIM_TIMEOUT) {
+            Ok(claimed) => claimed,
             Err(_) => {
                 // Nobody claimed it. Give the reservation back rather than
                 // leaking an entry and a parked thread.
@@ -83,7 +88,12 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
         match kind {
             StreamKind::Proxy { host, port } => pump_proxy(connection, &host, port),
             StreamKind::PtySubscribe { session } => pump_pty_subscribe(connection, &session),
-            StreamKind::Screen { id, peer, control } => pump_screen(connection, id, peer, control),
+            StreamKind::Screen {
+                id,
+                peer,
+                control,
+                quality,
+            } => pump_screen(connection, id, peer, control, quality, route),
         }
     });
     Ok(answer)
@@ -91,8 +101,15 @@ pub(crate) fn open(kind: StreamKind) -> Result<String, String> {
 
 /// Host half of a screen channel. Video arrives from the device-local macOS
 /// helper; input returns to that helper only when the capability grants it.
-fn pump_screen(connection: Connection, id: String, peer: String, control: bool) {
-    let capture = match crate::screen_runtime::create(id.clone(), peer, control) {
+fn pump_screen(
+    connection: Connection,
+    id: String,
+    peer: String,
+    control: bool,
+    quality: Option<String>,
+    route: crate::remote::Route,
+) {
+    let capture = match crate::screen_runtime::create(id.clone(), peer, control, quality, route) {
         Ok(capture) => capture,
         Err(_) => return,
     };
@@ -137,10 +154,10 @@ fn pump_screen(connection: Connection, id: String, peer: String, control: bool) 
 /// Claim a reservation. Called from the serve path when a fresh connection's
 /// first message is a stream handshake. Returns false when the token is not a
 /// live reservation, in which case the caller closes the connection.
-pub(crate) fn accept(token: &str, connection: Connection) -> bool {
+pub(crate) fn accept(token: &str, connection: Connection, route: crate::remote::Route) -> bool {
     let pending = registry().lock().ok().and_then(|mut r| r.remove(token));
     match pending {
-        Some(pending) => pending.tx.send(connection).is_ok(),
+        Some(pending) => pending.tx.send((connection, route)).is_ok(),
         None => {
             // Not a live reservation: refuse outright, and make sure the
             // connection is gone either way.

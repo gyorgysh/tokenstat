@@ -366,16 +366,140 @@ struct ScreenPermission: Codable, Sendable, Hashable, Identifiable {
     }
 }
 struct ScreenCapability: Codable, Sendable, Hashable { var token: String; var expiresAt: UInt64; var control: Bool }
+/// What the person watching asked the picture to be worth.
+///
+/// A closed set with wire names the host knows, never a number: nothing
+/// arbitrary crosses that boundary. Auto is the default and means the host
+/// decides from the route, which is the answer almost everybody wants.
+enum ScreenQualityChoice: String, CaseIterable, Identifiable, Sendable {
+    case auto
+    case sharp
+    case smooth
+    case dataSaver
+
+    var id: String { rawValue }
+
+    /// Nil for auto: the absence of a choice, rather than a choice called auto.
+    var wire: String? { self == .auto ? nil : rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Automatic"
+        case .sharp: return "Sharp"
+        case .smooth: return "Smooth"
+        case .dataSaver: return "Data saver"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .auto: return "Best the connection allows"
+        case .sharp: return "Every detail, on a fast link"
+        case .smooth: return "Steady over the relay"
+        case .dataSaver: return "Least data, softest picture"
+        }
+    }
+}
+
+/// What one screen session may spend, and how finely it may spend it.
+///
+/// These four numbers used to be constants inside the encoder, chosen for the
+/// relay because that was the only route there was. A direct connection is the
+/// person's own bandwidth, so the same desktop can be several times sharper on
+/// it and cost nobody anything.
+struct ScreenQualityProfile: Sendable, Hashable {
+    /// The widest picture to encode. The capture is scaled down to this, so a
+    /// 5K display is not sent at 5K over anything.
+    var maxWidth: CGFloat
+    var averageBitRate: Int
+    /// Pictures per second while watching, and while driving.
+    ///
+    /// A pointer is the one thing on a remote desktop judged frame by frame,
+    /// and at thirty a drag arrives in visible steps however good each step
+    /// looks. Watching has no such test.
+    var viewingFPS: Int32
+    var controlFPS: Int32
+    /// Seconds between keyframes. A keyframe is the expensive picture, and on
+    /// a desktop nobody is touching it is the only traffic there is.
+    var keyframeSeconds: Int32
+
+    /// Today's numbers, unchanged. Everything metered stays here.
+    ///
+    /// 1.5 Mbps, not 4: four megabits is a number for a screen recording
+    /// somebody keeps. This is a desktop being watched live, usually on a
+    /// phone, over a relay somebody pays for by the gigabyte, and the
+    /// difference on a screen that is mostly text and flat panels is not
+    /// something a person notices on a handset.
+    static let relay = ScreenQualityProfile(
+        maxWidth: 1920,
+        averageBitRate: 1_500_000,
+        viewingFPS: 30,
+        controlFPS: 60,
+        keyframeSeconds: 4
+    )
+
+    /// A metered link somebody wants to keep cheap, or a poor one.
+    static let dataSaver = ScreenQualityProfile(
+        maxWidth: 1280,
+        averageBitRate: 800_000,
+        viewingFPS: 20,
+        controlFPS: 30,
+        keyframeSeconds: 4
+    )
+
+    /// The default on a direct route. Text is legible at native size rather
+    /// than nearly legible, which is the whole difference between reading a
+    /// terminal on the other machine and squinting at it.
+    static let direct = ScreenQualityProfile(
+        maxWidth: 2560,
+        averageBitRate: 8_000_000,
+        viewingFPS: 30,
+        controlFPS: 60,
+        keyframeSeconds: 2
+    )
+
+    /// Asked for by hand, on a link that can take it.
+    static let directSharp = ScreenQualityProfile(
+        maxWidth: 3840,
+        averageBitRate: 16_000_000,
+        viewingFPS: 30,
+        controlFPS: 60,
+        keyframeSeconds: 2
+    )
+}
+
 struct ScreenCaptureSession: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var peerID: String
     var control: Bool
     var dropped: UInt64
+    /// How the viewer reached this machine: `direct` or `relay`. Absent from a
+    /// host built before routes were carried, which reads as relay, the
+    /// answer that spends nothing it should not.
+    var route: String?
+    /// What the viewer asked the picture to be worth, when it asked. Absent
+    /// means it left the choice here.
+    var quality: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case peerID = "peerId"
-        case control, dropped
+        case control, dropped, route, quality
+    }
+
+    /// The bandwidth budget this session may spend.
+    ///
+    /// A relay channel is metered and pueev pays for it by the gigabyte. A
+    /// direct channel is the person's own network. The first has to stay
+    /// frugal; the second can afford a far better picture for nothing, and
+    /// spending the same 1.5 Mbps on it was leaving that on the table.
+    var profile: ScreenQualityProfile {
+        switch quality {
+        case "sharp": return .directSharp
+        case "smooth": return .relay
+        case "dataSaver": return .dataSaver
+        default: return route == "direct" ? .direct : .relay
+        }
     }
 }
 struct ScreenCapturePush: Codable, Sendable, Hashable { var accepted: Bool; var dropped: UInt64 }
