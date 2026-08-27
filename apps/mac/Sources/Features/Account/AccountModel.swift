@@ -280,6 +280,7 @@ final class AccountModel {
     private func pollUntilConfirmed(_ device: DeviceLogin) async throws {
         var interval = device.interval
         let deadline = Date().addingTimeInterval(Double(device.expiresIn))
+        var consecutiveTransportFailures = 0
 
         while Date() < deadline {
             try await Task.sleep(for: .seconds(interval))
@@ -289,18 +290,35 @@ final class AccountModel {
             do {
                 poll = try await Bridge.pollLogin()
             } catch {
-                // **A dropped packet must not end a sign-in.** This used to
-                // throw straight out of the loop, so one blocked poll, a moment
-                // of no signal or a laptop lid closing meant starting over,
-                // even though the code on screen was still valid for minutes.
-                //
-                // A poll failure is nearly always the network, and the answer
-                // to that is to poll again. Say so on screen, keep the code
-                // alive, and let the deadline be the thing that ends this.
-                signInNotice = "Waiting for the network."
-                try await Task.sleep(for: .seconds(max(interval, 3)))
-                continue
+                switch Self.signInPollFailure(error) {
+                case .transport:
+                    // A dropped packet is recoverable, but a dead path must not
+                    // leave App Review looking at a spinner for fifteen minutes.
+                    consecutiveTransportFailures += 1
+                    if consecutiveTransportFailures < 3 {
+                        signInNotice = "Waiting for the network."
+                        try await Task.sleep(for: .seconds(max(interval, 3)))
+                        continue
+                    }
+                    signInDismisser?()
+                    signInNotice = nil
+                    await Bridge.cancelLogin()
+                    throw SignInFailure.message(
+                        "The account service could not be reached after several tries. Try again."
+                    )
+                case .invalidGrant:
+                    signInDismisser?()
+                    signInNotice = nil
+                    await Bridge.cancelLogin()
+                    throw SignInFailure.message("That sign-in expired. Start again.")
+                case .terminal:
+                    signInDismisser?()
+                    signInNotice = nil
+                    await Bridge.cancelLogin()
+                    throw error
+                }
             }
+            consecutiveTransportFailures = 0
             signInNotice = nil
 
             if poll.isConfirmed {
@@ -328,6 +346,39 @@ final class AccountModel {
         signInNotice = nil
         await Bridge.cancelLogin()
         errorMessage = "The sign-in code expired before it was confirmed."
+    }
+
+    private enum SignInPollFailure {
+        case transport
+        case invalidGrant
+        case terminal
+    }
+
+    private enum SignInFailure: LocalizedError {
+        case message(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .message(let message): return message
+            }
+        }
+    }
+
+    /// The core gives device polling its own codes. Host transport errors can
+    /// happen outside the core envelope, so those remain retryable too.
+    private static func signInPollFailure(_ error: Error) -> SignInPollFailure {
+        guard let bridge = error as? BridgeError,
+              case let .core(code, _) = bridge else {
+            return error is URLError ? .transport : .terminal
+        }
+        switch code {
+        case "device_transport", "offline", "host_timeout", "host_unreachable":
+            return .transport
+        case "device_invalid_grant":
+            return .invalidGrant
+        default:
+            return .terminal
+        }
     }
 
     func cancelSignIn() {

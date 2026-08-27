@@ -611,6 +611,30 @@ trait IntoEnvelope<T> {
     fn envelope(self) -> Result<T, DispatchError>;
 }
 
+/// Keep the device-flow failure classes intact across the JSON bridge. The UI
+/// can retry a transport failure, but retrying a refused or already-consumed
+/// grant only produces a spinner that can never succeed.
+fn device_poll_error(error: tokenstat_sync::profile::ProfileError) -> DispatchError {
+    use tokenstat_sync::profile::ProfileError;
+    match error {
+        ProfileError::DeviceRejected { code, detail } => {
+            let envelope_code = if code == "invalid_grant" {
+                "device_invalid_grant"
+            } else {
+                "device_refused"
+            };
+            DispatchError::new(envelope_code, format!("login failed: {code}{detail}"))
+        }
+        ProfileError::LoginStorage(message) => DispatchError::new(
+            "device_storage",
+            format!("could not save your sign-in: {message}"),
+        ),
+        ProfileError::Http(error) => DispatchError::new("device_transport", error.to_string()),
+        ProfileError::Io(error) => DispatchError::new("device_transport", error.to_string()),
+        other => DispatchError::new("device_failed", other.to_string()),
+    }
+}
+
 impl<T, E: std::fmt::Display> IntoEnvelope<T> for Result<T, E> {
     fn envelope(self) -> Result<T, DispatchError> {
         self.map_err(|e| DispatchError::from(e.to_string()))
@@ -1292,7 +1316,7 @@ fn dispatch(s: &mut Session, method: &str, params: &str) -> Result<Value, Dispat
                     .clone()
                     .ok_or_else(|| DispatchError::from("no sign-in is in progress"))
             })?;
-            match tokenstat_sync::device_poll(&pending).envelope()? {
+            match tokenstat_sync::device_poll(&pending).map_err(device_poll_error)? {
                 tokenstat_sync::DeviceStatus::Pending { interval } => {
                     serde_json::to_value(DevicePollDto {
                         state: "pending",
@@ -3374,6 +3398,29 @@ mod tests {
     /// take the lock instead. Poisoned by a panicking test, which must not
     /// take the rest of the suite down with it.
     static IDENTITY_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn device_poll_refusal_keeps_invalid_grant_structured() {
+        let error = tokenstat_sync::profile::ProfileError::DeviceRejected {
+            code: "invalid_grant".into(),
+            detail: " (That code is not valid.)".into(),
+        };
+        let mapped = device_poll_error(error);
+        assert_eq!(mapped.code, "device_invalid_grant");
+        assert_eq!(
+            mapped.message,
+            "login failed: invalid_grant (That code is not valid.)"
+        );
+    }
+
+    #[test]
+    fn device_poll_storage_failure_is_not_a_network_failure() {
+        let mapped = device_poll_error(tokenstat_sync::profile::ProfileError::LoginStorage(
+            "disk is read-only".into(),
+        ));
+        assert_eq!(mapped.code, "device_storage");
+        assert!(mapped.message.contains("could not save your sign-in"));
+    }
 
     /// A fresh archive per test.
     ///

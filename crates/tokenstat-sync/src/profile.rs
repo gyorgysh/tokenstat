@@ -38,6 +38,14 @@ pub enum ProfileError {
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+    /// The device-token endpoint answered and definitively refused the grant.
+    /// Kept structured so a GUI never retries it as though a packet was lost.
+    #[error("login failed: {code}{detail}")]
+    DeviceRejected { code: String, detail: String },
+    /// Apple/server accepted the one-use device code, but its bearer could not
+    /// be made durable locally. A retry of the consumed code cannot recover it.
+    #[error("could not save your sign-in: {0}")]
+    LoginStorage(String),
     #[error("{message}")]
     RateLimited {
         message: String,
@@ -425,8 +433,10 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
                 "server returned a token that is not a tsk_ sync token".into(),
             ));
         }
-        keychain::store_token(&login.host, &ok.token)?;
-        config::set_sync_host(&login.host)?;
+        keychain::store_token(&login.host, &ok.token)
+            .map_err(|e| ProfileError::LoginStorage(format!("credential file: {e}")))?;
+        config::set_sync_host(&login.host)
+            .map_err(|e| ProfileError::LoginStorage(format!("account host setting: {e}")))?;
         // Same as the pairing path: name this machine on the account it just
         // joined, and do not fail the login if that call does not land.
         let _ = publish_machine_profile(Some(&login.host));
@@ -443,11 +453,10 @@ pub fn device_poll(login: &DeviceLogin) -> Result<DeviceStatus, ProfileError> {
         error: Some(format!("http_{}", status.as_u16())),
         message: Some(text.clone()),
     });
-    Err(ProfileError::Message(format!(
-        "login failed: {}{}",
-        err.error.unwrap_or_else(|| status.to_string()),
-        err.message.map(|m| format!(" ({m})")).unwrap_or_default()
-    )))
+    Err(ProfileError::DeviceRejected {
+        code: err.error.unwrap_or_else(|| status.to_string()),
+        detail: err.message.map(|m| format!(" ({m})")).unwrap_or_default(),
+    })
 }
 
 /// RFC 8628 device authorization grant, driven to completion for the CLI.
