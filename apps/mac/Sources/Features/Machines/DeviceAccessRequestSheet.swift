@@ -51,7 +51,11 @@ struct DeviceAccessRequestSheet: View {
             answers
         }
         .padding(Theme.Space.xl)
-        .frame(width: 520, height: 460)
+        // A minimum, not a size. The copy wraps, and at an accessibility text
+        // size a fixed height would put the answers off the bottom of a sheet
+        // that cannot scroll.
+        .frame(width: 520)
+        .frame(minHeight: 460)
         // Painted, not inherited. See the type comment.
         .background(Theme.panel)
     }

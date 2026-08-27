@@ -22,10 +22,11 @@ import UserNotifications
 /// of these is now a separate yes from whoever is at the machine.
 ///
 /// A request travels the tunnel and lands in a policy file. This polls for it
-/// and surfaces it the way the app surfaces everything else that is worth
-/// knowing but not worth interrupting for: a toast with a way to the question,
-/// and a local notification when the app is not in front. The sheet that
-/// actually asks is opened from either, never on its own.
+/// and surfaces it the way the app surfaces everything else worth knowing and
+/// not worth interrupting for: a card in the sidebar above the account row,
+/// beside what update and sync say, staying until the question is answered.
+/// Away from the app it is a local notification carrying the answers. The
+/// sheet that actually asks is opened from either, never on its own.
 @MainActor
 @Observable
 final class DeviceAccessRequests {
@@ -40,14 +41,15 @@ final class DeviceAccessRequests {
     /// stopping what somebody was in the middle of.
     var asking: DeviceAccessPending?
 
-    /// The oldest question still standing, which is the one a toast names.
+    /// The oldest question still standing, which is the one the sidebar card
+    /// names and the one its View button opens.
     var oldest: DeviceAccessPending? { pending.min { $0.askedAt < $1.askedAt } }
 
-    /// Open the sheet on the oldest standing request. The toast's action.
+    /// Open the sheet on the oldest standing request. The sidebar card's View
+    /// button, and a click on the banner.
     func askAboutOldest() {
         asking = oldest
     }
-
 
     /// Requests already announced, so a poll every few seconds does not say
     /// the same thing every few seconds.
@@ -56,11 +58,11 @@ final class DeviceAccessRequests {
     /// refused the mouse and comes back asking for it is a new question, and
     /// keying on the device alone meant that second ask arrived in silence.
     private var announced: Set<String> = []
+    private var polling: Task<Void, Never>?
 
     private func stamp(_ request: DeviceAccessPending) -> String {
         "\(request.id):\(request.control):\(request.askedAt)"
     }
-    private var polling: Task<Void, Never>?
 
     /// How often to look. A request is answered by a person walking to their
     /// Mac, so seconds of latency cost nothing and a tighter loop would spend
@@ -95,10 +97,12 @@ final class DeviceAccessRequests {
         // on screen with buttons that no longer do anything. Matched on the
         // device rather than the stamp, so a re-ask keeps the sheet up with
         // the newer question in it.
-        if let asking, let live = rows.first(where: { $0.id == asking.id }) {
-            self.asking = live
-        } else if asking != nil {
-            self.asking = nil
+        if let asking {
+            let live = rows.first { $0.id == asking.id }
+            // Assigned only on a real change. `@Observable` counts every write
+            // as one, so writing an identical value each poll would rebuild
+            // the sheet under somebody's cursor every five seconds.
+            if live != asking { self.asking = live }
         }
         for request in arrived {
             announced.insert(stamp(request))
@@ -208,12 +212,6 @@ final class DeviceAccessRequests {
         }
     }
 
-    /// Say it once, in whichever way suits where the person is.
-    ///
-    /// In front of the app it is a toast, the same furniture sync and updates
-    /// use, with a way to the question rather than the question itself. Away
-    /// from it, a notification carrying the answers so it can be dealt with
-    /// without coming back.
     /// Post a banner, for an app that is not in front.
     ///
     /// Nothing is posted while the app is active: the sidebar card is already

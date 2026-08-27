@@ -437,7 +437,8 @@ final class ClientWorkspacesModel {
                 // succeed: there was no way to ask from this screen, only from
                 // the device's own page. Pressing Connect is somebody saying
                 // they want in, so this asks on their behalf and waits.
-                if try await !Bridge.workspaceAccessAllowed(peer: peer.key) {
+                let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
+                if !allowed {
                     _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
                     // Its own state, not `infoMessage`. Waiting on a person at
                     // another computer is the one thing on this screen where
