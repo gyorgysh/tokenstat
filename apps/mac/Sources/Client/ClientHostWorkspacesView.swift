@@ -183,6 +183,12 @@ final class ClientHostWorkspacesModel {
             guard allowed else {
                 folders = []
                 sessions = []
+                // Opening this screen is somebody saying they want in, so the
+                // asking happens without a second press. The button stays, for
+                // asking again once a request has gone stale.
+                if requestNotice == nil {
+                    await requestAccess(peerKey: peerKey)
+                }
                 return
             }
             folders = try await Bridge.remoteWorkspaces(peer: peer)

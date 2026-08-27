@@ -352,18 +352,6 @@ struct RootView: View {
         .sheet(item: $deviceRequests.asking) { request in
             DeviceAccessRequestSheet(request: request, model: deviceRequests)
         }
-        // The same furniture sync and updates use. A question about a device is
-        // worth knowing about and not worth stopping what you were doing for,
-        // so the toast carries a way to the question rather than the question.
-        .overlay(alignment: .bottomTrailing) {
-            TransientToast(
-                message: $deviceRequests.toast,
-                severity: .info,
-                actionLabel: "Review",
-                action: { deviceRequests.askAboutOldest() }
-            )
-            .padding(Theme.Space.l)
-        }
         // A grant made here is what the phone is waiting on, so look again the
         // moment this window comes forward rather than on the next tick.
         .onReceive(
@@ -1899,6 +1887,11 @@ struct RootView: View {
             // amber, a failure is red. A plain caption made a successful sync
             // read as a footnote.
             SyncCard(account: account)
+            // Above the update card, because a device waiting on an answer is
+            // the only thing in this footer that somebody else is blocked on.
+            #if os(macOS)
+            DeviceAccessCard(model: deviceRequests)
+            #endif
             UpdateCard(update: appUpdate)
             Rectangle().fill(Theme.border).frame(height: 1)
             // The up-to-date confirmation is a card in `UpdateCard`; only the

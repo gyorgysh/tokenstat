@@ -563,11 +563,11 @@ struct MachinesView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: Theme.Space.s)
-                        // The answer to the question actually asked is the
-                        // prominent one, so a screen request that wanted the
-                        // mouse leads with Full access and the narrower answer
-                        // stands beside it.
-                        if request.control {
+                        // Both answers for a screen, whichever was asked for.
+                        // Offering only what the device happened to name left
+                        // no way to hand over the mouse without sending
+                        // somebody back to their phone to ask again.
+                        if request.kind == .screen {
                             Button("View only", .preview) {
                                 Task { await deviceRequests.answer(request, view: true, control: false) }
                             }
@@ -577,7 +577,7 @@ struct MachinesView: View {
                             }
                             .buttonStyle(AccentButtonStyle())
                         } else {
-                            Button(request.kind == .screen ? "View only" : "Allow", .approve) {
+                            Button("Allow", .approve) {
                                 Task { await deviceRequests.answer(request, view: true, control: false) }
                             }
                             .buttonStyle(AccentButtonStyle())

@@ -34,12 +34,10 @@ final class DeviceAccessRequests {
     private(set) var pending: [DeviceAccessPending] = []
     private(set) var errorMessage: String?
 
-    /// The toast's sentence, or nil. Cleared by the toast itself when it times
-    /// out or when its action is taken.
-    var toast: String?
-    /// The request the sheet is asking about, set by the toast's action or by
-    /// the Devices card. Nothing opens it on its own: a question about a
-    /// device is worth answering, not worth stopping what you were doing.
+    /// The request the sheet is asking about, set by the sidebar card's View
+    /// button, by a notification, or by the Devices card. Nothing opens it on
+    /// its own: a question about a device is worth answering, not worth
+    /// stopping what somebody was in the middle of.
     var asking: DeviceAccessPending?
 
     /// The oldest question still standing, which is the one a toast names.
@@ -50,26 +48,18 @@ final class DeviceAccessRequests {
         asking = oldest
     }
 
-    /// A toast that goes away on its own.
-    ///
-    /// `TransientToast` renders whatever its binding holds and never clears it,
-    /// so the timing belongs to whoever set it. The generation guard is what
-    /// stops an older toast's timer taking a newer one off the screen.
-    private var toastGeneration = 0
-    private func showToast(_ message: String) {
-        toastGeneration += 1
-        let generation = toastGeneration
-        toast = message
-        Task { [weak self] in
-            try? await Task.sleep(for: .seconds(8))
-            guard let self, self.toastGeneration == generation else { return }
-            self.toast = nil
-        }
-    }
 
-    /// Requests a notification has already been posted for, so a poll every
-    /// few seconds does not post the same banner every few seconds.
+    /// Requests already announced, so a poll every few seconds does not say
+    /// the same thing every few seconds.
+    ///
+    /// Keyed on *what was asked*, not on which device asked. A phone that was
+    /// refused the mouse and comes back asking for it is a new question, and
+    /// keying on the device alone meant that second ask arrived in silence.
     private var announced: Set<String> = []
+
+    private func stamp(_ request: DeviceAccessPending) -> String {
+        "\(request.id):\(request.control):\(request.askedAt)"
+    }
     private var polling: Task<Void, Never>?
 
     /// How often to look. A request is answered by a person walking to their
@@ -96,18 +86,22 @@ final class DeviceAccessRequests {
         async let screen = try? Bridge.pendingDeviceAccess(.screen)
         async let workspace = try? Bridge.pendingDeviceAccess(.workspace)
         let rows = (await screen ?? []) + (await workspace ?? [])
-        let arrived = rows.filter { !announced.contains($0.id) }
+        let arrived = rows.filter { !announced.contains(stamp($0)) }
         pending = rows
         // Forget what is gone, so a device that asks again in an hour is
         // announced again rather than being silently swallowed.
-        announced.formIntersection(Set(rows.map(\.id)))
+        announced.formIntersection(Set(rows.map(stamp)))
         // A question that expired or was answered elsewhere must not be left
-        // on screen with buttons that no longer do anything.
-        if let asking, !rows.contains(where: { $0.id == asking.id }) {
+        // on screen with buttons that no longer do anything. Matched on the
+        // device rather than the stamp, so a re-ask keeps the sheet up with
+        // the newer question in it.
+        if let asking, let live = rows.first(where: { $0.id == asking.id }) {
+            self.asking = live
+        } else if asking != nil {
             self.asking = nil
         }
         for request in arrived {
-            announced.insert(request.id)
+            announced.insert(stamp(request))
             announce(request)
         }
     }
@@ -220,11 +214,13 @@ final class DeviceAccessRequests {
     /// use, with a way to the question rather than the question itself. Away
     /// from it, a notification carrying the answers so it can be dealt with
     /// without coming back.
+    /// Post a banner, for an app that is not in front.
+    ///
+    /// Nothing is posted while the app is active: the sidebar card is already
+    /// on screen and stays there until the question is answered, which is what
+    /// a banner would be trying to say.
     private func announce(_ request: DeviceAccessPending) {
-        guard !NSApplication.shared.isActive else {
-            showToast(request.headline)
-            return
-        }
+        guard !NSApplication.shared.isActive else { return }
         let content = UNMutableNotificationContent()
         content.title = request.headline
         content.body = request.detail

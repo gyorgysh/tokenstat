@@ -421,6 +421,24 @@ final class ClientWorkspacesModel {
                     address: ""
                 )
                 _ = try await Bridge.setTunnel(true)
+                // Asked before anything is loaded, and asked *for* rather than
+                // reported. Connect used to walk straight into the refusal and
+                // show it as a failure with a Try again that could never
+                // succeed: there was no way to ask from this screen, only from
+                // the device's own page. Pressing Connect is somebody saying
+                // they want in, so this asks on their behalf and waits.
+                if try await !Bridge.workspaceAccessAllowed(peer: peer.key) {
+                    _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
+                    infoMessage = "Asked \(host.name) to let this device in. "
+                        + "Approve it on that computer, then Connect again."
+                    errorMessage = nil
+                    if !recovering {
+                        connectedKey = nil
+                        folders = []
+                        sessions = []
+                    }
+                    return
+                }
                 folders = try await Bridge.remoteWorkspaces(peer: peer)
                 sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
                 connectedKey = host.peerKey
