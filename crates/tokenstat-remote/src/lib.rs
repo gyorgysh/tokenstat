@@ -824,6 +824,19 @@ impl Server {
     }
 
     fn handshake(&self, stream: TcpStream, address: &str) -> Result<Connection, Refused> {
+        // Blocking from here on, whatever the listener was.
+        //
+        // The direct listener is non-blocking so its accept loop can notice a
+        // stop flag rather than parking forever on `accept`. On BSD, and so on
+        // macOS, an accepted socket inherits that flag, and the Noise
+        // handshake's first read then returns EAGAIN before the peer has had a
+        // chance to say anything. Every direct connection to a Mac failed that
+        // way, which read in the log as a flood of "handshake failed:
+        // Resource temporarily unavailable" and on a phone as a long wait
+        // before it gave up and used the relay.
+        stream
+            .set_nonblocking(false)
+            .map_err(|e| Refused::Handshake(e.into()))?;
         stream
             .set_nodelay(true)
             .map_err(|e| Refused::Handshake(e.into()))?;
@@ -1116,6 +1129,55 @@ mod tests {
         assert_eq!(reader.read(1 << 20).expect("read two"), b"second");
         writer.write(&[]).expect("end of stream");
         echo.join().expect("echo thread");
+    }
+
+    /// A non-blocking listener must still be able to complete a handshake.
+    ///
+    /// The direct listener sets `set_nonblocking(true)` so its accept loop can
+    /// poll a stop flag. On BSD the accepted socket inherits that, and the
+    /// Noise handshake's first read then failed with EAGAIN before the peer had
+    /// said anything: every direct connection to a Mac was refused, and the
+    /// only sign was a repeated "Resource temporarily unavailable" in the log.
+    #[test]
+    fn a_non_blocking_listener_still_completes_a_handshake() {
+        let responder_ident = MachineIdentity::from_secret([3u8; 32]);
+        let responder_key = responder_ident.public_key();
+        let initiator_ident = MachineIdentity::from_secret([4u8; 32]);
+
+        let server = Server::bind("127.0.0.1:0", &responder_ident).expect("a listener");
+        let address = server.local_address().expect("its address");
+        server.set_nonblocking(true).expect("non-blocking");
+
+        let accepted = std::thread::spawn(move || {
+            loop {
+                match server.accept() {
+                    // Approval is not what this is about: a refusal that names
+                    // the peer store means the handshake itself got through.
+                    Ok(answer) => return answer.map(|_| ()).map_err(|e| format!("{e:?}")),
+                    Err(RemoteError::Io(error))
+                        if error.kind() == std::io::ErrorKind::WouldBlock =>
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => return Err(format!("{error}")),
+                }
+            }
+        });
+
+        let stream = TcpStream::connect(&address).expect("connect");
+        let _ = handshake_initiator(
+            Box::new(stream),
+            &initiator_ident,
+            Some(responder_key),
+            "test",
+        );
+        let outcome = accepted.join().expect("accept thread");
+        if let Err(reason) = outcome {
+            assert!(
+                !reason.contains("Handshake"),
+                "the handshake itself must not fail: {reason}"
+            );
+        }
     }
 
     /// A transport that hands over one byte at a time and reports a timeout
