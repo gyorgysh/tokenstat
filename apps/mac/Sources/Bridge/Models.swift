@@ -2930,6 +2930,14 @@ struct RemoteStatus: Codable, Sendable {
     let fingerprint: String
     let words: String?
     let label: String
+    /// Addresses held by the live direct listener. Optional across rollout.
+    let directCandidates: [RemoteDirectCandidate]?
+}
+
+struct RemoteDirectCandidate: Codable, Sendable {
+    let kind: String
+    let address: String
+    let priority: Int
 }
 
 struct TunnelOutcome: Codable, Sendable {

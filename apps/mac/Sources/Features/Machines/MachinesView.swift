@@ -417,7 +417,7 @@ struct MachinesView: View {
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Reach devices from anywhere").font(Theme.callout)
-                            Text("Everything between machines goes through the tunnel, end to end encrypted. The service can see which machines talked, when, and how much, but not what they said.")
+                            Text("Connections are end to end encrypted. Screen sharing prefers a direct LAN or router-mapped route and otherwise uses the tunnel. Automatic router mappings are leased only while Remote Reach is on. The service can see which machines talked, when, and how much on relayed connections, but not what they said.")
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1464,7 +1464,7 @@ private struct PairingForm: View {
     var body: some View {
         Card(
             title: "Connect another device",
-            subtitle: "Paste an invite from the other device. Nearby devices do not need this step.",
+            subtitle: "Paste an invite from the other device. A live invite includes its LAN address when available.",
             mark: "mark_device"
         ) {
             VStack(alignment: .leading, spacing: Theme.Space.s) {

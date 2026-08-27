@@ -23,7 +23,9 @@
 //! daemon listens only after the user says to, and serves only peers a person
 //! approved. See `docs/remote-transport.md`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+#[cfg(feature = "local-host")]
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use std::thread;
@@ -109,6 +111,54 @@ fn tunnel_running() -> &'static AtomicBool {
 fn direct_running() -> &'static AtomicBool {
     static RUNNING: AtomicBool = AtomicBool::new(false);
     &RUNNING
+}
+
+/// Port held by the direct listener, or zero while it is not listening.
+///
+/// The old implementation advertised 7878 even when its bind had failed. The
+/// candidate contract reports only a socket the accept loop actually owns.
+#[cfg(feature = "local-host")]
+fn direct_port() -> &'static AtomicUsize {
+    static PORT: AtomicUsize = AtomicUsize::new(0);
+    &PORT
+}
+
+#[cfg(feature = "local-host")]
+fn direct_generation() -> &'static AtomicUsize {
+    static GENERATION: AtomicUsize = AtomicUsize::new(0);
+    &GENERATION
+}
+
+#[cfg(feature = "local-host")]
+#[derive(Clone)]
+struct DirectMapping {
+    generation: usize,
+    address: SocketAddr,
+}
+
+#[cfg(feature = "local-host")]
+fn direct_mapping() -> &'static Mutex<Option<DirectMapping>> {
+    static MAPPING: OnceLock<Mutex<Option<DirectMapping>>> = OnceLock::new();
+    MAPPING.get_or_init(|| Mutex::new(None))
+}
+
+/// One address an authenticated peer may try for the direct Noise connection.
+/// An address is never authority: the pinned key still has to complete the
+/// handshake before the candidate is accepted or remembered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DirectCandidate {
+    pub kind: String,
+    pub address: String,
+    pub priority: u16,
+}
+
+/// Candidates recently offered by each peer over an authenticated connection.
+/// They are deliberately memory-only. A candidate becomes durable only after
+/// connecting and presenting the peer's pinned Noise key.
+fn offered_direct_candidates() -> &'static Mutex<HashMap<String, Vec<DirectCandidate>>> {
+    static CANDIDATES: OnceLock<Mutex<HashMap<String, Vec<DirectCandidate>>>> = OnceLock::new();
+    CANDIDATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// The one multiplexed tunnel session the daemon keeps, if remote reach is on.
@@ -228,16 +278,34 @@ fn start_direct_if_enabled() {
                 return;
             }
         };
+        // Keep 7878 for compatibility with old invites, but a port conflict is
+        // not a reason to lose direct reach. Every new candidate includes the
+        // actual port this listener obtained.
         let server = match tokenstat_remote::Server::bind("0.0.0.0:7878", &identity) {
             Ok(value) => value,
-            Err(error) => {
-                eprintln!("remote: direct listener unavailable: {error}");
-                direct_running().store(false, Ordering::Release);
-                return;
-            }
+            Err(preferred_error) => match tokenstat_remote::Server::bind("0.0.0.0:0", &identity) {
+                Ok(value) => value,
+                Err(fallback_error) => {
+                    eprintln!(
+                        "remote: direct listener unavailable on 7878 ({preferred_error}) or a free port ({fallback_error})"
+                    );
+                    direct_running().store(false, Ordering::Release);
+                    return;
+                }
+            },
         };
+        let port = server
+            .local_address()
+            .ok()
+            .and_then(|address| address.parse::<SocketAddr>().ok())
+            .map_or(0, |address| usize::from(address.port()));
+        direct_port().store(port, Ordering::Release);
         let _ = server.set_nonblocking(true);
         direct_bound().store(true, Ordering::Release);
+        let generation = direct_generation().fetch_add(1, Ordering::AcqRel) + 1;
+        if port != 0 {
+            start_direct_mapping(generation, port as u16);
+        }
         while direct_running().load(Ordering::Acquire) {
             match server.accept() {
                 Ok(Ok(connection)) => {
@@ -259,6 +327,7 @@ fn start_direct_if_enabled() {
         }
         drop(server);
         direct_bound().store(false, Ordering::Release);
+        direct_port().store(0, Ordering::Release);
         direct_running().store(false, Ordering::Release);
     });
 }
@@ -266,6 +335,10 @@ fn start_direct_if_enabled() {
 #[cfg(feature = "local-host")]
 fn stop_direct() {
     direct_running().store(false, Ordering::Release);
+    direct_generation().fetch_add(1, Ordering::AcqRel);
+    if let Ok(mut mapping) = direct_mapping().lock() {
+        *mapping = None;
+    }
 }
 
 /// Wait for the accept loop to let go of port 7878 before binding it again.
@@ -1449,6 +1522,293 @@ fn clear_all_unreachable() {
     if let Ok(mut misses) = direct_misses().lock() {
         misses.clear();
     }
+    if let Ok(mut offered) = offered_direct_candidates().lock() {
+        offered.clear();
+    }
+}
+
+/// Addresses this host can honestly offer for a direct connection right now.
+///
+/// Literal addresses come first because they do not depend on multicast DNS.
+/// The `.local` name remains as a compatibility candidate, not the only bet.
+#[cfg(feature = "local-host")]
+pub(crate) fn direct_candidates() -> Vec<DirectCandidate> {
+    let port = direct_port().load(Ordering::Acquire) as u16;
+    if port == 0 || !direct_bound().load(Ordering::Acquire) {
+        return Vec::new();
+    }
+
+    let mut candidates = local_ipv4_addresses()
+        .into_iter()
+        .map(|address| DirectCandidate {
+            kind: "lan".into(),
+            address: SocketAddr::from((address, port)).to_string(),
+            priority: 100,
+        })
+        .collect::<Vec<_>>();
+
+    let generation = direct_generation().load(Ordering::Acquire);
+    if let Some(mapping) = direct_mapping()
+        .lock()
+        .ok()
+        .and_then(|mapping| mapping.clone())
+        .filter(|mapping| mapping.generation == generation)
+    {
+        candidates.push(DirectCandidate {
+            kind: "mapped".into(),
+            address: mapping.address.to_string(),
+            priority: 80,
+        });
+    }
+
+    if let Some(host) = local_mdns_hostname() {
+        candidates.push(DirectCandidate {
+            kind: "mdns".into(),
+            address: format!("{host}.local:{port}"),
+            priority: 50,
+        });
+    }
+    candidates
+}
+
+#[cfg(not(feature = "local-host"))]
+pub(crate) fn direct_candidates() -> Vec<DirectCandidate> {
+    Vec::new()
+}
+
+/// Active, non-loopback IPv4 interface addresses. The listener is IPv4 today,
+/// so advertising IPv6 before it owns an IPv6 socket would be a false promise.
+#[cfg(all(feature = "local-host", unix))]
+fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
+    let mut found = BTreeSet::new();
+    let mut first = std::ptr::null_mut();
+    // SAFETY: `getifaddrs` initializes `first` on success. Every node and
+    // address is read only while the returned list is alive, and the one
+    // matching `freeifaddrs` call runs before returning.
+    unsafe {
+        if libc::getifaddrs(&mut first) != 0 {
+            return Vec::new();
+        }
+        let mut current = first;
+        while !current.is_null() {
+            let interface = &*current;
+            let flags = interface.ifa_flags as u32;
+            if !interface.ifa_addr.is_null()
+                && flags & libc::IFF_UP as u32 != 0
+                && flags & libc::IFF_LOOPBACK as u32 == 0
+                && (*interface.ifa_addr).sa_family as i32 == libc::AF_INET
+            {
+                let address = &*(interface.ifa_addr as *const libc::sockaddr_in);
+                let ip = Ipv4Addr::from(u32::from_be(address.sin_addr.s_addr));
+                if usable_direct_ipv4(ip) {
+                    found.insert(ip);
+                }
+            }
+            current = interface.ifa_next;
+        }
+        libc::freeifaddrs(first);
+    }
+    if let Some(preferred) = preferred_route_ipv4()
+        && usable_direct_ipv4(preferred)
+    {
+        found.insert(preferred);
+    }
+    found.into_iter().collect()
+}
+
+/// A portable fallback for platforms where interface enumeration has not been
+/// wired to the native API yet. The mDNS candidate still participates there.
+#[cfg(all(feature = "local-host", not(unix)))]
+fn local_ipv4_addresses() -> Vec<Ipv4Addr> {
+    preferred_route_ipv4()
+        .filter(|address| usable_direct_ipv4(*address))
+        .into_iter()
+        .collect()
+}
+
+#[cfg(feature = "local-host")]
+fn preferred_route_ipv4() -> Option<Ipv4Addr> {
+    // UDP connect chooses a route but sends no packet. This gives Windows and
+    // other non-Unix hosts at least the address of their active interface,
+    // and covers Unix systems whose interface enumeration was restricted.
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("1.1.1.1:443").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(address) => Some(address),
+        std::net::IpAddr::V6(_) => None,
+    }
+}
+
+/// Ask an UPnP IGD router for a leased public TCP mapping. This is an
+/// optimisation under Remote Reach, never a replacement for authentication:
+/// the public socket still enters the same Noise responder and peer approval.
+#[cfg(feature = "local-host")]
+fn start_direct_mapping(generation: usize, port: u16) {
+    const LEASE_SECS: u32 = 3_600;
+    const RENEW_AFTER: Duration = Duration::from_secs(1_800);
+    if let Err(error) = std::thread::Builder::new()
+        .name("direct-mapping".into())
+        .spawn(move || {
+            let Some(local_ip) = preferred_route_ipv4() else {
+                return;
+            };
+            let local = SocketAddr::from((local_ip, port));
+            let gateway = match igd_next::search_gateway(Default::default()) {
+                Ok(gateway) => gateway,
+                Err(_) => return,
+            };
+            let external = match gateway.get_any_address(
+                igd_next::PortMappingProtocol::TCP,
+                local,
+                LEASE_SECS,
+                "tokenstat direct connection",
+            ) {
+                Ok(address) if usable_public_address(address) => address,
+                Ok(address) => {
+                    let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, address.port());
+                    return;
+                }
+                Err(_) => return,
+            };
+            if direct_generation().load(Ordering::Acquire) != generation
+                || !direct_running().load(Ordering::Acquire)
+            {
+                let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
+                return;
+            }
+            if let Ok(mut mapping) = direct_mapping().lock() {
+                *mapping = Some(DirectMapping {
+                    generation,
+                    address: external,
+                });
+            }
+
+            let mut renewed_at = Instant::now();
+            while direct_generation().load(Ordering::Acquire) == generation
+                && direct_running().load(Ordering::Acquire)
+            {
+                std::thread::sleep(Duration::from_secs(1));
+                if renewed_at.elapsed() < RENEW_AFTER {
+                    continue;
+                }
+                if gateway
+                    .add_port(
+                        igd_next::PortMappingProtocol::TCP,
+                        external.port(),
+                        local,
+                        LEASE_SECS,
+                        "tokenstat direct connection",
+                    )
+                    .is_err()
+                {
+                    break;
+                }
+                renewed_at = Instant::now();
+            }
+            if let Ok(mut mapping) = direct_mapping().lock()
+                && mapping
+                    .as_ref()
+                    .is_some_and(|mapping| mapping.generation == generation)
+            {
+                *mapping = None;
+            }
+            let _ = gateway.remove_port(igd_next::PortMappingProtocol::TCP, external.port());
+        })
+    {
+        eprintln!("remote: could not start direct mapping: {error}");
+    }
+}
+
+#[cfg(feature = "local-host")]
+fn usable_public_address(address: SocketAddr) -> bool {
+    match address.ip() {
+        std::net::IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            usable_direct_ipv4(ip)
+                && octets[0] != 0
+                && !ip.is_private()
+                && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
+                && !(octets[0] == 192 && octets[1] == 0 && octets[2] <= 2)
+                && !(octets[0] == 198 && (18..=19).contains(&octets[1]))
+                && !(octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                && !(octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                && octets[0] < 240
+        }
+        // The listener is IPv4. Do not advertise an address it does not own.
+        std::net::IpAddr::V6(_) => false,
+    }
+}
+
+#[cfg(feature = "local-host")]
+fn usable_direct_ipv4(ip: Ipv4Addr) -> bool {
+    !ip.is_unspecified()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_multicast()
+        && ip != Ipv4Addr::BROADCAST
+}
+
+#[cfg(feature = "local-host")]
+fn local_mdns_hostname() -> Option<String> {
+    let output = std::process::Command::new("hostname").output().ok()?;
+    let host = String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .trim_end_matches(".local")
+        .to_string();
+    (!host.is_empty()
+        && host
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'-' | b'.')))
+    .then_some(host)
+}
+
+/// Hold an authenticated peer's hints until the next dial. Invalid and
+/// excessive entries are ignored so a peer cannot turn one response into an
+/// unbounded number of connection attempts.
+pub(crate) fn offer_direct_candidates(peer_hex: &str, candidates: Vec<DirectCandidate>) {
+    const MAX_CANDIDATES: usize = 8;
+    let mut unique = BTreeSet::new();
+    let mut candidates = candidates
+        .into_iter()
+        .filter(|candidate| {
+            !candidate.address.trim().is_empty()
+                && candidate.address.len() <= 255
+                && unique.insert(candidate.address.clone())
+        })
+        .take(MAX_CANDIDATES)
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.priority));
+    if let Ok(mut offered) = offered_direct_candidates().lock() {
+        if candidates.is_empty() {
+            offered.remove(peer_hex);
+        } else {
+            offered.insert(peer_hex.to_string(), candidates);
+            // These describe the current network, learned after the old miss.
+            clear_direct_miss(peer_hex);
+        }
+    }
+}
+
+fn candidates_for_peer(peer_hex: &str, remembered: Option<&str>) -> Vec<DirectCandidate> {
+    let mut candidates = offered_direct_candidates()
+        .lock()
+        .ok()
+        .and_then(|offered| offered.get(peer_hex).cloned())
+        .unwrap_or_default();
+    if let Some(address) = remembered
+        && !candidates
+            .iter()
+            .any(|candidate| candidate.address == address)
+    {
+        candidates.push(DirectCandidate {
+            kind: "remembered".into(),
+            address: address.to_string(),
+            priority: 110,
+        });
+    }
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.priority));
+    candidates
 }
 
 /// How long a direct address is left alone after it failed.
@@ -1640,27 +2000,83 @@ pub(crate) fn dial_peer_for(
 
     let identity = MachineIdentity::load_or_create().map_err(|e| e.to_string())?;
     let peer_hex = tokenstat_identity::hex(&key);
-    let direct = address
-        .as_deref()
-        .ok_or_else(|| "no direct address".to_string())
-        .and_then(|address| {
-            // A remembered address that has been failing is not tried again on
-            // every dial. See `DirectMiss`.
-            if !direct_is_worth_trying(&peer_hex) {
-                return Err(format!("{address} did not answer recently"));
-            }
-            tokenstat_remote::dial(address, &identity, Some(key), &label).map_err(|error| {
-                note_direct_miss(&peer_hex);
-                error.to_string()
-            })
-        });
+    let candidates = candidates_for_peer(&peer_hex, address.as_deref());
+    let direct = if !direct_is_worth_trying(&peer_hex) {
+        Err("the direct candidates did not answer recently".into())
+    } else {
+        dial_direct_candidates(&peer_hex, candidates, &identity, key, &label)
+    };
     match direct {
-        Ok(connection) => {
+        Ok((connection, address)) => {
             clear_direct_miss(&peer_hex);
+            // Persistence follows proof: TCP connected and the pinned key
+            // completed Noise. Merely advertising a candidate never writes it.
+            let _ = remember_direct_address(&peer_hex, &address);
             Ok((connection, "direct"))
         }
-        Err(error) => tunnel_dial(&settings(), key, &identity, &label, purpose, error)
-            .map(|connection| (connection, "relay")),
+        Err(error) => {
+            if !candidates_for_peer(&peer_hex, address.as_deref()).is_empty() {
+                note_direct_miss(&peer_hex);
+            }
+            tunnel_dial(&settings(), key, &identity, &label, purpose, error)
+                .map(|connection| (connection, "relay"))
+        }
+    }
+}
+
+/// Try every candidate concurrently and take the first one that authenticates.
+/// The result includes the winning address so only proven routes reach disk.
+fn dial_direct_candidates(
+    peer_hex: &str,
+    candidates: Vec<DirectCandidate>,
+    identity: &MachineIdentity,
+    key: tokenstat_identity::PublicKey,
+    label: &str,
+) -> Result<(tokenstat_remote::Connection, String), String> {
+    const ATTEMPT_TIMEOUT: Duration = Duration::from_millis(900);
+    const RACE_TIMEOUT: Duration = Duration::from_millis(1_100);
+    if candidates.is_empty() {
+        return Err("no direct address".into());
+    }
+
+    let (send, receive) = std::sync::mpsc::channel();
+    let secret = identity.secret_bytes();
+    let attempts = candidates.len();
+    for candidate in candidates {
+        let send = send.clone();
+        let label = label.to_string();
+        std::thread::spawn(move || {
+            let identity = MachineIdentity::from_secret(secret);
+            let result = tokenstat_remote::dial_with_timeout(
+                &candidate.address,
+                &identity,
+                Some(key),
+                &label,
+                ATTEMPT_TIMEOUT,
+            );
+            let _ = send.send((candidate.address, result));
+        });
+    }
+    drop(send);
+
+    let deadline = Instant::now() + RACE_TIMEOUT;
+    let mut errors = Vec::new();
+    for _ in 0..attempts {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        match receive.recv_timeout(left) {
+            Ok((address, Ok(connection))) => return Ok((connection, address)),
+            Ok((address, Err(error))) => errors.push(format!("{address}: {error}")),
+            Err(_) => break,
+        }
+    }
+    if errors.is_empty() {
+        Err(format!(
+            "no direct candidate for {peer_hex} answered in time"
+        ))
+    } else {
+        Err(errors.join("; "))
     }
 }
 
@@ -2078,6 +2494,7 @@ fn status() -> Result<Value, String> {
     if let Some(session) = tunnel_session().lock().ok().and_then(|guard| guard.clone()) {
         merge_live_tunnel_status(&mut tunnel_state, &session.status());
     }
+    let direct_candidates = direct_candidates();
     Ok(json!({
         // What the user chose, and what is actually true. They differ while
         // the tunnel is being refused, and a screen that showed only the
@@ -2097,6 +2514,9 @@ fn status() -> Result<Value, String> {
         // reads aloud instead of skimming.
         "words": tokenstat_identity::key_words(&identity.public_key()),
         "label": tokenstat_identity::machine_label(),
+        // Useful for an invite as well as diagnostics. These are addresses,
+        // never credentials; the receiver still authenticates the key above.
+        "directCandidates": direct_candidates,
     }))
 }
 
@@ -2581,5 +3001,65 @@ mod tests {
                 miss.ttl_ms()
             );
         }
+    }
+
+    #[test]
+    fn direct_candidates_reject_addresses_that_cannot_reach_a_peer() {
+        assert!(!usable_direct_ipv4(Ipv4Addr::UNSPECIFIED));
+        assert!(!usable_direct_ipv4(Ipv4Addr::LOCALHOST));
+        assert!(!usable_direct_ipv4(Ipv4Addr::new(169, 254, 4, 2)));
+        assert!(!usable_direct_ipv4(Ipv4Addr::new(224, 0, 0, 1)));
+        assert!(!usable_direct_ipv4(Ipv4Addr::BROADCAST));
+        assert!(usable_direct_ipv4(Ipv4Addr::new(192, 168, 0, 102)));
+        assert!(usable_direct_ipv4(Ipv4Addr::new(10, 2, 3, 4)));
+    }
+
+    #[test]
+    fn router_mapping_candidates_must_be_public_ipv4() {
+        let at = |octets| SocketAddr::from((Ipv4Addr::from(octets), 42_000));
+        assert!(!usable_public_address(at([192, 168, 1, 2])));
+        assert!(!usable_public_address(at([0, 1, 2, 3])));
+        assert!(!usable_public_address(at([100, 64, 1, 2])));
+        assert!(!usable_public_address(at([192, 0, 2, 1])));
+        assert!(!usable_public_address(at([198, 18, 1, 1])));
+        assert!(!usable_public_address(at([198, 51, 100, 1])));
+        assert!(!usable_public_address(at([203, 0, 113, 1])));
+        assert!(!usable_public_address(at([240, 0, 0, 1])));
+        assert!(usable_public_address(at([8, 8, 8, 8])));
+    }
+
+    #[test]
+    fn offered_candidates_are_bounded_deduplicated_and_prioritized() {
+        let peer = "candidate-contract-test";
+        let mut offered = (0..12)
+            .map(|index| DirectCandidate {
+                kind: "lan".into(),
+                address: format!("192.168.1.{}:7878", index + 1),
+                priority: index,
+            })
+            .collect::<Vec<_>>();
+        offered.push(DirectCandidate {
+            kind: "duplicate".into(),
+            address: "192.168.1.1:7878".into(),
+            priority: u16::MAX,
+        });
+        offer_direct_candidates(peer, offered);
+        let candidates = candidates_for_peer(peer, None);
+        assert_eq!(candidates.len(), 8, "one peer gets a bounded dial fanout");
+        assert!(
+            candidates
+                .windows(2)
+                .all(|pair| pair[0].priority >= pair[1].priority),
+            "higher-priority routes are attempted first"
+        );
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|candidate| candidate.address == "192.168.1.1:7878")
+                .count(),
+            1,
+            "the same socket is never dialled twice"
+        );
+        offer_direct_candidates(peer, Vec::new());
     }
 }

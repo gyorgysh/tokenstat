@@ -36,9 +36,9 @@
 //!   which of the two explanations to go and check.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use tokenstat_identity::{MachineIdentity, PeerStore, PublicKey, Trust, fingerprint};
@@ -613,24 +613,107 @@ pub fn dial(
     expect: Option<PublicKey>,
     label_for_errors: &str,
 ) -> Result<Connection, RemoteError> {
-    let target = address
-        .to_socket_addrs()?
-        .next()
-        .ok_or_else(|| std::io::Error::other(format!("{address} resolves to nothing")))?;
-    let stream = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT)?;
-    stream.set_nodelay(true)?;
-    handshake_initiator(Box::new(stream), identity, expect, label_for_errors)
+    dial_with_timeout(address, identity, expect, label_for_errors, CONNECT_TIMEOUT)
+}
+
+/// Dial one candidate under a deliberately short direct-path budget.
+///
+/// Candidate racing calls this in parallel. A dead LAN address must not delay
+/// the reliable relay by the normal operating-system TCP timeout, and a socket
+/// that accepts but never speaks must be bounded by the same attempt budget.
+pub fn dial_with_timeout(
+    address: &str,
+    identity: &MachineIdentity,
+    expect: Option<PublicKey>,
+    label_for_errors: &str,
+    timeout: Duration,
+) -> Result<Connection, RemoteError> {
+    let deadline = Instant::now() + timeout;
+    let targets = resolve_with_timeout(address, timeout)?;
+    let mut last = None;
+    for target in targets {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        match TcpStream::connect_timeout(&target, left) {
+            Ok(stream) => {
+                stream.set_nodelay(true)?;
+                let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                match handshake_initiator_with_timeout(
+                    Box::new(stream),
+                    identity,
+                    expect,
+                    label_for_errors,
+                    left,
+                ) {
+                    Ok(connection) => return Ok(connection),
+                    Err(error) => last = Some(error),
+                }
+            }
+            Err(error) => last = Some(RemoteError::Io(error)),
+        }
+    }
+    Err(last.unwrap_or_else(|| {
+        RemoteError::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("{address} did not answer within {} ms", timeout.as_millis()),
+        ))
+    }))
+}
+
+fn resolve_with_timeout(address: &str, timeout: Duration) -> Result<Vec<SocketAddr>, RemoteError> {
+    let address = address.to_string();
+    let shown = address.clone();
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name("direct-dns".into())
+        .spawn(move || {
+            let result = address
+                .to_socket_addrs()
+                .map(|addresses| addresses.collect::<Vec<_>>());
+            let _ = send.send(result);
+        })
+        .map_err(RemoteError::Io)?;
+    match receive.recv_timeout(timeout) {
+        Ok(Ok(addresses)) if addresses.is_empty() => Err(RemoteError::Io(std::io::Error::other(
+            format!("{shown} resolves to nothing"),
+        ))),
+        Ok(Ok(addresses)) => Ok(addresses),
+        Ok(Err(error)) => Err(RemoteError::Io(error)),
+        Err(_) => Err(RemoteError::Io(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("resolving {shown} exceeded {} ms", timeout.as_millis()),
+        ))),
+    }
 }
 
 /// Run the initiator side of the Noise handshake over any bidirectional
 /// transport. The caller has already completed any transport-specific setup.
 pub fn handshake_initiator(
-    mut stream: Box<dyn Transport>,
+    stream: Box<dyn Transport>,
     identity: &MachineIdentity,
     expect: Option<PublicKey>,
     label_for_errors: &str,
 ) -> Result<Connection, RemoteError> {
-    stream.set_deadline(Some(HANDSHAKE_TIMEOUT))?;
+    handshake_initiator_with_timeout(
+        stream,
+        identity,
+        expect,
+        label_for_errors,
+        HANDSHAKE_TIMEOUT,
+    )
+}
+
+fn handshake_initiator_with_timeout(
+    mut stream: Box<dyn Transport>,
+    identity: &MachineIdentity,
+    expect: Option<PublicKey>,
+    label_for_errors: &str,
+    timeout: Duration,
+) -> Result<Connection, RemoteError> {
+    stream.set_deadline(Some(timeout))?;
 
     let secret = identity.secret_bytes();
     let mut handshake = snow::Builder::new(PATTERN.parse().map_err(RemoteError::from)?)

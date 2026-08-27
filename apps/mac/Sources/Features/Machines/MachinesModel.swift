@@ -196,15 +196,23 @@ final class MachinesModel {
         return "desktopcomputer"
     }
 
-    /// The one string to move to the other machine: the key. Everything rides
-    /// the tunnel now, so there is no address to carry; the far end's Add
-    /// device box accepts the key as pasted.
-    var pairingCode: String? { identity?.key }
+    /// The key plus the best live LAN hint when one exists. An old receiver
+    /// accepts the same `key@host:port` form, and a bare key remains right when
+    /// this machine has no direct listener.
+    var pairingCode: String? {
+        guard let key = identity?.key else { return nil }
+        guard let address = status?.directCandidates?
+            .filter({ $0.kind == "lan" })
+            .max(by: { $0.priority < $1.priority })?
+            .address else { return key }
+        return "\(key)@\(address)"
+    }
 
     /// Copy this machine's connection invite to the pasteboard.
     ///
-    /// The invite is the key. Nobody has to read it — Copy is the whole
-    /// action, and the other machine's Add device box accepts it as pasted.
+    /// Nobody has to read the invite. It contains the public key and, while a
+    /// listener is live, a LAN address hint that is accepted only after Noise
+    /// proves the key.
     func copyInvite() {
         guard let code = pairingCode else { return }
         #if os(macOS)
@@ -408,7 +416,7 @@ final class MachinesModel {
         do {
             _ = try await Bridge.setTunnel(enabled)
             showNotice(enabled
-                ? "Remote reach is on. Everything between devices goes through the tunnel."
+                ? "Remote reach is on. Direct connections are preferred when available."
                 : "Remote reach is off.")
             errorMessage = nil
             await load()
@@ -461,8 +469,9 @@ final class MachinesModel {
     }
 
     func connect(_ peer: Peer) async {
-        // One transport: the tunnel. It works from any network, which is the
-        // point; there is no direct path to prefer.
+        // The tunnel is the reliable introduction path. Once connected, a
+        // screen session exchanges and tries direct candidates before carrying
+        // its high-bandwidth stream through the relay.
         guard status?.tunnel == true else {
             errorMessage = "Turn on Reach devices from anywhere before connecting to \(peer.label)."
             return

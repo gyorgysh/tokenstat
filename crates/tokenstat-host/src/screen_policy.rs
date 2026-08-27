@@ -273,33 +273,37 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             crate::screen_runtime::set_control(&p.session_id, &peer, p.control)?;
             Ok(json!({"control":p.control}))
         }
+        "screen.direct.candidates" => direct_candidates(),
+        // Kept for peers from before candidate lists. New callers never rely
+        // on this one-address contract.
         "screen.direct.candidate" => direct_candidate(),
         _ => Err(format!("unknown screen method: {method}")),
     })())
 }
 
 fn direct_candidate() -> Result<Value, String> {
+    let candidates = verified_direct_candidates()?;
+    let address = candidates
+        .first()
+        .map(|candidate| candidate.address.as_str())
+        .ok_or("this host has no direct address available")?;
+    Ok(json!({"address":address}))
+}
+
+fn direct_candidates() -> Result<Value, String> {
+    Ok(json!({"candidates":verified_direct_candidates()?}))
+}
+
+fn verified_direct_candidates() -> Result<Vec<crate::remote::DirectCandidate>, String> {
     let peer = crate::request_context::remote_peer()
         .ok_or("direct candidate must be requested by an authenticated peer")?;
     verify_view_peer(&peer)?;
-    #[cfg(feature = "local-host")]
-    {
-        let output = std::process::Command::new("hostname")
-            .output()
-            .map_err(|error| error.to_string())?;
-        let mut host = String::from_utf8(output.stdout).map_err(|error| error.to_string())?;
-        host = host.trim().trim_end_matches(".local").to_string();
-        if host.is_empty()
-            || !host
-                .bytes()
-                .all(|value| value.is_ascii_alphanumeric() || matches!(value, b'-' | b'.'))
-        {
-            return Err("this host has no usable local-network name".into());
-        }
-        Ok(json!({"address":format!("{host}.local:7878")}))
+    let candidates = crate::remote::direct_candidates();
+    if candidates.is_empty() {
+        Err("this device does not currently accept direct screen connections".into())
+    } else {
+        Ok(candidates)
     }
-    #[cfg(not(feature = "local-host"))]
-    Err("this device does not accept direct screen connections".into())
 }
 
 #[cfg(test)]
