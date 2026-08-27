@@ -199,16 +199,7 @@ final class HomeModel {
                 // The grid underneath the popover changed identity (e.g. an
                 // account grid fell back to local). Stale day details would
                 // describe a different machine's usage, so they have to go.
-                dayDetailCache = [:]
-                dayOverviewCache = [:]
-                hoveredDay = nil
-                hoveredDetail = nil
-                isLoadingDayDetail = false
-                hoverDetailTask?.cancel()
-                selectedDetailTask?.cancel()
-                dayOverviewTask?.cancel()
-                selectedDetail = nil
-                selectedOverview = nil
+                invalidateArchiveCaches()
             }
             deliveredScope = newScope
             scopeNotice = grid?.notice
@@ -457,6 +448,17 @@ final class HomeModel {
         guard new != scope else { return }
         // The new grid is a different set of numbers; a cached hover from the
         // old one would describe the wrong scope.
+        invalidateArchiveCaches()
+        scope = new
+        await load()
+    }
+
+    /// Forget every per-day answer this screen is holding.
+    ///
+    /// Two things make an answer wrong: the grid started counting something
+    /// else, or the archive underneath it changed. A scope switch is the first
+    /// and a sync is the second, and both need exactly this.
+    func invalidateArchiveCaches() {
         dayDetailCache = [:]
         dayOverviewCache = [:]
         hoveredDay = nil
@@ -469,8 +471,31 @@ final class HomeModel {
         selectedOverview = nil
         isLoadingSelectedDetail = false
         isLoadingSelectedOverview = false
-        scope = new
-        await load()
+    }
+
+    /// Re-read everything a sync can have moved.
+    ///
+    /// A sync sends this machine's window to the account and pulls a fresh
+    /// answer back, so the grid, the day under the pointer and the day pinned
+    /// in the inspector are all stale at once. Before this, only the account
+    /// card reloaded and the numbers on Home stayed at whatever they were
+    /// before the upload, for ten minutes or until somebody changed scope.
+    ///
+    /// Quiet, so the heatmap stays drawn while its numbers move, and
+    /// `refreshAccountGrid` so the host's own ten-minute series cache does not
+    /// hand back the answer the sync just replaced.
+    func reloadAfterSync() async {
+        let pinned = selectedDay
+        invalidateArchiveCaches()
+        await load(quiet: true, refreshAccountGrid: true)
+        // Pin the same day again so the inspector refetches rather than
+        // sitting on the detail the cache no longer holds. `load` re-selects
+        // its own cell when the grid still has one, so only a day the fresh
+        // grid dropped needs this.
+        if let pinned, selectedDetail == nil, selectedDay?.date == pinned.date {
+            select(day: pinned)
+        }
+        await loadPlanLimits()
     }
 
     /// Vendor plan limits, loaded on their own.

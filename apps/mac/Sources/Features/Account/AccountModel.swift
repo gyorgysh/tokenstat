@@ -41,6 +41,14 @@ final class AccountModel {
     var errorMessage: String?
     /// Set after a sync, cleared on the next action.
     var lastSyncSummary: String?
+    /// Bumped once per successful sync, whoever started it.
+    ///
+    /// A counter rather than a callback, so this model never has to know that
+    /// Home or Insights exist. The shell watches it and re-reads the screens a
+    /// sync can have moved: before this, only the account card reloaded and the
+    /// heatmap, the hover popover and the inspector all sat on pre-sync numbers
+    /// until the host's ten-minute cache expired.
+    private(set) var syncGeneration = 0
     var syncNotice: String?
     var syncNoticeIsError = false
     /// After any accepted sync, and after a real 429, the next manual press
@@ -452,6 +460,7 @@ final class AccountModel {
             lastSyncWasRateLimited = false
             showSyncNotice(lastSyncSummary!, isError: false)
             await load()
+            syncGeneration += 1
             startSyncCooldown(fromRateLimit: false)
         } catch {
             // Sync failures are action feedback, not account state. Keep them

@@ -408,6 +408,19 @@ struct RootView: View {
             .onChange(of: workspaces.front(in: route.workspaceID ?? "")) { _, front in
                 syncRouteToFront(front)
             }
+            // A sync landed, so the archive underneath every reporting screen
+            // has moved. The counter is on AccountModel and the re-reads are
+            // here, which is what keeps that model from having to know Home
+            // and Insights exist.
+            .onChange(of: account.syncGeneration) { _, _ in
+                refreshAfterSync()
+            }
+            // The same, for a sync the in-process scheduler started. It has no
+            // model to bump, so it says so on the one channel the app already
+            // uses for facts that cross screens.
+            .onReceive(NotificationCenter.default.publisher(for: .tokenstatDidSync)) { _ in
+                refreshAfterSync()
+            }
             // After the heatmap is up, warm secondary surfaces so Machines /
             // remote workspaces / agent tiles are a cache hit on first click.
             // Never starts before archive ready, so Home keeps the host first.
@@ -2535,6 +2548,16 @@ struct RootView: View {
 
     /// Closing a Files, Changes or Browser chip puts sessions in front. The
     /// route has to follow or the sidebar stays on the section just closed.
+    /// Re-read everything a sync can have moved.
+    ///
+    /// Home drops its per-day caches and pulls the grid again past the host's
+    /// ten-minute series cache; Insights reloads its own period. The account
+    /// card is already reloaded by whoever ran the sync.
+    private func refreshAfterSync() {
+        Task { await home.reloadAfterSync() }
+        model.reload()
+    }
+
     private func syncRouteToFront(_ front: WorkspaceSurface) {
         guard let id = route.workspaceID, let section = route.workspaceSection else { return }
         switch section {

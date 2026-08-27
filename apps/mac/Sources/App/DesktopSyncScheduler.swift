@@ -39,8 +39,15 @@ enum DesktopSyncScheduler {
                     // otherwise send a second usage POST into the same
                     // gate the account just accepted.
                     let again = try? await Bridge.syncScheduleStatus()
-                    if again?.scheduledNetworkAllowed == true && again?.due == true {
-                        _ = try? await Bridge.sync()
+                    if again?.scheduledNetworkAllowed == true && again?.due == true,
+                       (try? await Bridge.sync()) != nil {
+                        // The numbers on screen are now older than the archive.
+                        // A scheduled upload has to refresh them the same way a
+                        // pressed button does, or Home quietly disagrees with
+                        // itself for the rest of the day.
+                        await MainActor.run {
+                            NotificationCenter.default.post(name: .tokenstatDidSync, object: nil)
+                        }
                     }
                 }
                 try? await Task.sleep(for: .seconds(60))

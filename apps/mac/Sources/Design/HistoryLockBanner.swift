@@ -13,6 +13,12 @@ extension Notification.Name {
     /// The signed-in account just changed tier or remote entitlement.
     /// Home and Devices refetch instead of keeping a Free lock on screen.
     static let tokenstatEntitlementDidChange = Notification.Name("ai.tokenstat.entitlementDidChange")
+    /// A sync finished and the archive underneath the reporting screens moved.
+    ///
+    /// Posted by the in-process scheduler, which has no model to bump. A
+    /// pressed Sync now goes through `AccountModel.syncGeneration` instead, and
+    /// the shell answers both the same way.
+    static let tokenstatDidSync = Notification.Name("ai.tokenstat.didSync")
 }
 
 /// Where "See plans" goes, which is not the same place on the two platforms.
