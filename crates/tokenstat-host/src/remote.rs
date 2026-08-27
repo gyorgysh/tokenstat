@@ -1174,15 +1174,23 @@ fn report(refused: &Refused) {
 /// can be far sharper on the second for free. Nothing else in the product
 /// treats the two differently, and nothing here changes that: this says how a
 /// request arrived, never whether it is allowed.
+///
+/// A build without `local-host` has no screen to encode and no direct listener
+/// to be reached on, so both the second variant and the name of it go unused
+/// there. The type stays whole rather than being cut in half by a `cfg`: one
+/// shape for one fact is easier to read than two.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Route {
     /// A TCP connection straight to this machine, on the LAN or through a
-    /// router mapping.
+    /// router mapping. Only a `local-host` build has a listener to be reached
+    /// on, so nothing constructs this without one.
+    #[cfg_attr(not(feature = "local-host"), allow(dead_code))]
     Direct,
     /// Through the account's relay.
     Relay,
 }
 
+#[cfg_attr(not(feature = "local-host"), allow(dead_code))]
 impl Route {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
@@ -1202,7 +1210,9 @@ impl Route {
 fn serve_peer(
     mut connection: tokenstat_remote::Connection,
     session: &Mutex<Session>,
-    route: Route,
+    // Read only by the stream claim below, which needs `local-host` to exist:
+    // without it there are no reservations to claim and nothing to encode.
+    #[cfg_attr(not(feature = "local-host"), allow(unused_variables))] route: Route,
 ) {
     let peer = connection.peer_key();
     // A machine cannot serve itself. A self-dial through the tunnel, or a
@@ -3148,6 +3158,8 @@ mod tests {
         }
     }
 
+    // The addresses themselves only exist in a build that can listen on one.
+    #[cfg(feature = "local-host")]
     #[test]
     fn direct_candidates_reject_addresses_that_cannot_reach_a_peer() {
         assert!(!usable_direct_ipv4(Ipv4Addr::UNSPECIFIED));
@@ -3159,6 +3171,8 @@ mod tests {
         assert!(usable_direct_ipv4(Ipv4Addr::new(10, 2, 3, 4)));
     }
 
+    // A router mapping only exists in a build that can be reached directly.
+    #[cfg(feature = "local-host")]
     #[test]
     fn router_mapping_candidates_must_be_public_ipv4() {
         let at = |octets| SocketAddr::from((Ipv4Addr::from(octets), 42_000));

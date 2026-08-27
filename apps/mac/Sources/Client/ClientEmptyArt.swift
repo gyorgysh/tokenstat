@@ -603,7 +603,7 @@ private struct WorkspaceAccessScene: View {
                 .frame(width: 26, height: 10)
                 .offset(x: -36, y: -25)
             Image(systemName: "key.fill")
-                .font(.system(size: 17, weight: .medium))
+                .font(Theme.font(17, weight: .medium))
                 .foregroundStyle(Ink.lead)
                 .rotationEffect(.degrees(settled ? -18 : -34))
                 .offset(x: settled ? 24 : 38, y: settled ? 10 : -2)
