@@ -367,7 +367,7 @@ struct ClientSidebarRoot: View {
             ? summary.workflowsRunning
             : summary.workflows
         case .automations: return summary.automations
-        case .files, .browser: return nil
+        case .chat, .files, .browser: return nil
         }
     }
 

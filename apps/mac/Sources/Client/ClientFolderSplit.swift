@@ -156,7 +156,7 @@ struct ClientFolderSplit: View {
         case .workflows: return counts.workflows
         case .automations: return counts.automations
         case .notes: return counts.notes
-        case .files, .browser: return nil
+        case .chat, .files, .browser: return nil
         }
     }
 
@@ -261,6 +261,8 @@ struct ClientWorkspaceSectionDetail: View {
         switch section {
         case .sessions:
             ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
+        case .chat:
+            ChatComingSoonView(folderName: folderNow.name)
         case .changes:
             ClientWorkspaceChangesView(
                 peer: peer,

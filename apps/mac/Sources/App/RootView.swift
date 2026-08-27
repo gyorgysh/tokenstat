@@ -2077,7 +2077,7 @@ struct RootView: View {
     private var showsWorkspaceSurface: Bool {
         switch route.workspaceSection {
         case .sessions, .changes, .files, .browser: return true
-        case .todo, .notes, .workflows, .automations, nil: return false
+        case .chat, .todo, .notes, .workflows, .automations, nil: return false
         }
     }
 
@@ -2126,6 +2126,8 @@ struct RootView: View {
         case .workspace(_, .sessions), .workspace(_, .changes),
              .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
+        case let .workspace(id, .chat):
+            ChatComingSoonView(folderName: workspaces.folders.first { $0.id == id }?.name)
         case .global(.home):
             HomeView(
                 model: home,
@@ -2386,6 +2388,8 @@ struct RootView: View {
         let value: Int
         switch section {
         case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
+        // Nothing to count yet.
+        case .chat: value = 0
         case .changes: value = folder.git?.files.count ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
         case .notes:
@@ -2478,7 +2482,9 @@ struct RootView: View {
                 } else {
                     workspaces.showBrowser(in: folderID)
                 }
-            case .todo, .notes, .workflows, .automations:
+            case .chat, .todo, .notes, .workflows, .automations:
+                // Not a tab in the terminal pane. These are drawn where their
+                // global versions are, so there is nothing to bring forward.
                 break
             }
             #endif

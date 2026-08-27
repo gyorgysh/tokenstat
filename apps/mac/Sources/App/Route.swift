@@ -146,6 +146,11 @@ enum GlobalSection: String, CaseIterable, Identifiable, Hashable {
 /// and a sidebar is worth having because it does not move.
 enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     case sessions
+    /// Talking to the agents in this folder, rather than driving them through
+    /// a terminal. Nothing behind it yet, and it is here rather than waiting
+    /// for the feature because a place people can see is a place they can ask
+    /// about.
+    case chat
     case changes
     case todo
     case notes
@@ -159,6 +164,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     var label: String {
         switch self {
         case .sessions: return "Sessions"
+        case .chat: return "Chat"
         case .changes: return "Changes"
         case .todo: return "Tasks"
         case .notes: return "Notes"
@@ -172,6 +178,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .sessions: return "terminal.fill"
+        case .chat: return "bubble.left.and.bubble.right"
         case .changes: return "plusminus"
         case .todo: return "checklist"
         case .notes: return "note.text"
