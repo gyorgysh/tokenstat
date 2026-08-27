@@ -107,9 +107,15 @@ fn legend(tier: &str) -> Result<(), String> {
     }
 }
 
-fn verify_legend_account() -> Result<(), String> {
+/// The account this machine is signed into, once it has been checked.
+///
+/// Returns the status rather than `()` so a caller that also needs to know
+/// whether this is the review demo account gets it from the request that was
+/// going out anyway.
+fn verify_legend_account() -> Result<tokenstat_sync::profile::StatusResult, String> {
     let status = tokenstat_sync::sync_status(None).map_err(|e| e.to_string())?;
-    legend(status.tier.as_deref().unwrap_or(""))
+    legend(status.tier.as_deref().unwrap_or(""))?;
+    Ok(status)
 }
 
 pub(crate) fn verify_view_peer(peer_id: &str) -> Result<(), String> {
@@ -279,6 +285,41 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 && (!p.control || held.control)
             {
                 return Ok(json!({"pending": false, "granted": true}));
+            }
+            // The one automatic grant in the product, and the reason it
+            // exists: App Review signs into the website's demo account on a
+            // fresh iPhone and asks a Mac for its screen, and nobody at Apple
+            // has that Mac to press a button on. An untestable feature is a
+            // rejected build.
+            //
+            // Four things have to hold, and a user can set none of them. The
+            // account has to be the one id in pueev's own server environment,
+            // during a review round somebody opened by hand: that is what
+            // `review_demo` means, and it is false for every other account
+            // and for this one between rounds. The device has to be approved
+            // already, which `serve_peer` checks before dispatch is reached,
+            // so a stranger never gets this far. The account has to be Legend,
+            // checked here as everywhere. And the grant is an ordinary row: it
+            // is listed in Devices, revocable there, and gone the moment the
+            // round's switch goes off, because the next check re-reads it.
+            //
+            // No build flag on purpose. A path that only exists in some builds
+            // is a path nobody tests, and the thing guarding this is a
+            // server-side environment variable either way.
+            //
+            // A failure here is not a refusal. Not signed in, not Legend, or
+            // the account unreachable for a moment all mean "not the demo
+            // account", and the request queues for a person as it should. The
+            // only way past this line is a positive answer.
+            let review_demo = verify_legend_account()
+                .map(|status| status.review_demo)
+                .unwrap_or(false);
+            if review_demo {
+                set_permission(&peer, true, p.control)?;
+                let mut store = load()?;
+                store.pending.retain(|request| request.peer_id != peer);
+                save(&store)?;
+                return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
             let asked_at = now();
             store.pending.retain(|request| request.peer_id != peer);
@@ -470,6 +511,17 @@ mod tests {
                 assert!(refused.contains("answered on the host"), "{refused}");
             }
         });
+    }
+
+    #[test]
+    fn a_request_that_says_nothing_is_not_asking_for_the_mouse() {
+        // What a device sends decides how much the answer can grant, and the
+        // review demo grant hands over exactly this. A missing field must be
+        // the picture only, not everything.
+        let quiet: AskParams = serde_json::from_str("{}").unwrap();
+        assert!(!quiet.control);
+        let asked: AskParams = serde_json::from_str(r#"{"control":true}"#).unwrap();
+        assert!(asked.control);
     }
 
     #[test]

@@ -122,6 +122,11 @@ pub struct StatusResult {
     pub schema_min_v: Option<u32>,
     pub schema_max_v: Option<u32>,
     pub schema_current: Option<u32>,
+    /// Whether this account is the website's App Review demo account, during
+    /// an open review round. False everywhere else, and false against a server
+    /// old enough not to send the field: a flag that has to be present to be
+    /// safe is a flag that fails open.
+    pub review_demo: bool,
     pub raw: Value,
 }
 
@@ -581,6 +586,10 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         .and_then(|s| s.get("current"))
         .and_then(|v| v.as_u64())
         .map(|n| n as u32);
+    let review_demo = raw
+        .get("review_demo")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     Ok(StatusResult {
         host,
         handle,
@@ -590,6 +599,7 @@ pub fn sync_status(host_flag: Option<&str>) -> Result<StatusResult, ProfileError
         schema_min_v,
         schema_max_v,
         schema_current,
+        review_demo,
         raw,
     })
 }
