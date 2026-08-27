@@ -57,7 +57,7 @@ struct ClientHostWorkspacesView: View {
                         ClientEmptyState(
                             kind: .nothingYet,
                             title: "\(hostName) has not let this device in yet",
-                            message: "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed.",
+                            message: "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed. This screen opens on its own once the request is answered.",
                             actionTitle: model.isRequesting ? "Asking…" : "Request access",
                             actionIcon: .approve,
                             action: { Task { await model.requestAccess(peerKey: peerKey) } },
@@ -162,12 +162,18 @@ final class ClientHostWorkspacesModel {
     /// What came back from asking, kept apart from `errorMessage`.
     private(set) var requestNotice: String?
     private(set) var isRequesting = false
+    /// The watch that reloads on its own once the answer lands, so somebody
+    /// who walks over, approves and comes back is not looking at the same
+    /// refusal with no sign that anything changed.
+    private var accessWatch: Task<Void, Never>?
     var activeTerminal: ClientTerminalSession?
 
     func connect(peerKey: String, name: String) async {
         guard !isConnecting else { return }
         isConnecting = true
         defer { isConnecting = false }
+        accessWatch?.cancel()
+        accessWatch = nil
         errorMessage = nil
         do {
             await ClientDeviceName.publish()
@@ -189,6 +195,7 @@ final class ClientHostWorkspacesModel {
                 if requestNotice == nil {
                     await requestAccess(peerKey: peerKey)
                 }
+                watchForAccess(peerKey: peerKey, name: name)
                 return
             }
             folders = try await Bridge.remoteWorkspaces(peer: peer)
@@ -222,6 +229,26 @@ final class ClientHostWorkspacesModel {
             }
         } catch {
             requestNotice = error.localizedDescription
+        }
+    }
+
+    /// Poll for the answer, then load. Stops as soon as it succeeds.
+    private func watchForAccess(peerKey: String, name: String) {
+        accessWatch?.cancel()
+        accessWatch = Task { [weak self] in
+            for _ in 0..<ClientAccessWatch.attempts {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: ClientAccessWatch.interval)
+                guard !Task.isCancelled, let self else { return }
+                guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: peerKey),
+                      allowed
+                else { continue }
+                guard !Task.isCancelled else { return }
+                // Released before reconnecting, for the reason `connect` gives.
+                self.accessWatch = nil
+                await self.connect(peerKey: peerKey, name: name)
+                return
+            }
         }
     }
 

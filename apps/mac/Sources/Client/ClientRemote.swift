@@ -439,4 +439,18 @@ enum ClientRemote {
     }
 }
 
+
+/// How long this device waits for another computer to answer a request.
+///
+/// The host drops an unanswered request after fifteen minutes
+/// (`PENDING_TTL` in `screen_policy`), so a watch that outlived that would be
+/// polling for an answer to a question nobody can see any more. Kept in step
+/// with it deliberately: two different windows would mean a card that says it
+/// is waiting for something that is already gone.
+enum ClientAccessWatch {
+    static let interval: Duration = .seconds(5)
+    /// Fifteen minutes at the interval above.
+    static let attempts = 180
+}
+
 #endif

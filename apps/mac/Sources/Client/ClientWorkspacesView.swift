@@ -376,6 +376,13 @@ final class ClientWorkspacesModel {
     /// is still standing. Named rather than a bool, because the card says
     /// which machine somebody has to walk to.
     private(set) var awaitingAccessHost: String?
+    /// The watch that connects on its own once the answer lands.
+    ///
+    /// The waiting card shows a picture that keeps moving, and a picture that
+    /// keeps moving is a promise that something is still happening. It was not:
+    /// somebody who walked over, approved the device and came back found the
+    /// same card, with nothing telling them to press Connect again.
+    private var accessWatch: Task<Void, Never>?
 
     func connect(_ host: ClientHost) async {
         await connect(host, recovering: false)
@@ -414,7 +421,7 @@ final class ClientWorkspacesModel {
             infoMessage = nil
             // A fresh attempt asks again rather than leaving the old card up,
             // so pressing Connect always means something happened.
-            awaitingAccessHost = nil
+            stopWatchingForAccess()
         }
         let delays: [UInt64] = [0, 1, 2, 4]
         for (index, delay) in delays.enumerated() {
@@ -452,9 +459,10 @@ final class ClientWorkspacesModel {
                         folders = []
                         sessions = []
                     }
+                    watchForAccess(host)
                     return
                 }
-                awaitingAccessHost = nil
+                stopWatchingForAccess()
                 folders = try await Bridge.remoteWorkspaces(peer: peer)
                 sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
                 connectedKey = host.peerKey
@@ -501,7 +509,44 @@ final class ClientWorkspacesModel {
             || lower.contains("not_approved")
     }
 
+    /// Wait for the answer, then connect without being asked again.
+    ///
+    /// The same cadence the Mac polls its own pending list on. Cheap: one
+    /// small call to the host that already answered, and it stops the moment
+    /// it succeeds or the screen goes away.
+    private func watchForAccess(_ host: ClientHost) {
+        accessWatch?.cancel()
+        accessWatch = Task { [weak self] in
+            for _ in 0..<ClientAccessWatch.attempts {
+                guard !Task.isCancelled else { return }
+                try? await Task.sleep(for: ClientAccessWatch.interval)
+                guard !Task.isCancelled, let self else { return }
+                // The key is already known, so this asks one small question
+                // and nothing else. Re-pairing on every tick would rewrite
+                // this device's peer store every five seconds to learn a
+                // string it was already holding.
+                guard let allowed = try? await Bridge.workspaceAccessAllowed(peer: host.peerKey),
+                      allowed
+                else { continue }
+                guard !Task.isCancelled else { return }
+                // Let go of the handle before connecting. `connect` stops the
+                // watch on its way in, and a task that cancels itself
+                // mid-flight would take the retry ladder's own sleeps with it.
+                self.accessWatch = nil
+                await self.connect(host)
+                return
+            }
+        }
+    }
+
+    private func stopWatchingForAccess() {
+        accessWatch?.cancel()
+        accessWatch = nil
+        awaitingAccessHost = nil
+    }
+
     func disconnect() {
+        stopWatchingForAccess()
         activeTerminal?.stop()
         activeTerminal = nil
         connectedKey = nil

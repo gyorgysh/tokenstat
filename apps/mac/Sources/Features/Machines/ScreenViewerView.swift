@@ -761,7 +761,15 @@ private final class ScreenViewerModel {
         isRequesting = true
         defer { isRequesting = false }
         do {
-            let answer = try await Bridge.askScreenAccess(peer: peer, control: requestedControl)
+            var answer = try await Bridge.askScreenAccess(peer: peer, control: requestedControl)
+            // Already allowed to watch, and still not running: what is missing
+            // is the mouse. Asking for exactly what the Control toggle happened
+            // to say left somebody who had been granted View only pressing a
+            // button that answered "this device already has access" forever,
+            // with no way from here to ask for the rest.
+            if answer.granted == true, !requestedControl {
+                answer = try await Bridge.askScreenAccess(peer: peer, control: true)
+            }
             if answer.granted == true {
                 requestNotice = "This device already has access. Press Try again."
                 return

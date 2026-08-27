@@ -314,6 +314,12 @@ eligible for sync, and the source is published so you can confirm it.
   talked, and how much. The machine's connection key and the name you gave it
   are registered with your account only while remote reach is on. The sync
   envelope never carries either.
+- Being on your account does not let a device open your work. Reaching the
+  folders, files, terminals and agents on a machine is a separate yes, given
+  per device on the machine being asked, and watching or driving its screen is
+  two more. A device asks from its own screen, the request waits on the
+  computer until somebody answers it, and any of the three can be taken back in
+  Devices.
 
 The core library cannot link a network stack, enforced in CI.
 

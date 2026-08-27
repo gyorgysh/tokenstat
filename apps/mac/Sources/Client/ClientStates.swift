@@ -286,7 +286,7 @@ struct ClientAwaitingAccessCard: View {
             Text("Waiting for \(hostName)")
                 .font(ClientType.sectionTitle)
                 .multilineTextAlignment(.center)
-            Text("Open tokenstat on that computer and approve this device. The request is waiting in the sidebar and in Devices.")
+            Text("Open tokenstat on that computer and approve this device. The request is waiting in the sidebar and in Devices. This screen connects on its own once it is answered.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -21,6 +21,13 @@ desktop and Android builds remain previews. Newest first.
   and keyframed twice as often on it, where the relay stays exactly as frugal
   as before. A Quality menu in the viewer picks between automatic, sharp,
   smooth and data saver, and changing it never interrupts the picture.
+- On a phone, a computer that has not answered yet shows what it is waiting on
+  and connects on its own the moment somebody approves it, rather than leaving
+  a screen that never changes.
+- Reaching another of your computers across the same network now asks for the
+  Local Network permission it needs. Without it iOS refused every direct dial
+  silently and every session fell back to the relay, which is slower and
+  further away than the machine in the next room.
 - A computer now lets each device open its work by name. Signing in on a new
   phone no longer reaches the folders, files, terminals and agents on every
   machine on the account: that is a separate yes, given on the computer being
