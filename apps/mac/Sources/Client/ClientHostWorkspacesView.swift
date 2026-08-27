@@ -48,6 +48,30 @@ struct ClientHostWorkspacesView: View {
 
                 if model.isConnecting {
                     ClientWireframe.Rows(count: 3)
+                } else if model.isAllowed == false {
+                    // Not an error. Every device on an account used to reach
+                    // every machine on it the moment it signed in; now each one
+                    // is let in by name, and this is the screen a device sees
+                    // until somebody says yes.
+                    VStack(spacing: Theme.Space.s) {
+                        ClientEmptyState(
+                            kind: .nothingYet,
+                            title: "\(hostName) has not let this device in yet",
+                            message: "Folders, files, terminals and the agents running in them are only open to devices that computer has allowed.",
+                            actionTitle: model.isRequesting ? "Asking…" : "Request access",
+                            actionIcon: .approve,
+                            action: { Task { await model.requestAccess(peerKey: peerKey) } },
+                            art: .workspaceAccess
+                        )
+                        if let notice = model.requestNotice {
+                            Text(notice)
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
                 } else if model.folders.isEmpty, model.sessions.isEmpty {
                     ClientEmptyState(
                         kind: model.errorMessage == nil ? .nothingYet : .unreachable,
@@ -131,6 +155,13 @@ final class ClientHostWorkspacesModel {
     /// Whether a call to this host has come back. Nil until one has, so the
     /// header can say "not known yet" rather than guessing awake.
     private(set) var reachedHost: Bool?
+    /// Whether that computer has let this device open its work. Nil until the
+    /// question has been asked once, so the screen does not flash a refusal at
+    /// somebody who is simply still connecting.
+    private(set) var isAllowed: Bool?
+    /// What came back from asking, kept apart from `errorMessage`.
+    private(set) var requestNotice: String?
+    private(set) var isRequesting = false
     var activeTerminal: ClientTerminalSession?
 
     func connect(peerKey: String, name: String) async {
@@ -142,14 +173,45 @@ final class ClientHostWorkspacesModel {
             await ClientDeviceName.publish()
             let peer = try await Bridge.pair(key: peerKey, label: name, address: "")
             _ = try await Bridge.setTunnel(true)
+            // Asked before anything is loaded. Being paired is not being let
+            // in: that computer allows each device to open its work
+            // explicitly, and a device that has not been allowed should get
+            // the screen that says so rather than a list that fails.
+            let allowed = try await Bridge.workspaceAccessAllowed(peer: peer.key)
+            isAllowed = allowed
+            reachedHost = true
+            guard allowed else {
+                folders = []
+                sessions = []
+                return
+            }
             folders = try await Bridge.remoteWorkspaces(peer: peer)
             sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
-            reachedHost = true
         } catch {
             errorMessage = error.localizedDescription
             folders = []
             sessions = []
             reachedHost = false
+        }
+    }
+
+    /// Ask that computer to let this device in.
+    ///
+    /// The answer is kept apart from `errorMessage`, which is why the screen
+    /// could not be loaded. An outcome written into a field something else
+    /// reads is how a message ends up changing a state nobody meant it to.
+    func requestAccess(peerKey: String) async {
+        isRequesting = true
+        defer { isRequesting = false }
+        do {
+            let answer = try await Bridge.askWorkspaceAccess(peer: peerKey)
+            if answer.granted == true {
+                requestNotice = "This device already has access. Pull to refresh."
+            } else {
+                requestNotice = "Asked. Approve this device on that computer."
+            }
+        } catch {
+            requestNotice = error.localizedDescription
         }
     }
 

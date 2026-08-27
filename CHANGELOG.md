@@ -10,18 +10,24 @@ desktop and Android builds remain previews. Newest first.
 ### Added
 
 - A device can ask for screen access from its own screen, and the computer it
-  asked raises the question: a sheet while the app is open, a notification
-  carrying the same three answers when it is not, and a card at the top of
-  Devices for whoever dismissed the banner. View only and Full access are
-  separate answers, and either can be taken back afterwards. Request access
-  used to send a notification that could not carry which device was asking and
-  never reached a Mac at all, so nothing happened and the switch was hard to
-  find.
+  asked says so: a toast with a way to the question while the app is open, a
+  notification carrying the answers when it is not, and a card in Devices for
+  whoever let either go. View only and Full access are separate answers, and
+  either can be taken back afterwards. Request access used to send a
+  notification that could not carry which device was asking and never reached a
+  Mac at all, so nothing happened and the switch was hard to find.
 - Watching a screen over a direct connection now looks far better. A LAN or
   router-mapped link is your own bandwidth, so the picture is wider, sharper
   and keyframed twice as often on it, where the relay stays exactly as frugal
   as before. A Quality menu in the viewer picks between automatic, sharp,
   smooth and data saver, and changing it never interrupts the picture.
+- A computer now lets each device open its work by name. Signing in on a new
+  phone no longer reaches the folders, files, terminals and agents on every
+  machine on the account: that is a separate yes, given on the computer being
+  asked. **Devices you already use will ask again after this update**, once
+  each, from a screen with a Request access button on it. Pairing a device by
+  typing its code still grants it in the same step, because that already is
+  somebody saying yes to one device by name.
 - Workspaces has a Chat section under Sessions, on the Mac and on the phone.
   It is empty and says so: a friendlier way to talk to the agents in a folder
   is coming, and this is where it will be.
@@ -30,6 +36,9 @@ desktop and Android builds remain previews. Newest first.
 
 - Open work and View screen on a device now read as the buttons they are, with
   a glyph and a surface of their own instead of plain text and a chevron.
+- Devices lists everything still waiting on you in one place, and one card
+  there now covers all three permissions a device can hold: workspaces,
+  watching the screen, and driving it.
 - Syncing refreshes the numbers it just changed. The heatmap, the day under
   the pointer and the pinned day all re-read, where they used to keep pre-sync
   figures for up to ten minutes.

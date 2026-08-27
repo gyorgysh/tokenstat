@@ -94,6 +94,7 @@ pub mod ssh_client;
 pub mod ssh_records;
 #[cfg(feature = "local-host")]
 mod sync_scheduler;
+pub mod workspace_policy;
 
 #[cfg(feature = "local-host")]
 mod todo;

@@ -42,7 +42,11 @@ pub struct PendingRequest {
 }
 
 /// How long an unanswered request stands.
-const PENDING_TTL: u64 = 15 * 60;
+///
+/// Shared with `workspace_policy`, because a person answers both kinds of
+/// request the same way and two different staleness windows would be two
+/// different behaviours for one action.
+pub(crate) const PENDING_TTL: u64 = 15 * 60;
 
 /// The one account whose devices are granted screen access without a person.
 ///
@@ -88,7 +92,18 @@ fn load() -> Result<Store, String> {
 }
 
 fn prune(store: &mut Store, now: u64) {
-    store.pending.retain(|request| request.expires_at > now);
+    prune_pending(&mut store.pending, now);
+}
+
+/// Drop requests nobody answered in time. Shared, for the same reason the TTL
+/// is.
+pub(crate) fn prune_pending(pending: &mut Vec<PendingRequest>, now: u64) {
+    pending.retain(|request| request.expires_at > now);
+}
+
+/// Seconds since the epoch, shared so both policies stamp requests the same.
+pub(crate) fn now_secs() -> u64 {
+    now()
 }
 fn save(store: &Store) -> Result<(), String> {
     let path = path()?;

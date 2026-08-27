@@ -541,17 +541,36 @@ struct ScreenAccessAsk: Codable, Sendable, Hashable {
     var granted: Bool?
 }
 
+/// What a device is asking this machine for.
+///
+/// Two grants, one shape. Being approved is not being let in: every device on
+/// the account is auto-approved on first contact, so each of these is a
+/// separate, explicit yes from whoever is at the machine.
+enum DeviceAccessKind: String, Sendable, Hashable {
+    /// Watch this screen, and possibly drive it.
+    case screen
+    /// Open the folders, files, terminals and agents on this machine.
+    case workspace
+}
+
 /// A device waiting for an answer on this machine.
-struct ScreenAccessPending: Codable, Sendable, Hashable, Identifiable {
+struct DeviceAccessPending: Codable, Sendable, Hashable, Identifiable {
     var peerID: String
     /// The account's name for that device, when it has one. A public key is
     /// not something anybody recognises their own phone by.
     var label: String?
+    /// Whether mouse and keyboard were asked for as well as the picture.
+    /// Always false for a workspace request: there is no half of that grant.
     var control: Bool
     var askedAt: UInt64
     var expiresAt: UInt64
+    /// Set from the method the row came back on rather than read off the wire,
+    /// so the two host policies stay unaware of each other.
+    var kind: DeviceAccessKind = .screen
 
-    var id: String { peerID }
+    /// One device can have both kinds of request standing at once, so the peer
+    /// alone is not an identity here.
+    var id: String { "\(kind.rawValue):\(peerID)" }
 
     enum CodingKeys: String, CodingKey {
         case peerID = "peerId"
@@ -564,6 +583,25 @@ struct ScreenAccessPending: Codable, Sendable, Hashable, Identifiable {
     var displayName: String {
         if let label, !label.isEmpty { return label }
         return "Device \(peerID.prefix(8))"
+    }
+
+    /// The one-line question, for a toast and for a notification title.
+    var headline: String {
+        switch kind {
+        case .screen: return "\(displayName) wants to see this screen"
+        case .workspace: return "\(displayName) wants to open your work"
+        }
+    }
+
+    var detail: String {
+        switch kind {
+        case .screen:
+            return control
+                ? "It asked for the picture, and for mouse and keyboard."
+                : "It asked for the picture only."
+        case .workspace:
+            return "Folders, files, terminals and the agents running in them."
+        }
     }
 }
 

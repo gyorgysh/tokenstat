@@ -107,9 +107,9 @@ struct TokenstatApp: App {
         // difference between a banner and silence while the app is in front.
         NotificationPresenter.install()
         #if os(macOS)
-        // A device can ask to see this screen at any moment, from anywhere.
-        // The poll is what turns that into a sheet or a banner here.
-        ScreenAccessRequests.shared.start()
+        // A device can ask to see this screen, or to open the work on it, at
+        // any moment. The poll is what turns that into a toast or a banner.
+        DeviceAccessRequests.shared.start()
         #endif
         #if os(iOS)
         // A token is only asked for when somebody has already said yes, and

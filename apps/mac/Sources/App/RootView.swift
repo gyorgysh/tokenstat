@@ -38,10 +38,10 @@ struct RootView: View {
     /// screen. The shells are the host's, so leaving the screen must not end
     /// them and coming back must find them again.
     @State private var sshSessions = SSHSessionsModel()
-    /// Devices asking to see this screen. A shared singleton rather than a
-    /// fresh model, because the notification delegate answers through the
-    /// same object from outside any view.
-    @State private var screenRequests = ScreenAccessRequests.shared
+    /// Devices asking to see this screen, or to open the work on it. A shared
+    /// singleton rather than a fresh model, because the notification delegate
+    /// answers through the same object from outside any view.
+    @State private var deviceRequests = DeviceAccessRequests.shared
     #endif
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
@@ -346,28 +346,29 @@ struct RootView: View {
                 }
             }
         }
-        // Above the route switch for the same reason: a device can ask to see
-        // this screen while somebody is anywhere in the app, and the question
-        // has to be in front of them wherever that is.
-        .sheet(item: Binding(
-            get: { screenRequests.showing },
-            set: { shown in
-                // Closed without an answer. Say so, rather than swallowing the
-                // dismissal: a setter that does nothing leaves SwiftUI and the
-                // model disagreeing about whether a sheet is up. The request
-                // is still pending and still answerable in Devices.
-                if shown == nil, let request = screenRequests.showing {
-                    screenRequests.setAside(request)
-                }
-            }
-        )) { request in
-            ScreenAccessRequestSheet(request: request, model: screenRequests)
+        // Above the route switch, because a device can ask while somebody is
+        // anywhere in the app. Nothing opens this on its own: it is raised by
+        // the toast below, by that toast's notification, or from Devices.
+        .sheet(item: $deviceRequests.asking) { request in
+            DeviceAccessRequestSheet(request: request, model: deviceRequests)
+        }
+        // The same furniture sync and updates use. A question about a device is
+        // worth knowing about and not worth stopping what you were doing for,
+        // so the toast carries a way to the question rather than the question.
+        .overlay(alignment: .bottomTrailing) {
+            TransientToast(
+                message: $deviceRequests.toast,
+                severity: .info,
+                actionLabel: "Review",
+                action: { deviceRequests.askAboutOldest() }
+            )
+            .padding(Theme.Space.l)
         }
         // A grant made here is what the phone is waiting on, so look again the
         // moment this window comes forward rather than on the next tick.
         .onReceive(
             NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
-        ) { _ in Task { await screenRequests.refresh() } }
+        ) { _ in Task { await deviceRequests.refresh() } }
         #endif
         // The window size for the hover popover, which needs to be placed
         // against the window rather than the pane it floats over.

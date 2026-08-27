@@ -192,6 +192,10 @@ fn pair(params: &str) -> Result<Value, String> {
         .map(str::to_string);
     let peer = store.add_approved(&key, &label, address.as_deref(), &now());
     store.save().map_err(|e| e.to_string())?;
+    // Pairing by code is a person saying yes to one device by name, in front
+    // of the machine, which is exactly the consent workspace access asks for.
+    // Appearing on the account is not, and that path grants nothing.
+    crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), true)?;
     Ok(peer_json(&peer))
 }
 
@@ -208,6 +212,20 @@ fn set_trust(params: &str, trust: Trust) -> Result<Value, String> {
     if changed {
         store.save().map_err(|e| e.to_string())?;
     }
+    // Approving in Devices is the same yes as typing a pairing code, and
+    // revoking has to take the work back with it: a device nobody trusts
+    // enough to reach this machine must not keep a grant waiting for it.
+    match trust {
+        // The canonical hex, not what the caller typed: the policy file is
+        // keyed by the form `remote_peer` hands out.
+        Trust::Approved => {
+            crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), true)?
+        }
+        Trust::Revoked => {
+            crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), false)?
+        }
+        Trust::Pending => {}
+    }
     // False rather than an error: approving a peer that just went away is not
     // a failure the user did anything about, and it is racy by nature.
     Ok(json!({"changed": changed}))
@@ -222,6 +240,9 @@ fn forget(params: &str) -> Result<Value, String> {
     if forgotten {
         store.save().map_err(|e| e.to_string())?;
     }
+    // A device this machine has forgotten must not come back to a grant it
+    // was left holding.
+    crate::workspace_policy::set_allowed(&tokenstat_identity::hex(&key), false)?;
     Ok(json!({"forgotten": forgotten}))
 }
 

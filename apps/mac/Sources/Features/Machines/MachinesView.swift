@@ -41,10 +41,10 @@ struct MachinesView: View {
     /// consequences, it is how the list reads.
     @State private var renamingID: String?
     #if os(macOS)
-    /// Devices asking to see this screen. The same object the sheet and the
-    /// notification answer through, so all three agree about what is still
+    /// Devices asking for something. The same object the toast, the sheet and
+    /// the notification answer through, so all four agree about what is still
     /// waiting.
-    @State private var screenRequests = ScreenAccessRequests.shared
+    @State private var deviceRequests = DeviceAccessRequests.shared
     #endif
 
     var body: some View {
@@ -193,19 +193,19 @@ struct MachinesView: View {
         // First, because these are the only things here that are waiting on a
         // person. Everything else can be read at leisure.
         #if os(macOS)
-        // Above pairing, because a device asking for the screen is already
-        // paired: it got far enough to ask. The sheet raises itself when a
-        // request arrives, and this is where somebody who dismissed it, or was
+        // Above pairing, because a device asking for either grant is already
+        // paired: it got far enough to ask. A toast names a request as it
+        // arrives, and this is where somebody who let the toast go, or was
         // away when it landed, finds the question again.
-        if !screenRequests.pending.isEmpty {
-            askingToView
+        if !deviceRequests.pending.isEmpty {
+            askingForAccess
         }
         #endif
         if !model.pending.isEmpty {
             waitingForApproval
         }
         thisMachine
-        ScreenPermissionCard(peers: model.known.filter { $0.trust == .approved })
+        DevicePermissionCard(peers: model.known.filter { $0.trust == .approved })
         #if os(macOS)
         alwaysOnHost
         #endif
@@ -541,48 +541,55 @@ struct MachinesView: View {
     }
 
     #if os(macOS)
-    /// Devices that have asked to see this screen and are still waiting.
+    /// Devices that have asked for something and are still waiting.
     ///
-    /// The same three answers the sheet offers, in the one place somebody
-    /// would go looking after a banner has gone.
-    private var askingToView: some View {
+    /// The same answers the sheet offers, in the one place somebody would go
+    /// looking after a toast or a banner has gone.
+    private var askingForAccess: some View {
         Card(
-            title: "Asking to see this screen",
+            title: "Waiting for you",
             subtitle: "Approve only a device you recognise. You can take it back below.",
             mark: "mark_device"
         ) {
             VStack(spacing: Theme.Space.s) {
-                ForEach(screenRequests.pending) { request in
+                ForEach(deviceRequests.pending, id: \.id) { request in
                     HStack(alignment: .center, spacing: Theme.Space.m) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(request.displayName)
+                            Text(request.headline)
                                 .font(Theme.callout.weight(.medium))
-                            Text(request.control
-                                ? "Asked for the picture, and for mouse and keyboard."
-                                : "Asked for the picture only.")
+                            Text(request.detail)
                                 .font(Theme.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: Theme.Space.s)
-                        Button("View only", .preview) {
-                            Task { await screenRequests.answer(request, view: true, control: false) }
-                        }
-                        .buttonStyle(SecondaryButtonStyle())
+                        // The answer to the question actually asked is the
+                        // prominent one, so a screen request that wanted the
+                        // mouse leads with Full access and the narrower answer
+                        // stands beside it.
                         if request.control {
+                            Button("View only", .preview) {
+                                Task { await deviceRequests.answer(request, view: true, control: false) }
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
                             Button("Full access", .approve) {
-                                Task { await screenRequests.answer(request, view: true, control: true) }
+                                Task { await deviceRequests.answer(request, view: true, control: true) }
+                            }
+                            .buttonStyle(AccentButtonStyle())
+                        } else {
+                            Button(request.kind == .screen ? "View only" : "Allow", .approve) {
+                                Task { await deviceRequests.answer(request, view: true, control: false) }
                             }
                             .buttonStyle(AccentButtonStyle())
                         }
                         Button("Deny", .revoke, role: .destructive) {
-                            Task { await screenRequests.answer(request, view: false, control: false) }
+                            Task { await deviceRequests.answer(request, view: false, control: false) }
                         }
                         .buttonStyle(SecondaryButtonStyle())
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let error = screenRequests.errorMessage {
+                if let error = deviceRequests.errorMessage {
                     Text(error)
                         .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
@@ -1112,9 +1119,17 @@ struct MachinesView: View {
     }
 }
 
-private struct ScreenPermissionCard: View {
+/// What each paired device is allowed to do here.
+///
+/// Not only the screen any more. Being approved is not being let in: every
+/// device on the account is auto-approved on first contact with the tunnel, so
+/// reaching the work on this machine is its own explicit yes, and it is first
+/// because it is the broadest of the three.
+private struct DevicePermissionCard: View {
     let peers: [Peer]
     @State private var permissions: [String: ScreenPermission] = [:]
+    /// Peer keys allowed to open the work here.
+    @State private var workspaceAllowed: Set<String> = []
     @State private var error: String?
     @State private var transferDestination: String?
     #if os(macOS)
@@ -1123,7 +1138,7 @@ private struct ScreenPermissionCard: View {
 
     var body: some View {
         if !peers.isEmpty {
-            Card(title: "Screen access", subtitle: "Legend only. Each device is allowed independently.", mark: "mark_device") {
+            Card(title: "What each device may do", subtitle: "Each device is allowed independently. Watching the screen is Legend.", mark: "mark_device") {
                 VStack(spacing: Theme.Space.s) {
                     // Says where the switch comes from, for somebody reading
                     // this card cold. A device does not need to be told what to
@@ -1140,6 +1155,7 @@ private struct ScreenPermissionCard: View {
                                 Text(peer.words ?? peer.fingerprint).font(Theme.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
+                            Toggle("Workspaces", isOn: workspaceBinding(peer)).toggleStyle(.switch)
                             Toggle("View", isOn: binding(peer, control: false)).toggleStyle(.switch)
                             Toggle("Control", isOn: binding(peer, control: true)).toggleStyle(.switch)
                                 .disabled(permissions[peer.key]?.view != true)
@@ -1242,6 +1258,22 @@ private struct ScreenPermissionCard: View {
     }
     #endif
 
+    /// Whether this device may reach the work here.
+    ///
+    /// One switch, because there is no half of it: a device that can open a
+    /// folder can write to it, start a terminal in it and push it.
+    private func workspaceBinding(_ peer: Peer) -> Binding<Bool> {
+        Binding {
+            workspaceAllowed.contains(peer.key)
+        } set: { allow in
+            if allow { workspaceAllowed.insert(peer.key) } else { workspaceAllowed.remove(peer.key) }
+            Task {
+                do { try await Bridge.setWorkspaceAccess(peerID: peer.key, allow: allow) }
+                catch { self.error = error.localizedDescription; await load() }
+            }
+        }
+    }
+
     private func binding(_ peer: Peer, control: Bool) -> Binding<Bool> {
         Binding {
             control ? permissions[peer.key]?.control == true : permissions[peer.key]?.view == true
@@ -1270,6 +1302,7 @@ private struct ScreenPermissionCard: View {
         do {
             let values = try await Bridge.screenPermissions()
             permissions = Dictionary(uniqueKeysWithValues: values.map { ($0.peerID, $0) })
+            workspaceAllowed = Set((try? await Bridge.workspaceAccessList()) ?? [])
             transferDestination = try? await Bridge.screenTransferDestination().path
             error = nil
         } catch { self.error = error.localizedDescription }

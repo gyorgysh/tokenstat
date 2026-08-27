@@ -29,6 +29,8 @@ enum EmptyArtKind {
     case vault
     /// Remote screen, shown when the plan does not include Legend.
     case screen
+    /// Another computer has not let this device open its work yet.
+    case workspaceAccess
 }
 
 /// The picture over an empty state.
@@ -59,6 +61,7 @@ struct ClientEmptyArt: View {
             case .waiting: WaitingScene(reduceMotion: reduceMotion)
             case .vault: VaultScene(reduceMotion: reduceMotion)
             case .screen: ScreenScene(reduceMotion: reduceMotion)
+            case .workspaceAccess: WorkspaceAccessScene(reduceMotion: reduceMotion)
             }
         }
         .frame(width: Self.size.width, height: Self.size.height)
@@ -575,6 +578,47 @@ private struct Arc: Shape {
             clockwise: false
         )
         return path
+    }
+}
+
+
+/// A folder waiting on a key.
+///
+/// The one empty state in the client that is about permission rather than
+/// about emptiness, so the picture is a closed thing and something that opens
+/// it, drifting in rather than turning: nothing is locked against this person,
+/// it simply has not been handed over yet.
+private struct WorkspaceAccessScene: View {
+    let reduceMotion: Bool
+    @State private var settled = false
+
+    var body: some View {
+        ZStack {
+            Frame(radius: 10)
+                .frame(width: 74, height: 54)
+                .offset(x: -14, y: 6)
+            // The folder's tab, so the shape reads as a folder and not a card.
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .strokeBorder(Ink.quiet, style: Ink.style)
+                .frame(width: 26, height: 10)
+                .offset(x: -36, y: -25)
+            Image(systemName: "key.fill")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Ink.lead)
+                .rotationEffect(.degrees(settled ? -18 : -34))
+                .offset(x: settled ? 24 : 38, y: settled ? 10 : -2)
+                .opacity(settled ? 1 : 0.5)
+                .animation(
+                    reduceMotion
+                        ? nil
+                        : .easeInOut(duration: 1.9).repeatForever(autoreverses: true),
+                    value: settled
+                )
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            settled = true
+        }
     }
 }
 

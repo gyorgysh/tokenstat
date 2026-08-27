@@ -1278,6 +1278,14 @@ fn respond_remote(line: &str, session: &Mutex<Session>, peer: &str) -> String {
     if crate::host_policy::should_refuse_inbound(line) {
         return crate::host_policy::refuse_inbound(line);
     }
+    // Approved is not the same as let in. Every device on the account is
+    // auto-approved on first contact, and this is where a device that was
+    // never explicitly allowed stops short of the work on this machine. Here
+    // rather than in dispatch, because a local caller is the owner and has
+    // nothing to ask permission for.
+    if let Some(refusal) = crate::workspace_policy::refuse_unpermitted(line, peer) {
+        return refusal;
+    }
     crate::keep_awake::note_inbound(line);
     crate::request_context::with_remote_peer(peer, || crate::server::respond(line, session))
 }

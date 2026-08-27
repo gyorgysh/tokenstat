@@ -1956,9 +1956,45 @@ extension Bridge {
         try await onPeer(peer, "screen.access.ask", ["control": control], as: ScreenAccessAsk.self)
     }
 
-    /// Devices waiting for an answer on this machine.
-    static func pendingScreenAccess() async throws -> [ScreenAccessPending] {
-        try await background("screen.access.pending", as: [ScreenAccessPending].self)
+    /// Devices waiting for an answer on this machine, of one kind.
+    static func pendingDeviceAccess(_ kind: DeviceAccessKind) async throws -> [DeviceAccessPending] {
+        let method = kind == .screen ? "screen.access.pending" : "workspace.access.pending"
+        var rows = try await background(method, as: [DeviceAccessPending].self)
+        // The kind comes from the method that answered, not from the wire, so
+        // neither host policy has to know the other exists.
+        for index in rows.indices { rows[index].kind = kind }
+        return rows
+    }
+
+    /// Ask another computer to let this device open its work.
+    static func askWorkspaceAccess(peer: String) async throws -> ScreenAccessAsk {
+        try await onPeer(peer, "workspace.access.ask", as: ScreenAccessAsk.self)
+    }
+
+    /// Whether this device may open that computer's work.
+    ///
+    /// Asked before anything loads. `remote.call` flattens a peer's error to
+    /// its message and drops the code, so reading this off a failure would
+    /// have meant matching on a sentence.
+    static func workspaceAccessAllowed(peer: String) async throws -> Bool {
+        struct Answer: Codable, Sendable { var allowed: Bool }
+        return try await onPeer(peer, "workspace.access.check", as: Answer.self).allowed
+    }
+
+    /// Devices this machine has let into its work.
+    static func workspaceAccessList() async throws -> [String] {
+        try await background("workspace.access.list", as: [String].self)
+    }
+
+    /// Let one in, or shut it out. Answering a request and moving the toggle
+    /// in Devices are the same act, so they are the same call.
+    static func setWorkspaceAccess(peerID: String, allow: Bool) async throws {
+        struct Saved: Codable, Sendable { var saved: Bool }
+        _ = try await background(
+            "workspace.access.set",
+            ["peerId": peerID, "allow": allow],
+            as: Saved.self
+        )
     }
 
     /// Answer one. Denying is view and control both false.
