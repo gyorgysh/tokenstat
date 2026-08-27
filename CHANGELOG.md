@@ -5,6 +5,35 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
+## [Unreleased]
+
+### Added
+
+- A device can ask for screen access from its own screen, and the computer it
+  asked raises the question: a sheet while the app is open, a notification
+  carrying the same three answers when it is not, and a card at the top of
+  Devices for whoever dismissed the banner. View only and Full access are
+  separate answers, and either can be taken back afterwards. Request access
+  used to send a notification that could not carry which device was asking and
+  never reached a Mac at all, so nothing happened and the switch was hard to
+  find.
+- Watching a screen over a direct connection now looks far better. A LAN or
+  router-mapped link is your own bandwidth, so the picture is wider, sharper
+  and keyframed twice as often on it, where the relay stays exactly as frugal
+  as before. A Quality menu in the viewer picks between automatic, sharp,
+  smooth and data saver, and changing it never interrupts the picture.
+- Workspaces has a Chat section under Sessions, on the Mac and on the phone.
+  It is empty and says so: a friendlier way to talk to the agents in a folder
+  is coming, and this is where it will be.
+
+### Changed
+
+- Open work and View screen on a device now read as the buttons they are, with
+  a glyph and a surface of their own instead of plain text and a chevron.
+- Syncing refreshes the numbers it just changed. The heatmap, the day under
+  the pointer and the pinned day all re-read, where they used to keep pre-sync
+  figures for up to ten minutes.
+
 ## [0.7.0] - 2026-08-27
 
 ### Fixed
