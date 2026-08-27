@@ -1166,13 +1166,6 @@ fn report(refused: &Refused) {
     }
 }
 
-/// Answer one peer for as long as it stays connected.
-///
-/// The body is `server::respond`, unchanged, plus a keep-awake hook that
-/// looks at the method name. That is the entire point of the design: this
-/// transport adds a handshake and a frame, and asks the same dispatch the
-/// same way. A method cannot exist here and be missing over the socket,
-/// because neither transport knows what a method is.
 /// How a peer reached this machine.
 ///
 /// The screen encoder is the one thing that cares, and it cares a lot: a relay
@@ -1199,6 +1192,13 @@ impl Route {
     }
 }
 
+/// Answer one peer for as long as it stays connected.
+///
+/// The body is `server::respond`, unchanged, plus a keep-awake hook that
+/// looks at the method name. That is the entire point of the design: this
+/// transport adds a handshake and a frame, and asks the same dispatch the
+/// same way. A method cannot exist here and be missing over the socket,
+/// because neither transport knows what a method is.
 fn serve_peer(
     mut connection: tokenstat_remote::Connection,
     session: &Mutex<Session>,

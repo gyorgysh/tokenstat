@@ -296,6 +296,24 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             {
                 return Ok(json!({"pending": false, "granted": true}));
             }
+            // Recorded first, and only then upgraded to a grant. The demo
+            // check below asks the account server, which is a request that can
+            // take a minute to fail on a bad network, and a device whose ask
+            // is lost because a lookup hung has no way to know it should ask
+            // again. It also keeps the write short: `store` was read before
+            // any of that, and holding a snapshot across a network call is how
+            // a concurrent answer gets clobbered.
+            let asked_at = now();
+            store.pending.retain(|request| request.peer_id != peer);
+            store.pending.push(PendingRequest {
+                label: crate::remote::account_peer_label_hex(&peer),
+                peer_id: peer.clone(),
+                control: p.control,
+                asked_at,
+                expires_at: asked_at + PENDING_TTL,
+            });
+            save(&store)?;
+
             // The one automatic grant in the product, and the reason it
             // exists: App Review signs into the website's demo account on a
             // fresh iPhone and asks a Mac for its screen, and nobody at Apple
@@ -319,7 +337,7 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
             //
             // A failure here is not a refusal. Not signed in, not Legend, or
             // the account unreachable for a moment all mean "not the demo
-            // account", and the request queues for a person as it should. The
+            // account", and the request stands for a person as it should. The
             // only way past this line is a positive answer.
             let review_demo = verify_legend_account()
                 .map(|status| status.review_demo)
@@ -331,16 +349,6 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 save(&store)?;
                 return Ok(json!({"pending": false, "granted": true, "reviewDemo": true}));
             }
-            let asked_at = now();
-            store.pending.retain(|request| request.peer_id != peer);
-            store.pending.push(PendingRequest {
-                label: crate::remote::account_peer_label_hex(&peer),
-                peer_id: peer,
-                control: p.control,
-                asked_at,
-                expires_at: asked_at + PENDING_TTL,
-            });
-            save(&store)?;
             Ok(json!({"pending": true}))
         }
         "screen.access.pending" => {

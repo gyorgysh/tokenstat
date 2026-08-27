@@ -485,15 +485,16 @@ final class HomeModel {
     /// `refreshAccountGrid` so the host's own ten-minute series cache does not
     /// hand back the answer the sync just replaced.
     func reloadAfterSync() async {
-        let pinned = selectedDay
+        let pinnedDate = selectedDay?.date
         invalidateArchiveCaches()
         await load(quiet: true, refreshAccountGrid: true)
-        // Pin the same day again so the inspector refetches rather than
-        // sitting on the detail the cache no longer holds. `load` re-selects
-        // its own cell when the grid still has one, so only a day the fresh
-        // grid dropped needs this.
-        if let pinned, selectedDetail == nil, selectedDay?.date == pinned.date {
-            select(day: pinned)
+        // Pin that date again so the inspector refetches rather than sitting on
+        // the detail the cache no longer holds. The cell has to come from the
+        // grid that just arrived: re-pinning the one held from before the sync
+        // would put the pre-sync value back in the inspector's header, which is
+        // the number this whole reload exists to move.
+        if let pinnedDate, let fresh = cell(on: pinnedDate) {
+            select(day: fresh)
         }
         await loadPlanLimits()
     }

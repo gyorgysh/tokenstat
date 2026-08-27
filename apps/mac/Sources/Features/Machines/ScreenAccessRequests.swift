@@ -36,7 +36,25 @@ final class ScreenAccessRequests {
     /// The one being asked about right now. The sheet shows the oldest, so a
     /// second request queues behind the first rather than replacing it under
     /// somebody's cursor mid-answer.
-    var showing: ScreenAccessPending? { pending.min { $0.askedAt < $1.askedAt } }
+    ///
+    /// A request somebody put aside is skipped. It is still pending, still
+    /// listed in Devices and still answerable there: putting the sheet away is
+    /// "not now", not an answer.
+    var showing: ScreenAccessPending? {
+        pending.filter { !setAside.contains($0.peerID) }.min { $0.askedAt < $1.askedAt }
+    }
+
+    /// Requests whose sheet was dismissed without an answer.
+    ///
+    /// Held rather than ignored, because a binding whose setter does nothing
+    /// leaves SwiftUI's idea of the sheet and this one disagreeing, and the
+    /// sheet then cannot be raised again for the same request.
+    private var setAside: Set<String> = []
+
+    /// The sheet was closed without an answer.
+    func setAside(_ request: ScreenAccessPending) {
+        setAside.insert(request.peerID)
+    }
 
     /// Requests a notification has already been posted for, so a poll every
     /// few seconds does not post the same banner every few seconds.
@@ -69,7 +87,11 @@ final class ScreenAccessRequests {
             pending = rows
             // Forget what is gone, so a device that asks again in an hour is
             // announced again rather than being silently swallowed.
-            announced.formIntersection(Set(rows.map(\.peerID)))
+            let live = Set(rows.map(\.peerID))
+            announced.formIntersection(live)
+            // A request that expired or was answered elsewhere is gone, so a
+            // device asking again gets the sheet rather than silence.
+            setAside.formIntersection(live)
             for request in arrived {
                 announced.insert(request.peerID)
                 announce(request)
@@ -153,6 +175,12 @@ final class ScreenAccessRequests {
         await refresh()
         guard let request = pending.first(where: { $0.peerID == peerID }) else { return }
         switch action {
+        case UNNotificationDefaultActionIdentifier:
+            // The banner itself was clicked rather than one of its buttons.
+            // That is somebody asking to look at the question, so bring the
+            // app forward and let the sheet do the asking.
+            setAside.remove(peerID)
+            NSApplication.shared.activate(ignoringOtherApps: true)
         case Self.allowViewAction: await answer(request, view: true, control: false)
         case Self.allowControlAction: await answer(request, view: true, control: true)
         case Self.denyAction: await answer(request, view: false, control: false)

@@ -349,7 +349,18 @@ struct RootView: View {
         // Above the route switch for the same reason: a device can ask to see
         // this screen while somebody is anywhere in the app, and the question
         // has to be in front of them wherever that is.
-        .sheet(item: Binding(get: { screenRequests.showing }, set: { _ in })) { request in
+        .sheet(item: Binding(
+            get: { screenRequests.showing },
+            set: { shown in
+                // Closed without an answer. Say so, rather than swallowing the
+                // dismissal: a setter that does nothing leaves SwiftUI and the
+                // model disagreeing about whether a sheet is up. The request
+                // is still pending and still answerable in Devices.
+                if shown == nil, let request = screenRequests.showing {
+                    screenRequests.setAside(request)
+                }
+            }
+        )) { request in
             ScreenAccessRequestSheet(request: request, model: screenRequests)
         }
         // A grant made here is what the phone is waiting on, so look again the
@@ -2552,8 +2563,6 @@ struct RootView: View {
         }
     }
 
-    /// Closing a Files, Changes or Browser chip puts sessions in front. The
-    /// route has to follow or the sidebar stays on the section just closed.
     /// Re-read everything a sync can have moved.
     ///
     /// Home drops its per-day caches and pulls the grid again past the host's
@@ -2564,6 +2573,8 @@ struct RootView: View {
         model.reload()
     }
 
+    /// Closing a Files, Changes or Browser chip puts sessions in front. The
+    /// route has to follow or the sidebar stays on the section just closed.
     private func syncRouteToFront(_ front: WorkspaceSurface) {
         guard let id = route.workspaceID, let section = route.workspaceSection else { return }
         switch section {
