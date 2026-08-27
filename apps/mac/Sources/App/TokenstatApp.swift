@@ -106,6 +106,11 @@ struct TokenstatApp: App {
         // callbacks for whatever arrived first, and on a Mac that is the
         // difference between a banner and silence while the app is in front.
         NotificationPresenter.install()
+        #if os(macOS)
+        // A device can ask to see this screen at any moment, from anywhere.
+        // The poll is what turns that into a sheet or a banner here.
+        ScreenAccessRequests.shared.start()
+        #endif
         #if os(iOS)
         // A token is only asked for when somebody has already said yes, and
         // then on every launch, because iOS reissues them.

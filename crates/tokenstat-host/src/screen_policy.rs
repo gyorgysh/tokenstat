@@ -20,9 +20,37 @@ pub struct ScreenPermission {
     pub view: bool,
     pub control: bool,
 }
+/// A device that has asked to see this screen and is waiting for an answer.
+///
+/// Kept on disk beside the grants rather than in memory, so a request made
+/// while the owner was away survives the app being quit and is still there
+/// when they come back. Expiry is what keeps that from becoming a pile: a
+/// question nobody answered in fifteen minutes is stale, and the device can
+/// ask again.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRequest {
+    pub peer_id: String,
+    /// The name the account carries for that device, when it knows one. A
+    /// public key is not something anybody can recognise their own phone by.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Whether mouse and keyboard were asked for as well as the picture.
+    pub control: bool,
+    pub asked_at: u64,
+    pub expires_at: u64,
+}
+
+/// How long an unanswered request stands.
+const PENDING_TTL: u64 = 15 * 60;
+
 #[derive(Default, Deserialize, Serialize)]
 struct Store {
     permissions: Vec<ScreenPermission>,
+    /// Absent in every file written before requests existed, which is why it
+    /// defaults rather than being required.
+    #[serde(default)]
+    pending: Vec<PendingRequest>,
 }
 struct Capability {
     peer_id: String,
@@ -39,11 +67,20 @@ fn path() -> Result<PathBuf, String> {
         .map_err(|e| e.to_string())
 }
 fn load() -> Result<Store, String> {
-    match fs::read(path()?) {
-        Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Store::default()),
-        Err(e) => Err(e.to_string()),
-    }
+    let mut store: Store = match fs::read(path()?) {
+        Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Store::default(),
+        Err(e) => return Err(e.to_string()),
+    };
+    // Pruned on the way in rather than on a timer. Every path that cares about
+    // a request reads the store first, so there is no moment where an expired
+    // one can be seen, and nothing has to be woken up to sweep.
+    prune(&mut store, now());
+    Ok(store)
+}
+
+fn prune(store: &mut Store, now: u64) {
+    store.pending.retain(|request| request.expires_at > now);
 }
 fn save(store: &Store) -> Result<(), String> {
     let path = path()?;
@@ -141,6 +178,14 @@ struct SetParams {
     view: bool,
     control: bool,
 }
+/// What a device asks for. No peer id: that comes from the transport, and a
+/// field here would be a device naming somebody else.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AskParams {
+    #[serde(default)]
+    control: bool,
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct IssueParams {
@@ -170,6 +215,33 @@ struct ControlParams {
     control: bool,
 }
 
+/// Write one device's grant, and make the change take effect now.
+///
+/// Every path that changes a permission goes through here: the toggles in
+/// Devices, and answering a request. Held capabilities are dropped and a live
+/// session is cut back or ended, because a grant somebody just narrowed has to
+/// mean the next frame, not the next reconnect.
+fn set_permission(peer_id: &str, view: bool, control: bool) -> Result<(), String> {
+    if control && !view {
+        return Err("control permission requires view permission".into());
+    }
+    let mut store = load()?;
+    store.permissions.retain(|v| v.peer_id != peer_id);
+    store.permissions.push(ScreenPermission {
+        peer_id: peer_id.to_string(),
+        view,
+        control,
+    });
+    save(&store)?;
+    capabilities()
+        .lock()
+        .map_err(|_| "capability lock poisoned")?
+        .retain(|_, capability| capability.peer_id != peer_id);
+    #[cfg(feature = "local-host")]
+    crate::screen_runtime::revoke_peer(peer_id, view, control)?;
+    Ok(())
+}
+
 pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
     if !method.starts_with("screen.") {
         return None;
@@ -186,23 +258,58 @@ pub fn call(method: &str, params: &str) -> Option<Result<Value, String>> {
                 return Err("screen policy settings are local-only".into());
             }
             let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
-            if p.control && !p.view {
-                return Err("control permission requires view permission".into());
-            }
+            set_permission(&p.peer_id, p.view, p.control)?;
+            Ok(json!({"saved":true}))
+        }
+        // The device asking, over the tunnel it is already connected on.
+        //
+        // The push below is a nudge and never was the mechanism: a
+        // notification carries a reason and a machine id by design, never the
+        // id of the device that asked, and the Mac app does not register for
+        // push at all. So the question travels the one channel that can carry
+        // it, and the peer it names comes from the transport rather than from
+        // the params, the same rule `screen.capability.issue` follows.
+        "screen.access.ask" => {
+            let peer = crate::request_context::remote_peer()
+                .ok_or("a screen access request must arrive from the device asking")?;
+            let p: AskParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
             let mut store = load()?;
-            store.permissions.retain(|v| v.peer_id != p.peer_id);
-            store.permissions.push(ScreenPermission {
-                peer_id: p.peer_id.clone(),
-                view: p.view,
+            if let Some(held) = store.permissions.iter().find(|v| v.peer_id == peer)
+                && held.view
+                && (!p.control || held.control)
+            {
+                return Ok(json!({"pending": false, "granted": true}));
+            }
+            let asked_at = now();
+            store.pending.retain(|request| request.peer_id != peer);
+            store.pending.push(PendingRequest {
+                label: crate::remote::account_peer_label_hex(&peer),
+                peer_id: peer,
                 control: p.control,
+                asked_at,
+                expires_at: asked_at + PENDING_TTL,
             });
             save(&store)?;
-            capabilities()
-                .lock()
-                .map_err(|_| "capability lock poisoned")?
-                .retain(|_, capability| capability.peer_id != p.peer_id);
-            #[cfg(feature = "local-host")]
-            crate::screen_runtime::revoke_peer(&p.peer_id, p.view, p.control)?;
+            Ok(json!({"pending": true}))
+        }
+        "screen.access.pending" => {
+            if crate::request_context::remote_peer().is_some() {
+                return Err("screen access requests are answered on the host".into());
+            }
+            Ok(serde_json::to_value(load()?.pending).map_err(|e| e.to_string())?)
+        }
+        // The answer, from the person at this machine. Deny is view false and
+        // control false, which is the same call: refusing and revoking are the
+        // same state, and a request that is answered stops standing either way.
+        "screen.access.answer" => {
+            if crate::request_context::remote_peer().is_some() {
+                return Err("screen access requests are answered on the host".into());
+            }
+            let p: SetParams = serde_json::from_str(params).map_err(|e| e.to_string())?;
+            set_permission(&p.peer_id, p.view, p.control)?;
+            let mut store = load()?;
+            store.pending.retain(|request| request.peer_id != p.peer_id);
+            save(&store)?;
             Ok(json!({"saved":true}))
         }
         "screen.access.request" => {
@@ -344,6 +451,54 @@ mod tests {
                 .is_err()
             );
         });
+    }
+
+    #[test]
+    fn only_the_asking_device_may_ask_and_only_the_host_may_answer() {
+        // No transport, so nobody is asking: a local caller cannot queue a
+        // request in some other device's name.
+        let refused = call("screen.access.ask", r#"{"control":true}"#)
+            .unwrap()
+            .expect_err("a local caller has no device to ask for");
+        assert!(refused.contains("device asking"), "{refused}");
+
+        crate::request_context::with_remote_peer("phone", || {
+            for method in ["screen.access.pending", "screen.access.answer"] {
+                let refused = call(method, r#"{"peerId":"phone","view":true,"control":true}"#)
+                    .unwrap()
+                    .expect_err("a device must not answer its own request");
+                assert!(refused.contains("answered on the host"), "{refused}");
+            }
+        });
+    }
+
+    #[test]
+    fn control_without_view_is_refused_before_anything_is_written() {
+        let refused = call(
+            "screen.policy.set",
+            r#"{"peerId":"phone","view":false,"control":true}"#,
+        )
+        .unwrap()
+        .expect_err("control needs view");
+        assert!(refused.contains("requires view"), "{refused}");
+    }
+
+    #[test]
+    fn an_unanswered_request_stops_standing_once_it_expires() {
+        let request = |peer: &str, expires_at: u64| PendingRequest {
+            peer_id: peer.into(),
+            label: None,
+            control: false,
+            asked_at: 0,
+            expires_at,
+        };
+        let mut store = Store {
+            permissions: vec![],
+            pending: vec![request("stale", 100), request("fresh", 300)],
+        };
+        prune(&mut store, 200);
+        assert_eq!(store.pending.len(), 1);
+        assert_eq!(store.pending[0].peer_id, "fresh");
     }
 
     #[test]

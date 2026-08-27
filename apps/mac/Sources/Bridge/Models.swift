@@ -410,6 +410,39 @@ struct ScreenTransferSaved: Codable, Sendable, Hashable { var saved: Bool; var p
 struct ScreenTransferCancelled: Codable, Sendable, Hashable { var cancelled: Bool; var removed: Bool }
 struct ScreenAccessRequest: Codable, Sendable, Hashable { var sent: UInt32; var enabled: Bool; var signedIn: Bool }
 
+/// What the host said about a request this device just made. `granted` means
+/// the permission was already there and there is nothing to wait for.
+struct ScreenAccessAsk: Codable, Sendable, Hashable {
+    var pending: Bool
+    var granted: Bool?
+}
+
+/// A device waiting for an answer on this machine.
+struct ScreenAccessPending: Codable, Sendable, Hashable, Identifiable {
+    var peerID: String
+    /// The account's name for that device, when it has one. A public key is
+    /// not something anybody recognises their own phone by.
+    var label: String?
+    var control: Bool
+    var askedAt: UInt64
+    var expiresAt: UInt64
+
+    var id: String { peerID }
+
+    enum CodingKeys: String, CodingKey {
+        case peerID = "peerId"
+        case label, control
+        case askedAt, expiresAt
+    }
+
+    /// What to call it on screen. Falls back to the head of the key, which is
+    /// what the rest of the app shows when the account knows no better.
+    var displayName: String {
+        if let label, !label.isEmpty { return label }
+        return "Device \(peerID.prefix(8))"
+    }
+}
+
 /// Filters accepted by every reporting method.
 struct Query: Sendable, Equatable {
     var since: String?

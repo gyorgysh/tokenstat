@@ -437,6 +437,14 @@ struct ScreenViewerView: View {
                 if model.needsPermission {
                     Button("Request access", .approve) { Task { await model.requestAccess() } }
                         .buttonStyle(AccentButtonStyle())
+                        .disabled(model.isRequesting)
+                    if let notice = model.requestNotice {
+                        Text(notice)
+                            .font(Theme.caption)
+                            .foregroundStyle(Color.white.opacity(0.72))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Button("Try again", .refresh) { Task { await start() } }
                     .buttonStyle(SecondaryButtonStyle())
@@ -709,6 +717,13 @@ private final class ScreenViewerModel {
     /// How long a session has to hold up before the budget is given back.
     private static let stableAfter: TimeInterval = 12
     private var stopped = false
+    /// What came back from asking, kept apart from `message` on purpose.
+    ///
+    /// `message` is why the session is not running, and the checklist reads it
+    /// word by word. Writing an outcome into it would tell the checklist the
+    /// permission had arrived and take the button away in the same breath.
+    private(set) var requestNotice: String?
+    private(set) var isRequesting = false
     var needsPermission: Bool {
         let value = message.lowercased()
         return value.contains("permission") || value.contains("screen access") || value.contains("allowed")
@@ -718,14 +733,32 @@ private final class ScreenViewerModel {
         message.localizedCaseInsensitiveContains("legend plan")
     }
 
+    /// Ask the computer itself, then nudge the owner's phone.
+    ///
+    /// The ask is the part that matters and the part that can fail usefully:
+    /// it travels the tunnel, so the host learns which device is asking and
+    /// can queue it for a person. The push afterwards is best effort and
+    /// carries no device id at all, which is why it was never enough on its
+    /// own. A host that is asleep cannot be asked, and says so.
     func requestAccess() async {
+        isRequesting = true
+        defer { isRequesting = false }
         do {
-            let result = try await Bridge.requestScreenAccess()
-            if !result.signedIn { message = "Sign in before requesting access." }
-            else if !result.enabled { message = "Notifications are unavailable. Ask the host owner to open Screen access settings." }
-            else if result.sent == 0 { message = "No notification destination is registered. Ask the host owner to open Screen access settings." }
-            else { message = "Request sent. Try again after the host owner approves this device." }
-        } catch { message = error.localizedDescription }
+            let answer = try await Bridge.askScreenAccess(peer: peer, control: requestedControl)
+            if answer.granted == true {
+                requestNotice = "This device already has access. Press Try again."
+                return
+            }
+            requestNotice = "Asked. Approve this device on that computer."
+        } catch {
+            requestNotice = error.localizedDescription
+            return
+        }
+        // Best effort, and never the reason the request failed. Somebody with
+        // no phone registered has still asked the computer itself.
+        if let sent = try? await Bridge.requestScreenAccess(), sent.signedIn, sent.enabled, sent.sent > 0 {
+            requestNotice = "Asked. A notification went to your other devices."
+        }
     }
 
     func start(peer: String, tier: String?, control: Bool) async {
@@ -736,6 +769,7 @@ private final class ScreenViewerModel {
         requestedTier = tier
         requestedControl = control
         reconnectAttempts = 0
+        requestNotice = nil
         state = .connecting
         message = "Connecting…"
         await connect()

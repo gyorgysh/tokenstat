@@ -1067,9 +1067,17 @@ fn clear_account_directory() {
 /// that is noise. Revoked peers never reach this path (authorize keeps them
 /// revoked).
 fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
-    let want = tokenstat_identity::hex(peer);
+    account_peer_label_hex(&tokenstat_identity::hex(peer))
+}
+
+/// The same lookup for callers that already hold the key as hex.
+///
+/// Everything past the handshake speaks hex: `request_context::remote_peer`
+/// hands one out, and re-parsing it into a `PublicKey` only to print it back
+/// would be a round trip through bytes for nothing.
+pub(crate) fn account_peer_label_hex(want: &str) -> Option<String> {
     let fetched_at = directory_fetched_at_ms();
-    if let Some(label) = label_for(&account_machines(false), &want) {
+    if let Some(label) = label_for(&account_machines(false), want) {
         return Some(label);
     }
     // Not in what we hold. A device that registered since the cache was filled
@@ -1092,7 +1100,7 @@ fn account_peer_label(peer: &tokenstat_identity::PublicKey) -> Option<String> {
     if !may_refetch {
         return None;
     }
-    label_for(&account_machines(true), &want)
+    label_for(&account_machines(true), want)
 }
 
 /// When the held directory was last filled, or 0 when nothing is held. Used to

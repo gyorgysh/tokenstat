@@ -38,6 +38,10 @@ struct RootView: View {
     /// screen. The shells are the host's, so leaving the screen must not end
     /// them and coming back must find them again.
     @State private var sshSessions = SSHSessionsModel()
+    /// Devices asking to see this screen. A shared singleton rather than a
+    /// fresh model, because the notification delegate answers through the
+    /// same object from outside any view.
+    @State private var screenRequests = ScreenAccessRequests.shared
     #endif
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
@@ -342,6 +346,17 @@ struct RootView: View {
                 }
             }
         }
+        // Above the route switch for the same reason: a device can ask to see
+        // this screen while somebody is anywhere in the app, and the question
+        // has to be in front of them wherever that is.
+        .sheet(item: Binding(get: { screenRequests.showing }, set: { _ in })) { request in
+            ScreenAccessRequestSheet(request: request, model: screenRequests)
+        }
+        // A grant made here is what the phone is waiting on, so look again the
+        // moment this window comes forward rather than on the next tick.
+        .onReceive(
+            NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+        ) { _ in Task { await screenRequests.refresh() } }
         #endif
         // The window size for the hover popover, which needs to be placed
         // against the window rather than the pane it floats over.

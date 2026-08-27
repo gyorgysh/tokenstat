@@ -1947,6 +1947,30 @@ extension Bridge {
         try await background("screen.access.request", as: ScreenAccessRequest.self)
     }
 
+    /// Ask another computer to let this device see its screen.
+    ///
+    /// Over the tunnel, because that is the only channel that can carry which
+    /// device is asking. The host takes the peer from the connection, so
+    /// nothing here names one.
+    static func askScreenAccess(peer: String, control: Bool) async throws -> ScreenAccessAsk {
+        try await onPeer(peer, "screen.access.ask", ["control": control], as: ScreenAccessAsk.self)
+    }
+
+    /// Devices waiting for an answer on this machine.
+    static func pendingScreenAccess() async throws -> [ScreenAccessPending] {
+        try await background("screen.access.pending", as: [ScreenAccessPending].self)
+    }
+
+    /// Answer one. Denying is view and control both false.
+    static func answerScreenAccess(peerID: String, view: Bool, control: Bool) async throws {
+        struct Saved: Codable, Sendable { var saved: Bool }
+        _ = try await background(
+            "screen.access.answer",
+            ["peerId": peerID, "view": view, "control": control],
+            as: Saved.self
+        )
+    }
+
     static func screenCaptureSessions() async throws -> [ScreenCaptureSession] {
         try await background("screen.capture.list", patience: Patience.interactive, as: [ScreenCaptureSession].self)
     }

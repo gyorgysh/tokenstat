@@ -40,6 +40,12 @@ struct MachinesView: View {
     /// rather than a sheet: naming a device is not a decision with
     /// consequences, it is how the list reads.
     @State private var renamingID: String?
+    #if os(macOS)
+    /// Devices asking to see this screen. The same object the sheet and the
+    /// notification answer through, so all three agree about what is still
+    /// waiting.
+    @State private var screenRequests = ScreenAccessRequests.shared
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -184,8 +190,17 @@ struct MachinesView: View {
     /// The full pairing screen: approvals, this machine, peers, add, e2e.
     @ViewBuilder
     private var remoteReadyContent: some View {
-        // First, because it is the only thing here that is waiting on a
+        // First, because these are the only things here that are waiting on a
         // person. Everything else can be read at leisure.
+        #if os(macOS)
+        // Above pairing, because a device asking for the screen is already
+        // paired: it got far enough to ask. The sheet raises itself when a
+        // request arrives, and this is where somebody who dismissed it, or was
+        // away when it landed, finds the question again.
+        if !screenRequests.pending.isEmpty {
+            askingToView
+        }
+        #endif
         if !model.pending.isEmpty {
             waitingForApproval
         }
@@ -524,6 +539,59 @@ struct MachinesView: View {
         }
         .animation(.easeOut(duration: 0.22), value: model.status != nil)
     }
+
+    #if os(macOS)
+    /// Devices that have asked to see this screen and are still waiting.
+    ///
+    /// The same three answers the sheet offers, in the one place somebody
+    /// would go looking after a banner has gone.
+    private var askingToView: some View {
+        Card(
+            title: "Asking to see this screen",
+            subtitle: "Approve only a device you recognise. You can take it back below.",
+            mark: "mark_device"
+        ) {
+            VStack(spacing: Theme.Space.s) {
+                ForEach(screenRequests.pending) { request in
+                    HStack(alignment: .center, spacing: Theme.Space.m) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(request.displayName)
+                                .font(Theme.callout.weight(.medium))
+                            Text(request.control
+                                ? "Asked for the picture, and for mouse and keyboard."
+                                : "Asked for the picture only.")
+                                .font(Theme.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: Theme.Space.s)
+                        Button("View only", .preview) {
+                            Task { await screenRequests.answer(request, view: true, control: false) }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        if request.control {
+                            Button("Full access", .approve) {
+                                Task { await screenRequests.answer(request, view: true, control: true) }
+                            }
+                            .buttonStyle(AccentButtonStyle())
+                        }
+                        Button("Deny", .revoke, role: .destructive) {
+                            Task { await screenRequests.answer(request, view: false, control: false) }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let error = screenRequests.errorMessage {
+                    Text(error)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+    #endif
 
     private var waitingForApproval: some View {
         Card(
@@ -1057,6 +1125,14 @@ private struct ScreenPermissionCard: View {
         if !peers.isEmpty {
             Card(title: "Screen access", subtitle: "Legend only. Each device is allowed independently.", mark: "mark_device") {
                 VStack(spacing: Theme.Space.s) {
+                    // Says where the switch comes from, for somebody reading
+                    // this card cold. A device does not need to be told what to
+                    // ask for, and nobody has to be told what to switch on.
+                    Text("A device can ask from its own screen. The request appears at the top of this page, and you can also switch one on here.")
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     ForEach(peers) { peer in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {

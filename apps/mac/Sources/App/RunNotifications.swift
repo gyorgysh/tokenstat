@@ -40,6 +40,9 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     /// delivered loses that delivery's callbacks, so it goes in at launch.
     static func install() {
         UNUserNotificationCenter.current().delegate = shared
+        #if os(macOS)
+        ScreenAccessRequests.registerCategory()
+        #endif
     }
 
     nonisolated func userNotificationCenter(
@@ -48,6 +51,26 @@ final class NotificationPresenter: NSObject, UNUserNotificationCenterDelegate {
     ) async -> UNNotificationPresentationOptions {
         [.banner, .sound, .list]
     }
+
+    /// A button on a banner was pressed.
+    ///
+    /// Only screen access answers here. The peer comes from the request's own
+    /// identifier, which this app wrote, rather than from anything in the
+    /// notification's text.
+    #if os(macOS)
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let request = response.notification.request
+        guard request.content.categoryIdentifier == ScreenAccessRequests.category else { return }
+        let prefix = ScreenAccessRequests.identifier("")
+        guard request.identifier.hasPrefix(prefix) else { return }
+        let peerID = String(request.identifier.dropFirst(prefix.count))
+        let action = response.actionIdentifier
+        await ScreenAccessRequests.shared.handleNotification(action: action, peerID: peerID)
+    }
+    #endif
 }
 
 #if os(macOS)
