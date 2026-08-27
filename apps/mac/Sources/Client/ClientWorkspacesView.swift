@@ -50,6 +50,9 @@ struct ClientWorkspacesView: View {
                             Task { await model.refresh(account: account.account) }
                         }
                     }
+                    if let host = model.awaitingAccessHost {
+                        ClientAwaitingAccessCard(hostName: host)
+                    }
                     if let message = model.infoMessage {
                         HStack(alignment: .top, spacing: Theme.Space.s) {
                             Image(systemName: "info.circle.fill")
@@ -369,6 +372,10 @@ final class ClientWorkspacesModel {
 
     /// Soft guidance (approve on host), not a hard failure banner.
     private(set) var infoMessage: String?
+    /// The computer this device has asked to be let into, while that request
+    /// is still standing. Named rather than a bool, because the card says
+    /// which machine somebody has to walk to.
+    private(set) var awaitingAccessHost: String?
 
     func connect(_ host: ClientHost) async {
         await connect(host, recovering: false)
@@ -405,6 +412,9 @@ final class ClientWorkspacesModel {
         if !recovering {
             errorMessage = nil
             infoMessage = nil
+            // A fresh attempt asks again rather than leaving the old card up,
+            // so pressing Connect always means something happened.
+            awaitingAccessHost = nil
         }
         let delays: [UInt64] = [0, 1, 2, 4]
         for (index, delay) in delays.enumerated() {
@@ -429,8 +439,12 @@ final class ClientWorkspacesModel {
                 // they want in, so this asks on their behalf and waits.
                 if try await !Bridge.workspaceAccessAllowed(peer: peer.key) {
                     _ = try? await Bridge.askWorkspaceAccess(peer: host.peerKey)
-                    infoMessage = "Asked \(host.name) to let this device in. "
-                        + "Approve it on that computer, then Connect again."
+                    // Its own state, not `infoMessage`. Waiting on a person at
+                    // another computer is the one thing on this screen where
+                    // nothing will change until they act, and a line of grey
+                    // caption is not enough to say so.
+                    awaitingAccessHost = host.name
+                    infoMessage = nil
                     errorMessage = nil
                     if !recovering {
                         connectedKey = nil
@@ -439,6 +453,7 @@ final class ClientWorkspacesModel {
                     }
                     return
                 }
+                awaitingAccessHost = nil
                 folders = try await Bridge.remoteWorkspaces(peer: peer)
                 sessions = (try? await ClientRemote.ptyList(peer: peer.key)) ?? []
                 connectedKey = host.peerKey

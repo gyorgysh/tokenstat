@@ -270,4 +270,32 @@ enum ClientWireframe {
     }
 }
 
+
+/// This device has asked another computer to let it in, and is waiting.
+///
+/// Its own card rather than a line of caption, because it is the one state on
+/// this screen where nothing at all will change until a person walks to
+/// another machine. It says which machine, it says what to do there, and it
+/// keeps a picture moving so it reads as pending rather than as failed.
+struct ClientAwaitingAccessCard: View {
+    let hostName: String
+
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            ClientEmptyArt(kind: .workspaceAccess)
+            Text("Waiting for \(hostName)")
+                .font(ClientType.sectionTitle)
+                .multilineTextAlignment(.center)
+            Text("Open tokenstat on that computer and approve this device. The request is waiting in the sidebar and in Devices.")
+                .font(ClientType.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Theme.Space.l)
+        .cardSurface()
+    }
+}
+
 #endif

@@ -142,6 +142,18 @@ struct ClientWorkspaceDetailView: View {
             }
             .buttonStyle(.plain)
 
+            // Under Sessions, the same place the Mac puts it. This list is
+            // written out rather than driven from `WorkspaceSection.allCases`,
+            // which is why adding the case alone left the phone without it.
+            NavigationLink {
+                ChatComingSoonView(folderName: current.name)
+                    .navigationTitle("Chat")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                ClientSectionRow(section: .chat, count: nil)
+            }
+            .buttonStyle(.plain)
+
             NavigationLink {
                 ClientWorkspaceChangesView(
                     peer: peer,

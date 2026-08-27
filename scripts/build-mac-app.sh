@@ -14,6 +14,18 @@
 # Usage:
 #   scripts/build-mac-app.sh [version] [output-dir]
 #
+# The xcframework is rebuilt first, with macOS slices only, because that is all
+# a Mac bundle links and CI's Mac job has no use for the rest. That rebuild
+# *replaces* the xcframework, so an iOS archive run afterwards fails with "no
+# library for this platform". When the same checkout is about to archive for
+# iOS, ask for those slices here instead of rebuilding by hand:
+#
+#   TOKENSTAT_FFI_PLATFORMS="macos ios sim" scripts/build-mac-app.sh 0.7.1 dist
+#
+# They are rebuilt, never carried over from a previous run: a slice kept
+# because it happened to be on disk is a slice that can be older than the
+# source it claims to be, and that one would ship to TestFlight.
+#
 # The version is written into CFBundleShortVersionString, so a release tag names
 # the build the user sees in About rather than whatever was last committed to
 # project.yml.
@@ -41,8 +53,11 @@ if ! command -v xcodegen > /dev/null; then
     exit 1
 fi
 
-echo "Building TokenstatFFI (universal)"
-"$ROOT/scripts/build-ffi-xcframework.sh" macos
+FFI_PLATFORMS="${TOKENSTAT_FFI_PLATFORMS:-macos}"
+echo "Building TokenstatFFI (universal: $FFI_PLATFORMS)"
+# Deliberately unquoted: this is a list of platform words.
+# shellcheck disable=SC2086
+"$ROOT/scripts/build-ffi-xcframework.sh" $FFI_PLATFORMS
 
 echo "Generating the Xcode project"
 (cd "$ROOT/apps/mac" && xcodegen > /dev/null)
