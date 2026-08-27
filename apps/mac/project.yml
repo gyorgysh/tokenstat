@@ -96,9 +96,11 @@ settings:
     # looks exactly like a failed upload, and a retry then answers DUPLICATE,
     # which looks like confirmation. It is not. Give it a few minutes before
     # concluding anything.
-    # 55 went up with v0.6.9 and is on TestFlight, so it is spent. 56 goes up
-    # with 0.7.1. 57 is the next one and has not been used.
-    CURRENT_PROJECT_VERSION: "56"
+    # 55 went up with v0.6.9 and is on TestFlight, so it is spent. 56 went up
+    # as 0.7.1 and is spent too: it carried the per-device workspace grant but
+    # none of the fixes to how a request arrives. 57 is the same 0.7.1 with
+    # those. 58 is the next one and has not been used.
+    CURRENT_PROJECT_VERSION: "57"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     # Signed ad hoc so a fresh checkout builds and runs with no team set up.
     # The shipped build is Developer ID signed by the release workflow instead,
