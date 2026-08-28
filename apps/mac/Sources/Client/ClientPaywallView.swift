@@ -207,6 +207,12 @@ struct ClientPaywallView: View {
                 }
             }
             .padding(.top, 4)
+            if item == .legend {
+                Text("Screen connections try a direct path first. If a relay is needed, it remains end-to-end encrypted. The current generous relay allowance is 20 GiB per rolling 30 days, one relayed screen at a time, with up to 10 minutes per relayed session before reconnecting.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if showTrial {
                 Text("3 days free, then the yearly price. Once per account.")
                     .font(ClientType.caption)
@@ -364,7 +370,8 @@ struct ClientPaywallView: View {
     private static let compareFeatures: [CompareFeature] = [
         CompareFeature(label: "Devices", values: ["2", "4", "6", "10"]),
         CompareFeature(label: "History", values: ["30 days", "1 yr", "All", "All"]),
-        CompareFeature(label: "Remote", values: ["No", "No", "Yes", "Yes"]),
+        CompareFeature(label: "Terminal + SSH", values: ["No", "No", "Yes", "Yes"]),
+        CompareFeature(label: "View screen", values: ["No", "No", "No", "Yes"]),
         CompareFeature(label: "Sync", values: ["Hourly", "30 min", "10 min", "5 min"]),
         CompareFeature(label: "Mark", values: ["None", "Star", "Badge", "Crown"]),
         CompareFeature(label: "Read API", values: ["No", "No", "No", "Yes"]),

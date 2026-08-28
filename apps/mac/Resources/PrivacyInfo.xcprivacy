@@ -15,6 +15,20 @@
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
 	<array>
+		<!-- The display name returned by the chosen sign-in provider and any
+		     display name the person later sets on the account. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeName</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
 		<!-- The account id. Everything the account holds hangs off it. -->
 		<dict>
 			<key>NSPrivacyCollectedDataType</key>

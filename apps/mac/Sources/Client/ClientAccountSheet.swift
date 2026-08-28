@@ -567,7 +567,7 @@ private struct ClientAccountContent: View {
             Text(
                 model.account?.billing?.isApple == true
                     && model.account?.billing?.blocksOtherStore == true
-                    ? "Cancel the App Store plan in Apple ID subscriptions first. Deleting the account cannot stop Apple from charging."
+                    ? "Permanent. You can delete immediately on the website. Deletion does not cancel the App Store subscription, so Apple may keep charging until you cancel it separately."
                     : "Permanent. Confirmed on the website's data settings. The account, linked providers, sessions and usage are removed outright."
             )
                 .font(ClientType.body)

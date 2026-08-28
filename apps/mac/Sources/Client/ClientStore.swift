@@ -39,7 +39,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         switch self {
         case .supporter: return "A yearly plan. More devices, a longer history, and a nicer profile."
         case .patron: return "For people running agents on everything they own, and reaching those machines from anywhere."
-        case .legend: return "The top plan. More devices, a faster page, the read API, and first in line when something new lands."
+        case .legend: return "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API."
         }
     }
 
@@ -75,6 +75,8 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         case .legend:
             return [
                 "Everything in Patron",
+                "Remote screen viewing and control",
+                "Direct connection first; end-to-end encrypted relay fallback",
                 "10 devices, added up into one profile",
                 "Profile updates every 5 minutes",
                 "The legend crown next to your name",

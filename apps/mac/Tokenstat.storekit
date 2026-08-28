@@ -38,7 +38,7 @@
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Yearly Supporter plan. A year of history and three devices.",
+              "description" : "Yearly Supporter plan. A year of history and four devices.",
               "displayName" : "Supporter",
               "locale" : "en_US"
             }
@@ -94,7 +94,7 @@
           "introductoryOffer" : null,
           "localizations" : [
             {
-              "description" : "Yearly Legend plan. More devices, faster sync, the read API.",
+              "description" : "Yearly Legend plan. Remote screen viewing and control, ten devices, faster sync, and the read API.",
               "displayName" : "Legend",
               "locale" : "en_US"
             }
