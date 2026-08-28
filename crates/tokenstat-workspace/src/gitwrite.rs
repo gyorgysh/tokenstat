@@ -129,6 +129,43 @@ pub fn push(dir: &Path) -> GitOutcome {
     }
 }
 
+/// Switch to a local branch, or create a tracking branch from a remote ref.
+///
+/// No stash, force, clean, or detach option exists here. A dirty tree that
+/// cannot move is left exactly where it was and git's explanation is returned.
+pub fn checkout(dir: &Path, name: &str, remote: bool) -> GitOutcome {
+    if !valid_branch(dir, name) {
+        return GitOutcome::failed("that is not a valid branch name");
+    }
+    if remote {
+        git(dir, &["switch", "--track", name])
+    } else {
+        git(dir, &["switch", name])
+    }
+}
+
+/// Create and switch to a branch from the current branch or a named start.
+pub fn create_branch(dir: &Path, name: &str, from: Option<&str>) -> GitOutcome {
+    let name = name.trim();
+    if name.is_empty() || !valid_branch(dir, name) {
+        return GitOutcome::failed("that is not a valid branch name");
+    }
+    match from.filter(|value| !value.is_empty()) {
+        Some(start) => git(dir, &["switch", "-c", name, start]),
+        None => git(dir, &["switch", "-c", name]),
+    }
+}
+
+fn valid_branch(dir: &Path, name: &str) -> bool {
+    Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["check-ref-format", "--branch", name])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 /// Write one text file after an explicit Save action in the editor.
 ///
 /// The path is checked against the canonical workspace root, so a symlink
@@ -167,6 +204,7 @@ mod tests {
         run(&["init", "-q", "."]);
         run(&["config", "user.email", "t@example.invalid"]);
         run(&["config", "user.name", "t"]);
+        run(&["config", "commit.gpgSign", "false"]);
         std::fs::write(dir.join("seed.txt"), "seed\n").unwrap();
         run(&["add", "-A"]);
         run(&["commit", "-qm", "init"]);
@@ -189,6 +227,30 @@ mod tests {
         assert!(crate::git::status(&dir).files.is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn creating_and_switching_branches_is_explicit() {
+        let dir = repo("branches");
+        let created = create_branch(&dir, "feature/picker", None);
+        assert!(created.ok, "{}", created.message);
+
+        let branch = Command::new("git")
+            .arg("-C")
+            .arg(&dir)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&branch.stdout).trim(),
+            "feature/picker"
+        );
+
+        let other = create_branch(&dir, "feature/other", None);
+        assert!(other.ok, "{}", other.message);
+        let switched = checkout(&dir, "feature/picker", false);
+        assert!(switched.ok, "{}", switched.message);
+        assert!(!create_branch(&dir, "-unsafe", None).ok);
     }
 
     #[test]

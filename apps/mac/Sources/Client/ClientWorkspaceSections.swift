@@ -443,22 +443,39 @@ struct ClientWorkspaceChangesView: View {
     }
 
     private func branchCard(_ git: GitStatus) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: "arrow.triangle.branch")
-                .foregroundStyle(Theme.accent)
-            Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
-                .font(ClientType.label.weight(.medium))
-            Spacer()
-            if git.ahead > 0 {
-                Text("⇡\(git.ahead)").font(ClientType.rowFigure).foregroundStyle(Theme.accent)
+        BranchPickerPresentation(
+            workspaceID: "remote:\(peer):\(workspaceID)",
+            currentBranch: git.branch,
+            onChanged: { await load() }
+        ) {
+            HStack(spacing: Theme.Space.s) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Space.xs)
+                        .fill(Theme.accent.opacity(0.12))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "arrow.triangle.branch")
+                        .foregroundStyle(Theme.accent)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Branch").font(ClientType.caption).foregroundStyle(.secondary)
+                    Text(git.branch.map { $0.isEmpty ? "detached" : $0 } ?? "detached")
+                        .font(ClientType.label.weight(.medium))
+                }
+                Spacer()
+                if git.ahead > 0 {
+                    Text("⇡\(git.ahead)").font(ClientType.rowFigure).foregroundStyle(Theme.accent)
+                }
+                if git.behind > 0 {
+                    Text("⇣\(git.behind)").font(ClientType.rowFigure).foregroundStyle(Theme.warning)
+                }
+                Image(systemName: "chevron.right")
+                    .font(ClientType.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            if git.behind > 0 {
-                Text("⇣\(git.behind)").font(ClientType.rowFigure).foregroundStyle(Theme.accent)
-            }
+            .padding(Theme.Space.m)
+            .frame(maxWidth: .infinity)
+            .cardSurface()
         }
-        .padding(Theme.Space.m)
-        .frame(maxWidth: .infinity)
-        .cardSurface()
     }
 }
 

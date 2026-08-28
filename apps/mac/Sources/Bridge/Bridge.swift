@@ -1202,6 +1202,37 @@ extension Bridge {
 /// and never from a timer, a watcher, or a refresh. See
 /// `tokenstat_workspace::gitwrite` for why that split is kept in the Rust too.
 extension Bridge {
+    static func branches(id: String) async throws -> [GitBranch] {
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(
+                target.peer,
+                "workspace.branches",
+                ["id": target.workspace],
+                as: [GitBranch].self
+            )
+        }
+        return try await background("workspace.branches", ["id": id], as: [GitBranch].self)
+    }
+
+    static func checkout(id: String, branch: GitBranch) async throws -> GitOutcome {
+        let params: [String: Any] = ["id": remoteWorkspace(id)?.workspace ?? id,
+                                     "branch": branch.name,
+                                     "remote": branch.remote]
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(target.peer, "workspace.checkout", params, as: GitOutcome.self)
+        }
+        return try await background("workspace.checkout", params, as: GitOutcome.self)
+    }
+
+    static func createBranch(id: String, name: String, from: String?) async throws -> GitOutcome {
+        var params: [String: Any] = ["id": remoteWorkspace(id)?.workspace ?? id, "branch": name]
+        if let from { params["from"] = from }
+        if let target = remoteWorkspace(id) {
+            return try await onPeer(target.peer, "workspace.createBranch", params, as: GitOutcome.self)
+        }
+        return try await background("workspace.createBranch", params, as: GitOutcome.self)
+    }
+
     static func stage(id: String, paths: [String]) async throws -> GitOutcome {
         if let target = remoteWorkspace(id) {
             return try await onPeer(

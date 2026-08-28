@@ -40,6 +40,11 @@ ALLOWED = [
     ("Features/Workspaces/WorkspaceInspector.swift", "Button(action: action) {"),
     ("Features/Workspaces/WorkspacesView.swift", 'Button(all ? "Clear all"'),
     ("Features/Workspaces/WorkspacesView.swift", "Button(action: onOpen)"),
+    # The branch chip/card and each branch are whole-surface controls. Their
+    # labels already carry the branch/check glyph; another action glyph would
+    # duplicate the mark instead of clarifying the action.
+    ("Features/Workspaces/BranchPicker.swift", "Button { isPresented = true } label:"),
+    ("Features/Workspaces/BranchPicker.swift", "Task { await checkout(branch) }"),
     ("Features/Automations/AutomationsView.swift", "Button(action, action: perform)"),
     ("Features/Workflows/WorkflowsView.swift", "Button(action: onSelect)"),
     ("Features/Workflows/WorkflowsView.swift", "onSelect?(node.id)"),

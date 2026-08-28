@@ -100,7 +100,9 @@ struct WorkspacesView: View {
             .layoutPriority(1)
             Spacer()
             if let git = folder.git, git.isRepo {
-                BranchChip(git: git)
+                BranchChip(workspaceID: folder.id, git: git) {
+                    await model.refresh()
+                }
                     // The chip keeps its whole shape whatever the path does:
                     // without this, a long path with layout priority squeezes
                     // the branch text and the chip starts to look broken.
@@ -206,31 +208,6 @@ struct WorkspacesView: View {
         .padding(Theme.Space.xl)
     }
 
-}
-
-/// Branch, and how far it has drifted from its upstream.
-struct BranchChip: View {
-    var git: GitStatus
-
-    var body: some View {
-        HStack(spacing: Theme.Space.xs) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(Theme.font(9))
-            Text(git.branch ?? "detached")
-                .font(Theme.mono(12))
-            if git.ahead > 0 {
-                Text("↑\(git.ahead)").font(Theme.numeric(11)).foregroundStyle(Theme.secondary)
-            }
-            if git.behind > 0 {
-                Text("↓\(git.behind)").font(Theme.numeric(11)).foregroundStyle(Theme.warning)
-            }
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, Theme.Space.s)
-        .padding(.vertical, 3)
-        .background(Theme.panel, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-    }
 }
 
 /// The Changes tab of the workspace inspector: what changed, grouped by

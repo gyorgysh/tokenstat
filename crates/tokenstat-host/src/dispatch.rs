@@ -198,6 +198,15 @@ struct WorkspaceIdParams {
     /// Only used by `workspace.rename`.
     #[serde(default)]
     name: Option<String>,
+    /// Branch checkout source, or the new branch name.
+    #[serde(default)]
+    branch: Option<String>,
+    /// Whether `branch` names a remote-tracking ref.
+    #[serde(default)]
+    remote: bool,
+    /// Optional start point for a new branch.
+    #[serde(default)]
+    from: Option<String>,
     /// Only used by `workspace.log`.
     #[serde(default)]
     limit: Option<u32>,
@@ -1874,10 +1883,25 @@ fn workflow_call(method: &str, params: &str) -> Result<Value, String> {
 #[cfg(feature = "local-host")]
 fn folders(method: &str, params: &str) -> Option<Result<Value, String>> {
     match method {
-        "workspace.list" | "workspace.add" | "workspace.remove" | "workspace.rename"
-        | "workspace.status" | "workspace.summary" | "workspace.log" | "workspace.tree"
-        | "workspace.show" | "workspace.diff" | "workspace.read" | "workspace.stage"
-        | "workspace.unstage" | "workspace.commit" | "workspace.write" | "workspace.push"
+        "workspace.list"
+        | "workspace.add"
+        | "workspace.remove"
+        | "workspace.rename"
+        | "workspace.status"
+        | "workspace.summary"
+        | "workspace.log"
+        | "workspace.tree"
+        | "workspace.branches"
+        | "workspace.checkout"
+        | "workspace.createBranch"
+        | "workspace.show"
+        | "workspace.diff"
+        | "workspace.read"
+        | "workspace.stage"
+        | "workspace.unstage"
+        | "workspace.commit"
+        | "workspace.write"
+        | "workspace.push"
         | "pty.spawn" => {}
         _ => return None,
     }
@@ -2071,6 +2095,14 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
             serde_json::to_value(describe(&ws)).map_err(|e| e.to_string())
         }
 
+        "workspace.branches" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            serde_json::to_value(tokenstat_workspace::git::branches(&ws.path))
+                .map_err(|e| e.to_string())
+        }
+
         // Counts for a folder's badges, or every folder's. One call because a
         // front end drawing six folders' badges was making five list calls per
         // folder and counting them itself, which is thirty round trips from a
@@ -2160,6 +2192,27 @@ fn folder_call(method: &str, params: &str) -> Result<Value, String> {
         // is a place to work, not a reporter: they run when someone presses a
         // button and are never reachable from a timer or a status path. See
         // `tokenstat_workspace::gitwrite`.
+        "workspace.checkout" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let branch = p.branch.ok_or("workspace.checkout needs a branch")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome = tokenstat_workspace::gitwrite::checkout(&ws.path, &branch, p.remote);
+            invalidate_workspace_status(Some(&p.id));
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
+        "workspace.createBranch" => {
+            let p: WorkspaceIdParams =
+                serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;
+            let branch = p.branch.ok_or("workspace.createBranch needs a branch")?;
+            let ws = crate::workspaces::folder(&p.id)?;
+            let outcome =
+                tokenstat_workspace::gitwrite::create_branch(&ws.path, &branch, p.from.as_deref());
+            invalidate_workspace_status(Some(&p.id));
+            serde_json::to_value(outcome).map_err(|e| e.to_string())
+        }
+
         "workspace.stage" | "workspace.unstage" => {
             let p: WorkspaceIdParams =
                 serde_json::from_str(params.trim()).map_err(|e| e.to_string())?;

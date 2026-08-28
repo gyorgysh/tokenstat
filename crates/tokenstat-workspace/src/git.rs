@@ -64,6 +64,21 @@ pub struct GitStatus {
     pub partial: bool,
 }
 
+/// One branch a person can switch this worktree to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub name: String,
+    pub current: bool,
+    pub upstream: Option<String>,
+    pub ahead: u32,
+    pub behind: u32,
+    /// Commit time in unix seconds. Zero means git had no commit to report.
+    pub last_commit: i64,
+    /// A remote-tracking branch with no local branch of the same name.
+    pub remote: bool,
+}
+
 /// One commit, as the history panel shows it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -524,6 +539,82 @@ pub fn status(dir: &Path) -> GitStatus {
     status
 }
 
+/// List local branches and remote-tracking branches in one git process.
+///
+/// Remote refs that already have a same-named local branch are omitted. The
+/// picker presents those as one local branch with its upstream, rather than as
+/// two choices that appear to do the same thing.
+pub fn branches(dir: &Path) -> Vec<Branch> {
+    let Some(raw) = git(
+        dir,
+        &[
+            "for-each-ref",
+            "--sort=-committerdate",
+            "--format=%(refname)%1f%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%1f%(committerdate:unix)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    ) else {
+        return Vec::new();
+    };
+
+    let records: Vec<_> = raw.lines().filter_map(parse_branch).collect();
+    let local_names: std::collections::HashSet<_> = records
+        .iter()
+        .filter(|branch| !branch.remote)
+        .map(|branch| branch.name.clone())
+        .collect();
+    records
+        .into_iter()
+        .filter(|branch| {
+            if !branch.remote {
+                return true;
+            }
+            let Some((_, local_name)) = branch.name.split_once('/') else {
+                return false;
+            };
+            local_name != "HEAD" && !local_names.contains(local_name)
+        })
+        .collect()
+}
+
+fn parse_branch(record: &str) -> Option<Branch> {
+    let mut fields = record.split('\u{1f}');
+    let refname = fields.next()?;
+    let name = fields.next()?.to_string();
+    let current = fields.next()?.trim() == "*";
+    let upstream = fields
+        .next()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let track = fields.next().unwrap_or_default();
+    let last_commit = fields
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .parse()
+        .unwrap_or(0);
+    let remote = refname.starts_with("refs/remotes/");
+    let mut ahead = 0;
+    let mut behind = 0;
+    for part in track.split(',').map(str::trim) {
+        if let Some(value) = part.strip_prefix("ahead ") {
+            ahead = value.parse().unwrap_or(0);
+        } else if let Some(value) = part.strip_prefix("behind ") {
+            behind = value.parse().unwrap_or(0);
+        }
+    }
+    Some(Branch {
+        name,
+        current,
+        upstream,
+        ahead,
+        behind,
+        last_commit,
+        remote,
+    })
+}
+
 fn inside_work_tree(dir: &Path) -> bool {
     git(dir, &["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")
@@ -705,6 +796,24 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_records_keep_tracking_and_remote_shape() {
+        let local = parse_branch("refs/heads/work\u{1f}work\u{1f}*\u{1f}origin/work\u{1f}ahead 2, behind 1\u{1f}1700000000")
+            .expect("local branch");
+        assert_eq!(local.name, "work");
+        assert!(local.current);
+        assert_eq!(local.upstream.as_deref(), Some("origin/work"));
+        assert_eq!((local.ahead, local.behind), (2, 1));
+        assert!(!local.remote);
+
+        let remote = parse_branch(
+            "refs/remotes/origin/review\u{1f}origin/review\u{1f} \u{1f}\u{1f}\u{1f}1690000000",
+        )
+        .expect("remote branch");
+        assert!(remote.remote);
+        assert_eq!(remote.last_commit, 1_690_000_000);
+    }
 
     #[test]
     fn a_plain_folder_is_not_an_error() {

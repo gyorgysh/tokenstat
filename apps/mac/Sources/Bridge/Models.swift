@@ -1777,6 +1777,20 @@ struct GitStatus: Codable, Sendable, Hashable {
     var partial: Bool
 }
 
+/// One branch offered by the workspace branch picker.
+struct GitBranch: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var current: Bool
+    var upstream: String?
+    var ahead: UInt32
+    var behind: UInt32
+    var lastCommit: Int64
+    var remote: Bool
+
+    var id: String { "\(remote ? "remote" : "local"):\(name)" }
+    var date: Date? { lastCommit > 0 ? Date(timeIntervalSince1970: TimeInterval(lastCommit)) : nil }
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
