@@ -29,6 +29,8 @@ pub enum ForgeError {
     RefreshFailed,
     #[error("GitHub rejected the request: {0}")]
     Api(String),
+    #[error("GitHub's request limit is exhausted{reset}", reset = reset_suffix(*.reset))]
+    RateLimited { reset: Option<u64> },
     #[error("network: {0}")]
     Network(#[from] reqwest::Error),
     #[error("credential storage: {0}")]
@@ -454,6 +456,13 @@ fn api_message(text: &str, status: u16) -> String {
     } else {
         format!("HTTP {status}: {detail}")
     }
+}
+
+fn reset_suffix(reset: Option<u64>) -> String {
+    reset
+        .and_then(|at| i64::try_from(at).ok())
+        .and_then(|at| jiff::Timestamp::from_second(at).ok())
+        .map_or_else(String::new, |at| format!(" until {at}"))
 }
 
 #[cfg(test)]

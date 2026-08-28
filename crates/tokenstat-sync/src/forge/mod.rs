@@ -5,12 +5,13 @@
 
 mod auth;
 mod model;
+mod query;
 
 pub use auth::{
     APP_SLUG, Credential, CredentialSource, DeviceLogin, DeviceStatus, ForgeError, credential,
     device_poll, device_start, set_token, sign_out,
 };
-pub use model::{Availability, Repo};
+pub use model::{Availability, CheckState, PullSummary, Repo, Scope, State};
 
 /// Public OAuth client identifier for tokenstat's GitHub App.
 ///
@@ -20,6 +21,79 @@ pub use model::{Availability, Repo};
 pub const GITHUB_CLIENT_ID: &str = "Iv23lih7KyYQNkeyuak1";
 
 use serde::de::DeserializeOwned;
+
+/// Read one filtered page of pull requests in a single GraphQL request.
+pub fn list(
+    repo: &Repo,
+    scope: Scope,
+    state: State,
+    limit: u32,
+) -> Result<Vec<PullSummary>, ForgeError> {
+    let Some(credential) = credential(&repo.host) else {
+        return Err(ForgeError::NotSignedIn);
+    };
+    match list_once(repo, scope, state, limit, &credential) {
+        Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
+            let refreshed = auth::refresh_stored(&repo.host)?;
+            list_once(repo, scope, state, limit, &refreshed).map_err(Into::into)
+        }
+        result => result.map_err(Into::into),
+    }
+}
+
+fn list_once(
+    repo: &Repo,
+    scope: Scope,
+    state: State,
+    limit: u32,
+    credential: &Credential,
+) -> Result<Vec<PullSummary>, HttpFailure> {
+    let body = serde_json::json!({
+        "query": query::LIST,
+        "variables": {
+            "query": query::search_query(repo, scope, state),
+            "limit": limit.clamp(1, 40),
+        }
+    });
+    let endpoint = if repo.host.eq_ignore_ascii_case("github.com") {
+        "https://api.github.com/graphql".to_string()
+    } else {
+        format!("https://{}/api/graphql", repo.host)
+    };
+    let response = auth::http_client()?
+        .post(endpoint)
+        .header("accept", "application/vnd.github+json")
+        .header("x-github-api-version", "2022-11-28")
+        .bearer_auth(credential.bearer())
+        .json(&body)
+        .send()
+        .map_err(ForgeError::from)?;
+    let status = response.status();
+    let reset = response
+        .headers()
+        .get("x-ratelimit-reset")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let remaining = response
+        .headers()
+        .get("x-ratelimit-remaining")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let text = response.text().map_err(ForgeError::from)?;
+    match status.as_u16() {
+        401 => Err(HttpFailure::Unauthorized),
+        403 if remaining == Some(0) => Err(HttpFailure::Forge(ForgeError::RateLimited { reset })),
+        403 => Err(HttpFailure::Forbidden),
+        404 => Err(HttpFailure::NotFound),
+        429 => Err(HttpFailure::Forge(ForgeError::RateLimited { reset })),
+        _ if !status.is_success() => Err(HttpFailure::Forge(ForgeError::Api(format!(
+            "HTTP {}: {}",
+            status.as_u16(),
+            text.trim()
+        )))),
+        _ => query::decode_list(&text, reset).map_err(HttpFailure::from),
+    }
+}
 
 /// Resolve the signed-in account and whether it may access this repository.
 /// No installation or permission change is made here; the returned URL is an

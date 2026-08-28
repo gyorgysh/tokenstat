@@ -1826,6 +1826,64 @@ struct PullDevicePoll: Codable, Sendable, Hashable {
     var source: String?
 }
 
+enum PullScope: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case all
+    case mine
+    case assigned
+    case reviewRequested
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .mine: return "Mine"
+        case .assigned: return "Assigned"
+        case .reviewRequested: return "Review requested"
+        }
+    }
+}
+
+enum PullStateFilter: String, Codable, Sendable, Hashable, CaseIterable, Identifiable {
+    case open
+    case merged
+    case closed
+    case draft
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+}
+
+enum PullCheckState: String, Codable, Sendable, Hashable {
+    case passing
+    case failing
+    case pending
+}
+
+/// One row returned by the forge list query. Bodies and diffs never enter this
+/// type: the compact list contains only review metadata.
+struct PullSummary: Codable, Sendable, Hashable, Identifiable {
+    var number: UInt32
+    var title: String
+    var author: String
+    var authorAvatar: String?
+    var createdAt: String
+    var updatedAt: String
+    var headRef: String
+    var baseRef: String
+    var additions: UInt32
+    var deletions: UInt32
+    var changedFiles: UInt32
+    var state: String
+    var draft: Bool
+    var reviewDecision: String?
+    var labels: [String]
+    var comments: UInt32
+    var checks: PullCheckState?
+
+    var id: UInt32 { number }
+    var updatedDate: Date? { parseServerDate(updatedAt) }
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String

@@ -1229,6 +1229,31 @@ extension Bridge {
         )
     }
 
+    static func pullList(
+        workspaceID: String,
+        peer: String? = nil,
+        scope: PullScope,
+        state: PullStateFilter,
+        refresh: Bool = false
+    ) async throws -> [PullSummary] {
+        let params: [String: Any] = [
+            "workspaceId": workspaceID,
+            "scope": scope.rawValue,
+            "state": state.rawValue,
+            "limit": 40,
+            "refresh": refresh,
+        ]
+        if let peer {
+            return try await onPeer(peer, "pulls.list", params, as: [PullSummary].self)
+        }
+        if let target = remoteWorkspace(workspaceID) {
+            var remoteParams = params
+            remoteParams["workspaceId"] = target.workspace
+            return try await onPeer(target.peer, "pulls.list", remoteParams, as: [PullSummary].self)
+        }
+        return try await background("pulls.list", params, as: [PullSummary].self)
+    }
+
     static func startPullLogin(host: String = "github.com") async throws -> PullDeviceLogin {
         try await background(
             "pulls.signIn",

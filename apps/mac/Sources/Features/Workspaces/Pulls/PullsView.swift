@@ -14,6 +14,7 @@ struct PullsView: View {
     var connectionHostName: String? = nil
 
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = PullsModel()
 
     private var canConnectHere: Bool { connectionHostName == nil }
@@ -30,7 +31,13 @@ struct PullsView: View {
         }
         .background(Theme.background)
         .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
-        .refreshable { await model.load(workspaceID: workspaceID, peer: peer) }
+        .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
+        .onChange(of: model.scope) { _, _ in
+            Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
+        }
+        .onChange(of: model.state) { _, _ in
+            Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
+        }
         .sheet(isPresented: loginPresented) { loginSheet }
     }
 
@@ -47,20 +54,35 @@ struct PullsView: View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
             HStack(spacing: Theme.Space.s) {
                 Image(systemName: "arrow.triangle.merge")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(Theme.fixed(17, weight: .semibold))
                     .foregroundStyle(Theme.accent)
                     .frame(width: 34, height: 34)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Pull requests")
-                        .font(.title2.weight(.semibold))
+                        .font(Theme.title2.weight(.semibold))
                     Text(model.availability?.repositoryName ?? "Review the work around this branch")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if model.isLoading {
+                if model.isLoading && model.availability == nil {
                     ProgressView().controlSize(.small)
+                }
+                if model.availability?.state == "ready" {
+                    ToolbarIconButton(
+                        systemImage: "arrow.clockwise",
+                        help: "Refresh pull requests",
+                        isBusy: model.isLoadingList
+                    ) {
+                        Task {
+                            await model.loadList(
+                                workspaceID: workspaceID,
+                                peer: peer,
+                                refresh: true
+                            )
+                        }
+                    }
                 }
             }
             Rectangle()
@@ -101,7 +123,7 @@ struct PullsView: View {
                     message: "The connection works, but \(availability.repositoryName ?? "this repository") is not in tokenstat's selected repositories."
                 )
             case "ready":
-                readyCard(availability)
+                pullList(availability)
             default:
                 empty(
                     title: "GitHub returned an unfamiliar state",
@@ -122,14 +144,14 @@ struct PullsView: View {
                 Circle().fill(Theme.accent.opacity(0.08)).frame(width: 104, height: 104)
                 Circle().stroke(Theme.accent.opacity(0.18), lineWidth: 1).frame(width: 78, height: 78)
                 Image(systemName: "arrow.triangle.merge")
-                    .font(.system(size: 30, weight: .light))
+                    .font(Theme.fixed(30, weight: .light))
                     .foregroundStyle(Theme.accent)
             }
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text("Bring the review into tokenstat")
-                    .font(.title3.weight(.semibold))
+                    .font(Theme.title3.weight(.semibold))
                 Text("Read the conversation, inspect the same diff as Changes, follow checks, and review without losing the workspace around it.")
-                    .font(.body)
+                    .font(Theme.body)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -148,7 +170,7 @@ struct PullsView: View {
                     "Connect Pull Requests on \(connectionHostName ?? "the workspace's computer"), then return here.",
                     systemImage: "laptopcomputer"
                 )
-                .font(.callout)
+                .font(Theme.callout)
                 .foregroundStyle(.secondary)
             }
         }
@@ -165,10 +187,10 @@ struct PullsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             Label(title, systemImage: "lock.open")
-                .font(.title3.weight(.semibold))
+                .font(Theme.title3.weight(.semibold))
                 .foregroundStyle(Theme.accent)
             Text(message)
-                .font(.body)
+                .font(Theme.body)
                 .foregroundStyle(.secondary)
             if let raw = availability.installUrl, let url = URL(string: raw) {
                 Button { openURL(url) } label: {
@@ -177,7 +199,7 @@ struct PullsView: View {
                 .buttonStyle(AccentButtonStyle())
             }
             Text("tokenstat only sees repositories selected for its GitHub App installation.")
-                .font(.caption)
+                .font(Theme.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(Theme.Space.l)
@@ -186,31 +208,83 @@ struct PullsView: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.24)))
     }
 
-    private func readyCard(_ availability: PullAvailability) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            HStack(alignment: .top, spacing: Theme.Space.m) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Theme.panel)
-                    .frame(width: 30, height: 30)
-                    .background(Theme.success, in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Connected to \(availability.repositoryName ?? "GitHub")")
-                        .font(.headline)
-                    Text("@\(availability.login ?? "connected") · \(sourceLabel(availability.source))")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+    private func pullList(_ availability: PullAvailability) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(spacing: Theme.Space.s) {
+                Circle()
+                    .fill(Theme.success)
+                    .frame(width: 7, height: 7)
+                    .accessibilityHidden(true)
+                Text("@\(availability.login ?? "connected")")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+                Text("· \(sourceLabel(availability.source))")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                if !model.rows.isEmpty {
+                    Text("\(model.rows.count) shown")
+                        .font(Theme.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
-            Divider().overlay(Theme.border)
-            Text("The connection is ready. Pull-request lists and review details use this repository grant and stay between this computer and GitHub.")
-                .font(.body)
-                .foregroundStyle(.secondary)
+
+            PullFilters(scope: $model.scope, state: $model.state)
+
+            if let error = model.listError {
+                errorCard(error)
+            } else if model.isLoadingList && model.rows.isEmpty {
+                PullListSkeleton()
+                    .transition(.smoothIn(reduceMotion: reduceMotion))
+            } else if model.rows.isEmpty {
+                filteredEmpty
+                    .transition(.smoothIn(reduceMotion: reduceMotion))
+            } else {
+                LazyVStack(spacing: Theme.Space.s) {
+                    ForEach(model.rows) { pull in
+                        PullRow(pull: pull)
+                    }
+                }
+                .transition(.smoothIn(reduceMotion: reduceMotion))
+                .opacity(model.isLoadingList ? 0.62 : 1)
+                .animation(.easeOut(duration: 0.16), value: model.isLoadingList)
+            }
+        }
+    }
+
+    private var filteredEmpty: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            EmptyState(
+                symbol: model.state == .draft ? "pencil.line" : "arrow.triangle.merge",
+                title: "No \(model.state.label.lowercased()) pull requests",
+                message: emptyMessage
+            )
+            if model.scope != .all || model.state != .open {
+                Button {
+                    withAnimation(.snappy(duration: 0.22)) {
+                        model.scope = .all
+                        model.state = .open
+                    }
+                } label: {
+                    Label("Show open pull requests", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+            }
         }
         .padding(Theme.Space.l)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private var emptyMessage: String {
+        switch model.scope {
+        case .all: return "Nothing in this repository matches the selected state."
+        case .mine: return "You have no pull requests matching the selected state."
+        case .assigned: return "No matching pull requests are assigned to you."
+        case .reviewRequested: return "No matching pull requests are waiting for your review."
+        }
     }
 
     private func sourceLabel(_ source: String?) -> String {
@@ -235,7 +309,7 @@ struct PullsView: View {
                 .foregroundStyle(Theme.warning)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 Text(FriendlyError.from(message).message)
-                    .font(.callout)
+                    .font(Theme.callout)
                 Button("Try again") {
                     Task { await model.load(workspaceID: workspaceID, peer: peer) }
                 }
@@ -255,19 +329,19 @@ struct PullsView: View {
                 ZStack {
                     Circle().fill(Theme.accent.opacity(0.10)).frame(width: 82, height: 82)
                     Image(systemName: "link")
-                        .font(.system(size: 26, weight: .light))
+                        .font(Theme.fixed(26, weight: .light))
                         .foregroundStyle(Theme.accent)
                 }
                 VStack(spacing: Theme.Space.xs) {
                     Text("Connect GitHub")
-                        .font(.title2.weight(.semibold))
+                        .font(Theme.title2.weight(.semibold))
                     Text("Enter this one-time code in the GitHub page that just opened.")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 Text(login.userCode)
-                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                    .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
                     .tracking(2)
                     .foregroundStyle(Theme.accent)
                     .textSelection(.enabled)
@@ -278,12 +352,12 @@ struct PullsView: View {
                 HStack(spacing: Theme.Space.s) {
                     ProgressView().controlSize(.small)
                     Text("Waiting for GitHub…")
-                        .font(.callout)
+                        .font(Theme.callout)
                         .foregroundStyle(.secondary)
                 }
                 if let error = model.loginError {
                     Text(FriendlyError.from(error).message)
-                        .font(.caption)
+                        .font(Theme.caption)
                         .foregroundStyle(Theme.danger)
                         .multilineTextAlignment(.center)
                 }
@@ -305,6 +379,295 @@ struct PullsView: View {
     }
 }
 
+/// The two questions are separate: whose pull requests, and which lifecycle
+/// state. Keeping both visible avoids a menu whose current answer is hidden.
+private struct PullFilters: View {
+    @Binding var scope: PullScope
+    @Binding var state: PullStateFilter
+    @Namespace private var scopeSlide
+    @Namespace private var stateSlide
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("SCOPE")
+                    .font(Theme.caption2.weight(.semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(.tertiary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 3) {
+                        ForEach(PullScope.allCases) { option in
+                            filterButton(
+                                title: option.label,
+                                selected: scope == option,
+                                tint: Theme.accent,
+                                namespace: scopeSlide
+                            ) {
+                                withAnimation(.snappy(duration: 0.22)) { scope = option }
+                            }
+                        }
+                    }
+                    .padding(2)
+                }
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("STATE")
+                    .font(Theme.caption2.weight(.semibold))
+                    .tracking(0.7)
+                    .foregroundStyle(.tertiary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Theme.Space.xs) {
+                        ForEach(PullStateFilter.allCases) { option in
+                            stateButton(option)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.accent.opacity(0.035), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private func filterButton(
+        title: String,
+        selected: Bool,
+        tint: Color,
+        namespace: Namespace.ID,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.caption.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? tint : Color.secondary)
+                .padding(.horizontal, Theme.Space.m)
+                .frame(height: Theme.Control.height)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(tint.opacity(0.12))
+                            .matchedGeometryEffect(id: "selection", in: namespace)
+                    }
+                }
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    private func stateButton(_ option: PullStateFilter) -> some View {
+        let selected = state == option
+        let tint = tint(for: option)
+        return Button {
+            guard !selected else { return }
+            withAnimation(.snappy(duration: 0.22)) { state = option }
+        } label: {
+            HStack(spacing: 6) {
+                Circle().fill(tint).frame(width: 7, height: 7)
+                Text(option.label)
+            }
+            .font(Theme.caption.weight(selected ? .semibold : .medium))
+            .foregroundStyle(selected ? tint : Color.secondary)
+            .padding(.horizontal, 11)
+            .frame(height: Theme.Control.heightSmall)
+            .background {
+                if selected {
+                    Capsule()
+                        .fill(tint.opacity(0.13))
+                        .matchedGeometryEffect(id: "state", in: stateSlide)
+                }
+            }
+            .overlay(Capsule().strokeBorder(selected ? tint.opacity(0.34) : Theme.border))
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    private func tint(for state: PullStateFilter) -> Color {
+        switch state {
+        case .open: return Theme.accent
+        case .merged: return Theme.secondary
+        case .closed: return Theme.danger
+        case .draft: return Theme.stateIdle
+        }
+    }
+}
+
+private struct PullRow: View {
+    let pull: PullSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.s) {
+                Text("#\(pull.number)")
+                    .font(Theme.numeric(12, weight: .semibold))
+                    .foregroundStyle(stateTint)
+                Text(pull.title)
+                    .font(Theme.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Spacer(minLength: Theme.Space.s)
+                if let checks = pull.checks { PullChecksPill(state: checks) }
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.s) { identity; branchAndCounts }
+                VStack(alignment: .leading, spacing: Theme.Space.xs) { identity; branchAndCounts }
+            }
+
+            if !pull.labels.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(pull.labels.prefix(5), id: \.self) { label in
+                            Text(label)
+                                .font(Theme.caption2.weight(.medium))
+                                .foregroundStyle(Theme.secondary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Theme.secondary.opacity(0.10), in: Capsule())
+                        }
+                    }
+                }
+            }
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(stateTint)
+                .frame(width: 3)
+                .padding(.vertical, 9)
+        }
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var identity: some View {
+        HStack(spacing: 6) {
+            Avatar(
+                url: pull.authorAvatar,
+                handle: pull.author,
+                size: 18,
+                tint: Avatar.tint(for: pull.author)
+            )
+            Text(pull.author).lineLimit(1)
+            if let date = pull.updatedDate {
+                Text("·").foregroundStyle(.tertiary)
+                RelativeTimeText(date: date, unitsStyle: .abbreviated)
+            }
+            if pull.comments > 0 {
+                Label("\(pull.comments)", systemImage: "bubble.left")
+                    .labelStyle(.titleAndIcon)
+            }
+            if let review = reviewLabel {
+                Label(review.text, systemImage: review.symbol)
+                    .foregroundStyle(review.tint)
+            }
+        }
+        .font(Theme.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private var branchAndCounts: some View {
+        HStack(spacing: Theme.Space.s) {
+            Text("\(pull.headRef) → \(pull.baseRef)")
+                .font(Theme.monoText(10, relativeTo: .caption))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text("+\(pull.additions)").foregroundStyle(Theme.diffAdded)
+            Text("−\(pull.deletions)").foregroundStyle(Theme.diffRemoved)
+            Text("\(pull.changedFiles) files").foregroundStyle(.tertiary)
+        }
+        .font(Theme.caption2.weight(.medium))
+    }
+
+    private var stateTint: Color {
+        if pull.draft { return Theme.stateIdle }
+        switch pull.state {
+        case "merged": return Theme.secondary
+        case "closed": return Theme.danger
+        default: return Theme.accent
+        }
+    }
+
+    private var reviewLabel: (text: String, symbol: String, tint: Color)? {
+        switch pull.reviewDecision {
+        case "approved": return ("Approved", "checkmark", Theme.success)
+        case "changes_requested": return ("Changes requested", "exclamationmark", Theme.danger)
+        case "review_required": return ("Review needed", "eye", Theme.warning)
+        default: return nil
+        }
+    }
+}
+
+private struct PullChecksPill: View {
+    let state: PullCheckState
+
+    var body: some View {
+        Label(label, systemImage: symbol)
+            .font(Theme.caption2.weight(.semibold))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.11), in: Capsule())
+            .overlay(Capsule().strokeBorder(tint.opacity(0.25)))
+            .fixedSize()
+    }
+
+    private var label: String {
+        switch state {
+        case .passing: return "Passing"
+        case .failing: return "Failing"
+        case .pending: return "Running"
+        }
+    }
+
+    private var symbol: String {
+        switch state {
+        case .passing: return "checkmark"
+        case .failing: return "xmark"
+        case .pending: return "ellipsis"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .passing: return Theme.success
+        case .failing: return Theme.danger
+        case .pending: return Theme.warning
+        }
+    }
+}
+
+private struct PullListSkeleton: View {
+    var body: some View {
+        VStack(spacing: Theme.Space.s) {
+            ForEach(0..<4, id: \.self) { index in
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    HStack {
+                        Skeleton.Bar(width: 42, phase: Double(index) * 0.08)
+                        Skeleton.Bar(width: index.isMultiple(of: 2) ? 220 : 170, phase: Double(index) * 0.08 + 0.03)
+                        Spacer()
+                        Skeleton.Bar(width: 58, height: 10, phase: Double(index) * 0.08 + 0.06)
+                    }
+                    Skeleton.Bar(width: 132, height: 9, phase: Double(index) * 0.08 + 0.09)
+                    Skeleton.Bar(width: 196, height: 9, phase: Double(index) * 0.08 + 0.12)
+                }
+                .padding(Theme.Space.m)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+            }
+        }
+        .accessibilityLabel("Loading pull requests")
+    }
+}
+
 @MainActor
 @Observable
 private final class PullsModel {
@@ -312,18 +675,54 @@ private final class PullsModel {
     var login: PullDeviceLogin?
     var isLoading = false
     var isConnecting = false
+    var isLoadingList = false
     var errorMessage: String?
+    var listError: String?
     var loginError: String?
+    var rows: [PullSummary] = []
+    var scope: PullScope = .all
+    var state: PullStateFilter = .open
+    private var listGeneration = 0
 
-    func load(workspaceID: String, peer: String?) async {
+    func load(workspaceID: String, peer: String?, refresh: Bool = false) async {
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
         do {
             availability = try await Bridge.pullAvailability(workspaceID: workspaceID, peer: peer)
+            if availability?.state == "ready" {
+                await loadList(workspaceID: workspaceID, peer: peer, refresh: refresh)
+            } else {
+                rows = []
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func loadList(workspaceID: String, peer: String?, refresh: Bool = false) async {
+        guard availability?.state == "ready" else { return }
+        listGeneration += 1
+        let generation = listGeneration
+        let requestedScope = scope
+        let requestedState = state
+        isLoadingList = true
+        listError = nil
+        do {
+            let loaded = try await Bridge.pullList(
+                workspaceID: workspaceID,
+                peer: peer,
+                scope: requestedScope,
+                state: requestedState,
+                refresh: refresh
+            )
+            guard generation == listGeneration else { return }
+            rows = loaded
+        } catch {
+            guard generation == listGeneration else { return }
+            listError = error.localizedDescription
+        }
+        if generation == listGeneration { isLoadingList = false }
     }
 
     func beginLogin() async -> URL? {
