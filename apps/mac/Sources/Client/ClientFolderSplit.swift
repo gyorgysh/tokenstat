@@ -152,6 +152,7 @@ struct ClientFolderSplit: View {
         switch section {
         case .sessions: return counts.sessions
         case .changes: return counts.changes
+        case .pulls: return nil
         case .todo: return counts.todo
         case .workflows: return counts.workflows
         case .automations: return counts.automations
@@ -270,6 +271,8 @@ struct ClientWorkspaceSectionDetail: View {
                 folder: folderNow,
                 hostName: hostName
             )
+        case .pulls:
+            PullsView(workspaceID: workspaceID, peer: peer, connectionHostName: hostName)
         case .todo:
             ClientWorkspaceTasksView(
                 peer: peer,

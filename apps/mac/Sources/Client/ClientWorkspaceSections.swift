@@ -167,6 +167,15 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
+                PullsView(workspaceID: workspaceID, peer: peer, connectionHostName: hostName)
+                    .navigationTitle("Pull requests")
+                    .navigationBarTitleDisplayMode(.inline)
+            } label: {
+                ClientSectionRow(section: .pulls, count: nil)
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
                 ClientWorkspaceTasksView(
                     peer: peer,
                     workspaceID: workspaceID,

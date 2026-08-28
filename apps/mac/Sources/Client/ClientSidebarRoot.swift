@@ -361,6 +361,7 @@ struct ClientSidebarRoot: View {
         switch section {
         case .sessions: return summary.sessions
         case .changes: return summary.changed ?? folder.git?.files.count
+        case .pulls: return nil
         case .todo: return summary.tasks
         case .notes: return summary.notes
         case .workflows: return summary.workflowsRunning > 0

@@ -72,6 +72,8 @@ pub mod open_files;
 pub mod ownership;
 pub mod pricing;
 mod proxy_http;
+#[cfg(feature = "local-host")]
+pub(crate) mod pulls;
 pub mod remote;
 /// Loopback proxy for phones that dial a host service (no full stream stack).
 /// Host builds use `remote_stream` instead.

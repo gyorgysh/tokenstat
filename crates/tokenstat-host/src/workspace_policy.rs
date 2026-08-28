@@ -134,6 +134,7 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
     }
     match method {
         m if m.starts_with("workspace.") => true,
+        m if m.starts_with("pulls.") => true,
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("automation.") => true,

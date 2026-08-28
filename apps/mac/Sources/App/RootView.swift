@@ -2093,7 +2093,7 @@ struct RootView: View {
     private var showsWorkspaceSurface: Bool {
         switch route.workspaceSection {
         case .sessions, .changes, .files, .browser: return true
-        case .chat, .todo, .notes, .workflows, .automations, nil: return false
+        case .chat, .pulls, .todo, .notes, .workflows, .automations, nil: return false
         }
     }
 
@@ -2144,6 +2144,13 @@ struct RootView: View {
             EmptyView()
         case let .workspace(id, .chat):
             ChatComingSoonView(folderName: workspaces.folders.first { $0.id == id }?.name)
+        case let .workspace(id, .pulls):
+            PullsView(
+                workspaceID: id,
+                connectionHostName: workspaces.folders.first { $0.id == id }?.isRemote == true
+                    ? "the workspace's computer"
+                    : nil
+            )
         case .global(.home):
             HomeView(
                 model: home,
@@ -2412,6 +2419,7 @@ struct RootView: View {
         // Nothing to count yet.
         case .chat: value = 0
         case .changes: value = folder.git?.files.count ?? 0
+        case .pulls: return nil
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
         case .notes:
             // No remote count for notes yet, and a folder on another machine
@@ -2503,7 +2511,7 @@ struct RootView: View {
                 } else {
                     workspaces.showBrowser(in: folderID)
                 }
-            case .chat, .todo, .notes, .workflows, .automations:
+            case .chat, .pulls, .todo, .notes, .workflows, .automations:
                 // Not a tab in the terminal pane. These are drawn where their
                 // global versions are, so there is nothing to bring forward.
                 break

@@ -79,6 +79,75 @@ pub struct Branch {
     pub remote: bool,
 }
 
+/// The forge repository named by a git remote.
+///
+/// Kept deliberately smaller than a URL: API calls need the host, owner and
+/// repository, and carrying credentials or query strings any further would be
+/// both useless and unsafe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Remote {
+    pub host: String,
+    pub owner: String,
+    pub repo: String,
+}
+
+/// Read and parse the repository's `origin` remote.
+///
+/// Supports the HTTPS, `ssh://`, and scp-like forms git itself accepts. A
+/// missing origin or a non-forge-shaped path is simply no remote: folders and
+/// local-only repositories are valid workspaces, not errors.
+pub fn remote(dir: &Path) -> Option<Remote> {
+    let raw = git(dir, &["remote", "get-url", "origin"])?;
+    parse_remote(raw.trim())
+}
+
+fn parse_remote(raw: &str) -> Option<Remote> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.contains(['\n', '\r']) {
+        return None;
+    }
+
+    let (host, path) = if let Some((_, rest)) = raw.split_once("://") {
+        let authority_and_path = rest.split_once('/')?;
+        let authority = authority_and_path.0.rsplit('@').next()?;
+        let host = authority
+            .trim_start_matches('[')
+            .split(']')
+            .next()?
+            .split(':')
+            .next()?;
+        (host, authority_and_path.1)
+    } else {
+        // `git@github.com:owner/repo.git`. Requiring an `@` keeps a Windows
+        // drive (`C:\\work`) from being mistaken for a network remote.
+        let (authority, path) = raw.split_once(':')?;
+        if !authority.contains('@') {
+            return None;
+        }
+        (authority.rsplit('@').next()?, path)
+    };
+
+    let mut parts = path.trim_matches('/').split('/');
+    let owner = parts.next()?.trim();
+    let repo = parts.next()?.trim().trim_end_matches(".git");
+    if owner.is_empty() || repo.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    let valid = |part: &str| {
+        part.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    if !valid(host) || !valid(owner) || !valid(repo) {
+        return None;
+    }
+    Some(Remote {
+        host: host.to_ascii_lowercase(),
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+    })
+}
+
 /// One commit, as the history panel shows it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -796,6 +865,45 @@ fn apply_numstat(raw: &str, status: &mut GitStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_common_remote_urls_without_carrying_credentials() {
+        let expected = Remote {
+            host: "github.com".into(),
+            owner: "pueev".into(),
+            repo: "tokenstat".into(),
+        };
+        assert_eq!(
+            parse_remote("https://github.com/pueev/tokenstat.git"),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            parse_remote("git@github.com:pueev/tokenstat.git"),
+            Some(expected.clone())
+        );
+        assert_eq!(
+            parse_remote("ssh://git@github.com/pueev/tokenstat"),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn rejects_local_and_ambiguous_remote_paths() {
+        assert_eq!(parse_remote("/srv/git/tokenstat.git"), None);
+        assert_eq!(parse_remote("C:\\work\\tokenstat"), None);
+        assert_eq!(
+            parse_remote("https://github.com/owner/extra/repo.git"),
+            None
+        );
+        assert_eq!(
+            parse_remote("https://user:secret@github.com/owner/repo.git"),
+            Some(Remote {
+                host: "github.com".into(),
+                owner: "owner".into(),
+                repo: "repo".into(),
+            })
+        );
+    }
 
     #[test]
     fn branch_records_keep_tracking_and_remote_shape() {

@@ -1202,6 +1202,63 @@ extension Bridge {
 /// and never from a timer, a watcher, or a refresh. See
 /// `tokenstat_workspace::gitwrite` for why that split is kept in the Rust too.
 extension Bridge {
+    static func pullAvailability(
+        workspaceID: String,
+        peer: String? = nil
+    ) async throws -> PullAvailability {
+        if let peer {
+            return try await onPeer(
+                peer,
+                "pulls.availability",
+                ["workspaceId": workspaceID],
+                as: PullAvailability.self
+            )
+        }
+        if let target = remoteWorkspace(workspaceID) {
+            return try await onPeer(
+                target.peer,
+                "pulls.availability",
+                ["workspaceId": target.workspace],
+                as: PullAvailability.self
+            )
+        }
+        return try await background(
+            "pulls.availability",
+            ["workspaceId": workspaceID],
+            as: PullAvailability.self
+        )
+    }
+
+    static func startPullLogin(host: String = "github.com") async throws -> PullDeviceLogin {
+        try await background(
+            "pulls.signIn",
+            ["host": host],
+            patience: Patience.interactive,
+            as: PullDeviceLogin.self
+        )
+    }
+
+    static func pollPullLogin() async throws -> PullDevicePoll {
+        try await background(
+            "pulls.signInPoll",
+            patience: Patience.interactive,
+            as: PullDevicePoll.self
+        )
+    }
+
+    static func cancelPullLogin() async {
+        _ = try? await background("pulls.cancelSignIn", as: Ack.self)
+    }
+
+    static func signOutPulls(host: String) async throws {
+        _ = try await background(
+            "pulls.signOut",
+            ["host": host],
+            patience: Patience.interactive,
+            as: Ack.self
+        )
+    }
+
     static func branches(id: String) async throws -> [GitBranch] {
         if let target = remoteWorkspace(id) {
             return try await onPeer(

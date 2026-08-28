@@ -152,6 +152,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
     /// about.
     case chat
     case changes
+    case pulls
     case todo
     case notes
     case workflows
@@ -166,6 +167,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "Sessions"
         case .chat: return "Chat"
         case .changes: return "Changes"
+        case .pulls: return "Pull requests"
         case .todo: return "Tasks"
         case .notes: return "Notes"
         case .workflows: return "Workflows"
@@ -180,6 +182,7 @@ enum WorkspaceSection: String, CaseIterable, Identifiable, Hashable {
         case .sessions: return "terminal.fill"
         case .chat: return "bubble.left.and.bubble.right"
         case .changes: return "plusminus"
+        case .pulls: return "arrow.triangle.merge"
         case .todo: return "checklist"
         case .notes: return "note.text"
         case .workflows: return "point.3.connected.trianglepath.dotted"

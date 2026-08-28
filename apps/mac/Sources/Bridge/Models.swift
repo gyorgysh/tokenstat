@@ -1791,6 +1791,41 @@ struct GitBranch: Codable, Sendable, Hashable, Identifiable {
     var date: Date? { lastCommit > 0 ? Date(timeIntervalSince1970: TimeInterval(lastCommit)) : nil }
 }
 
+// MARK: - Pull requests
+
+/// Whether this workspace can use its forge connection.
+struct PullAvailability: Codable, Sendable, Hashable {
+    var state: String
+    var host: String?
+    var owner: String?
+    var repo: String?
+    var login: String?
+    var source: String?
+    var installUrl: String?
+    var installationId: UInt64?
+
+    var repositoryName: String? {
+        guard let owner, let repo else { return nil }
+        return "\(owner)/\(repo)"
+    }
+}
+
+/// Public half of a GitHub device authorization. The device code never leaves
+/// the host bridge.
+struct PullDeviceLogin: Codable, Sendable, Hashable {
+    var host: String
+    var userCode: String
+    var openUrl: String
+    var expiresIn: UInt64
+    var interval: UInt64
+}
+
+struct PullDevicePoll: Codable, Sendable, Hashable {
+    var state: String
+    var interval: UInt64?
+    var source: String?
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
