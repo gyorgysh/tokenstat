@@ -5,6 +5,20 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
+## [0.7.3] - 2026-08-28
+
+### Added
+
+- A Git-enabled workspace gains a Pull requests section that begins with its
+  connection. Connecting uses the tokenstat GitHub App through the device flow:
+  the app shows a one-time code, GitHub's page opens, and the answer stays on
+  the machine that owns the workspace. Where git already holds a GitHub
+  credential for this host, that credential is used instead and the screen says
+  so, and a token can be pasted for GitHub Enterprise or by preference. Which
+  of the three answered is always visible. Selecting the repositories tokenstat
+  may open happens on GitHub, and a workspace whose repository is not selected
+  says exactly that rather than showing an empty list.
+
 ## [0.7.2] - 2026-08-28
 
 ### Added
