@@ -871,8 +871,17 @@ extension Bridge {
         try await background("chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
     }
 
-    static func createChat(workspaceID: String, backend: String, title: String = "New chat") async throws -> ChatConversation {
-        try await background("chat.create", ["workspaceId": workspaceID, "backend": backend, "title": title], as: ChatConversation.self)
+    static func createChat(
+        workspaceID: String,
+        backend: String,
+        title: String = "New chat",
+        mode: String = "plan"
+    ) async throws -> ChatConversation {
+        try await background(
+            "chat.create",
+            ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode],
+            as: ChatConversation.self
+        )
     }
 
     static func sendChat(id: String, text: String) async throws -> ChatConversation {

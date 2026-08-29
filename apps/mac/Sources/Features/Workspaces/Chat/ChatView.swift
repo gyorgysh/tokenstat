@@ -22,9 +22,9 @@ final class ChatModel {
         } catch { self.error = error.localizedDescription }
     }
 
-    func create(workspaceID: String) async {
+    func create(workspaceID: String, backend: String = "claude", mode: String = "plan") async {
         do {
-            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: "claude")
+            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode)
             chats.insert(chat, at: 0)
             selected = chat
             events = []
@@ -73,12 +73,13 @@ struct ChatView: View {
     var workspaceName: String? = nil
     @State private var model = ChatModel()
     @State private var draft = ""
+    @State private var showingSetup = false
 
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(scope: workspaceName.map { ScopeChip(label: $0, symbol: "folder.fill") }) {
-                ToolbarIconButton(systemImage: "plus", help: "New chat") { Task { await model.create(workspaceID: workspaceID) } }
+                ToolbarIconButton(systemImage: "plus", help: "New chat") { showingSetup = true }
             }
             #endif
             if let chat = model.selected {
@@ -99,6 +100,12 @@ struct ChatView: View {
         .alert("Chat unavailable", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
+        .sheet(isPresented: $showingSetup) {
+            ChatSetupSheet { backend, mode in
+                showingSetup = false
+                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode) }
+            }
+        }
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
@@ -159,9 +166,41 @@ struct ChatView: View {
             ChatScene(reduceMotion: false)
             Text("Start a chat").font(Theme.title2.weight(.semibold))
             Text("Ask an agent to explore, plan, or work in this folder.").font(Theme.callout).foregroundStyle(.secondary)
-            Button("New chat") { Task { await model.create(workspaceID: workspaceID) } }.buttonStyle(AccentButtonStyle())
+            Button("New chat") { showingSetup = true }.buttonStyle(AccentButtonStyle())
             Spacer()
         }
+    }
+}
+
+private struct ChatSetupSheet: View {
+    let create: (String, String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var backend = "claude"
+    @State private var mode = "plan"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("New chat").font(Theme.title2.weight(.semibold))
+                Text("Choose how this conversation should begin. You can refine its settings before the first message.")
+                    .font(Theme.callout).foregroundStyle(.secondary)
+            }
+            Picker("Agent", selection: $backend) {
+                Text("Claude").tag("claude")
+                Text("Codex").tag("codex")
+                Text("Grok").tag("grok")
+                Text("Cursor").tag("cursor")
+                Text("Antigravity").tag("agy")
+                Text("OpenCode").tag("opencode")
+            }
+            Picker("Starting mode", selection: $mode) {
+                Text("Plan — explore before changing work").tag("plan")
+                Text("Execute — work directly in the folder").tag("execute")
+            }
+            HStack { Spacer(); Button("Cancel", role: .cancel) { dismiss() }; Button("Create chat") { create(backend, mode) }.buttonStyle(AccentButtonStyle()) }
+        }
+        .padding(Theme.Space.xl)
+        .frame(width: 460)
     }
 }
 
