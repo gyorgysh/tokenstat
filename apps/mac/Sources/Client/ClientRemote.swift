@@ -38,6 +38,7 @@ enum ClientTunnelCopy {
 
 /// `todo.remove`'s answer. `Bridge`'s own is private to that file.
 private struct TodoRemoved: Codable, Sendable { let removed: Bool }
+private struct ClientChatAck: Codable, Sendable { let stopped: Bool? }
 
 enum ClientRemote {
     /// Split a folder id from `Bridge.remoteWorkspaces` (`remote:<peer>:<id>`).
@@ -375,6 +376,28 @@ enum ClientRemote {
             ["id": id, "offset": offset],
             as: TranscriptChunk.self
         )
+    }
+
+    // MARK: - Chat on a peer
+
+    static func chats(peer: String, workspaceID: String) async throws -> [ChatConversation] {
+        try await Bridge.onPeer(peer, "chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
+    }
+
+    static func createChat(peer: String, workspaceID: String, backend: String = "claude") async throws -> ChatConversation {
+        try await Bridge.onPeer(peer, "chat.create", ["workspaceId": workspaceID, "backend": backend], as: ChatConversation.self)
+    }
+
+    static func sendChat(peer: String, id: String, text: String) async throws -> ChatConversation {
+        try await Bridge.onPeer(peer, "chat.send", ["id": id, "text": text], as: ChatConversation.self)
+    }
+
+    static func stopChat(peer: String, id: String) async throws {
+        _ = try await Bridge.onPeer(peer, "chat.stop", ["id": id], as: ClientChatAck.self)
+    }
+
+    static func chatEvents(peer: String, id: String, offset: UInt64) async throws -> ChatEventChunk {
+        try await Bridge.onPeer(peer, "chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
     }
 
     static func runWorkflow(

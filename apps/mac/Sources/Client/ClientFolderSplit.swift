@@ -267,7 +267,7 @@ struct ClientWorkspaceSectionDetail: View {
         case .sessions:
             ClientWorkspaceSessionsView(peer: peer, hostName: hostName, folder: folder)
         case .chat:
-            ChatComingSoonView(folderName: folderNow.name)
+            ClientChatView(peer: peer, workspaceID: workspaceID, folderName: folderNow.name)
         case .changes:
             ClientWorkspaceChangesView(
                 peer: peer,
