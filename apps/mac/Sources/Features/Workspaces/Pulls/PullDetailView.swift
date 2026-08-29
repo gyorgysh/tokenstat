@@ -49,7 +49,7 @@ struct PullDetailView: View {
                             }
                         }
                     } else {
-                        detailSkeleton
+                        pullDetailSkeleton
                     }
                 }
                 .frame(maxWidth: 1040, alignment: .leading)
@@ -226,7 +226,7 @@ struct PullDetailView: View {
 
     private var changes: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            if model.loadingDiff { detailSkeleton }
+            if model.loadingDiff { contentSkeleton }
             else if let error = model.diffError { inlineError(error) }
             else if model.diffs.isEmpty {
                 EmptyState(symbol: "doc.text.magnifyingglass", title: "No text changes", message: "This pull request has no line-by-line diff to show.")
@@ -325,12 +325,71 @@ struct PullDetailView: View {
             .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
             .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(tint.opacity(0.16)))
     }
-    private var detailSkeleton: some View {
+    /// Keep the cold detail view shaped like the content that will replace it.
+    /// Widths are caps rather than fixed frames so an iPhone never grows its
+    /// vertical scroll view wider than the viewport while the request loads.
+    private var pullDetailSkeleton: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.l) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                HStack(alignment: .top, spacing: Theme.Space.m) {
+                    RoundedRectangle(cornerRadius: 11)
+                        .fill(Theme.border)
+                        .frame(width: 38, height: 38)
+                    VStack(alignment: .leading, spacing: Theme.Space.s) {
+                        flexibleBar(maxWidth: 520, height: 18)
+                        flexibleBar(maxWidth: 210)
+                    }
+                }
+                HStack(spacing: Theme.Space.s) {
+                    flexibleBar(maxWidth: 126, height: 22)
+                    flexibleBar(maxWidth: 18, height: 9)
+                    flexibleBar(maxWidth: 96, height: 22)
+                }
+            }
+            .padding(Theme.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+
+            HStack(spacing: Theme.Space.s) {
+                flexibleBar(maxWidth: 92, height: 28)
+                flexibleBar(maxWidth: 72, height: 28)
+                flexibleBar(maxWidth: 68, height: 28)
+            }
+            .padding(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.border))
+
+            contentSkeleton
+        }
+        .accessibilityLabel("Loading pull request")
+    }
+
+    private var contentSkeleton: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
-            Skeleton.Bar(width: 240, height: 18)
-            Skeleton.Bar(width: 160)
-            ForEach(0..<4, id: \.self) { index in Skeleton.Bar(width: index == 3 ? 190 : 480, phase: Double(index) * 0.08) }
-        }.padding(Theme.cardPadding).background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            flexibleBar(maxWidth: 240, height: 18)
+            flexibleBar(maxWidth: 160)
+            ForEach(0..<4, id: \.self) { index in
+                flexibleBar(
+                    maxWidth: index == 3 ? 190 : 480,
+                    phase: Double(index) * 0.08
+                )
+            }
+        }
+        .padding(Theme.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private func flexibleBar(
+        maxWidth: CGFloat,
+        height: CGFloat = 12,
+        phase: Double = 0
+    ) -> some View {
+        Skeleton.Bar(width: nil, height: height, phase: phase)
+            .frame(maxWidth: maxWidth, alignment: .leading)
     }
 }
 

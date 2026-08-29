@@ -717,7 +717,11 @@ private struct PullListSkeleton: View {
                 VStack(alignment: .leading, spacing: Theme.Space.s) {
                     HStack {
                         Skeleton.Bar(width: 42, phase: Double(index) * 0.08)
-                        Skeleton.Bar(width: index.isMultiple(of: 2) ? 220 : 170, phase: Double(index) * 0.08 + 0.03)
+                        Skeleton.Bar(width: nil, phase: Double(index) * 0.08 + 0.03)
+                            .frame(
+                                maxWidth: index.isMultiple(of: 2) ? 220 : 170,
+                                alignment: .leading
+                            )
                         Spacer()
                         Skeleton.Bar(width: 58, height: 10, phase: Double(index) * 0.08 + 0.06)
                     }
