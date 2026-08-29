@@ -41,6 +41,12 @@ desktop and Android builds remain previews. Newest first.
   actions and the inspector toggle at the far right. WinUI's native accent,
   focus and action controls use tokenstat violet instead of the system blue.
 
+### Fixed
+
+- The Mac app no longer aborts when entering or leaving full screen from the
+  traffic lights. A second sidebar toggle that appeared next to those lights
+  on a narrow window is gone, so only the app's own mark remains.
+
 ## [0.7.2] - 2026-08-28
 
 ### Added

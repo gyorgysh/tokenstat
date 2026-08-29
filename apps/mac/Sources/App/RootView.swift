@@ -103,11 +103,11 @@ struct RootView: View {
     /// resize notifications rather than measured inside the split view.
     @State private var windowContentWidth: CGFloat = 0
     #if os(macOS)
-    /// Full screen switches to an opaque titlebar; windowed stays transparent.
-    /// Owned by `WindowScreenObserver`. Not used for toolbar background flips.
+    /// Full screen sits the content below a real titlebar. Windowed chrome
+    /// still pulls into the traffic-light row. Owned by `WindowScreenObserver`.
     @State private var isFullScreen = false
     /// Measured titlebar band above contentLayoutRect. Detail chrome pulls up
-    /// by this amount so it shares the traffic-light row.
+    /// by this amount so it shares the traffic-light row. Zero in full screen.
     @State private var titlebarInset: CGFloat = 0
     #endif
     /// A run a delegated task asked to show: set when navigating from Tasks,
@@ -239,9 +239,9 @@ struct RootView: View {
         // lights stay because the window itself is already up with the splash.
         ZStack {
             if launch.hostReady {
-                // Same NavigationSplitView chrome in both modes. Full screen only
-                // changes the AppKit titlebar (native bar above content); the
-                // toolbar items stay on the detail column.
+                // Same NavigationSplitView chrome in both modes. Full screen
+                // parks the content below a real titlebar. Windowed chrome
+                // still shares the traffic-light row.
                 mainChrome
             } else {
                 LaunchSplashView()
@@ -564,6 +564,10 @@ struct RootView: View {
     private var mainChrome: some View {
         NavigationSplitView(columnVisibility: sidebarVisibility) {
             sidebar
+                // Also on the column. `.toolbar(removing:)` on the split view
+                // alone misses the stock toggle that comes back when the
+                // sidebar collapses on a narrow window.
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             detailColumn
                 .environment(\.detailChromeToggles, detailChromeToggles)
@@ -571,16 +575,21 @@ struct RootView: View {
                 // vertical row as traffic lights). Value comes from AppKit
                 // contentLayoutRect, not a faked compact chrome height.
                 //
-                // macOS 27 aborts if this padding animates, or if it changes
-                // the hosted column's min/max during NSSplitView's own
-                // constraint pass. Keep the inset, do not animate it.
-                .padding(.top, -titlebarInset)
+                // Full screen uses a real titlebar above the content, so the
+                // pull is skipped there. macOS 27 aborts if this padding
+                // animates, or if it changes the hosted column's min/max
+                // during NSSplitView's own constraint pass. Keep the inset,
+                // do not animate it.
+                .padding(.top, isFullScreen ? 0 : -titlebarInset)
                 .animation(nil, value: titlebarInset)
+                .animation(nil, value: isFullScreen)
+                .toolbar(removing: .sidebarToggle)
         }
         .navigationSplitViewStyle(.balanced)
         // Drop the stock NavigationSplitView toggle (glyph + "Hide
         // Sidebar", no shortcut). Ours carry ⌘B / ⌥⌘B in the help, and live
-        // in DetailChromeBar rather than here.
+        // in DetailChromeBar rather than here. AppKit still strips any
+        // item that SwiftUI re-inserts (WindowScreenObserver).
         .toolbar(removing: .sidebarToggle)
         // No app items. Background hidden; AppKit also hides the empty host
         // so it does not own a content band (WindowScreenObserver).
