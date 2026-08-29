@@ -338,7 +338,11 @@ impl Store {
         let store = Arc::clone(self);
         let chat_id = id.to_string();
         let backend = chat.backend;
-        std::thread::spawn(move || store.drain(&chat_id, &backend, &info.id));
+        // Preserve the backend's original stream per turn. Structured events
+        // are what the UI reads, but raw output lets a parser correction
+        // rematerialize an older conversation without rerunning an agent.
+        let raw_path = self.raw_path(id, now_ms());
+        std::thread::spawn(move || store.drain(&chat_id, &backend, &info.id, &raw_path));
         Ok(running)
     }
 
@@ -356,7 +360,7 @@ impl Store {
         }
     }
 
-    fn drain(self: Arc<Self>, id: &str, backend: &str, pty: &str) {
+    fn drain(self: Arc<Self>, id: &str, backend: &str, pty: &str, raw_path: &PathBuf) {
         let manager = tokenstat_pty::manager();
         let mut parser = Parser::new(backend);
         let reader = format!("chat:{id}");
@@ -369,6 +373,7 @@ impl Store {
             if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset) {
                 offset = chunk.next_offset;
                 if !chunk.bytes.is_empty() {
+                    let _ = append_raw(raw_path, &chunk.bytes);
                     self.record_events(id, parser.push_events(&chunk.bytes));
                 }
             }
@@ -384,6 +389,7 @@ impl Store {
         if let Ok(chunk) = manager.read_for_stream(pty, &reader, offset)
             && !chunk.bytes.is_empty()
         {
+            let _ = append_raw(raw_path, &chunk.bytes);
             self.record_events(id, parser.push_events(&chunk.bytes));
         }
         self.record_events(id, parser.finish_events());
@@ -497,6 +503,23 @@ impl Store {
     fn events_path(&self, id: &str) -> PathBuf {
         self.root.join(id).join("events.ndjson")
     }
+
+    fn raw_path(&self, id: &str, turn_started_at_ms: i64) -> PathBuf {
+        self.root
+            .join(id)
+            .join("raw")
+            .join(format!("{turn_started_at_ms}.ndjson"))
+    }
+}
+
+fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    fs::create_dir_all(path.parent().ok_or("invalid chat raw path")?).map_err(|e| e.to_string())?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(bytes).map_err(|e| e.to_string())
 }
 
 fn now_ms() -> i64 {
@@ -576,5 +599,22 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(next > 0);
         assert!(store.list("workspace-b").is_empty());
+    }
+
+    #[test]
+    fn raw_turns_are_kept_separately_from_the_structured_timeline() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let path = store.raw_path("chat-test", 42);
+        append_raw(&path, b"{\"type\":\"text\"").unwrap();
+        append_raw(&path, b",\"data\":\"hello\"}\n").unwrap();
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"{\"type\":\"text\",\"data\":\"hello\"}\n"
+        );
+        assert_ne!(
+            path.parent().unwrap(),
+            store.events_path("chat-test").parent().unwrap()
+        );
     }
 }
