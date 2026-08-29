@@ -400,8 +400,26 @@ pub fn chat_agent_command(
     effort: Option<&str>,
     budget_seconds: u64,
     resume: Option<&str>,
+    bypass: bool,
 ) -> Result<Vec<String>, String> {
     let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
+    // Automations are an explicit background action and retain their existing
+    // bypass contract. Chat is interactive: until a backend's hook-based
+    // approval channel decides otherwise, it must not inherit those flags.
+    // Removing them means a CLI that cannot prompt headlessly fails closed
+    // instead of silently editing the workspace.
+    if !bypass {
+        match backend {
+            "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
+            "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
+            "grok" => {
+                argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
+            }
+            "cursor" => argv.retain(|arg| arg != "--trust"),
+            "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
+            _ => {}
+        }
+    }
     let Some(token) = resume.filter(|token| !token.trim().is_empty()) else {
         return Ok(argv);
     };
@@ -2006,6 +2024,55 @@ mod tests {
         assert!(
             models.iter().any(|m| m.as_str() == Some("grok-4.6")),
             "picker must offer grok-4.6 (live list or fallback), got {models:?}"
+        );
+    }
+
+    #[test]
+    fn chat_defaults_to_no_bypass_flags() {
+        let claude = chat_agent_command(
+            "claude",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(
+            !claude
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions")
+        );
+        let codex = chat_agent_command(
+            "codex",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(
+            !codex
+                .iter()
+                .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+        );
+        let bypass = chat_agent_command(
+            "claude",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            None,
+            true,
+        )
+        .unwrap();
+        assert!(
+            bypass
+                .iter()
+                .any(|arg| arg == "--dangerously-skip-permissions")
         );
     }
 

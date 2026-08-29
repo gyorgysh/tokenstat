@@ -353,6 +353,7 @@ impl Store {
             chat.effort.as_deref(),
             chat.budget_seconds,
             chat.resume_token.as_deref(),
+            chat.autonomy == "bypass",
         )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
