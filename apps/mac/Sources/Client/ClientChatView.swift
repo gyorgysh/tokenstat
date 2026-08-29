@@ -3,6 +3,7 @@
 #if !os(macOS)
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor @Observable
 private final class ClientChatModel {
@@ -10,6 +11,7 @@ private final class ClientChatModel {
     var chat: ChatConversation?
     var events: [ChatTimelineEvent] = []
     var offset: UInt64 = 0
+    var attachments: [ChatAttachment] = []
     var error: String?
 
     func load(peer: String, workspaceID: String) async {
@@ -27,7 +29,13 @@ private final class ClientChatModel {
 
     func send(peer: String, text: String) async {
         guard let chat else { return }
-        do { self.chat = try await ClientRemote.sendChat(peer: peer, id: chat.id, text: text); await eventsFor(peer: peer, id: chat.id, reset: false) }
+        do { self.chat = try await ClientRemote.sendChat(peer: peer, id: chat.id, text: text, attachmentIDs: attachments.map(\.id)); attachments = []; await eventsFor(peer: peer, id: chat.id, reset: false) }
+        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
+    }
+
+    func attach(peer: String, file: URL) async {
+        guard let chat else { return }
+        do { attachments.append(try await ClientRemote.attachToChat(peer: peer, id: chat.id, file: file)) }
         catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
     }
 
@@ -55,6 +63,7 @@ struct ClientChatView: View {
     let folderName: String
     @State private var model = ClientChatModel()
     @State private var draft = ""
+    @State private var importingAttachment = false
 
     var body: some View {
         Group {
@@ -68,7 +77,7 @@ struct ClientChatView: View {
                 }
                 composer(chat)
             } else {
-                ContentUnavailableView("Start a chat", systemImage: "bubble.left.and.bubble.right", description: Text("Ask an agent to help with (folderName)."))
+                ContentUnavailableView("Start a chat", systemImage: "bubble.left.and.bubble.right", description: Text("Ask an agent to help with \(folderName)."))
                     .overlay(alignment: .bottom) { Button("New chat") { Task { await model.create(peer: peer, workspaceID: workspaceID) } }.buttonStyle(AccentButtonStyle()).padding(.bottom, Theme.Space.xl) }
             }
         }
@@ -81,11 +90,24 @@ struct ClientChatView: View {
     }
 
     private func composer(_ chat: ChatConversation) -> some View {
-        HStack(alignment: .bottom, spacing: Theme.Space.s) {
-            TextField("Ask about (folderName)", text: $draft, axis: .vertical).lineLimit(1...5).padding(10).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if !model.attachments.isEmpty {
+                HStack(spacing: Theme.Space.xs) {
+                    ForEach(model.attachments) { attachment in
+                        Label(attachment.name, systemImage: "paperclip").font(Theme.caption).lineLimit(1).padding(.horizontal, 8).padding(.vertical, 5).background(Theme.panel, in: Capsule())
+                    }
+                }
+            }
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                Button { importingAttachment = true } label: { Image(systemName: "paperclip") }.buttonStyle(SecondaryButtonStyle(small: true))
+                TextField("Ask about \(folderName)", text: $draft, axis: .vertical).lineLimit(1...5).padding(10).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             Button { if chat.running { Task { await model.stop(peer: peer) } } else { let text = draft; draft = ""; Task { await model.send(peer: peer, text: text) } } } label: { Image(systemName: chat.running ? "stop.fill" : "arrow.up") }
                 .buttonStyle(AccentButtonStyle(small: true)).disabled(!chat.running && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }.padding(Theme.Space.m)
+        .fileImporter(isPresented: $importingAttachment, allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]) {
+            if case let .success(file) = $0 { Task { await model.attach(peer: peer, file: file) } }
+        }
     }
 }
 

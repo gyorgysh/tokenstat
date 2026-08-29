@@ -388,8 +388,8 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "chat.create", ["workspaceId": workspaceID, "backend": backend], as: ChatConversation.self)
     }
 
-    static func sendChat(peer: String, id: String, text: String) async throws -> ChatConversation {
-        try await Bridge.onPeer(peer, "chat.send", ["id": id, "text": text], as: ChatConversation.self)
+    static func sendChat(peer: String, id: String, text: String, attachmentIDs: [String] = []) async throws -> ChatConversation {
+        try await Bridge.onPeer(peer, "chat.send", ["id": id, "text": text, "attachmentIds": attachmentIDs], as: ChatConversation.self)
     }
 
     static func stopChat(peer: String, id: String) async throws {
@@ -398,6 +398,13 @@ enum ClientRemote {
 
     static func chatEvents(peer: String, id: String, offset: UInt64) async throws -> ChatEventChunk {
         try await Bridge.onPeer(peer, "chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+    }
+
+    static func attachToChat(peer: String, id: String, file: URL) async throws -> ChatAttachment {
+        let access = file.startAccessingSecurityScopedResource()
+        defer { if access { file.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: file)
+        return try await Bridge.onPeer(peer, "chat.attach", ["id": id, "name": file.lastPathComponent, "data": data.base64EncodedString()], as: ChatAttachment.self)
     }
 
     static func runWorkflow(
