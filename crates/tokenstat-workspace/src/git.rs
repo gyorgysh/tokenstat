@@ -340,6 +340,45 @@ fn parse_diff(raw: &str) -> Vec<DiffHunk> {
     hunks
 }
 
+/// Split a forge's unified pull-request diff into the same file shape the
+/// working-tree and commit screens already render.
+///
+/// This is intentionally a pure parser. Opening a pull request must not fetch
+/// refs, create a branch, or move HEAD; the API text is rendered and discarded.
+pub fn split_unified(raw: &str) -> Vec<FileDiff> {
+    raw.split("diff --git ")
+        .skip(1)
+        .filter_map(|body| {
+            let chunk = format!("diff --git {body}");
+            let path = chunk
+                .lines()
+                .find_map(|line| line.strip_prefix("+++ b/"))
+                .or_else(|| {
+                    chunk
+                        .lines()
+                        .find_map(|line| line.strip_prefix("rename to "))
+                })
+                .or_else(|| chunk.lines().find_map(|line| line.strip_prefix("--- a/")))
+                .or_else(|| {
+                    chunk.lines().next().and_then(|line| {
+                        line.strip_prefix("diff --git a/")
+                            .and_then(|paths| paths.rsplit_once(" b/"))
+                            .map(|(_, path)| path)
+                    })
+                })?
+                .to_string();
+            Some(FileDiff {
+                path,
+                hunks: parse_diff(&chunk),
+                binary: chunk
+                    .lines()
+                    .any(|line| line.starts_with("Binary files ") || line == "GIT binary patch"),
+                untracked: false,
+            })
+        })
+        .collect()
+}
+
 /// Pull the two starting line numbers out of `@@ -a,b +c,d @@`.
 ///
 /// The counts are omitted when they are 1, so `-a +c` is legal and has to
@@ -1089,6 +1128,37 @@ mod tests {
         let hunks = parse_diff("@@ -1,2 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n");
         assert_eq!(hunks[0].lines.len(), 2);
         assert_eq!(hunks[0].lines[1].new_line, Some(1));
+    }
+
+    #[test]
+    fn a_forge_diff_splits_text_rename_delete_and_binary_files() {
+        let raw = "diff --git a/src/old.rs b/src/new.rs\n\
+                   similarity index 80%\n\
+                   rename from src/old.rs\n\
+                   rename to src/new.rs\n\
+                   --- a/src/old.rs\n\
+                   +++ b/src/new.rs\n\
+                   @@ -1 +1 @@\n\
+                   -old\n\
+                   +new\n\
+                   \\ No newline at end of file\n\
+                   diff --git a/gone.txt b/gone.txt\n\
+                   deleted file mode 100644\n\
+                   --- a/gone.txt\n\
+                   +++ /dev/null\n\
+                   @@ -1 +0,0 @@\n\
+                   -gone\n\
+                   diff --git a/art.png b/art.png\n\
+                   new file mode 100644\n\
+                   Binary files /dev/null and b/art.png differ\n";
+        let files = split_unified(raw);
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[0].path, "src/new.rs");
+        assert_eq!(files[0].hunks[0].lines.len(), 2);
+        assert_eq!(files[1].path, "gone.txt");
+        assert_eq!(files[1].hunks[0].lines[0].old_line, Some(1));
+        assert_eq!(files[2].path, "art.png");
+        assert!(files[2].binary);
     }
 
     #[test]

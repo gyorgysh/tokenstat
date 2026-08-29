@@ -1254,6 +1254,71 @@ extension Bridge {
         return try await background("pulls.list", params, as: [PullSummary].self)
     }
 
+    static func pullView(
+        workspaceID: String,
+        peer: String? = nil,
+        number: UInt32,
+        refresh: Bool = false
+    ) async throws -> PullDetail {
+        try await pullRead(
+            workspaceID: workspaceID,
+            peer: peer,
+            method: "pulls.view",
+            values: ["number": number, "refresh": refresh],
+            as: PullDetail.self
+        )
+    }
+
+    static func pullTimeline(
+        workspaceID: String,
+        peer: String? = nil,
+        number: UInt32,
+        cursor: String? = nil,
+        refresh: Bool = false
+    ) async throws -> PullTimelinePage {
+        var values: [String: Any] = ["number": number, "refresh": refresh]
+        if let cursor { values["cursor"] = cursor }
+        return try await pullRead(
+            workspaceID: workspaceID,
+            peer: peer,
+            method: "pulls.timeline",
+            values: values,
+            as: PullTimelinePage.self
+        )
+    }
+
+    static func pullDiff(
+        workspaceID: String,
+        peer: String? = nil,
+        number: UInt32,
+        refresh: Bool = false
+    ) async throws -> [FileDiff] {
+        try await pullRead(
+            workspaceID: workspaceID,
+            peer: peer,
+            method: "pulls.diff",
+            values: ["number": number, "refresh": refresh],
+            as: [FileDiff].self
+        )
+    }
+
+    private static func pullRead<T: Decodable>(
+        workspaceID: String,
+        peer: String?,
+        method: String,
+        values: [String: Any],
+        as type: T.Type
+    ) async throws -> T {
+        var params = values
+        params["workspaceId"] = workspaceID
+        if let peer { return try await onPeer(peer, method, params, as: type) }
+        if let target = remoteWorkspace(workspaceID) {
+            params["workspaceId"] = target.workspace
+            return try await onPeer(target.peer, method, params, as: type)
+        }
+        return try await background(method, params, as: type)
+    }
+
     static func startPullLogin(host: String = "github.com") async throws -> PullDeviceLogin {
         try await background(
             "pulls.signIn",

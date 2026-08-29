@@ -1884,6 +1884,95 @@ struct PullSummary: Codable, Sendable, Hashable, Identifiable {
     var updatedDate: Date? { parseServerDate(updatedAt) }
 }
 
+struct PullActor: Codable, Sendable, Hashable, Identifiable {
+    var login: String
+    var avatar: String?
+    var id: String { login }
+}
+
+struct PullReview: Codable, Sendable, Hashable, Identifiable {
+    var author: PullActor
+    var state: String
+    var body: String
+    var submittedAt: String
+    var id: String { "\(author.login):\(submittedAt)" }
+}
+
+struct PullFile: Codable, Sendable, Hashable, Identifiable {
+    var path: String
+    var additions: UInt32
+    var deletions: UInt32
+    var changeType: String
+    var id: String { path }
+}
+
+struct PullCheck: Codable, Sendable, Hashable, Identifiable {
+    var name: String
+    var workflow: String?
+    var state: String
+    var startedAt: String?
+    var completedAt: String?
+    var url: String?
+    var id: String { "\(workflow ?? ""):\(name)" }
+
+    var durationText: String? {
+        guard let started = parseServerDate(startedAt),
+              let completed = parseServerDate(completedAt)
+        else { return nil }
+        let seconds = max(0, Int(completed.timeIntervalSince(started).rounded()))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m \(seconds % 60)s" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
+}
+
+struct PullDetail: Codable, Sendable, Hashable, Identifiable {
+    var number: UInt32
+    var title: String
+    var body: String
+    var url: String
+    var author: PullActor
+    var createdAt: String
+    var updatedAt: String
+    var headRef: String
+    var baseRef: String
+    var additions: UInt32
+    var deletions: UInt32
+    var changedFiles: UInt32
+    var state: String
+    var draft: Bool
+    var reviewDecision: String?
+    var mergeable: String
+    var mergeState: String
+    var labels: [String]
+    var assignees: [PullActor]
+    var reviewRequests: [PullActor]
+    var reviews: [PullReview]
+    var files: [PullFile]
+    var checks: [PullCheck]
+
+    var id: UInt32 { number }
+    var createdDate: Date? { parseServerDate(createdAt) }
+}
+
+struct PullTimelineEvent: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var kind: String
+    var actor: PullActor
+    var createdAt: String
+    var body: String?
+    var subject: String?
+    var state: String?
+    var url: String?
+    var createdDate: Date? { parseServerDate(createdAt) }
+}
+
+struct PullTimelinePage: Codable, Sendable, Hashable {
+    var events: [PullTimelineEvent]
+    var nextCursor: String?
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String

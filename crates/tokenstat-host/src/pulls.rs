@@ -20,6 +20,8 @@ struct Params {
     scope: Option<tokenstat_sync::forge::Scope>,
     state: Option<tokenstat_sync::forge::State>,
     limit: Option<u32>,
+    number: Option<u32>,
+    cursor: Option<String>,
     refresh: bool,
 }
 
@@ -45,6 +47,65 @@ fn list_cache() -> &'static Mutex<HashMap<ListKey, ListEntry>> {
 
 fn clear_list_cache() {
     list_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DetailKey {
+    workspace_id: String,
+    number: u32,
+}
+
+#[derive(Clone)]
+struct DetailEntry<T> {
+    at: Instant,
+    value: T,
+}
+
+fn detail_cache()
+-> &'static Mutex<HashMap<DetailKey, DetailEntry<tokenstat_sync::forge::PullDetail>>> {
+    static CACHE: OnceLock<
+        Mutex<HashMap<DetailKey, DetailEntry<tokenstat_sync::forge::PullDetail>>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TimelineKey {
+    workspace_id: String,
+    number: u32,
+    cursor: Option<String>,
+}
+
+fn timeline_cache()
+-> &'static Mutex<HashMap<TimelineKey, DetailEntry<tokenstat_sync::forge::TimelinePage>>> {
+    static CACHE: OnceLock<
+        Mutex<HashMap<TimelineKey, DetailEntry<tokenstat_sync::forge::TimelinePage>>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn diff_cache()
+-> &'static Mutex<HashMap<DetailKey, DetailEntry<Vec<tokenstat_workspace::git::FileDiff>>>> {
+    static CACHE: OnceLock<
+        Mutex<HashMap<DetailKey, DetailEntry<Vec<tokenstat_workspace::git::FileDiff>>>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn clear_read_cache() {
+    clear_list_cache();
+    detail_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    timeline_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clear();
+    diff_cache()
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
@@ -106,7 +167,7 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
                         *pending = None;
                         Ok(())
                     })?;
-                    clear_list_cache();
+                    clear_read_cache();
                     Ok(json!({
                         "state": "confirmed",
                         "source": credential.source(),
@@ -125,19 +186,140 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "pulls.signOut" => {
             local_credentials_only()?;
             tokenstat_sync::forge::sign_out(host_or_default(&p.host)).map_err(|e| e.to_string())?;
-            clear_list_cache();
+            clear_read_cache();
             Ok(json!({"signedOut": true}))
         }
         "pulls.setToken" => {
             local_credentials_only()?;
             tokenstat_sync::forge::set_token(host_or_default(&p.host), &p.token)
                 .map_err(|e| e.to_string())?;
-            clear_list_cache();
+            clear_read_cache();
             Ok(json!({"stored": true}))
         }
         "pulls.list" => list(&p),
+        "pulls.view" => view(&p),
+        "pulls.timeline" => timeline(&p),
+        "pulls.diff" => diff(&p),
         other => Err(format!("unknown pull-request method: {other}")),
     }
+}
+
+fn repo_for(workspace_id: &str, method: &str) -> Result<tokenstat_sync::forge::Repo, String> {
+    if workspace_id.trim().is_empty() {
+        return Err(format!("{method} needs workspaceId"));
+    }
+    let workspace = crate::workspaces::folder(workspace_id)?;
+    let remote = tokenstat_workspace::git::remote(&workspace.path)
+        .ok_or_else(|| "this workspace has no GitHub remote".to_string())?;
+    Ok(forge_repo(remote))
+}
+
+fn pull_number(p: &Params, method: &str) -> Result<u32, String> {
+    p.number
+        .filter(|number| *number > 0)
+        .ok_or_else(|| format!("{method} needs number"))
+}
+
+fn view(p: &Params) -> Result<Value, String> {
+    let number = pull_number(p, "pulls.view")?;
+    let key = DetailKey {
+        workspace_id: p.workspace_id.clone(),
+        number,
+    };
+    if !p.refresh {
+        if let Some(hit) = detail_cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
+            .cloned()
+        {
+            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
+        }
+    }
+    let value = tokenstat_sync::forge::view(&repo_for(&p.workspace_id, "pulls.view")?, number)
+        .map_err(|error| error.to_string())?;
+    detail_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(
+            key,
+            DetailEntry {
+                at: Instant::now(),
+                value: value.clone(),
+            },
+        );
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+fn timeline(p: &Params) -> Result<Value, String> {
+    let number = pull_number(p, "pulls.timeline")?;
+    let key = TimelineKey {
+        workspace_id: p.workspace_id.clone(),
+        number,
+        cursor: p.cursor.clone(),
+    };
+    if !p.refresh {
+        if let Some(hit) = timeline_cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
+            .cloned()
+        {
+            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
+        }
+    }
+    let value = tokenstat_sync::forge::timeline(
+        &repo_for(&p.workspace_id, "pulls.timeline")?,
+        number,
+        p.cursor.as_deref(),
+    )
+    .map_err(|error| error.to_string())?;
+    timeline_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(
+            key,
+            DetailEntry {
+                at: Instant::now(),
+                value: value.clone(),
+            },
+        );
+    serde_json::to_value(value).map_err(|error| error.to_string())
+}
+
+fn diff(p: &Params) -> Result<Value, String> {
+    let number = pull_number(p, "pulls.diff")?;
+    let key = DetailKey {
+        workspace_id: p.workspace_id.clone(),
+        number,
+    };
+    if !p.refresh {
+        if let Some(hit) = diff_cache()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&key)
+            .filter(|entry| entry.at.elapsed() < Duration::from_secs(30))
+            .cloned()
+        {
+            return serde_json::to_value(hit.value).map_err(|error| error.to_string());
+        }
+    }
+    let raw = tokenstat_sync::forge::diff_text(&repo_for(&p.workspace_id, "pulls.diff")?, number)
+        .map_err(|error| error.to_string())?;
+    let value = tokenstat_workspace::git::split_unified(&raw);
+    diff_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(
+            key,
+            DetailEntry {
+                at: Instant::now(),
+                value: value.clone(),
+            },
+        );
+    serde_json::to_value(value).map_err(|error| error.to_string())
 }
 
 fn availability(workspace_id: &str) -> Result<Value, String> {

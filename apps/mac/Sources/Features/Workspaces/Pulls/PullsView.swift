@@ -16,22 +16,34 @@ struct PullsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model = PullsModel()
+    @State private var selectedPull: PullSummary?
 
     private var canConnectHere: Bool { connectionHostName == nil }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                heading
-                content
+        Group {
+            if let selectedPull {
+                PullDetailView(
+                    workspaceID: workspaceID,
+                    peer: peer,
+                    summary: selectedPull,
+                    onBack: { self.selectedPull = nil }
+                )
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.l) {
+                        heading
+                        content
+                    }
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .padding(Theme.Space.xl)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .padding(Theme.Space.xl)
-            .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(Theme.background)
         .task(id: workspaceID) { await model.load(workspaceID: workspaceID, peer: peer) }
-        .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
         .onChange(of: model.scope) { _, _ in
             Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
         }
@@ -243,7 +255,11 @@ struct PullsView: View {
             } else {
                 LazyVStack(spacing: Theme.Space.s) {
                     ForEach(model.rows) { pull in
-                        PullRow(pull: pull)
+                        Button { selectedPull = pull } label: {
+                            PullRow(pull: pull)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens pull request details")
                     }
                 }
                 .transition(.smoothIn(reduceMotion: reduceMotion))
