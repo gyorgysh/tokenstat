@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -31,9 +31,13 @@ pub struct Conversation {
     pub title: String,
     pub backend: String,
     #[serde(default)]
+    pub persona_id: Option<String>,
+    #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
+    #[serde(default)]
+    pub system_prompt: String,
     #[serde(default = "default_mode")]
     pub mode: String,
     #[serde(default = "default_autonomy")]
@@ -50,6 +54,28 @@ pub struct Conversation {
     pub updated_at_ms: i64,
     #[serde(default)]
     pub running: bool,
+}
+
+/// A locally stored starting point for a conversation, never an autonomous
+/// agent. Its fields are copied into a chat at creation time.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Persona {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub mark: String,
+    pub backend: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<String>,
+    #[serde(default)]
+    pub system_prompt: String,
+    #[serde(default = "default_mode")]
+    pub default_mode: String,
+    #[serde(default = "default_autonomy")]
+    pub default_autonomy: String,
 }
 
 /// A locally staged file. The client only receives this descriptor; bytes
@@ -80,6 +106,7 @@ pub struct Create {
     pub mode: Option<String>,
     pub autonomy: Option<String>,
     pub budget_seconds: Option<u64>,
+    pub persona_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -113,6 +140,7 @@ pub struct Store {
     root: PathBuf,
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
+    personas: Mutex<Vec<Persona>>,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -127,6 +155,7 @@ impl Store {
             root,
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
+            personas: Mutex::new(Vec::new()),
         }
     }
 
@@ -139,10 +168,12 @@ impl Store {
             .and_then(|body| serde_json::from_slice::<Index>(&body).ok())
             .map(|index| index.conversations)
             .unwrap_or_default();
+        let personas = load_personas(&root);
         Self {
             root,
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
+            personas: Mutex::new(personas),
         }
     }
 
@@ -175,12 +206,64 @@ impl Store {
         rows
     }
 
+    pub fn personas(&self) -> Vec<Persona> {
+        self.personas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn save_persona(&self, mut persona: Persona) -> Result<Persona, String> {
+        if persona.name.trim().is_empty() {
+            return Err("a persona needs a name".into());
+        }
+        if persona.backend.trim().is_empty() {
+            return Err("a persona needs a backend".into());
+        }
+        if persona.id.is_empty() {
+            persona.id = format!("persona-{}", now_ms());
+        }
+        let mut personas = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(existing) = personas
+            .iter_mut()
+            .find(|existing| existing.id == persona.id)
+        {
+            *existing = persona.clone();
+        } else {
+            personas.push(persona.clone());
+        }
+        drop(personas);
+        self.save_personas()?;
+        Ok(persona)
+    }
+
+    pub fn remove_persona(&self, id: &str) -> Result<bool, String> {
+        let mut personas = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = personas.len();
+        personas.retain(|persona| persona.id != id);
+        let removed = personas.len() != before;
+        drop(personas);
+        if removed {
+            self.save_personas()?;
+        }
+        Ok(removed)
+    }
+
     pub fn create(&self, input: Create) -> Result<Conversation, String> {
         if input.workspace_id.trim().is_empty() {
             return Err("chat.create needs a workspaceId".into());
         }
         crate::workspaces::folder(&input.workspace_id)?;
-        if input.backend.trim().is_empty() {
+        let persona = input
+            .persona_id
+            .as_deref()
+            .map(|id| self.persona(id))
+            .transpose()?;
+        let backend = persona
+            .as_ref()
+            .map(|persona| persona.backend.clone())
+            .unwrap_or(input.backend);
+        if backend.trim().is_empty() {
             return Err("chat.create needs a backend".into());
         }
         let id = format!("chat-{}", now_ms());
@@ -192,11 +275,30 @@ impl Store {
                 .title
                 .filter(|title| !title.trim().is_empty())
                 .unwrap_or_else(|| "New chat".into()),
-            backend: input.backend,
-            model: input.model,
-            effort: input.effort,
-            mode: input.mode.unwrap_or_else(default_mode),
-            autonomy: input.autonomy.unwrap_or_else(default_autonomy),
+            backend,
+            persona_id: persona.as_ref().map(|persona| persona.id.clone()),
+            model: persona
+                .as_ref()
+                .and_then(|persona| persona.model.clone())
+                .or(input.model),
+            effort: persona
+                .as_ref()
+                .and_then(|persona| persona.effort.clone())
+                .or(input.effort),
+            system_prompt: persona
+                .as_ref()
+                .map(|persona| persona.system_prompt.clone())
+                .unwrap_or_default(),
+            mode: persona
+                .as_ref()
+                .map(|persona| persona.default_mode.clone())
+                .or(input.mode)
+                .unwrap_or_else(default_mode),
+            autonomy: persona
+                .as_ref()
+                .map(|persona| persona.default_autonomy.clone())
+                .or(input.autonomy)
+                .unwrap_or_else(default_autonomy),
             resume_token: None,
             allowed_tools: Vec::new(),
             allowed_shell_prefixes: Vec::new(),
@@ -345,7 +447,10 @@ impl Store {
         }
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
         let attachments = self.attachment_paths(id, attachment_ids)?;
-        let prompt = prompt_with_attachments(prompt, &attachments);
+        let prompt = prompt_with_attachments(
+            &prompt_with_system_prompt(prompt, &chat.system_prompt),
+            &attachments,
+        );
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
             &prompt,
@@ -589,6 +694,32 @@ impl Store {
             })
             .collect()
     }
+
+    fn persona(&self, id: &str) -> Result<Persona, String> {
+        self.personas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|persona| persona.id == id)
+            .cloned()
+            .ok_or_else(|| "no persona with that id".into())
+    }
+
+    fn save_personas(&self) -> Result<(), String> {
+        let personas = self
+            .personas
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        fs::create_dir_all(&self.root).map_err(|e| e.to_string())?;
+        let temporary = self.root.join("personas.tmp");
+        fs::write(
+            &temporary,
+            serde_json::to_vec_pretty(&personas).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        fs::rename(temporary, self.root.join("personas.json")).map_err(|e| e.to_string())
+    }
 }
 
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -627,6 +758,21 @@ fn prompt_with_attachments(prompt: &str, attachments: &[PathBuf]) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("{prompt}\n\nThe user attached these local files. Read them when useful:\n{paths}")
+}
+
+fn prompt_with_system_prompt(prompt: &str, system_prompt: &str) -> String {
+    let system_prompt = system_prompt.trim();
+    if system_prompt.is_empty() {
+        return prompt.to_string();
+    }
+    format!("{system_prompt}\n\n---\n\n{prompt}")
+}
+
+fn load_personas(root: &Path) -> Vec<Persona> {
+    fs::read(root.join("personas.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
 }
 
 fn now_ms() -> i64 {
@@ -671,8 +817,10 @@ mod tests {
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
             backend: "claude".into(),
+            persona_id: None,
             model: None,
             effort: None,
+            system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
@@ -734,8 +882,10 @@ mod tests {
             workspace_id: "workspace-a".into(),
             title: "New chat".into(),
             backend: "claude".into(),
+            persona_id: None,
             model: None,
             effort: None,
+            system_prompt: String::new(),
             mode: default_mode(),
             autonomy: default_autonomy(),
             resume_token: None,
@@ -760,5 +910,36 @@ mod tests {
             .unwrap();
         assert_eq!(fs::read(&files[0]).unwrap(), b"hello");
         assert!(prompt_with_attachments("Inspect this", &files).contains("diagram.png"));
+    }
+
+    #[test]
+    fn personas_persist_and_keep_existing_conversation_settings_intact() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let saved = store
+            .save_persona(Persona {
+                id: String::new(),
+                name: "Careful reviewer".into(),
+                mark: "R".into(),
+                backend: "claude".into(),
+                model: Some("sonnet".into()),
+                effort: Some("high".into()),
+                system_prompt: "Review changes carefully.".into(),
+                default_mode: "plan".into(),
+                default_autonomy: "standard".into(),
+            })
+            .unwrap();
+        assert_eq!(store.personas(), vec![saved.clone()]);
+        assert_eq!(
+            prompt_with_system_prompt("Check this", &saved.system_prompt),
+            "Review changes carefully.\n\n---\n\nCheck this"
+        );
+        store
+            .save_persona(Persona {
+                system_prompt: "A new prompt".into(),
+                ..saved.clone()
+            })
+            .unwrap();
+        assert_eq!(saved.system_prompt, "Review changes carefully.");
     }
 }

@@ -476,6 +476,8 @@ struct ChatParams {
     name: Option<String>,
     data: Option<String>,
     media_type: Option<String>,
+    persona_id: Option<String>,
+    persona: Option<crate::chat::Persona>,
     offset: Option<u64>,
 }
 
@@ -491,6 +493,7 @@ impl ChatParams {
             mode: self.mode,
             autonomy: self.autonomy,
             budget_seconds: self.budget_seconds,
+            persona_id: self.persona_id,
         }
     }
 
@@ -1673,6 +1676,14 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             Ok(json!({ "events": events, "nextOffset": next }))
         }
         "chat.backends" => Ok(Value::Array(crate::chat::backends())),
+        "chat.personas" => serde_json::to_value(store.personas()).envelope(),
+        "chat.personaSave" => serde_json::to_value(
+            store.save_persona(p.persona.ok_or("chat.personaSave needs persona")?)?,
+        )
+        .envelope(),
+        "chat.personaRemove" => Ok(
+            json!({ "removed": store.remove_persona(&p.id.ok_or("chat.personaRemove needs id")?)? }),
+        ),
         other => Err(format!("unknown chat method: {other}").into()),
     }
 }
