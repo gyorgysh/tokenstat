@@ -2306,6 +2306,12 @@ struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var defaultAutonomy: String
 }
 
+struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var mediaType: String?
+}
+
 struct ChatEventChunk: Codable, Sendable {
     var events: [ChatTimelineEvent]
     var nextOffset: UInt64

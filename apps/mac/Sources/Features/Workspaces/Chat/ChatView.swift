@@ -2,6 +2,7 @@
 
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor @Observable
 final class ChatModel {
@@ -9,6 +10,7 @@ final class ChatModel {
     var selected: ChatConversation?
     var events: [ChatTimelineEvent] = []
     var offset: UInt64 = 0
+    var attachments: [ChatAttachment] = []
     var isLoading = false
     var error: String?
 
@@ -35,10 +37,17 @@ final class ChatModel {
     func send(_ text: String) async {
         guard let selected else { return }
         do {
-            let updated = try await Bridge.sendChat(id: selected.id, text: text)
+            let updated = try await Bridge.sendChat(id: selected.id, text: text, attachmentIDs: attachments.map(\.id))
             replace(updated)
+            attachments = []
             await loadEvents(id: updated.id, reset: false)
         } catch { self.error = error.localizedDescription }
+    }
+
+    func attach(_ file: URL) async {
+        guard let selected else { return }
+        do { attachments.append(try await Bridge.attachToChat(id: selected.id, file: file)) }
+        catch { self.error = error.localizedDescription }
     }
 
     func stop() async {
@@ -74,6 +83,7 @@ struct ChatView: View {
     @State private var model = ChatModel()
     @State private var draft = ""
     @State private var showingSetup = false
+    @State private var importingAttachment = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -140,7 +150,20 @@ struct ChatView: View {
     }
 
     private func composer(_ chat: ChatConversation) -> some View {
-        HStack(alignment: .bottom, spacing: Theme.Space.s) {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            if !model.attachments.isEmpty {
+                HStack(spacing: Theme.Space.xs) {
+                    ForEach(model.attachments) { attachment in
+                        Label(attachment.name, systemImage: "paperclip")
+                            .font(Theme.caption).lineLimit(1)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(Theme.panel, in: Capsule())
+                    }
+                }
+            }
+            HStack(alignment: .bottom, spacing: Theme.Space.s) {
+                Button { importingAttachment = true } label: { Image(systemName: "paperclip").frame(width: 30, height: 34) }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
             TextField("Ask about \(workspaceName ?? "this folder")", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
@@ -155,9 +178,13 @@ struct ChatView: View {
                     .buttonStyle(AccentButtonStyle(small: true))
                     .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            }
         }
         .padding(Theme.Space.m)
         .background(Theme.background)
+        .fileImporter(isPresented: $importingAttachment, allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]) { result in
+            if case let .success(file) = result { Task { await model.attach(file) } }
+        }
     }
 
     private var empty: some View {

@@ -887,8 +887,8 @@ extension Bridge {
         )
     }
 
-    static func sendChat(id: String, text: String) async throws -> ChatConversation {
-        try await background("chat.send", ["id": id, "text": text], as: ChatConversation.self)
+    static func sendChat(id: String, text: String, attachmentIDs: [String] = []) async throws -> ChatConversation {
+        try await background("chat.send", ["id": id, "text": text, "attachmentIds": attachmentIDs], as: ChatConversation.self)
     }
 
     static func stopChat(id: String) async throws {
@@ -901,6 +901,17 @@ extension Bridge {
 
     static func chatPersonas() async throws -> [ChatPersona] {
         try await background("chat.personas", as: [ChatPersona].self)
+    }
+
+    static func attachToChat(id: String, file: URL) async throws -> ChatAttachment {
+        let access = file.startAccessingSecurityScopedResource()
+        defer { if access { file.stopAccessingSecurityScopedResource() } }
+        let data = try Data(contentsOf: file)
+        return try await background(
+            "chat.attach",
+            ["id": id, "name": file.lastPathComponent, "data": data.base64EncodedString()],
+            as: ChatAttachment.self
+        )
     }
 }
 
