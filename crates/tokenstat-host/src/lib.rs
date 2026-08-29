@@ -53,6 +53,8 @@ pub(crate) mod agent_models;
 #[cfg(feature = "local-host")]
 pub mod automations;
 pub mod base64;
+#[cfg(feature = "local-host")]
+pub mod chat;
 pub mod cloud_import;
 pub mod dispatch;
 pub mod dto;

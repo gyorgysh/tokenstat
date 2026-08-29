@@ -138,6 +138,7 @@ pub(crate) fn needs_access(method: &str, stream_kind: Option<&str>) -> bool {
         m if m.starts_with("pty.") => true,
         m if m.starts_with("workflow.") => true,
         m if m.starts_with("automation.") => true,
+        m if m.starts_with("chat.") => true,
         m if m.starts_with("todo.") => true,
         m if m.starts_with("launcher.") => true,
         m if m.starts_with("harness.") => true,

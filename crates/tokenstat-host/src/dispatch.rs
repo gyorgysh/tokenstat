@@ -456,6 +456,55 @@ struct TodoParams {
     include_archived: Option<bool>,
 }
 
+#[cfg(feature = "local-host")]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct ChatParams {
+    id: Option<String>,
+    workspace_id: Option<String>,
+    title: Option<String>,
+    backend: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    mode: Option<String>,
+    autonomy: Option<String>,
+    budget_seconds: Option<u64>,
+    allowed_tools: Option<Vec<String>>,
+    allowed_shell_prefixes: Option<Vec<String>>,
+    text: Option<String>,
+    offset: Option<u64>,
+}
+
+#[cfg(feature = "local-host")]
+impl ChatParams {
+    fn create(self) -> crate::chat::Create {
+        crate::chat::Create {
+            workspace_id: self.workspace_id.unwrap_or_default(),
+            title: self.title,
+            backend: self.backend.unwrap_or_default(),
+            model: self.model,
+            effort: self.effort,
+            mode: self.mode,
+            autonomy: self.autonomy,
+            budget_seconds: self.budget_seconds,
+        }
+    }
+
+    fn changes(self) -> crate::chat::Update {
+        crate::chat::Update {
+            title: self.title,
+            backend: self.backend,
+            model: self.model,
+            effort: self.effort,
+            mode: self.mode,
+            autonomy: self.autonomy,
+            allowed_tools: self.allowed_tools,
+            allowed_shell_prefixes: self.allowed_shell_prefixes,
+            budget_seconds: self.budget_seconds,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 struct HighlightParams {
@@ -1581,6 +1630,42 @@ fn local_jobs(method: &str, params: &str) -> Option<Result<Value, DispatchError>
 /// the method belongs here, the other answers it. That keeps `?` usable in the
 /// arms, which a function returning `Option` cannot do.
 #[cfg(feature = "local-host")]
+fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
+    let p: ChatParams = parse(params)?;
+    let store = crate::chat::shared();
+    match method {
+        "chat.list" => serde_json::to_value(
+            store.list(&p.workspace_id.ok_or("chat.list needs a workspaceId")?),
+        )
+        .envelope(),
+        "chat.create" => serde_json::to_value(store.create(p.create())?).envelope(),
+        "chat.update" => serde_json::to_value(
+            store.update(&p.id.clone().ok_or("chat.update needs id")?, p.changes())?,
+        )
+        .envelope(),
+        "chat.remove" => {
+            Ok(json!({ "removed": store.remove(&p.id.ok_or("chat.remove needs id")?)? }))
+        }
+        "chat.send" => serde_json::to_value(store.send(
+            &p.id.ok_or("chat.send needs id")?,
+            &p.text.ok_or("chat.send needs text")?,
+        )?)
+        .envelope(),
+        "chat.stop" => {
+            store.stop(&p.id.ok_or("chat.stop needs id")?)?;
+            Ok(json!({ "stopped": true }))
+        }
+        "chat.events" => {
+            let (events, next) =
+                store.events(&p.id.ok_or("chat.events needs id")?, p.offset.unwrap_or(0))?;
+            Ok(json!({ "events": events, "nextOffset": next }))
+        }
+        "chat.backends" => Ok(Value::Array(crate::chat::backends())),
+        other => Err(format!("unknown chat method: {other}").into()),
+    }
+}
+
+#[cfg(feature = "local-host")]
 fn local_job_call(method: &str, params: &str) -> Result<Value, DispatchError> {
     match method {
         // Workspaces are registered folders, nothing to do with the archive.
@@ -2423,6 +2508,11 @@ fn sessionless(method: &str, params: &str) -> Option<Result<Value, String>> {
     #[cfg(feature = "local-host")]
     if method.starts_with("todo.") {
         return Some(local_job_call(method, params).map_err(|e| e.message));
+    }
+
+    #[cfg(feature = "local-host")]
+    if method.starts_with("chat.") {
+        return Some(chat_call(method, params).map_err(|e| e.message));
     }
 
     // Folders and terminals. Same reasoning: none of it reads the archive.

@@ -389,6 +389,59 @@ pub fn agent_command(
     Ok(args)
 }
 
+/// Headless argv for a chat turn. Unlike an automation, a chat retains the
+/// backend session token after every turn and gives it back on the next one.
+/// Keep the backend-specific resume spelling beside `agent_command`: the two
+/// paths launch the same CLIs and must not quietly drift apart.
+pub fn chat_agent_command(
+    backend: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    budget_seconds: u64,
+    resume: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
+    let Some(token) = resume.filter(|token| !token.trim().is_empty()) else {
+        return Ok(argv);
+    };
+    match backend {
+        "claude" => {
+            // `--resume` belongs with Claude's print flags, before the prompt.
+            let at = argv
+                .iter()
+                .position(|arg| arg == "-p")
+                .unwrap_or(argv.len());
+            argv.splice(at..at, ["--resume".into(), token.into()]);
+        }
+        "codex" => {
+            // `codex exec resume <thread>` is a different subcommand shape.
+            if let Some(at) = argv.iter().position(|arg| arg == "exec") {
+                argv.splice(at + 1..at + 1, ["resume".into(), token.into()]);
+            }
+        }
+        "grok" | "cursor" => {
+            let at = argv.len().saturating_sub(1);
+            argv.splice(at..at, ["--resume".into(), token.into()]);
+        }
+        "agy" => {
+            let at = argv
+                .iter()
+                .position(|arg| arg == "--print")
+                .unwrap_or(argv.len());
+            argv.splice(at..at, ["--conversation".into(), token.into()]);
+        }
+        "opencode" | "opencode2" => {
+            if let Some(at) = argv.iter().position(|arg| arg == "run") {
+                argv.splice(at + 1..at + 1, ["-s".into(), token.into()]);
+            }
+        }
+        "sh" => return Err("shell conversations cannot be resumed".into()),
+        _ => {}
+    }
+    Ok(argv)
+}
+
 /// Argv for an interactive TTY. Same backends as [`agent_command`], without
 /// print / stream-json flags. The front end `pty.spawn`s this so the person
 /// can watch the agent. Not an automation run: no transcript, no budget.
