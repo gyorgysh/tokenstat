@@ -134,7 +134,7 @@ struct ChatView: View {
 
     private func composer(_ chat: ChatConversation) -> some View {
         HStack(alignment: .bottom, spacing: Theme.Space.s) {
-            TextField("Ask about (workspaceName ?? "this folder")", text: $draft, axis: .vertical)
+            TextField("Ask about \(workspaceName ?? "this folder")", text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .padding(.horizontal, Theme.Space.m).padding(.vertical, 10)
