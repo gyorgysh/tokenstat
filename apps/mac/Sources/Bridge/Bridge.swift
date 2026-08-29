@@ -864,6 +864,30 @@ extension Bridge {
 
 // MARK: - Automations
 
+// MARK: - Chat
+
+extension Bridge {
+    static func chats(workspaceID: String) async throws -> [ChatConversation] {
+        try await background("chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
+    }
+
+    static func createChat(workspaceID: String, backend: String, title: String = "New chat") async throws -> ChatConversation {
+        try await background("chat.create", ["workspaceId": workspaceID, "backend": backend, "title": title], as: ChatConversation.self)
+    }
+
+    static func sendChat(id: String, text: String) async throws -> ChatConversation {
+        try await background("chat.send", ["id": id, "text": text], as: ChatConversation.self)
+    }
+
+    static func stopChat(id: String) async throws {
+        _ = try await background("chat.stop", ["id": id], as: Ack.self)
+    }
+
+    static func chatEvents(id: String, offset: UInt64) async throws -> ChatEventChunk {
+        try await background("chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+    }
+}
+
 extension Bridge {
     /// Who is signed in. Signed out is a normal result, not an error: the
     /// bridge reports `signedIn: false` so the UI can offer sign-in rather

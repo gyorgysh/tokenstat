@@ -2144,7 +2144,10 @@ struct RootView: View {
              .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
         case let .workspace(id, .chat):
-            ChatComingSoonView(folderName: workspaces.folders.first { $0.id == id }?.name)
+            ChatView(
+                workspaceID: id,
+                workspaceName: workspaces.folders.first { $0.id == id }?.name
+            )
         case let .workspace(id, .pulls):
             let folder = workspaces.folders.first { $0.id == id }
             PullsView(

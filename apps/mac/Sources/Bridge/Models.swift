@@ -2274,6 +2274,57 @@ struct WorkspaceFolder: Codable, Sendable, Hashable, Identifiable {
 
 // MARK: - Automations
 
+// MARK: - Chat
+
+struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var workspaceID: String
+    var title: String
+    var backend: String
+    var model: String?
+    var effort: String?
+    var mode: String
+    var autonomy: String
+    var resumeToken: String?
+    var allowedTools: [String]
+    var allowedShellPrefixes: [String]
+    var budgetSeconds: UInt64
+    var createdAtMs: Int64
+    var updatedAtMs: Int64
+    var running: Bool
+}
+
+struct ChatEventChunk: Codable, Sendable {
+    var events: [ChatTimelineEvent]
+    var nextOffset: UInt64
+}
+
+struct ChatTimelineEvent: Codable, Sendable, Identifiable {
+    var kind: String
+    var text: String?
+    var atMs: Int64?
+    var event: ChatAgentEvent?
+    var id: String {
+        "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? "event")"
+    }
+}
+
+struct ChatAgentEvent: Codable, Sendable {
+    var kind: String
+    var delta: String?
+    var verb: String?
+    var target: String?
+    var path: String?
+    var added: UInt32?
+    var removed: UInt32?
+    var patch: String?
+    var status: String?
+    var text: String?
+    var input: UInt64?
+    var output: UInt64?
+    var costUsd: Double?
+}
+
 /// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a
 /// schedule with a budget the run stops at.
 struct Automation: Codable, Sendable, Hashable, Identifiable {
