@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use crate::transcript::{Event, Parser};
 
 const EVENTS_CAP: u64 = 1024 * 1024;
+const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
 const POLL: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -49,6 +50,16 @@ pub struct Conversation {
     pub updated_at_ms: i64,
     #[serde(default)]
     pub running: bool,
+}
+
+/// A locally staged file. The client only receives this descriptor; bytes
+/// never leave the chat's host data directory except when its agent reads it.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    pub id: String,
+    pub name: String,
+    pub media_type: Option<String>,
 }
 
 fn default_mode() -> String {
@@ -291,7 +302,39 @@ impl Store {
         Ok((events, end as u64))
     }
 
-    pub fn send(self: &Arc<Self>, id: &str, text: &str) -> Result<Conversation, String> {
+    pub fn attach(
+        &self,
+        id: &str,
+        name: &str,
+        data: &str,
+        media_type: Option<String>,
+    ) -> Result<Attachment, String> {
+        self.get(id)?;
+        let bytes = crate::base64::decode(data)?;
+        if bytes.is_empty() {
+            return Err("an attachment cannot be empty".into());
+        }
+        if bytes.len() > ATTACHMENT_CAP {
+            return Err("an attachment is limited to 12 MB".into());
+        }
+        let attachment = Attachment {
+            id: format!("file-{}", now_ms()),
+            name: safe_file_name(name),
+            media_type,
+        };
+        let path = self.attachment_path(id, &attachment.id, &attachment.name);
+        fs::create_dir_all(path.parent().ok_or("invalid attachment path")?)
+            .map_err(|e| e.to_string())?;
+        fs::write(path, bytes).map_err(|e| e.to_string())?;
+        Ok(attachment)
+    }
+
+    pub fn send(
+        self: &Arc<Self>,
+        id: &str,
+        text: &str,
+        attachment_ids: &[String],
+    ) -> Result<Conversation, String> {
         let prompt = text.trim();
         if prompt.is_empty() {
             return Err("chat.send needs text".into());
@@ -301,9 +344,11 @@ impl Store {
             return Err("this chat is already responding".into());
         }
         let workspace = crate::workspaces::folder(&chat.workspace_id)?;
+        let attachments = self.attachment_paths(id, attachment_ids)?;
+        let prompt = prompt_with_attachments(prompt, &attachments);
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
-            prompt,
+            &prompt,
             chat.model.as_deref(),
             chat.effort.as_deref(),
             chat.budget_seconds,
@@ -326,7 +371,7 @@ impl Store {
         self.append(
             id,
             &StoredEvent::User {
-                text: prompt.into(),
+                text: text.trim().into(),
                 at_ms: now_ms(),
             },
         )?;
@@ -510,6 +555,36 @@ impl Store {
             .join("raw")
             .join(format!("{turn_started_at_ms}.ndjson"))
     }
+
+    fn attachment_path(&self, chat_id: &str, attachment_id: &str, name: &str) -> PathBuf {
+        self.root
+            .join(chat_id)
+            .join("files")
+            .join(attachment_id)
+            .join(name)
+    }
+
+    fn attachment_paths(&self, chat_id: &str, ids: &[String]) -> Result<Vec<PathBuf>, String> {
+        ids.iter()
+            .map(|id| {
+                if id.is_empty() || id.contains('/') || id.contains('\\') {
+                    return Err("invalid attachment id".into());
+                }
+                let directory = self.root.join(chat_id).join("files").join(id);
+                let mut files =
+                    fs::read_dir(&directory).map_err(|_| "an attachment is no longer available")?;
+                let file = files
+                    .next()
+                    .ok_or("an attachment is no longer available")?
+                    .map_err(|e| e.to_string())?
+                    .path();
+                if files.next().is_some() {
+                    return Err("invalid attachment directory".into());
+                }
+                Ok(file)
+            })
+            .collect()
+    }
 }
 
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -520,6 +595,34 @@ fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
         .open(path)
         .map_err(|e| e.to_string())?;
     file.write_all(bytes).map_err(|e| e.to_string())
+}
+
+fn safe_file_name(name: &str) -> String {
+    let leaf = std::path::Path::new(name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("attachment");
+    let cleaned: String = leaf
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    if cleaned.trim().is_empty() {
+        "attachment".into()
+    } else {
+        cleaned
+    }
+}
+
+fn prompt_with_attachments(prompt: &str, attachments: &[PathBuf]) -> String {
+    if attachments.is_empty() {
+        return prompt.to_string();
+    }
+    let paths = attachments
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("{prompt}\n\nThe user attached these local files. Read them when useful:\n{paths}")
 }
 
 fn now_ms() -> i64 {
@@ -616,5 +719,42 @@ mod tests {
             path.parent().unwrap(),
             store.events_path("chat-test").parent().unwrap()
         );
+    }
+
+    #[test]
+    fn attachments_are_staged_inside_the_chat_not_the_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            model: None,
+            effort: None,
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        let attachment = store
+            .attach(
+                "chat-test",
+                "../diagram.png",
+                "aGVsbG8=",
+                Some("image/png".into()),
+            )
+            .unwrap();
+        assert_eq!(attachment.name, "diagram.png");
+        let files = store
+            .attachment_paths("chat-test", &[attachment.id])
+            .unwrap();
+        assert_eq!(fs::read(&files[0]).unwrap(), b"hello");
+        assert!(prompt_with_attachments("Inspect this", &files).contains("diagram.png"));
     }
 }
