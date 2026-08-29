@@ -37,7 +37,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
 
     var summary: String {
         switch self {
-        case .supporter: return "A yearly plan. More devices, a longer history, and a nicer profile."
+        case .supporter: return "A year of heatmap across your devices, encrypted vault sync, and a public profile worth sharing."
         case .patron: return "For people running agents on everything they own, and reaching those machines from anywhere."
         case .legend: return "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API."
         }
@@ -60,7 +60,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
                 "Everything in Free",
                 "4 devices, added up into one profile",
                 "A year of history on your profile, not 30 days",
-                "Profile updates every 30 minutes, not hourly",
+                "End-to-end encrypted SSH vault sync across your devices",
                 "The supporter star next to your name",
             ]
         case .patron:

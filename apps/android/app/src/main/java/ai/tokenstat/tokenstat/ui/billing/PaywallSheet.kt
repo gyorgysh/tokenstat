@@ -33,12 +33,12 @@ private val pitches = listOf(
     Pitch(
         "ai.tokenstat.supporter.yearly",
         "Supporter",
-        "A yearly plan. More devices, a longer history, and a nicer profile.",
+        "A year of heatmap across your devices, encrypted vault sync, and a public profile worth sharing.",
         listOf(
             "Everything in Free",
             "4 devices, added up into one profile",
             "A year of history on your profile, not 30 days",
-            "Profile updates every 30 minutes, not hourly",
+            "End-to-end encrypted SSH vault sync across your devices",
             "The supporter star next to your name",
         ),
     ),
