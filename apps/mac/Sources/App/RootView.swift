@@ -28,6 +28,7 @@ struct RootView: View {
     @State private var home = HomeModel()
     @State private var account = AccountModel()
     @State private var workspaces = WorkspacesModel()
+    @State private var pullCounts = PullCountStore.shared
     @State private var machines = MachinesModel()
     /// The SSH library, owned by the shell rather than by a screen: the
     /// sidebar draws folders and a host count from it, and the content and
@@ -2145,11 +2146,18 @@ struct RootView: View {
         case let .workspace(id, .chat):
             ChatComingSoonView(folderName: workspaces.folders.first { $0.id == id }?.name)
         case let .workspace(id, .pulls):
+            let folder = workspaces.folders.first { $0.id == id }
             PullsView(
                 workspaceID: id,
-                connectionHostName: workspaces.folders.first { $0.id == id }?.isRemote == true
+                connectionHostName: folder?.isRemote == true
                     ? "the workspace's computer"
-                    : nil
+                    : nil,
+                workspaceName: folder.map {
+                    $0.isRemote
+                        ? "\($0.machineLabel ?? "Remote") / \($0.name)"
+                        : $0.name
+                },
+                workspaceIsRemote: folder?.isRemote == true
             )
         case .global(.home):
             HomeView(
@@ -2419,7 +2427,7 @@ struct RootView: View {
         // Nothing to count yet.
         case .chat: value = 0
         case .changes: value = folder.git?.files.count ?? 0
-        case .pulls: return nil
+        case .pulls: value = remote?.pulls ?? pullCounts.count(key: folder.id) ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)
         case .notes:
             // No remote count for notes yet, and a folder on another machine

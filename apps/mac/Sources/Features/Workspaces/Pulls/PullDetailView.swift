@@ -10,39 +10,52 @@ struct PullDetailView: View {
     let workspaceID: String
     let peer: String?
     let summary: PullSummary
+    let scope: ScopeChip?
     let onBack: () -> Void
 
     @Environment(\.openURL) private var openURL
     @State private var model = PullDetailModel()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.l) {
-                topBar
-                if let error = model.error, model.detail == nil {
-                    errorCard(error)
-                } else if let detail = model.detail {
-                    hero(detail)
-                    DetailTabs(selection: $model.tab, checks: detail.checks.count)
-                    if let notice = model.actionNotice { actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") }
-                    if let error = model.actionError { actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") }
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: Theme.Space.l) {
-                            selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
-                            inspector(detail).frame(width: 248)
-                        }
-                        VStack(alignment: .leading, spacing: Theme.Space.l) {
-                            selectedContent(detail)
-                            inspector(detail)
-                        }
-                    }
-                } else {
-                    detailSkeleton
-                }
+        VStack(spacing: 0) {
+            #if os(macOS)
+            DetailChromeBar(scope: scope, leading: {
+                Button(action: onBack) { ActionIcon.back.label("Pull requests") }
+                    .buttonStyle(SecondaryButtonStyle(small: true))
+            }) {
+                detailActions
             }
-            .frame(maxWidth: 1040, alignment: .leading)
-            .padding(Theme.Space.xl)
-            .frame(maxWidth: .infinity, alignment: .top)
+            #endif
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    #if !os(macOS)
+                    topBar
+                    #endif
+                    if let error = model.error, model.detail == nil {
+                        errorCard(error)
+                    } else if let detail = model.detail {
+                        hero(detail)
+                        DetailTabs(selection: $model.tab, checks: detail.checks.count)
+                        if let notice = model.actionNotice { actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") }
+                        if let error = model.actionError { actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") }
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .top, spacing: Theme.Space.l) {
+                                selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
+                                inspector(detail).frame(width: 248)
+                            }
+                            VStack(alignment: .leading, spacing: Theme.Space.l) {
+                                selectedContent(detail)
+                                inspector(detail)
+                            }
+                        }
+                    } else {
+                        detailSkeleton
+                    }
+                }
+                .frame(maxWidth: 1040, alignment: .leading)
+                .padding(Theme.Space.xl)
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
         }
         .background(Theme.background)
         .task(id: summary.number) {
@@ -78,13 +91,18 @@ struct PullDetailView: View {
             Button(action: onBack) { ActionIcon.back.label("Pull requests") }
                 .buttonStyle(SecondaryButtonStyle(small: true))
             Spacer()
-            if let raw = model.detail?.url, let url = URL(string: raw) {
-                Button { openURL(url) } label: { ActionIcon.external.label("Open on GitHub") }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-            }
-            ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh pull request", isBusy: model.loading) {
-                Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) }
-            }
+            detailActions
+        }
+    }
+
+    @ViewBuilder
+    private var detailActions: some View {
+        if let raw = model.detail?.url, let url = URL(string: raw) {
+            Button { openURL(url) } label: { ActionIcon.external.label("Open on GitHub") }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+        }
+        ToolbarIconButton(systemImage: "arrow.clockwise", help: "Refresh pull request", isBusy: model.loading) {
+            Task { await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true) }
         }
     }
 

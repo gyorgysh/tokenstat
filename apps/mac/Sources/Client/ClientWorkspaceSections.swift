@@ -34,6 +34,7 @@ struct ClientWorkspaceDetailView: View {
     /// this side addresses a remote folder as `remote:<peer>:<id>`.
     @State private var live: WorkspaceFolder?
     @State private var counts = WorkspaceSectionCounts()
+    @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
     @State private var portText = "5173"
@@ -167,11 +168,22 @@ struct ClientWorkspaceDetailView: View {
             .buttonStyle(.plain)
 
             NavigationLink {
-                PullsView(workspaceID: workspaceID, peer: peer, connectionHostName: hostName)
+                PullsView(
+                    workspaceID: workspaceID,
+                    peer: peer,
+                    connectionHostName: hostName,
+                    workspaceName: folder.name,
+                    workspaceIsRemote: true
+                )
                     .navigationTitle("Pull requests")
                     .navigationBarTitleDisplayMode(.inline)
             } label: {
-                ClientSectionRow(section: .pulls, count: nil)
+                ClientSectionRow(
+                    section: .pulls,
+                    count: counts.pulls > 0
+                        ? counts.pulls
+                        : pullCounts.count(workspaceID: workspaceID, peer: peer)
+                )
             }
             .buttonStyle(.plain)
 
@@ -297,6 +309,7 @@ struct ClientWorkspaceDetailView: View {
         counts = WorkspaceSectionCounts(
             sessions: summary.sessions,
             changes: summary.changed ?? current.git?.files.count ?? 0,
+            pulls: summary.pulls ?? pullCounts.count(workspaceID: workspaceID, peer: peer) ?? 0,
             todo: summary.tasks,
             notes: summary.notes ?? 0,
             automations: summary.automations,
@@ -325,6 +338,7 @@ struct ClientWorkspaceDetailView: View {
 struct WorkspaceSectionCounts {
     var sessions = 0
     var changes = 0
+    var pulls = 0
     var todo = 0
     var notes = 0
     var automations = 0

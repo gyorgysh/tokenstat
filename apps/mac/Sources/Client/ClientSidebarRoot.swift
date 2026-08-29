@@ -34,6 +34,7 @@ struct ClientSidebarRoot: View {
     /// tree rather than one per folder: the Mac's sidebar draws these counts
     /// too, and asking per row is five tunnel hops per folder.
     @State private var summaries: [String: WorkspaceSummary] = [:]
+    @State private var pullCounts = PullCountStore.shared
     @State private var columns = NavigationSplitViewVisibility.all
 
     var body: some View {
@@ -361,7 +362,12 @@ struct ClientSidebarRoot: View {
         switch section {
         case .sessions: return summary.sessions
         case .changes: return summary.changed ?? folder.git?.files.count
-        case .pulls: return nil
+        case .pulls:
+            return summary.pulls
+                ?? pullCounts.count(
+                    workspaceID: ClientRemote.rawWorkspaceID(of: folder) ?? folder.id,
+                    peer: workspaces.connectedKey
+                )
         case .todo: return summary.tasks
         case .notes: return summary.notes
         case .workflows: return summary.workflowsRunning > 0

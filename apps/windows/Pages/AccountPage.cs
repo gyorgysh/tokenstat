@@ -18,6 +18,7 @@ internal sealed class AccountPage : Page
 {
     private readonly StackPanel _root = new() { Spacing = Theme.SpaceL };
     private CancellationTokenSource? _poll;
+    private CancellationTokenSource? _pullPoll;
 
     public AccountPage()
     {
@@ -27,7 +28,11 @@ internal sealed class AccountPage : Page
             Content = _root,
         };
         Loaded += async (_, _) => await LoadAsync();
-        Unloaded += (_, _) => _poll?.Cancel();
+        Unloaded += (_, _) =>
+        {
+            _poll?.Cancel();
+            _pullPoll?.Cancel();
+        };
         AppServices.Update.Changed += () =>
         {
             DispatcherQueue.TryEnqueue(() => _ = LoadAsync());
@@ -111,8 +116,213 @@ internal sealed class AccountPage : Page
             _root.Children.Add(Chrome.Card("Account", body));
         }
 
+        _root.Children.Add(await PullConnectionCardAsync());
         _root.Children.Add(UpdateCard());
         _root.Children.Add(AboutBlurb());
+    }
+
+    private async Task<UIElement> PullConnectionCardAsync()
+    {
+        try
+        {
+            var connection = await AppServices.Host.CallAsync(
+                "pulls.connection",
+                new JsonObject { ["host"] = "github.com" });
+            var state = Format.Text(connection, "state", "signedOut");
+            var login = Format.Text(connection, "login");
+            var source = Format.Text(connection, "source");
+            var body = new StackPanel { Spacing = Theme.SpaceM };
+            var identity = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceM };
+            identity.Children.Add(new Border
+            {
+                Width = 38,
+                Height = 38,
+                CornerRadius = new CornerRadius(11),
+                Background = Theme.AccentSoftBrush,
+                Child = new SymbolIcon { Symbol = Symbol.Switch, Foreground = Theme.AccentBrush },
+            });
+            var words = new StackPanel { Spacing = 2 };
+            words.Children.Add(new TextBlock
+            {
+                Text = state == "ready" && !string.IsNullOrEmpty(login) ? "@" + login : "Not connected",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            });
+            words.Children.Add(new TextBlock
+            {
+                Text = "github.com · " + PullSourceLabel(source),
+                FontSize = 12,
+                Opacity = 0.68,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            identity.Children.Add(words);
+            body.Children.Add(identity);
+            body.Children.Add(new TextBlock
+            {
+                Text = source switch
+                {
+                    "tokenstat" => "Connected with the tokenstat GitHub App. Pull requests are limited to repositories you choose on GitHub.",
+                    "gitCredential" or "environment" => "Pull requests work through a credential owned by another tool. Connect the tokenstat GitHub App to choose exactly which repositories tokenstat may access.",
+                    "pasted" => "A token saved by tokenstat is active. You can replace it with the tokenstat GitHub App and selected-repository access.",
+                    _ => "Connect the tokenstat GitHub App, then choose the repositories tokenstat may open.",
+                },
+                FontSize = 12,
+                Opacity = 0.68,
+                TextWrapping = TextWrapping.Wrap,
+            });
+            if (source != "tokenstat")
+            {
+                body.Children.Add(ActionIconGlyph.PrimaryButton(
+                    "Connect tokenstat GitHub App",
+                    ActionIcon.Connect,
+                    async (_, _) => await StartPullLoginAsync()));
+            }
+            else
+            {
+                body.Children.Add(ActionIconGlyph.Button(
+                    "Choose repositories",
+                    ActionIcon.External,
+                    (_, _) => Open("https://github.com/apps/tokenstat/installations/new")));
+            }
+            if (source is "tokenstat" or "pasted")
+            {
+                body.Children.Add(ActionIconGlyph.Button("Sign out", ActionIcon.SignOut, async (_, _) =>
+                {
+                    var dialog = new ContentDialog
+                    {
+                        Title = "Sign out of GitHub pull requests?",
+                        Content = "The GitHub token saved by tokenstat will be removed. A credential already managed by git or your login environment may still be used.",
+                        PrimaryButtonText = "Sign out",
+                        CloseButtonText = "Cancel",
+                        DefaultButton = ContentDialogButton.Close,
+                    };
+                    if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary) return;
+                    try
+                    {
+                        await AppServices.Host.CallAsync(
+                            "pulls.signOut",
+                            new JsonObject { ["host"] = Format.Text(connection, "host", "github.com") });
+                        await LoadAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+                    }
+                }));
+            }
+            return Chrome.Card(
+                "GitHub pull requests",
+                body,
+                "Checked only when you open pull requests or this Account screen");
+        }
+        catch (Exception ex)
+        {
+            return Chrome.Card(
+                "GitHub pull requests",
+                Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important),
+                "The connection could not be checked");
+        }
+    }
+
+    private static string PullSourceLabel(string source) => source switch
+    {
+        "gitCredential" => "using the credential git already has",
+        "environment" => "using GH_TOKEN or GITHUB_TOKEN from your login environment",
+        "pasted" => "using a token saved by tokenstat",
+        "tokenstat" => "connected through tokenstat",
+        _ => "no GitHub credential found",
+    };
+
+    private async Task StartPullLoginAsync()
+    {
+        _pullPoll?.Cancel();
+        try
+        {
+            var started = await AppServices.Host.CallAsync(
+                "pulls.signIn",
+                new JsonObject { ["host"] = "github.com" });
+            var url = Format.Text(started, "openUrl");
+            var code = Format.Text(started, "userCode");
+            if (!string.IsNullOrEmpty(url)) Open(url);
+
+            var content = new StackPanel { Spacing = Theme.SpaceM };
+            content.Children.Add(new TextBlock
+            {
+                Text = "Enter this one-time code in the GitHub page that just opened.",
+                TextWrapping = TextWrapping.Wrap,
+                Opacity = 0.72,
+            });
+            content.Children.Add(new Border
+            {
+                Background = Theme.AccentSoftBrush,
+                BorderBrush = Theme.AccentBrush,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(Theme.SpaceL, Theme.SpaceM, Theme.SpaceL, Theme.SpaceM),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = new TextBlock
+                {
+                    Text = code,
+                    FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+                    FontSize = 25,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    CharacterSpacing = 120,
+                    Foreground = Theme.AccentBrush,
+                    IsTextSelectionEnabled = true,
+                },
+            });
+            var waiting = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+            waiting.Children.Add(new ProgressRing { Width = 18, Height = 18, IsActive = true });
+            waiting.Children.Add(new TextBlock
+            {
+                Text = "Waiting for GitHub…",
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0.72,
+            });
+            content.Children.Add(waiting);
+
+            var dialog = new ContentDialog
+            {
+                Title = "Connect tokenstat GitHub App",
+                Content = content,
+                CloseButtonText = "Cancel",
+            };
+            _pullPoll = new CancellationTokenSource();
+            var token = _pullPoll.Token;
+            var confirmed = false;
+
+            async Task PollAsync()
+            {
+                var interval = Math.Max(1, Format.Long(started, "interval"));
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(interval), token);
+                    var polled = await AppServices.Host.CallAsync("pulls.signInPoll", new JsonObject());
+                    if (Format.Text(polled, "state") == "confirmed")
+                    {
+                        confirmed = true;
+                        dialog.Hide();
+                        return;
+                    }
+                    var next = Format.Long(polled, "interval");
+                    if (next > 0) interval = next;
+                }
+            }
+
+            var polling = PollAsync();
+            await Chrome.ShowDialog(this, dialog);
+            _pullPoll.Cancel();
+            try { await polling; }
+            catch (OperationCanceledException) { }
+            if (!confirmed)
+            {
+                await AppServices.Host.CallAsync("pulls.cancelSignIn", new JsonObject());
+            }
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _root.Children.Insert(0, Chrome.Banner(ex.Message, Theme.Warning, Symbol.Important));
+        }
     }
 
     private UIElement UpdateCard()

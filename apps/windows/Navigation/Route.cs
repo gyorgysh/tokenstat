@@ -27,6 +27,7 @@ internal enum WorkspaceSection
 {
     Sessions,
     Changes,
+    Pulls,
     Todo,
     Notes,
     Workflows,
@@ -77,6 +78,7 @@ internal static class Sections
     {
         WorkspaceSection.Sessions => "Sessions",
         WorkspaceSection.Changes => "Changes",
+        WorkspaceSection.Pulls => "Pull requests",
         WorkspaceSection.Todo => "Tasks",
         WorkspaceSection.Notes => "Notes",
         WorkspaceSection.Workflows => "Workflows",

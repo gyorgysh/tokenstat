@@ -32,6 +32,20 @@ pub enum Availability {
     },
 }
 
+/// The forge identity shown in Account, independent of any one repository.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+pub enum ForgeConnection {
+    SignedOut {
+        host: String,
+    },
+    Ready {
+        host: String,
+        login: String,
+        source: CredentialSource,
+    },
+}
+
 /// Which relationship to the signed-in account narrows the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -5,7 +5,7 @@ and MCP server, which develop together under one version number. Stable
 releases currently contain every CLI target and the macOS desktop app; Windows
 desktop and Android builds remain previews. Newest first.
 
-## [0.7.3] - 2026-08-28
+## [0.7.3] - Unreleased
 
 ### Added
 
@@ -18,6 +18,28 @@ desktop and Android builds remain previews. Newest first.
   of the three answered is always visible. Selecting the repositories tokenstat
   may open happens on GitHub, and a workspace whose repository is not selected
   says exactly that rather than showing an empty list.
+- Pull requests continue into a complete native review workspace. Browse open,
+  merged, closed and draft work by relationship; read Markdown conversations
+  and review activity; inspect multi-file diffs and checks; comment, approve or
+  request changes; mark a draft ready; close, reopen, merge, or safely check a
+  pull request out as a local branch. Network reads stay cached and every
+  repository-changing operation follows an explicit labelled press.
+- The workspace branch chip searches, switches and creates branches, including
+  a clear distinction between local and remote-tracking branches.
+- Sidebar badges show cached open pull-request counts without making a request
+  while drawing navigation. Account names the GitHub host, account, and exact
+  credential source in use; it always offers an explicit tokenstat GitHub App
+  connection even when a credential borrowed from git already works, then
+  exposes repository selection and sign-out for the app-owned grant.
+- The Windows preview gains the pull-request list, conversation, lazy diff,
+  checks, review actions, connection status, and branch controls in WinUI.
+
+### Changed
+
+- Pull-request list and detail screens use the same fixed app chrome as the
+  rest of the Mac: folder scope and sidebar control on the left, contextual
+  actions and the inspector toggle at the far right. WinUI's native accent,
+  focus and action controls use tokenstat violet instead of the system blue.
 
 ## [0.7.2] - 2026-08-28
 

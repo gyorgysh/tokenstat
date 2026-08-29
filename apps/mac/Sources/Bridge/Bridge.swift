@@ -1384,6 +1384,13 @@ extension Bridge {
         )
     }
 
+    static func pullConnection(host: String = "github.com") async throws -> PullForgeConnection {
+        try await background(
+            "pulls.connection", ["host": host],
+            patience: Patience.interactive, as: PullForgeConnection.self
+        )
+    }
+
     static func pollPullLogin() async throws -> PullDevicePoll {
         try await background(
             "pulls.signInPoll",

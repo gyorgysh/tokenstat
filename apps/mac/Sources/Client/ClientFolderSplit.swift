@@ -19,6 +19,7 @@ struct ClientFolderSplit: View {
     @State private var section: WorkspaceSection = .sessions
     @State private var live: WorkspaceFolder?
     @State private var counts = WorkspaceSectionCounts()
+    @State private var pullCounts = PullCountStore.shared
     @State private var errorMessage: String?
     @State private var showPort = false
     @State private var portText = "5173"
@@ -152,7 +153,9 @@ struct ClientFolderSplit: View {
         switch section {
         case .sessions: return counts.sessions
         case .changes: return counts.changes
-        case .pulls: return nil
+        case .pulls: return counts.pulls > 0
+            ? counts.pulls
+            : pullCounts.count(workspaceID: workspaceID, peer: peer)
         case .todo: return counts.todo
         case .workflows: return counts.workflows
         case .automations: return counts.automations
@@ -204,6 +207,7 @@ struct ClientFolderSplit: View {
         counts = WorkspaceSectionCounts(
             sessions: summary.sessions,
             changes: summary.changed ?? current.git?.files.count ?? 0,
+            pulls: summary.pulls ?? pullCounts.count(workspaceID: workspaceID, peer: peer) ?? 0,
             todo: summary.tasks,
             notes: summary.notes ?? 0,
             automations: summary.automations,
@@ -272,7 +276,13 @@ struct ClientWorkspaceSectionDetail: View {
                 hostName: hostName
             )
         case .pulls:
-            PullsView(workspaceID: workspaceID, peer: peer, connectionHostName: hostName)
+            PullsView(
+                workspaceID: workspaceID,
+                peer: peer,
+                connectionHostName: hostName,
+                workspaceName: folder.name,
+                workspaceIsRemote: true
+            )
         case .todo:
             ClientWorkspaceTasksView(
                 peer: peer,

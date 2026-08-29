@@ -248,6 +248,7 @@ public sealed partial class MainWindow : Window
                     WorkspaceSection.Notes => new NotesPage(id),
                     WorkspaceSection.Workflows => new WorkflowsPage(id),
                     WorkspaceSection.Automations => new AutomationsPage(id),
+                    WorkspaceSection.Pulls => new PullsPage(id),
                     _ => new WorkspacePage(id, section),
                 };
             }

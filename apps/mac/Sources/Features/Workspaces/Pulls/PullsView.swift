@@ -3,6 +3,29 @@
 import Observation
 import SwiftUI
 
+/// Open-list counts already seen by this app process. Sidebar badges read this
+/// synchronously; writing it never performs a request.
+@MainActor @Observable
+final class PullCountStore {
+    static let shared = PullCountStore()
+    private var values: [String: Int] = [:]
+
+    func count(workspaceID: String, peer: String? = nil) -> Int? {
+        values[key(workspaceID: workspaceID, peer: peer)]
+    }
+
+    func count(key: String) -> Int? { values[key] }
+
+    func set(_ count: Int, workspaceID: String, peer: String?) {
+        values[key(workspaceID: workspaceID, peer: peer)] = count
+    }
+
+    private func key(workspaceID: String, peer: String?) -> String {
+        guard let peer, !workspaceID.hasPrefix("remote:") else { return workspaceID }
+        return "remote:\(peer):\(workspaceID)"
+    }
+}
+
 /// Connection boundary for the pull-request workspace.
 ///
 /// The same view ships on Mac, iPhone and iPad. A phone reads availability
@@ -12,6 +35,10 @@ struct PullsView: View {
     let workspaceID: String
     var peer: String? = nil
     var connectionHostName: String? = nil
+    /// The folder named in the shared Mac chrome. Clients already name it in
+    /// their navigation stack, so this stays optional for those call sites.
+    var workspaceName: String? = nil
+    var workspaceIsRemote = false
 
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -27,19 +54,29 @@ struct PullsView: View {
                     workspaceID: workspaceID,
                     peer: peer,
                     summary: selectedPull,
+                    scope: scopeChip,
                     onBack: { self.selectedPull = nil }
                 )
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: Theme.Space.l) {
-                        heading
-                        content
+                VStack(spacing: 0) {
+                    #if os(macOS)
+                    DetailChromeBar(scope: scopeChip) {
+                        if model.availability?.state == "ready" {
+                            refreshButton
+                        }
                     }
-                    .frame(maxWidth: 760, alignment: .leading)
-                    .padding(Theme.Space.xl)
-                    .frame(maxWidth: .infinity, alignment: .top)
+                    #endif
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: Theme.Space.l) {
+                            heading
+                            content
+                        }
+                        .frame(maxWidth: 760, alignment: .leading)
+                        .padding(Theme.Space.xl)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                    }
+                    .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
                 }
-                .refreshable { await model.load(workspaceID: workspaceID, peer: peer, refresh: true) }
             }
         }
         .background(Theme.background)
@@ -51,6 +88,30 @@ struct PullsView: View {
             Task { await model.loadList(workspaceID: workspaceID, peer: peer) }
         }
         .sheet(isPresented: loginPresented) { loginSheet }
+    }
+
+    private var scopeChip: ScopeChip? {
+        guard let workspaceName, !workspaceName.isEmpty else { return nil }
+        return ScopeChip(
+            label: workspaceName,
+            symbol: workspaceIsRemote ? "network" : "folder.fill"
+        )
+    }
+
+    private var refreshButton: some View {
+        ToolbarIconButton(
+            systemImage: "arrow.clockwise",
+            help: "Refresh pull requests",
+            isBusy: model.isLoadingList
+        ) {
+            Task {
+                await model.loadList(
+                    workspaceID: workspaceID,
+                    peer: peer,
+                    refresh: true
+                )
+            }
+        }
     }
 
     private var loginPresented: Binding<Bool> {
@@ -81,21 +142,9 @@ struct PullsView: View {
                 if model.isLoading && model.availability == nil {
                     ProgressView().controlSize(.small)
                 }
-                if model.availability?.state == "ready" {
-                    ToolbarIconButton(
-                        systemImage: "arrow.clockwise",
-                        help: "Refresh pull requests",
-                        isBusy: model.isLoadingList
-                    ) {
-                        Task {
-                            await model.loadList(
-                                workspaceID: workspaceID,
-                                peer: peer,
-                                refresh: true
-                            )
-                        }
-                    }
-                }
+                #if !os(macOS)
+                if model.availability?.state == "ready" { refreshButton }
+                #endif
             }
             Rectangle()
                 .fill(Theme.border)
@@ -734,6 +783,9 @@ private final class PullsModel {
             )
             guard generation == listGeneration else { return }
             rows = loaded
+            if requestedScope == .all, requestedState == .open {
+                PullCountStore.shared.set(loaded.count, workspaceID: workspaceID, peer: peer)
+            }
         } catch {
             guard generation == listGeneration else { return }
             listError = error.localizedDescription

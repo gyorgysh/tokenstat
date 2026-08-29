@@ -1959,6 +1959,7 @@ fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> Work
             })
             .count(),
         changed: described.git.as_ref().map(|g| g.files.len()),
+        pulls: crate::pulls::cached_open_count(&ws.id),
         tasks: live
             .cards
             .iter()

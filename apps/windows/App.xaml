@@ -9,6 +9,16 @@
             </ResourceDictionary.MergedDictionaries>
             <SolidColorBrush x:Key="AccentBrush" Color="#6A3DFF" />
             <SolidColorBrush x:Key="AccentDarkBrush" Color="#8B5CF6" />
+            <!-- Keep native focus, selection and toggle chrome in the same
+                 violet family as the surfaces drawn in code. Without these,
+                 WinUI quietly falls back to the Windows blue accent. -->
+            <Color x:Key="SystemAccentColor">#6A3DFF</Color>
+            <Color x:Key="SystemAccentColorLight1">#8B5CF6</Color>
+            <Color x:Key="SystemAccentColorLight2">#A78BFA</Color>
+            <Color x:Key="SystemAccentColorLight3">#C4B5FD</Color>
+            <Color x:Key="SystemAccentColorDark1">#5930DC</Color>
+            <Color x:Key="SystemAccentColorDark2">#4724B8</Color>
+            <Color x:Key="SystemAccentColorDark3">#351A8D</Color>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

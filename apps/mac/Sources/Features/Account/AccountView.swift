@@ -18,6 +18,13 @@ struct AccountView: View {
     @State private var deletionURL: URL?
     #if os(macOS)
     @State private var localModels = LocalModelsModel()
+    @State private var forgeConnection: PullForgeConnection?
+    @State private var forgeLogin: PullDeviceLogin?
+    @State private var forgeError: String?
+    @State private var forgeLoginError: String?
+    @State private var forgeBusy = false
+    @State private var forgeConnecting = false
+    @State private var confirmingForgeSignOut = false
     #endif
 
     var body: some View {
@@ -59,6 +66,7 @@ struct AccountView: View {
                     }
 
                     #if os(macOS)
+                    forgeCard
                     hostCard
                     terminalCard
                     localModelsCard
@@ -76,6 +84,11 @@ struct AccountView: View {
         .sheet(isPresented: $showLicenses) {
             LicensesSheet()
         }
+        #if os(macOS)
+        .sheet(isPresented: forgeLoginPresented) {
+            forgeLoginSheet
+        }
+        #endif
         #if os(iOS)
         // App Store Guideline 5.1.1(v) wants deletion available inside the
         // app. The website's own data settings page in an in-app browser lets the
@@ -92,7 +105,12 @@ struct AccountView: View {
                                : (model.syncNoticeIsError ? .danger : .success))
                 .padding(Theme.Space.l)
         }
-        .task { if model.account == nil { await model.load() } }
+        .task {
+            if model.account == nil { await model.load() }
+            #if os(macOS)
+            await loadForgeConnection()
+            #endif
+        }
     }
 
     private var signedOut: some View {
@@ -604,6 +622,242 @@ struct AccountView: View {
             await localModels.load()
         }
     }
+
+    private var forgeCard: some View {
+        Card(
+            title: "GitHub pull requests",
+            subtitle: "Checked only when you open pull requests or this Account screen",
+            mark: "mark_account"
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.m) {
+                if let forgeError {
+                    Text(FriendlyError.from(forgeError).message)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.warning)
+                }
+                if let forgeConnection {
+                    HStack(alignment: .center, spacing: Theme.Space.m) {
+                        ActionSeat(icon: .account, size: 36)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(forgeConnection.login.map { "@\($0)" } ?? "Not connected")
+                                .font(Theme.callout.weight(.semibold))
+                            Text(forgeConnectionDetail(forgeConnection))
+                                .font(Theme.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    Text(forgeConnectionMessage(forgeConnection))
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if forgeConnection.source != "tokenstat" {
+                        Button {
+                            Task { await beginForgeLogin() }
+                        } label: {
+                            ActionIcon.connect.label(
+                                forgeConnecting ? "Opening GitHub…" : "Connect tokenstat GitHub App"
+                            )
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .disabled(forgeConnecting || forgeBusy)
+                    }
+                    HStack(spacing: Theme.Space.s) {
+                        if forgeConnection.source == "tokenstat" {
+                            Button("Choose repositories", .external) {
+                                openURL(Self.githubInstallationURL)
+                            }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                        }
+                        Button("Refresh", .refresh) { Task { await loadForgeConnection() } }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                            .disabled(forgeBusy)
+                        if canSignOutForge(forgeConnection) {
+                            Button("Sign out", .signOut) { confirmingForgeSignOut = true }
+                                .buttonStyle(SecondaryButtonStyle(small: true))
+                                .disabled(forgeBusy)
+                        }
+                    }
+                } else if forgeError == nil {
+                    HStack(spacing: Theme.Space.s) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking the GitHub connection…")
+                            .font(Theme.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Sign out of GitHub pull requests?",
+            isPresented: $confirmingForgeSignOut,
+            titleVisibility: .visible
+        ) {
+            Button("Sign out", role: .destructive) { Task { await signOutForge() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The GitHub token saved by tokenstat will be removed. A credential already managed by git or your login environment may still be used.")
+        }
+    }
+
+    private func loadForgeConnection() async {
+        guard !forgeBusy else { return }
+        forgeBusy = true
+        forgeError = nil
+        defer { forgeBusy = false }
+        do {
+            forgeConnection = try await Bridge.pullConnection()
+        } catch {
+            forgeError = error.localizedDescription
+        }
+    }
+
+    private func signOutForge() async {
+        guard let connection = forgeConnection else { return }
+        forgeBusy = true
+        forgeError = nil
+        defer { forgeBusy = false }
+        do {
+            try await Bridge.signOutPulls(host: connection.host)
+            forgeConnection = try await Bridge.pullConnection(host: connection.host)
+        } catch {
+            forgeError = error.localizedDescription
+        }
+    }
+
+    private var forgeLoginPresented: Binding<Bool> {
+        Binding(
+            get: { forgeLogin != nil },
+            set: { presented in
+                if !presented { Task { await cancelForgeLogin() } }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var forgeLoginSheet: some View {
+        if let login = forgeLogin {
+            VStack(spacing: Theme.Space.l) {
+                ZStack {
+                    Circle().fill(Theme.accent.opacity(0.10)).frame(width: 82, height: 82)
+                    Image(systemName: "link")
+                        .font(Theme.fixed(26, weight: .light))
+                        .foregroundStyle(Theme.accent)
+                }
+                VStack(spacing: Theme.Space.xs) {
+                    Text("Connect tokenstat GitHub App")
+                        .font(Theme.title2.weight(.semibold))
+                    Text("Enter this one-time code in the GitHub page that just opened.")
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                Text(login.userCode)
+                    .font(Theme.monoText(30, weight: .semibold, relativeTo: .title))
+                    .tracking(2)
+                    .foregroundStyle(Theme.accent)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, Theme.Space.l)
+                    .frame(height: 58)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(0.3)))
+                HStack(spacing: Theme.Space.s) {
+                    ProgressView().controlSize(.small)
+                    Text("Waiting for GitHub…")
+                        .font(Theme.callout)
+                        .foregroundStyle(.secondary)
+                }
+                if let forgeLoginError {
+                    Text(FriendlyError.from(forgeLoginError).message)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.danger)
+                        .multilineTextAlignment(.center)
+                }
+                Button("Cancel", .disconnect) { Task { await cancelForgeLogin() } }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(Theme.Space.xl)
+            .frame(minWidth: 340, idealWidth: 420)
+            .background(Theme.panel)
+            .task(id: login.userCode) { await pollForgeLogin() }
+        }
+    }
+
+    private func beginForgeLogin() async {
+        guard !forgeConnecting else { return }
+        forgeConnecting = true
+        forgeError = nil
+        forgeLoginError = nil
+        defer { forgeConnecting = false }
+        do {
+            let login = try await Bridge.startPullLogin()
+            forgeLogin = login
+            if let url = URL(string: login.openUrl) { openURL(url) }
+        } catch {
+            forgeError = error.localizedDescription
+        }
+    }
+
+    private func pollForgeLogin() async {
+        while let login = forgeLogin, !Task.isCancelled {
+            do {
+                try await Task.sleep(for: .seconds(Double(max(login.interval, 1))))
+                let result = try await Bridge.pollPullLogin()
+                if result.state == "confirmed" {
+                    forgeLogin = nil
+                    forgeConnection = try await Bridge.pullConnection(host: login.host)
+                    return
+                }
+                if let interval = result.interval {
+                    forgeLogin?.interval = interval
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                forgeLoginError = error.localizedDescription
+                return
+            }
+        }
+    }
+
+    private func cancelForgeLogin() async {
+        forgeLogin = nil
+        forgeLoginError = nil
+        await Bridge.cancelPullLogin()
+    }
+
+    private func canSignOutForge(_ connection: PullForgeConnection) -> Bool {
+        connection.source == "tokenstat" || connection.source == "pasted"
+    }
+
+    private func forgeConnectionDetail(_ connection: PullForgeConnection) -> String {
+        let source = switch connection.source {
+        case "gitCredential": "Using the credential git already has"
+        case "environment": "Using GH_TOKEN or GITHUB_TOKEN from your login environment"
+        case "pasted": "Using a token saved by tokenstat"
+        case "tokenstat": "Connected through tokenstat"
+        default: "No GitHub credential found"
+        }
+        return "\(connection.host) · \(source)"
+    }
+
+    private func forgeConnectionMessage(_ connection: PullForgeConnection) -> String {
+        switch connection.source {
+        case "tokenstat":
+            return "Connected with the tokenstat GitHub App. Pull requests are limited to repositories you choose on GitHub."
+        case "gitCredential", "environment":
+            return "Pull requests work through a credential owned by another tool. Connect the tokenstat GitHub App to choose exactly which repositories tokenstat may access."
+        case "pasted":
+            return "A token saved by tokenstat is active. You can replace it with the tokenstat GitHub App and selected-repository access."
+        default:
+            return "Connect the tokenstat GitHub App, then choose the repositories tokenstat may open."
+        }
+    }
+
+    private static let githubInstallationURL = URL(
+        string: "https://github.com/apps/tokenstat/installations/new"
+    )!
 
     private func localProviderRow(_ provider: LocalProvider) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.xs) {

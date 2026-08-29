@@ -88,6 +88,11 @@ internal static class ActionIconGlyph
     {
         var btn = new Button
         {
+            Background = Theme.AccentSoftBrush,
+            Foreground = Theme.AccentBrush,
+            BorderBrush = Theme.Brush(Theme.Accent),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
             Content = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
@@ -101,5 +106,15 @@ internal static class ActionIconGlyph
         };
         btn.Click += click;
         return btn;
+    }
+
+    public static Button PrimaryButton(string title, ActionIcon icon, RoutedEventHandler click)
+    {
+        var button = Button(title, icon, click);
+        button.Background = Theme.AccentBrush;
+        button.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+            Microsoft.UI.Colors.White);
+        button.BorderBrush = Theme.AccentBrush;
+        return button;
     }
 }

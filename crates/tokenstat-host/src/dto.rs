@@ -485,6 +485,10 @@ pub struct WorkspaceSummaryDto {
     /// Files git reports as changed. Absent rather than zero when the folder
     /// is missing, so "we did not look" is not drawn as "nothing changed".
     pub changed: Option<usize>,
+    /// Open pull requests, only when the forge list is already cached. A
+    /// summary must never turn drawing the sidebar into a network request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pulls: Option<usize>,
     /// Cards that are neither done nor archived. Work left, not work logged.
     ///
     /// Notes are not tasks and are counted separately, below.

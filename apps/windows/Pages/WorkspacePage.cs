@@ -232,6 +232,11 @@ internal sealed class WorkspacePage : Page
             ?? status as JsonArray;
         var branch = Format.Text(git, "branch", Format.Text(status, "branch"));
 
+        if (!string.IsNullOrEmpty(branch))
+        {
+            _root.Children.Add(await BranchBarAsync(branch));
+        }
+
         var commitBox = new TextBox
         {
             PlaceholderText = "Commit message",
@@ -315,6 +320,81 @@ internal sealed class WorkspacePage : Page
             list.Children.Add(line);
         }
         _root.Children.Add(Chrome.Card("Changes", list));
+    }
+
+    private async Task<UIElement> BranchBarAsync(string current)
+    {
+        var branches = await AppServices.Host.CallAsync(
+            "workspace.branches",
+            new JsonObject { ["id"] = _id });
+        var items = branches as JsonArray ?? new JsonArray();
+        var choices = new List<(string Name, bool Remote)>();
+        foreach (var item in items)
+        {
+            if (item is null) continue;
+            var name = Format.Text(item, "name");
+            if (!string.IsNullOrEmpty(name)) choices.Add((name, Format.Flag(item, "remote")));
+        }
+        var picker = new ComboBox
+        {
+            MinWidth = 240,
+            ItemsSource = choices.Select(choice => choice.Remote ? choice.Name + " · remote" : choice.Name),
+            SelectedIndex = Math.Max(0, choices.FindIndex(choice => choice.Name == current)),
+        };
+        var ready = false;
+        picker.SelectionChanged += async (_, _) =>
+        {
+            if (!ready || picker.SelectedIndex < 0 || picker.SelectedIndex >= choices.Count) return;
+            var choice = choices[picker.SelectedIndex];
+            if (choice.Name == current) return;
+            await GitwriteAsync("workspace.checkout", new JsonObject
+            {
+                ["id"] = _id,
+                ["branch"] = choice.Name,
+                ["remote"] = choice.Remote,
+            });
+            await LoadAsync();
+        };
+        ready = true;
+
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        row.Children.Add(new SymbolIcon
+        {
+            Symbol = Symbol.Switch,
+            Foreground = Theme.AccentBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(picker);
+        row.Children.Add(ActionIconGlyph.Button("New branch", ActionIcon.Create, async (_, _) =>
+        {
+            var name = new TextBox { PlaceholderText = "feature/name", MinWidth = 280 };
+            var dialog = new ContentDialog
+            {
+                Title = $"New branch from {current}",
+                Content = name,
+                PrimaryButtonText = "Create branch",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+            };
+            if (await Chrome.ShowDialog(this, dialog) != ContentDialogResult.Primary
+                || string.IsNullOrWhiteSpace(name.Text)) return;
+            await GitwriteAsync("workspace.createBranch", new JsonObject
+            {
+                ["id"] = _id,
+                ["branch"] = name.Text.Trim(),
+                ["from"] = current,
+            });
+            await LoadAsync();
+        }));
+        return new Border
+        {
+            Background = Theme.AccentSoftBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(Theme.CardRadius),
+            Padding = new Thickness(Theme.SpaceM),
+            Child = row,
+        };
     }
 
     private async Task GitwriteAsync(string method, JsonObject parameters)

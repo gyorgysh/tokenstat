@@ -13,8 +13,8 @@ pub use auth::{
     device_poll, device_start, set_token, sign_out,
 };
 pub use model::{
-    Availability, CheckState, MergeMethod, PullActor, PullCheck, PullDetail, PullFile, PullReview,
-    PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage, Verdict,
+    Availability, CheckState, ForgeConnection, MergeMethod, PullActor, PullCheck, PullDetail,
+    PullFile, PullReview, PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage, Verdict,
 };
 pub use write::{close, comment, merge, ready, reopen, review};
 
@@ -279,6 +279,41 @@ pub fn availability(repo: &Repo) -> Result<Availability, ForgeError> {
         }
         result => result.map_err(Into::into),
     }
+}
+
+/// Resolve the forge account and credential source without choosing a repo.
+/// Account calls this when its screen opens; it is never polled.
+pub fn connection(host: &str) -> Result<ForgeConnection, ForgeError> {
+    let repo = Repo {
+        host: host.to_string(),
+        owner: String::new(),
+        repo: String::new(),
+    };
+    let Some(credential) = credential(host) else {
+        return Ok(ForgeConnection::SignedOut {
+            host: host.to_string(),
+        });
+    };
+    match connection_once(&repo, &credential) {
+        Err(HttpFailure::Unauthorized) if credential.source() == CredentialSource::Tokenstat => {
+            let refreshed = auth::refresh_stored(host)?;
+            connection_once(&repo, &refreshed).map_err(Into::into)
+        }
+        result => result.map_err(Into::into),
+    }
+}
+
+fn connection_once(repo: &Repo, credential: &Credential) -> Result<ForgeConnection, HttpFailure> {
+    #[derive(serde::Deserialize)]
+    struct User {
+        login: String,
+    }
+    let user: User = get_json(repo, "/user", credential)?;
+    Ok(ForgeConnection::Ready {
+        host: repo.host.clone(),
+        login: user.login,
+        source: credential.source(),
+    })
 }
 
 fn availability_once(repo: &Repo, credential: &Credential) -> Result<Availability, HttpFailure> {

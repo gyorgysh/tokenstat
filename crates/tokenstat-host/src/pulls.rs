@@ -49,6 +49,23 @@ fn list_cache() -> &'static Mutex<HashMap<ListKey, ListEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// The complete open list already fetched for this workspace, if one is still
+/// fresh. Sidebar summaries call this instead of making a forge request.
+pub(crate) fn cached_open_count(workspace_id: &str) -> Option<usize> {
+    list_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .filter(|(key, entry)| {
+            key.workspace_id == workspace_id
+                && key.scope == tokenstat_sync::forge::Scope::All
+                && key.state == tokenstat_sync::forge::State::Open
+                && entry.at.elapsed() < Duration::from_secs(60)
+        })
+        .max_by_key(|(_, entry)| entry.at)
+        .map(|(_, entry)| entry.rows.len())
+}
+
 fn clear_list_cache() {
     list_cache()
         .lock()
@@ -157,6 +174,14 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
     let p: Params = serde_json::from_str(params.trim()).map_err(|error| error.to_string())?;
     match method {
         "pulls.availability" => availability(&p.workspace_id),
+        "pulls.connection" => {
+            local_credentials_only()?;
+            serde_json::to_value(
+                tokenstat_sync::forge::connection(host_or_default(&p.host))
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())
+        }
         "pulls.signIn" => {
             local_credentials_only()?;
             let host = host_or_default(&p.host);

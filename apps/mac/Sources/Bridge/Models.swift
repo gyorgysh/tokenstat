@@ -1992,6 +1992,13 @@ struct PullWriteResult: Codable, Sendable, Hashable {
     var ok: Bool
 }
 
+struct PullForgeConnection: Codable, Sendable, Hashable {
+    var state: String
+    var host: String
+    var login: String?
+    var source: String?
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String
@@ -2207,6 +2214,8 @@ struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
     /// Nil when the folder is missing, so "we did not look" is not drawn as
     /// "nothing changed".
     var changed: Int?
+    /// Open pull requests only when an All/Open list is already cached.
+    var pulls: Int?
     var tasks: Int
     /// Notes kept here, archived ones excluded. Optional because a host older
     /// than this field answers without it, and a row that says nothing is
