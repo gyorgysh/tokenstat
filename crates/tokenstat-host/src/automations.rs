@@ -389,6 +389,14 @@ pub fn agent_command(
     Ok(args)
 }
 
+/// Chat-only execution choices. Keeping these together avoids an ever-growing
+/// command constructor as the chat contract gains capabilities.
+pub struct ChatLaunch<'a> {
+    pub resume: Option<&'a str>,
+    pub bypass: bool,
+    pub attachments: &'a [std::path::PathBuf],
+}
+
 /// Headless argv for a chat turn. Unlike an automation, a chat retains the
 /// backend session token after every turn and gives it back on the next one.
 /// Keep the backend-specific resume spelling beside `agent_command`: the two
@@ -399,8 +407,7 @@ pub fn chat_agent_command(
     model: Option<&str>,
     effort: Option<&str>,
     budget_seconds: u64,
-    resume: Option<&str>,
-    bypass: bool,
+    launch: ChatLaunch<'_>,
 ) -> Result<Vec<String>, String> {
     let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
     // Automations are an explicit background action and retain their existing
@@ -408,7 +415,7 @@ pub fn chat_agent_command(
     // approval channel decides otherwise, it must not inherit those flags.
     // Removing them means a CLI that cannot prompt headlessly fails closed
     // instead of silently editing the workspace.
-    if !bypass {
+    if !launch.bypass {
         match backend {
             "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
@@ -420,7 +427,22 @@ pub fn chat_agent_command(
             _ => {}
         }
     }
-    let Some(token) = resume.filter(|token| !token.trim().is_empty()) else {
+    // These two CLIs accept image files natively. The other backends receive
+    // the staged paths in the prompt, which lets their normal Read tool make
+    // the same files available without pretending they have image support.
+    if matches!(backend, "codex" | "opencode" | "opencode2") {
+        let flag = if backend == "codex" { "-i" } else { "-f" };
+        let at = argv
+            .iter()
+            .position(|arg| arg == "--")
+            .unwrap_or(argv.len());
+        let flags = launch
+            .attachments
+            .iter()
+            .flat_map(|path| [flag.to_string(), path.display().to_string()]);
+        argv.splice(at..at, flags);
+    }
+    let Some(token) = launch.resume.filter(|token| !token.trim().is_empty()) else {
         return Ok(argv);
     };
     match backend {
@@ -2035,8 +2057,11 @@ mod tests {
             None,
             None,
             DEFAULT_BUDGET_SECONDS,
-            None,
-            false,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                attachments: &[],
+            },
         )
         .unwrap();
         assert!(
@@ -2050,8 +2075,11 @@ mod tests {
             None,
             None,
             DEFAULT_BUDGET_SECONDS,
-            None,
-            false,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                attachments: &[],
+            },
         )
         .unwrap();
         assert!(
@@ -2065,14 +2093,58 @@ mod tests {
             None,
             None,
             DEFAULT_BUDGET_SECONDS,
-            None,
-            true,
+            ChatLaunch {
+                resume: None,
+                bypass: true,
+                attachments: &[],
+            },
         )
         .unwrap();
         assert!(
             bypass
                 .iter()
                 .any(|arg| arg == "--dangerously-skip-permissions")
+        );
+    }
+
+    #[test]
+    fn chat_uses_native_image_flags_when_a_backend_has_them() {
+        let attachment = std::path::PathBuf::from("/private/tmp/diagram.png");
+        let codex = chat_agent_command(
+            "codex",
+            "look",
+            None,
+            None,
+            0,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                attachments: &[attachment.clone()],
+            },
+        )
+        .unwrap();
+        assert!(
+            codex
+                .windows(2)
+                .any(|pair| pair == ["-i", "/private/tmp/diagram.png"])
+        );
+        let opencode = chat_agent_command(
+            "opencode",
+            "look",
+            None,
+            None,
+            0,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                attachments: &[attachment],
+            },
+        )
+        .unwrap();
+        assert!(
+            opencode
+                .windows(2)
+                .any(|pair| pair == ["-f", "/private/tmp/diagram.png"])
         );
     }
 

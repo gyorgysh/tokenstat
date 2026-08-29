@@ -352,8 +352,11 @@ impl Store {
             chat.model.as_deref(),
             chat.effort.as_deref(),
             chat.budget_seconds,
-            chat.resume_token.as_deref(),
-            chat.autonomy == "bypass",
+            crate::automations::ChatLaunch {
+                resume: chat.resume_token.as_deref(),
+                bypass: chat.autonomy == "bypass",
+                attachments: &attachments,
+            },
         )?;
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
