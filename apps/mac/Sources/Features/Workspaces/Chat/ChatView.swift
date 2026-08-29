@@ -22,9 +22,9 @@ final class ChatModel {
         } catch { self.error = error.localizedDescription }
     }
 
-    func create(workspaceID: String, backend: String = "claude", mode: String = "plan") async {
+    func create(workspaceID: String, backend: String = "claude", mode: String = "plan", personaID: String? = nil) async {
         do {
-            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode)
+            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode, personaID: personaID)
             chats.insert(chat, at: 0)
             selected = chat
             events = []
@@ -101,9 +101,9 @@ struct ChatView: View {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
         .sheet(isPresented: $showingSetup) {
-            ChatSetupSheet { backend, mode in
+            ChatSetupSheet { backend, mode, personaID in
                 showingSetup = false
-                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode) }
+                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode, personaID: personaID) }
             }
         }
     }
@@ -173,10 +173,12 @@ struct ChatView: View {
 }
 
 private struct ChatSetupSheet: View {
-    let create: (String, String) -> Void
+    let create: (String, String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var backend = "claude"
     @State private var mode = "plan"
+    @State private var personas: [ChatPersona] = []
+    @State private var personaID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.l) {
@@ -193,14 +195,28 @@ private struct ChatSetupSheet: View {
                 Text("Antigravity").tag("agy")
                 Text("OpenCode").tag("opencode")
             }
+            if !personas.isEmpty {
+                Picker("Persona", selection: $personaID) {
+                    Text("No preset").tag(String?.none)
+                    ForEach(personas) { persona in
+                        Text(persona.mark.isEmpty ? persona.name : "\(persona.mark)  \(persona.name)").tag(Optional(persona.id))
+                    }
+                }
+                .onChange(of: personaID) { _, id in
+                    guard let id, let persona = personas.first(where: { $0.id == id }) else { return }
+                    backend = persona.backend
+                    mode = persona.defaultMode
+                }
+            }
             Picker("Starting mode", selection: $mode) {
                 Text("Plan — explore before changing work").tag("plan")
                 Text("Execute — work directly in the folder").tag("execute")
             }
-            HStack { Spacer(); Button("Cancel", role: .cancel) { dismiss() }; Button("Create chat") { create(backend, mode) }.buttonStyle(AccentButtonStyle()) }
+            HStack { Spacer(); Button("Cancel", role: .cancel) { dismiss() }; Button("Create chat") { create(backend, mode, personaID) }.buttonStyle(AccentButtonStyle()) }
         }
         .padding(Theme.Space.xl)
         .frame(width: 460)
+        .task { personas = (try? await Bridge.chatPersonas()) ?? [] }
     }
 }
 

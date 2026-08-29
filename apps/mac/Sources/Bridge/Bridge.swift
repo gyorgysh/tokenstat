@@ -745,7 +745,7 @@ enum Bridge {
     }
 
     static func report(group: GroupBy, query: Query = Query()) async throws -> [Bucket] {
-        try await background(
+        return try await background(
             "report",
             ["group": group.rawValue, "query": query.payload],
             as: [Bucket].self
@@ -875,11 +875,14 @@ extension Bridge {
         workspaceID: String,
         backend: String,
         title: String = "New chat",
-        mode: String = "plan"
+        mode: String = "plan",
+        personaID: String? = nil
     ) async throws -> ChatConversation {
-        try await background(
+        var params: [String: Any] = ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode]
+        if let personaID { params["personaId"] = personaID }
+        return try await background(
             "chat.create",
-            ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode],
+            params,
             as: ChatConversation.self
         )
     }
@@ -894,6 +897,10 @@ extension Bridge {
 
     static func chatEvents(id: String, offset: UInt64) async throws -> ChatEventChunk {
         try await background("chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+    }
+
+    static func chatPersonas() async throws -> [ChatPersona] {
+        try await background("chat.personas", as: [ChatPersona].self)
     }
 }
 

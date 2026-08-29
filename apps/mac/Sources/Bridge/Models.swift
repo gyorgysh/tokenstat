@@ -2294,6 +2294,18 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var running: Bool
 }
 
+struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var mark: String
+    var backend: String
+    var model: String?
+    var effort: String?
+    var systemPrompt: String
+    var defaultMode: String
+    var defaultAutonomy: String
+}
+
 struct ChatEventChunk: Codable, Sendable {
     var events: [ChatTimelineEvent]
     var nextOffset: UInt64
