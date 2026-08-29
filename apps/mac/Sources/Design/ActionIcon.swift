@@ -58,6 +58,11 @@ enum ActionIcon {
     case browser
     case collapse
     case commit
+    case merge
+    case comment
+    case reopen
+    case checkout
+    case filter
     case enterFullScreen
     case exitFullScreen
 
@@ -144,6 +149,11 @@ enum ActionIcon {
         case .enterFullScreen: return "arrow.up.left.and.arrow.down.right"
         case .exitFullScreen: return "arrow.down.right.and.arrow.up.left"
         case .commit: return "checkmark.circle"
+        case .merge: return "arrow.triangle.merge"
+        case .comment: return "bubble.left"
+        case .reopen: return "arrow.uturn.backward.circle"
+        case .checkout: return "arrow.down.to.line"
+        case .filter: return "line.3.horizontal.decrease"
 
         case .delete: return "trash"
 

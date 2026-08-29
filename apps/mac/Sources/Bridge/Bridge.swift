@@ -1319,6 +1319,62 @@ extension Bridge {
         return try await background(method, params, as: type)
     }
 
+    // These methods are deliberately separate from refreshable reads. Every
+    // call site is one labelled button press in PullDetailView.
+    static func pullComment(workspaceID: String, peer: String?, number: UInt32, body: String) async throws {
+        _ = try await pullRead(
+            workspaceID: workspaceID, peer: peer, method: "pulls.comment",
+            values: ["number": number, "body": body], as: PullWriteResult.self
+        )
+    }
+
+    static func pullReview(
+        workspaceID: String, peer: String?, number: UInt32,
+        verdict: PullReviewVerdict, body: String
+    ) async throws {
+        _ = try await pullRead(
+            workspaceID: workspaceID, peer: peer, method: "pulls.review",
+            values: ["number": number, "verdict": verdict.rawValue, "body": body],
+            as: PullWriteResult.self
+        )
+    }
+
+    static func pullReady(workspaceID: String, peer: String?, number: UInt32) async throws {
+        _ = try await pullRead(
+            workspaceID: workspaceID, peer: peer, method: "pulls.ready",
+            values: ["number": number], as: PullWriteResult.self
+        )
+    }
+
+    static func pullSetOpen(
+        workspaceID: String, peer: String?, number: UInt32, open: Bool
+    ) async throws {
+        _ = try await pullRead(
+            workspaceID: workspaceID, peer: peer,
+            method: open ? "pulls.reopen" : "pulls.close",
+            values: ["number": number], as: PullWriteResult.self
+        )
+    }
+
+    static func pullMerge(
+        workspaceID: String, peer: String?, number: UInt32, method: PullMergeMethod
+    ) async throws {
+        _ = try await pullRead(
+            workspaceID: workspaceID, peer: peer, method: "pulls.merge",
+            values: ["number": number, "mergeMethod": method.rawValue],
+            as: PullWriteResult.self
+        )
+    }
+
+    static func pullCheckout(
+        workspaceID: String, peer: String?, number: UInt32, branch: String
+    ) async throws -> GitOutcome {
+        try await pullRead(
+            workspaceID: workspaceID, peer: peer, method: "pulls.checkout",
+            values: ["number": number, "branch": branch], as: GitOutcome.self
+        )
+    }
+
     static func startPullLogin(host: String = "github.com") async throws -> PullDeviceLogin {
         try await background(
             "pulls.signIn",

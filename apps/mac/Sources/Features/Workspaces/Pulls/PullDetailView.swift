@@ -24,14 +24,16 @@ struct PullDetailView: View {
                 } else if let detail = model.detail {
                     hero(detail)
                     DetailTabs(selection: $model.tab, checks: detail.checks.count)
+                    if let notice = model.actionNotice { actionBanner(notice, tint: Theme.success, symbol: "checkmark.circle.fill") }
+                    if let error = model.actionError { actionBanner(FriendlyError.from(error).message, tint: Theme.warning, symbol: "exclamationmark.triangle.fill") }
                     ViewThatFits(in: .horizontal) {
                         HStack(alignment: .top, spacing: Theme.Space.l) {
                             selectedContent(detail).frame(maxWidth: .infinity, alignment: .topLeading)
-                            PullInspector(detail: detail).frame(width: 248)
+                            inspector(detail).frame(width: 248)
                         }
                         VStack(alignment: .leading, spacing: Theme.Space.l) {
                             selectedContent(detail)
-                            PullInspector(detail: detail)
+                            inspector(detail)
                         }
                     }
                 } else {
@@ -52,6 +54,22 @@ struct PullDetailView: View {
         }
         .refreshable {
             await model.load(workspaceID: workspaceID, peer: peer, number: summary.number, refresh: true)
+        }
+        .confirmationDialog("Close this pull request?", isPresented: $model.confirmingClose, titleVisibility: .visible) {
+            Button("Close pull request", role: .destructive) {
+                Task { await model.setOpen(false, workspaceID: workspaceID, peer: peer, number: summary.number) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Other people will see it as closed. You can reopen it later.")
+        }
+        .confirmationDialog("Merge this pull request?", isPresented: $model.confirmingMerge, titleVisibility: .visible) {
+            Button("Merge with \(model.mergeMethod.title.lowercased())") {
+                Task { await model.merge(workspaceID: workspaceID, peer: peer, number: summary.number) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This changes the shared repository and cannot be undone from tokenstat.")
         }
     }
 
@@ -149,6 +167,18 @@ struct PullDetailView: View {
         }
     }
 
+    private func inspector(_ detail: PullDetail) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            PullInspector(detail: detail)
+            PullActionPanel(
+                detail: detail,
+                model: model,
+                workspaceID: workspaceID,
+                peer: peer
+            )
+        }
+    }
+
     private func conversation(_ detail: PullDetail) -> some View {
         LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
             PullConversationCard(actor: detail.author, date: detail.createdDate) {
@@ -166,6 +196,13 @@ struct PullDetailView: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
                 .frame(maxWidth: .infinity)
             }
+            PullCommentComposer(
+                text: $model.commentDraft,
+                busy: model.actionBusy,
+                send: {
+                    Task { await model.comment(workspaceID: workspaceID, peer: peer, number: summary.number) }
+                }
+            )
         }
     }
 
@@ -259,6 +296,16 @@ struct PullDetailView: View {
             .font(Theme.callout).foregroundStyle(Theme.warning).padding(Theme.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.warning.opacity(0.09), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+    }
+    private func actionBanner(_ message: String, tint: Color, symbol: String) -> some View {
+        Label(message, systemImage: symbol)
+            .font(Theme.callout.weight(.medium))
+            .foregroundStyle(tint)
+            .padding(.horizontal, Theme.Space.m)
+            .frame(minHeight: 42)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(tint.opacity(0.16)))
     }
     private var detailSkeleton: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
@@ -418,6 +465,177 @@ private struct PullInspector: View {
     private var reviewTint: Color { switch detail.reviewDecision { case "approved": Theme.success; case "changes_requested": Theme.danger; default: Theme.warning } }
 }
 
+private struct PullCommentComposer: View {
+    @Binding var text: String
+    let busy: Bool
+    let send: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: ActionIcon.comment.symbol)
+                    .foregroundStyle(Theme.accent)
+                Text("Join the conversation")
+                    .font(Theme.callout.weight(.semibold))
+            }
+            composerField("Write a comment…", text: $text, minHeight: 92)
+            HStack {
+                Text("Markdown is supported")
+                    .font(Theme.caption2)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Button("Comment", .comment, action: send)
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || busy)
+            }
+        }
+        .padding(Theme.cardPadding)
+        .background(
+            LinearGradient(colors: [Theme.accentSoft.opacity(0.72), Theme.panel], startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: Theme.cardRadius)
+        )
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.accent.opacity(0.18)))
+    }
+}
+
+private struct PullActionPanel: View {
+    let detail: PullDetail
+    @Bindable var model: PullDetailModel
+    let workspaceID: String
+    let peer: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.m) {
+            Label("ACTIONS", systemImage: "sparkles")
+                .font(Theme.caption2.weight(.semibold))
+                .tracking(0.7)
+                .foregroundStyle(.tertiary)
+
+            if detail.state == "open" {
+                reviewActions
+                if detail.draft {
+                    Button("Ready for review", .done) {
+                        Task { await model.ready(workspaceID: workspaceID, peer: peer, number: detail.number) }
+                    }
+                    .buttonStyle(AccentButtonStyle(small: true))
+                    .disabled(model.actionBusy)
+                }
+                mergeActions
+                Button("Close pull request", .dismiss) { model.confirmingClose = true }
+                    .buttonStyle(DestructiveButtonStyle(small: true))
+                    .disabled(model.actionBusy)
+            } else if detail.state == "closed" {
+                Button("Reopen pull request", .reopen) {
+                    Task { await model.setOpen(true, workspaceID: workspaceID, peer: peer, number: detail.number) }
+                }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .disabled(model.actionBusy)
+            }
+
+            checkoutActions
+        }
+        .padding(Theme.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).strokeBorder(Theme.border))
+    }
+
+    private var reviewActions: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Review")
+                .font(Theme.caption.weight(.semibold))
+            Button("Approve", .approve) {
+                Task { await model.review(.approve, workspaceID: workspaceID, peer: peer, number: detail.number) }
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .disabled(model.actionBusy)
+            Button("Request changes", .edit) { model.beginReview(.requestChanges) }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .disabled(model.actionBusy)
+            Button("Comment review", .comment) { model.beginReview(.comment) }
+                .buttonStyle(SecondaryButtonStyle(small: true))
+                .disabled(model.actionBusy)
+            if let mode = model.reviewMode {
+                VStack(alignment: .leading, spacing: Theme.Space.s) {
+                    composerField(
+                        mode == .requestChanges ? "Explain what needs to change…" : "Add a review note…",
+                        text: $model.reviewDraft,
+                        minHeight: 82
+                    )
+                    HStack {
+                        Button("Cancel", .dismiss) { model.cancelReview() }
+                            .buttonStyle(SecondaryButtonStyle(small: true))
+                        Spacer()
+                        Button("Send review", .send) {
+                            Task { await model.review(mode, workspaceID: workspaceID, peer: peer, number: detail.number) }
+                        }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .disabled(model.reviewDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.actionBusy)
+                    }
+                }
+                .padding(Theme.Space.s)
+                .background(Theme.accentSoft.opacity(0.58), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+
+    private var mergeActions: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Merge method")
+                .font(Theme.caption.weight(.semibold))
+            SegmentedTabs(
+                options: PullMergeMethod.allCases,
+                selection: $model.mergeMethod,
+                title: \PullMergeMethod.title
+            )
+            Button("Merge pull request", .merge) { model.confirmingMerge = true }
+                .buttonStyle(AccentButtonStyle(small: true))
+                .disabled(detail.draft || model.actionBusy)
+        }
+        .padding(.top, Theme.Space.xs)
+    }
+
+    private var checkoutActions: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            Text("Local checkout")
+                .font(Theme.caption.weight(.semibold))
+            TextField("Local branch name", text: $model.checkoutBranch)
+                .textFieldStyle(.plain)
+                .font(Theme.monoText(11, weight: .medium, relativeTo: .caption))
+                .padding(.horizontal, 10)
+                .frame(height: Theme.Control.height)
+                .background(Theme.background, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.border))
+            Button("Check out locally", .checkout) {
+                Task { await model.checkout(workspaceID: workspaceID, peer: peer, number: detail.number) }
+            }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+            .disabled(model.checkoutBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.actionBusy)
+        }
+        .padding(.top, Theme.Space.xs)
+    }
+}
+
+private func composerField(_ placeholder: String, text: Binding<String>, minHeight: CGFloat) -> some View {
+    ZStack(alignment: .topLeading) {
+        if text.wrappedValue.isEmpty {
+            Text(placeholder)
+                .font(Theme.callout)
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 10)
+                .allowsHitTesting(false)
+        }
+        TextEditor(text: text)
+            .font(Theme.callout)
+            .scrollContentBackground(.hidden)
+            .padding(4)
+    }
+    .frame(height: minHeight)
+    .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.border))
+}
+
 private struct FlowLabels: View {
     let labels: [String]
     var body: some View { VStack(alignment: .leading, spacing: 5) { ForEach(labels, id: \.self) { label in Text(label).font(Theme.caption2.weight(.medium)).foregroundStyle(Theme.secondary).padding(.horizontal, 8).padding(.vertical, 4).background(Theme.secondary.opacity(0.10), in: Capsule()) } } }
@@ -467,13 +685,25 @@ private final class PullDetailModel {
     var error: String?
     var timelineError: String?
     var diffError: String?
+    var commentDraft = ""
+    var reviewDraft = ""
+    var reviewMode: PullReviewVerdict?
+    var checkoutBranch = ""
+    var mergeMethod: PullMergeMethod = .squash
+    var actionBusy = false
+    var actionNotice: String?
+    var actionError: String?
+    var confirmingClose = false
+    var confirmingMerge = false
 
     func load(workspaceID: String, peer: String?, number: UInt32, refresh: Bool = false) async {
         loading = true; error = nil; defer { loading = false }
         do {
             async let detail = Bridge.pullView(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
             async let timeline = Bridge.pullTimeline(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh)
-            self.detail = try await detail
+            let loaded = try await detail
+            self.detail = loaded
+            if checkoutBranch.isEmpty { checkoutBranch = loaded.headRef }
             let page = try await timeline
             events = page.events; nextCursor = page.nextCursor; timelineError = nil
         } catch { self.error = error.localizedDescription }
@@ -490,5 +720,113 @@ private final class PullDetailModel {
         loadingDiff = true; diffError = nil; defer { loadingDiff = false }
         do { diffs = try await Bridge.pullDiff(workspaceID: workspaceID, peer: peer, number: number, refresh: refresh); selectedPath = diffs.first?.path }
         catch { diffError = error.localizedDescription }
+    }
+
+    func beginReview(_ verdict: PullReviewVerdict) {
+        reviewMode = verdict
+        reviewDraft = ""
+        actionError = nil
+    }
+
+    func cancelReview() {
+        reviewMode = nil
+        reviewDraft = ""
+    }
+
+    func comment(workspaceID: String, peer: String?, number: UInt32) async {
+        let body = commentDraft
+        if await perform("Comment posted", refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
+            try await Bridge.pullComment(workspaceID: workspaceID, peer: peer, number: number, body: body)
+        }) {
+            commentDraft = ""
+        }
+    }
+
+    func review(
+        _ verdict: PullReviewVerdict,
+        workspaceID: String,
+        peer: String?,
+        number: UInt32
+    ) async {
+        let body = verdict == .approve ? "" : reviewDraft
+        let message = switch verdict {
+        case .approve: "Review approved"
+        case .requestChanges: "Changes requested"
+        case .comment: "Review comment posted"
+        }
+        if await perform(message, refresh: true, workspaceID: workspaceID, peer: peer, number: number, action: {
+            try await Bridge.pullReview(
+                workspaceID: workspaceID, peer: peer, number: number,
+                verdict: verdict, body: body
+            )
+        }) {
+            cancelReview()
+        }
+    }
+
+    func ready(workspaceID: String, peer: String?, number: UInt32) async {
+        _ = await perform("Ready for review", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+            try await Bridge.pullReady(workspaceID: workspaceID, peer: peer, number: number)
+        }
+    }
+
+    func setOpen(_ open: Bool, workspaceID: String, peer: String?, number: UInt32) async {
+        _ = await perform(open ? "Pull request reopened" : "Pull request closed", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+            try await Bridge.pullSetOpen(workspaceID: workspaceID, peer: peer, number: number, open: open)
+        }
+    }
+
+    func merge(workspaceID: String, peer: String?, number: UInt32) async {
+        _ = await perform("Pull request merged", refresh: true, workspaceID: workspaceID, peer: peer, number: number) {
+            try await Bridge.pullMerge(
+                workspaceID: workspaceID, peer: peer, number: number, method: mergeMethod
+            )
+        }
+    }
+
+    func checkout(workspaceID: String, peer: String?, number: UInt32) async {
+        guard !actionBusy else { return }
+        actionBusy = true
+        actionError = nil
+        actionNotice = nil
+        defer { actionBusy = false }
+        do {
+            let outcome = try await Bridge.pullCheckout(
+                workspaceID: workspaceID, peer: peer, number: number, branch: checkoutBranch
+            )
+            if outcome.ok {
+                actionNotice = "Checked out \(checkoutBranch)"
+            } else {
+                actionError = outcome.message
+            }
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
+    private func perform(
+        _ success: String,
+        refresh: Bool,
+        workspaceID: String,
+        peer: String?,
+        number: UInt32,
+        action: () async throws -> Void
+    ) async -> Bool {
+        guard !actionBusy else { return false }
+        actionBusy = true
+        actionError = nil
+        actionNotice = nil
+        defer { actionBusy = false }
+        do {
+            try await action()
+            actionNotice = success
+            if refresh {
+                await load(workspaceID: workspaceID, peer: peer, number: number, refresh: true)
+            }
+            return true
+        } catch {
+            actionError = error.localizedDescription
+            return false
+        }
     }
 }

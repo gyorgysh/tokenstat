@@ -1973,6 +1973,25 @@ struct PullTimelinePage: Codable, Sendable, Hashable {
     var nextCursor: String?
 }
 
+enum PullReviewVerdict: String, Codable, Sendable, CaseIterable, Identifiable {
+    case approve
+    case requestChanges
+    case comment
+    var id: String { rawValue }
+}
+
+enum PullMergeMethod: String, Codable, Sendable, CaseIterable, Identifiable {
+    case merge
+    case squash
+    case rebase
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+}
+
+struct PullWriteResult: Codable, Sendable, Hashable {
+    var ok: Bool
+}
+
 /// One entry in a workspace's file tree.
 struct TreeEntry: Codable, Sendable, Hashable, Identifiable {
     var name: String

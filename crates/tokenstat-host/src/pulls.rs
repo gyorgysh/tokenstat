@@ -22,6 +22,10 @@ struct Params {
     limit: Option<u32>,
     number: Option<u32>,
     cursor: Option<String>,
+    body: String,
+    branch: String,
+    verdict: Option<tokenstat_sync::forge::Verdict>,
+    merge_method: Option<tokenstat_sync::forge::MergeMethod>,
     refresh: bool,
 }
 
@@ -109,6 +113,25 @@ fn clear_read_cache() {
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .clear();
+}
+
+fn invalidate_workspace(workspace_id: &str) {
+    list_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|key, _| key.workspace_id != workspace_id);
+    detail_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|key, _| key.workspace_id != workspace_id);
+    timeline_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|key, _| key.workspace_id != workspace_id);
+    diff_cache()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .retain(|key, _| key.workspace_id != workspace_id);
 }
 
 fn pending() -> &'static Mutex<Option<tokenstat_sync::forge::DeviceLogin>> {
@@ -200,6 +223,25 @@ fn call_inner(method: &str, params: &str) -> Result<Value, String> {
         "pulls.view" => view(&p),
         "pulls.timeline" => timeline(&p),
         "pulls.diff" => diff(&p),
+        "pulls.comment" => write(&p, "pulls.comment", |repo, number| {
+            tokenstat_sync::forge::comment(repo, number, &p.body)
+        }),
+        "pulls.close" => write(&p, "pulls.close", tokenstat_sync::forge::close),
+        "pulls.reopen" => write(&p, "pulls.reopen", tokenstat_sync::forge::reopen),
+        "pulls.ready" => write(&p, "pulls.ready", tokenstat_sync::forge::ready),
+        "pulls.review" => write(&p, "pulls.review", |repo, number| {
+            let verdict = p.verdict.ok_or_else(|| {
+                tokenstat_sync::forge::ForgeError::Api("pulls.review needs verdict".into())
+            })?;
+            tokenstat_sync::forge::review(repo, number, verdict, Some(&p.body))
+        }),
+        "pulls.merge" => write(&p, "pulls.merge", |repo, number| {
+            let method = p.merge_method.ok_or_else(|| {
+                tokenstat_sync::forge::ForgeError::Api("pulls.merge needs mergeMethod".into())
+            })?;
+            tokenstat_sync::forge::merge(repo, number, method)
+        }),
+        "pulls.checkout" => checkout(&p),
         other => Err(format!("unknown pull-request method: {other}")),
     }
 }
@@ -218,6 +260,31 @@ fn pull_number(p: &Params, method: &str) -> Result<u32, String> {
     p.number
         .filter(|number| *number > 0)
         .ok_or_else(|| format!("{method} needs number"))
+}
+
+fn write(
+    p: &Params,
+    method: &str,
+    action: impl FnOnce(
+        &tokenstat_sync::forge::Repo,
+        u32,
+    ) -> Result<(), tokenstat_sync::forge::ForgeError>,
+) -> Result<Value, String> {
+    let number = pull_number(p, method)?;
+    let repo = repo_for(&p.workspace_id, method)?;
+    action(&repo, number).map_err(|error| error.to_string())?;
+    invalidate_workspace(&p.workspace_id);
+    Ok(json!({"ok": true}))
+}
+
+fn checkout(p: &Params) -> Result<Value, String> {
+    let number = pull_number(p, "pulls.checkout")?;
+    let workspace = crate::workspaces::folder(&p.workspace_id)?;
+    let outcome = tokenstat_workspace::gitwrite::fetch_pull(&workspace.path, number, &p.branch);
+    if outcome.ok {
+        invalidate_workspace(&p.workspace_id);
+    }
+    serde_json::to_value(outcome).map_err(|error| error.to_string())
 }
 
 fn view(p: &Params) -> Result<Value, String> {

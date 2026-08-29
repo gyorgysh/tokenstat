@@ -61,6 +61,24 @@ pub enum CheckState {
     Pending,
 }
 
+/// The history shape GitHub should create when a pull request is merged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+/// A submitted pull-request review. Each variant is an explicit user action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Verdict {
+    Approve,
+    RequestChanges,
+    Comment,
+}
+
 /// One pull request in the workspace list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]

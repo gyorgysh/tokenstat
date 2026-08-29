@@ -6,15 +6,17 @@
 mod auth;
 mod model;
 mod query;
+mod write;
 
 pub use auth::{
     APP_SLUG, Credential, CredentialSource, DeviceLogin, DeviceStatus, ForgeError, credential,
     device_poll, device_start, set_token, sign_out,
 };
 pub use model::{
-    Availability, CheckState, PullActor, PullCheck, PullDetail, PullFile, PullReview, PullSummary,
-    Repo, Scope, State, TimelineEvent, TimelinePage,
+    Availability, CheckState, MergeMethod, PullActor, PullCheck, PullDetail, PullFile, PullReview,
+    PullSummary, Repo, Scope, State, TimelineEvent, TimelinePage, Verdict,
 };
+pub use write::{close, comment, merge, ready, reopen, review};
 
 /// Public OAuth client identifier for tokenstat's GitHub App.
 ///

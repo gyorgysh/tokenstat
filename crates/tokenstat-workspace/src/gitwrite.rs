@@ -156,6 +156,47 @@ pub fn create_branch(dir: &Path, name: &str, from: Option<&str>) -> GitOutcome {
     }
 }
 
+/// Fetch one GitHub pull-request head into a new local branch, then switch.
+///
+/// This never runs when a pull request is merely opened. It is the separate,
+/// labelled checkout action and refuses to rewrite an existing local branch.
+pub fn fetch_pull(dir: &Path, number: u32, branch: &str) -> GitOutcome {
+    let branch = branch.trim();
+    if number == 0 || branch.is_empty() || !valid_branch(dir, branch) {
+        return GitOutcome::failed("that is not a valid local branch name");
+    }
+    let exists = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if exists {
+        return GitOutcome::failed(format!("a local branch named '{branch}' already exists"));
+    }
+
+    let source = format!("pull/{number}/head:refs/heads/{branch}");
+    let fetched = git(dir, &["fetch", "origin", &source]);
+    if !fetched.ok {
+        return fetched;
+    }
+    let switched = git(dir, &["switch", branch]);
+    if switched.ok {
+        switched
+    } else {
+        GitOutcome::failed(format!(
+            "The pull request was fetched as '{branch}', but git could not switch to it. {}",
+            switched.message
+        ))
+    }
+}
+
 fn valid_branch(dir: &Path, name: &str) -> bool {
     Command::new("git")
         .arg("-C")
@@ -251,6 +292,67 @@ mod tests {
         let switched = checkout(&dir, "feature/picker", false);
         assert!(switched.ok, "{}", switched.message);
         assert!(!create_branch(&dir, "-unsafe", None).ok);
+    }
+
+    #[test]
+    fn fetching_a_pull_creates_a_new_branch_without_rewriting_one() {
+        let source = repo("pull-source");
+        let remote = std::env::temp_dir().join(format!(
+            "tokenstat-gitwrite-{}-pull-remote.git",
+            std::process::id()
+        ));
+        let client = std::env::temp_dir().join(format!(
+            "tokenstat-gitwrite-{}-pull-client",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&remote);
+        let _ = std::fs::remove_dir_all(&client);
+        Command::new("git")
+            .args(["init", "--bare", "-q"])
+            .arg(&remote)
+            .status()
+            .unwrap();
+        let pushed = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .args(["push", "-q"])
+            .arg(&remote)
+            .arg("HEAD:refs/heads/main")
+            .arg("HEAD:refs/pull/7/head")
+            .status()
+            .unwrap();
+        assert!(pushed.success());
+        let head = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(["symbolic-ref", "HEAD", "refs/heads/main"])
+            .status()
+            .unwrap();
+        assert!(head.success());
+        Command::new("git")
+            .args(["clone", "-q"])
+            .arg(&remote)
+            .arg(&client)
+            .status()
+            .unwrap();
+
+        let outcome = fetch_pull(&client, 7, "review/seven");
+        assert!(outcome.ok, "{}", outcome.message);
+        let branch = Command::new("git")
+            .arg("-C")
+            .arg(&client)
+            .args(["branch", "--show-current"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&branch.stdout).trim(),
+            "review/seven"
+        );
+        assert!(!fetch_pull(&client, 7, "review/seven").ok);
+
+        let _ = std::fs::remove_dir_all(&source);
+        let _ = std::fs::remove_dir_all(&remote);
+        let _ = std::fs::remove_dir_all(&client);
     }
 
     #[test]
