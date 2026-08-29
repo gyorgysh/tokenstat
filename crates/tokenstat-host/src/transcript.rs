@@ -15,11 +15,66 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
 /// How much one `automation.transcript` reply may carry.
 pub const REPLY_CAP: usize = 64 * 1024;
 
 /// How much readable text to keep on disk for one run.
 pub const READABLE_CAP: usize = 256 * 1024;
+
+/// One meaningful thing that happened while an agent was working.
+///
+/// The automation inspector intentionally still renders these into its compact
+/// prose timeline. Chat persists this shape instead, so it can show a tool,
+/// an edit, or a cost at the point it actually happened without reparsing a
+/// human-oriented transcript later.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Event {
+    Session {
+        id: String,
+    },
+    Text {
+        delta: String,
+    },
+    Thinking {
+        delta: String,
+    },
+    ToolStart {
+        call_id: String,
+        verb: String,
+        target: String,
+        input: Value,
+    },
+    ToolEnd {
+        call_id: String,
+        ok: bool,
+        detail: Option<String>,
+    },
+    Edit {
+        call_id: String,
+        path: String,
+        added: u32,
+        removed: u32,
+        patch: String,
+    },
+    Usage {
+        input: u64,
+        output: u64,
+        cache_read: u64,
+        cache_write: u64,
+        cost_usd: Option<f64>,
+    },
+    Failed {
+        text: String,
+    },
+    Done {
+        status: String,
+        exit_code: Option<i32>,
+    },
+}
 
 enum Piece {
     /// A streamed text delta. Consecutive ones join without a blank line.
@@ -62,6 +117,35 @@ impl Parser {
             }
         }
         out
+    }
+
+    /// Consume a drain chunk into structured events.
+    ///
+    /// This deliberately has its own incremental buffer. A caller chooses
+    /// either this API or [`Self::push`] for a stream; chat uses this one while
+    /// the existing automation inspector keeps its byte-identical renderer.
+    pub fn push_events(&mut self, bytes: &[u8]) -> Vec<Event> {
+        let incoming = String::from_utf8_lossy(bytes);
+        self.leftover.push_str(&incoming);
+        let mut events = Vec::new();
+        while let Some(idx) = self.leftover.find('\n') {
+            let mut line = self.leftover[..idx].to_string();
+            self.leftover = self.leftover[idx + 1..].to_string();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+            events.extend(self.line_events(&line));
+        }
+        events
+    }
+
+    /// Flush a final structured event from a line without a trailing newline.
+    pub fn finish_events(&mut self) -> Vec<Event> {
+        if self.leftover.is_empty() {
+            return Vec::new();
+        }
+        let line = std::mem::take(&mut self.leftover);
+        self.line_events(&line)
     }
 
     /// Treat any leftover partial line as complete. Call when the process
@@ -147,12 +231,474 @@ impl Parser {
         }
     }
 
+    fn line_events(&self, raw: &str) -> Vec<Event> {
+        let cleaned = strip_ansi(raw)
+            .trim()
+            .trim_start_matches('\u{feff}')
+            .to_string();
+        if cleaned.is_empty() {
+            return Vec::new();
+        }
+        if !cleaned.starts_with('{') {
+            return if self.is_json_backend() && cleaned.contains("\"type\":") {
+                Vec::new()
+            } else {
+                vec![Event::Text { delta: cleaned }]
+            };
+        }
+        let Ok(value) = serde_json::from_str(&cleaned) else {
+            return Vec::new();
+        };
+        events_for_value(&self.backend, &value)
+    }
+
     fn is_json_backend(&self) -> bool {
         matches!(
             self.backend.as_str(),
             "grok" | "claude" | "cursor" | "codex" | "opencode" | "opencode2" | "agy"
         )
     }
+}
+
+/// Decode one complete backend record. Keep this vocabulary here: the
+/// automation renderer and chat must agree on what a `Read` or `Edit` means.
+fn events_for_value(backend: &str, value: &Value) -> Vec<Event> {
+    let events = match backend {
+        "grok" => events_grok(value),
+        "claude" => events_claude(value),
+        "cursor" => events_cursor(value),
+        "codex" => events_codex(value),
+        "opencode" | "opencode2" => events_opencode(value),
+        "agy" => events_agy(value),
+        _ => Vec::new(),
+    };
+    events
+        .into_iter()
+        .flat_map(|event| {
+            let edit = match &event {
+                Event::ToolStart {
+                    call_id,
+                    target,
+                    input,
+                    ..
+                } => edit_event(call_id, target, input),
+                _ => None,
+            };
+            std::iter::once(event).chain(edit).collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn edit_event(call_id: &str, target: &str, input: &Value) -> Option<Event> {
+    let old = lookup_str(input, &["old_string", "old_str", "OldString", "OldStr"])?;
+    let new = lookup_str(input, &["new_string", "new_str", "NewString", "NewStr"])?;
+    if old.is_empty() && new.is_empty() {
+        return None;
+    }
+    Some(Event::Edit {
+        call_id: call_id.to_string(),
+        path: target.to_string(),
+        added: new.lines().count() as u32,
+        removed: old.lines().count() as u32,
+        patch: render_edit_snippet(old, new),
+    })
+}
+
+fn events_grok(value: &Value) -> Vec<Event> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("text") => event_text(value.get("data").and_then(Value::as_str)),
+        Some("thought") => event_thinking(value.get("data").and_then(Value::as_str)),
+        Some("tool_call") => vec![tool_start(
+            value,
+            value
+                .get("title")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("toolName").and_then(Value::as_str))
+                .unwrap_or("tool"),
+            value.get("rawInput").cloned().unwrap_or(Value::Null),
+        )],
+        Some("error") => event_failed(value.get("message").and_then(Value::as_str)),
+        Some("usage") => event_usage(value),
+        Some("end") => vec![done(
+            value
+                .get("stopReason")
+                .and_then(Value::as_str)
+                .unwrap_or("done"),
+            None,
+        )],
+        _ => Vec::new(),
+    }
+}
+
+fn events_claude(value: &Value) -> Vec<Event> {
+    let kind = value.get("type").and_then(Value::as_str);
+    if kind == Some("system") && value.get("subtype").and_then(Value::as_str) == Some("init") {
+        return value
+            .get("session_id")
+            .and_then(Value::as_str)
+            .map(|id| vec![Event::Session { id: id.into() }])
+            .unwrap_or_default();
+    }
+    if kind == Some("assistant") {
+        let content = value
+            .pointer("/message/content")
+            .or_else(|| value.get("content"));
+        return content
+            .and_then(Value::as_array)
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .flat_map(|block| match block.get("type").and_then(Value::as_str) {
+                        Some("text") => event_text(block.get("text").and_then(Value::as_str)),
+                        Some("thinking") => {
+                            event_thinking(block.get("thinking").and_then(Value::as_str))
+                        }
+                        Some("tool_use") => vec![tool_start(
+                            block,
+                            block.get("name").and_then(Value::as_str).unwrap_or("tool"),
+                            block.get("input").cloned().unwrap_or(Value::Null),
+                        )],
+                        _ => Vec::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    if kind == Some("result") {
+        let mut events = event_text(value.get("result").and_then(Value::as_str));
+        events.extend(event_usage(value));
+        events.push(done(
+            value
+                .get("subtype")
+                .and_then(Value::as_str)
+                .unwrap_or("done"),
+            value.get("exit_code").and_then(json_i32),
+        ));
+        return events;
+    }
+    Vec::new()
+}
+
+fn events_cursor(value: &Value) -> Vec<Event> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("assistant") => assistant_event_text(value),
+        Some("result") => {
+            let mut events = event_text(value.get("result").and_then(Value::as_str));
+            events.push(done("done", value.get("exit_code").and_then(json_i32)));
+            events
+        }
+        Some("tool_call") => {
+            let subtype = value
+                .get("subtype")
+                .and_then(Value::as_str)
+                .unwrap_or("started");
+            let Some((name, call)) = value
+                .get("tool_call")
+                .and_then(Value::as_object)
+                .and_then(|calls| calls.iter().next())
+            else {
+                return Vec::new();
+            };
+            let id = call
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or(name)
+                .to_string();
+            if subtype == "started" {
+                vec![tool_start_with_id(
+                    &id,
+                    name,
+                    call.get("args").cloned().unwrap_or(Value::Null),
+                )]
+            } else {
+                vec![Event::ToolEnd {
+                    call_id: id,
+                    ok: subtype != "failed",
+                    detail: call
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                }]
+            }
+        }
+        Some("error") => event_failed(value.get("message").and_then(Value::as_str)),
+        _ => Vec::new(),
+    }
+}
+
+fn events_codex(value: &Value) -> Vec<Event> {
+    let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+    if matches!(kind, "thread.started" | "thread_id") {
+        return value
+            .get("thread_id")
+            .or_else(|| value.get("id"))
+            .and_then(Value::as_str)
+            .map(|id| vec![Event::Session { id: id.into() }])
+            .unwrap_or_default();
+    }
+    let item = value.get("item");
+    if kind == "item.started" {
+        let Some(item) = item else { return Vec::new() };
+        return match item.get("type").and_then(Value::as_str) {
+            Some("command_execution") => vec![tool_start(
+                item,
+                "shell",
+                serde_json::json!({"command": item.get("command").and_then(Value::as_str).unwrap_or("")}),
+            )],
+            _ => Vec::new(),
+        };
+    }
+    if kind == "item.completed" {
+        let Some(item) = item else { return Vec::new() };
+        return match item.get("type").and_then(Value::as_str) {
+            Some("agent_message" | "message" | "text") => event_text(
+                item.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| item.get("content").and_then(Value::as_str)),
+            ),
+            Some("command_execution") => vec![Event::ToolEnd {
+                call_id: item_id(item),
+                ok: item.get("exit_code").and_then(json_i32).unwrap_or(0) == 0,
+                detail: item
+                    .get("aggregated_output")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            }],
+            _ => Vec::new(),
+        };
+    }
+    if kind == "turn.completed" {
+        return vec![done("done", None)];
+    }
+    if kind == "error" {
+        return event_failed(value.get("message").and_then(Value::as_str));
+    }
+    Vec::new()
+}
+
+fn events_opencode(value: &Value) -> Vec<Event> {
+    match value.get("type").and_then(Value::as_str) {
+        Some("session") | Some("session.created") => value
+            .pointer("/session/id")
+            .or_else(|| value.get("sessionID"))
+            .and_then(Value::as_str)
+            .map(|id| vec![Event::Session { id: id.into() }])
+            .unwrap_or_default(),
+        Some("text") => event_text(
+            value
+                .pointer("/part/text")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("text").and_then(Value::as_str)),
+        ),
+        Some("tool_use") => {
+            let part = value.get("part").unwrap_or(value);
+            let input = part
+                .get("input")
+                .or_else(|| part.get("args"))
+                .or_else(|| part.pointer("/state/input"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let id = item_id(part);
+            let status = part
+                .pointer("/state/status")
+                .and_then(Value::as_str)
+                .unwrap_or("running");
+            if matches!(status, "completed" | "error" | "failed") {
+                vec![Event::ToolEnd {
+                    call_id: id,
+                    ok: status == "completed",
+                    detail: part
+                        .pointer("/state/output")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                }]
+            } else {
+                vec![tool_start_with_id(
+                    &id,
+                    part.get("tool").and_then(Value::as_str).unwrap_or("tool"),
+                    input,
+                )]
+            }
+        }
+        Some("error") => event_failed(
+            value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .or_else(|| value.get("error").and_then(Value::as_str)),
+        ),
+        Some("step_finish") => vec![done(
+            value
+                .pointer("/part/reason")
+                .and_then(Value::as_str)
+                .unwrap_or("done"),
+            None,
+        )],
+        _ => Vec::new(),
+    }
+}
+
+fn events_agy(value: &Value) -> Vec<Event> {
+    match value.get("event").and_then(Value::as_str) {
+        Some("init") => value
+            .pointer("/init/conversation_id")
+            .or_else(|| value.pointer("/init/session_id"))
+            .and_then(Value::as_str)
+            .map(|id| vec![Event::Session { id: id.into() }])
+            .unwrap_or_default(),
+        Some("step_update") => {
+            let Some(step) = value.get("step_update") else {
+                return Vec::new();
+            };
+            match step.get("step_type").and_then(Value::as_str) {
+                Some("agent_response") => {
+                    event_text(step.get("text_delta").and_then(Value::as_str))
+                }
+                Some("tool") => {
+                    let id = item_id(step);
+                    let state = step
+                        .get("state")
+                        .and_then(Value::as_str)
+                        .unwrap_or("ACTIVE");
+                    if state == "ACTIVE" {
+                        let name = step
+                            .get("tool_name")
+                            .and_then(Value::as_str)
+                            .or_else(|| step.pointer("/tool_info/name").and_then(Value::as_str))
+                            .unwrap_or("tool");
+                        vec![tool_start_with_id(
+                            &id,
+                            name,
+                            step.pointer("/tool_info/parameters")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        )]
+                    } else {
+                        vec![Event::ToolEnd {
+                            call_id: id,
+                            ok: state != "ERROR",
+                            detail: step
+                                .pointer("/tool_info/error")
+                                .and_then(Value::as_str)
+                                .map(str::to_string),
+                        }]
+                    }
+                }
+                _ => Vec::new(),
+            }
+        }
+        Some("result") => {
+            let result = value.get("result").unwrap_or(value);
+            let status = result
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("done");
+            if status.eq_ignore_ascii_case("error") {
+                event_failed(
+                    result
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .or_else(|| result.get("response").and_then(Value::as_str)),
+                )
+            } else {
+                vec![done(status, None)]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn tool_start(source: &Value, name: &str, input: Value) -> Event {
+    tool_start_with_id(&item_id(source), name, input)
+}
+fn tool_start_with_id(id: &str, name: &str, input: Value) -> Event {
+    let target = tool_arg(Some(&input)).unwrap_or("").to_string();
+    Event::ToolStart {
+        call_id: id.to_string(),
+        verb: display_verb(name),
+        target,
+        input,
+    }
+}
+fn item_id(value: &Value) -> String {
+    value
+        .get("id")
+        .or_else(|| value.get("call_id"))
+        .or_else(|| value.get("tool_call_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("tool")
+        .to_string()
+}
+fn event_text(text: Option<&str>) -> Vec<Event> {
+    nonempty(text)
+        .map(|delta| vec![Event::Text { delta }])
+        .unwrap_or_default()
+}
+fn event_thinking(text: Option<&str>) -> Vec<Event> {
+    nonempty(text)
+        .map(|delta| vec![Event::Thinking { delta }])
+        .unwrap_or_default()
+}
+fn event_failed(text: Option<&str>) -> Vec<Event> {
+    nonempty(text)
+        .map(|text| vec![Event::Failed { text }])
+        .unwrap_or_default()
+}
+fn done(status: &str, exit_code: Option<i32>) -> Event {
+    Event::Done {
+        status: status.to_string(),
+        exit_code,
+    }
+}
+fn assistant_event_text(value: &Value) -> Vec<Event> {
+    value
+        .pointer("/message/content")
+        .or_else(|| value.get("content"))
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .flat_map(|block| event_text(block.get("text").and_then(Value::as_str)))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+fn event_usage(value: &Value) -> Vec<Event> {
+    let usage = value.get("usage").unwrap_or(value);
+    let input = usage
+        .get("input_tokens")
+        .or_else(|| usage.get("inputTokens"))
+        .and_then(Value::as_u64);
+    let output = usage
+        .get("output_tokens")
+        .or_else(|| usage.get("outputTokens"))
+        .and_then(Value::as_u64);
+    if input.is_none() && output.is_none() {
+        return Vec::new();
+    }
+    vec![Event::Usage {
+        input: input.unwrap_or(0),
+        output: output.unwrap_or(0),
+        cache_read: usage
+            .get("cache_read_input_tokens")
+            .or_else(|| usage.get("cacheReadTokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        cache_write: usage
+            .get("cache_creation_input_tokens")
+            .or_else(|| usage.get("cacheWriteTokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        cost_usd: usage
+            .get("cost_usd")
+            .or_else(|| usage.get("cost"))
+            .and_then(Value::as_f64),
+    }]
+}
+fn json_i32(value: &Value) -> Option<i32> {
+    value
+        .as_i64()
+        .and_then(|n| i32::try_from(n).ok())
+        .or_else(|| value.as_u64().and_then(|n| i32::try_from(n).ok()))
 }
 
 /// Walk a whole raw transcript into readable text, then cap it.
@@ -781,6 +1327,76 @@ mod tests {
     fn feed(backend: &str, raw: &str) -> String {
         let mut p = Parser::new(backend);
         p.push(raw.as_bytes())
+    }
+
+    #[test]
+    fn recorded_backend_streams_keep_the_events_chat_needs() {
+        let fixtures = [
+            (
+                "claude",
+                include_str!("../../../fixtures/chat/claude.ndjson"),
+            ),
+            ("codex", include_str!("../../../fixtures/chat/codex.ndjson")),
+            ("grok", include_str!("../../../fixtures/chat/grok.ndjson")),
+            (
+                "cursor",
+                include_str!("../../../fixtures/chat/cursor.ndjson"),
+            ),
+            ("agy", include_str!("../../../fixtures/chat/agy.ndjson")),
+            (
+                "opencode",
+                include_str!("../../../fixtures/chat/opencode.ndjson"),
+            ),
+            (
+                "opencode2",
+                include_str!("../../../fixtures/chat/opencode2.ndjson"),
+            ),
+        ];
+        for (backend, raw) in fixtures {
+            let mut parser = Parser::new(backend);
+            let events = parser.push_events(raw.as_bytes());
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, Event::Text { .. })),
+                "{backend} lost its response: {events:?}"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, Event::ToolStart { .. })),
+                "{backend} lost its tool call: {events:?}"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, Event::Done { .. })),
+                "{backend} never finished: {events:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn events_preserve_session_usage_and_edits() {
+        let raw = include_str!("../../../fixtures/chat/claude.ndjson");
+        let mut parser = Parser::new("claude");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(matches!(events.first(), Some(Event::Session { id }) if id == "claude-session"));
+        assert!(events.iter().any(
+            |event| matches!(event, Event::Thinking { delta } if delta == "Inspecting the project")
+        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Usage {
+                input: 12,
+                output: 4,
+                ..
+            }
+        )));
+
+        let mut agy = Parser::new("agy");
+        let edits = agy.push_events(include_str!("../../../fixtures/chat/agy.ndjson").as_bytes());
+        assert!(edits.iter().any(|event| matches!(event, Event::Edit { path, added: 1, removed: 1, .. } if path == "a.rs")));
     }
 
     #[test]

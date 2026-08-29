@@ -1,0 +1,4 @@
+{"event":"step_update","step_update":{"id":"agy-1","step_type":"tool","state":"ACTIVE","tool_name":"replace_file_content","tool_info":{"parameters":{"TargetFile":"a.rs","OldString":"old","NewString":"new"}}}}
+{"event":"step_update","step_update":{"id":"agy-1","step_type":"tool","state":"DONE"}}
+{"event":"step_update","step_update":{"step_type":"agent_response","text_delta":"Updated it."}}
+{"event":"result","result":{"status":"SUCCESS"}}

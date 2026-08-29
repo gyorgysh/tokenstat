@@ -1,0 +1,4 @@
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will check."}]}}
+{"type":"tool_call","subtype":"started","tool_call":{"shellToolCall":{"id":"shell-1","args":{"command":"ls"}}}}
+{"type":"tool_call","subtype":"completed","tool_call":{"shellToolCall":{"id":"shell-1"}}}
+{"type":"result","result":"Done."}

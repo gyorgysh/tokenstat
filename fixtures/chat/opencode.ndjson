@@ -1,0 +1,5 @@
+{"type":"session.created","session":{"id":"opencode-session"}}
+{"type":"tool_use","part":{"id":"oc-1","tool":"bash","state":{"status":"running","input":{"command":"pwd"}}}}
+{"type":"tool_use","part":{"id":"oc-1","tool":"bash","state":{"status":"completed","output":"/tmp"}}}
+{"type":"text","part":{"text":"Done."}}
+{"type":"step_finish","part":{"reason":"stop"}}

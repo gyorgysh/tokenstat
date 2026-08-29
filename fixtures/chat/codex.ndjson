@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"codex-thread"}
+{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"git status"}}
+{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","exit_code":0,"aggregated_output":"clean"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Working tree is clean."}}
+{"type":"turn.completed"}

@@ -1,0 +1,4 @@
+{"type":"session.created","session":{"id":"opencode2-session"}}
+{"type":"tool_use","part":{"id":"oc2-1","tool":"read","state":{"status":"running","input":{"filePath":"README.md"}}}}
+{"type":"text","part":{"text":"Read it."}}
+{"type":"step_finish","part":{"reason":"stop"}}

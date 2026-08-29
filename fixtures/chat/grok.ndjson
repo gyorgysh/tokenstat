@@ -1,0 +1,5 @@
+{"type":"thought","data":"Checking files"}
+{"type":"tool_call","id":"read-1","title":"read_file","rawInput":{"path":"src/lib.rs"}}
+{"type":"text","data":"Looks good."}
+{"type":"usage","input_tokens":8,"output_tokens":3}
+{"type":"end","stopReason":"end_turn"}
