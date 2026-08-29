@@ -21,6 +21,7 @@ use crate::transcript::{Event, Parser};
 
 const EVENTS_CAP: u64 = 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
+const APPROVAL_TTL_MS: i64 = 10 * 60 * 1000;
 const POLL: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -88,6 +89,19 @@ pub struct Attachment {
     pub media_type: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Approval {
+    pub id: String,
+    pub conversation_id: String,
+    pub verb: String,
+    pub preview: String,
+    pub shell_prefix: Option<String>,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+    pub decision: Option<String>,
+}
+
 fn default_mode() -> String {
     "plan".into()
 }
@@ -141,6 +155,7 @@ pub struct Store {
     conversations: Mutex<Vec<Conversation>>,
     active: Mutex<HashMap<String, String>>,
     personas: Mutex<Vec<Persona>>,
+    approvals: Mutex<Vec<Approval>>,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -156,6 +171,7 @@ impl Store {
             conversations: Mutex::new(Vec::new()),
             active: Mutex::new(HashMap::new()),
             personas: Mutex::new(Vec::new()),
+            approvals: Mutex::new(Vec::new()),
         }
     }
 
@@ -174,6 +190,7 @@ impl Store {
             conversations: Mutex::new(conversations),
             active: Mutex::new(HashMap::new()),
             personas: Mutex::new(personas),
+            approvals: Mutex::new(Vec::new()),
         }
     }
 
@@ -211,6 +228,104 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    pub fn approvals(&self, conversation_id: Option<&str>) -> Vec<Approval> {
+        self.prune_approvals();
+        self.approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|approval| conversation_id.is_none_or(|id| approval.conversation_id == id))
+            .filter(|approval| approval.decision.is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// Register a backend hook request. A saved permission is answered
+    /// immediately; otherwise the caller receives an id it can await without
+    /// tying up a socket thread.
+    pub fn request_approval(
+        &self,
+        conversation_id: &str,
+        verb: &str,
+        preview: &str,
+        shell_prefix: Option<String>,
+    ) -> Result<Approval, String> {
+        let chat = self.get(conversation_id)?;
+        let allowed = chat.allowed_tools.iter().any(|tool| tool == verb)
+            || shell_prefix.as_ref().is_some_and(|prefix| {
+                chat.allowed_shell_prefixes
+                    .iter()
+                    .any(|allowed| prefix.starts_with(allowed))
+            });
+        let now = now_ms();
+        let approval = Approval {
+            id: format!("approval-{now}"),
+            conversation_id: conversation_id.into(),
+            verb: verb.into(),
+            preview: preview.into(),
+            shell_prefix,
+            created_at_ms: now,
+            expires_at_ms: now + APPROVAL_TTL_MS,
+            decision: allowed.then(|| "allow".into()),
+        };
+        if !allowed {
+            self.approvals
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(approval.clone());
+        }
+        Ok(approval)
+    }
+
+    pub fn resolve_approval(&self, id: &str, choice: &str) -> Result<Approval, String> {
+        if !matches!(choice, "allow" | "allowAlways" | "deny" | "denyAlways") {
+            return Err("unknown approval choice".into());
+        }
+        self.prune_approvals();
+        let out = {
+            let mut approvals = self
+                .approvals
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let approval = approvals
+                .iter_mut()
+                .find(|approval| approval.id == id)
+                .ok_or("no pending approval with that id")?;
+            if approval.decision.is_some() {
+                return Err("that approval was already answered".into());
+            }
+            approval.decision = Some(
+                if choice.starts_with("allow") {
+                    "allow"
+                } else {
+                    "deny"
+                }
+                .into(),
+            );
+            approval.clone()
+        };
+        if choice.ends_with("Always") {
+            let mut chats = self
+                .conversations
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let chat = chats
+                .iter_mut()
+                .find(|chat| chat.id == out.conversation_id)
+                .ok_or("no chat with that id")?;
+            if let Some(prefix) = &out.shell_prefix {
+                if !chat.allowed_shell_prefixes.contains(prefix) {
+                    chat.allowed_shell_prefixes.push(prefix.clone());
+                }
+            } else if !chat.allowed_tools.contains(&out.verb) {
+                chat.allowed_tools.push(out.verb.clone());
+            }
+            drop(chats);
+            self.save()?;
+        }
+        Ok(out)
     }
 
     pub fn save_persona(&self, mut persona: Persona) -> Result<Persona, String> {
@@ -720,6 +835,23 @@ impl Store {
         .map_err(|e| e.to_string())?;
         fs::rename(temporary, self.root.join("personas.json")).map_err(|e| e.to_string())
     }
+
+    fn prune_approvals(&self) {
+        let now = now_ms();
+        let mut approvals = self
+            .approvals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for approval in approvals
+            .iter_mut()
+            .filter(|approval| approval.decision.is_none() && approval.expires_at_ms <= now)
+        {
+            approval.decision = Some("deny".into());
+        }
+        approvals.retain(|approval| {
+            approval.decision.is_none() || approval.expires_at_ms + APPROVAL_TTL_MS > now
+        });
+    }
 }
 
 fn append_raw(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
@@ -941,5 +1073,47 @@ mod tests {
             })
             .unwrap();
         assert_eq!(saved.system_prompt, "Review changes carefully.");
+    }
+
+    #[test]
+    fn approvals_are_explicit_and_always_allow_is_scoped_to_one_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        let pending = store
+            .request_approval("chat-test", "Edit", "Edit src/main.rs", None)
+            .unwrap();
+        assert_eq!(store.approvals(Some("chat-test")).len(), 1);
+        assert_eq!(
+            store
+                .resolve_approval(&pending.id, "allowAlways")
+                .unwrap()
+                .decision
+                .as_deref(),
+            Some("allow")
+        );
+        assert!(store.approvals(Some("chat-test")).is_empty());
+        let allowed = store
+            .request_approval("chat-test", "Edit", "Edit src/lib.rs", None)
+            .unwrap();
+        assert_eq!(allowed.decision.as_deref(), Some("allow"));
     }
 }
