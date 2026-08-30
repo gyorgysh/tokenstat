@@ -397,6 +397,9 @@ pub struct ChatLaunch<'a> {
     /// Absolute path of this daemon for lifecycle hooks. Relative PATH lookup
     /// is wrong for launchd and for the private environment of an agent CLI.
     pub hook_command: Option<&'a str>,
+    /// Agy discovers hooks from each supplied workspace. The private root goes
+    /// first; the person's workspace remains last, preserving its normal cwd.
+    pub agy_customization_dir: Option<&'a Path>,
     pub attachments: &'a [std::path::PathBuf],
 }
 
@@ -464,6 +467,18 @@ pub fn chat_agent_command(
             .position(|arg| arg == "exec")
             .unwrap_or(argv.len());
         argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
+    }
+    if backend == "agy" && !launch.bypass {
+        if let Some(directory) = launch.agy_customization_dir {
+            let at = argv
+                .iter()
+                .position(|arg| arg == "--prompt-interactive")
+                .unwrap_or(argv.len());
+            argv.splice(
+                at..at,
+                ["--add-dir".into(), directory.display().to_string()],
+            );
+        }
     }
     // These two CLIs accept image files natively. The other backends receive
     // the staged paths in the prompt, which lets their normal Read tool make
@@ -2099,6 +2114,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 hook_command: None,
+                agy_customization_dir: None,
                 attachments: &[],
             },
         )
@@ -2120,6 +2136,7 @@ mod tests {
                 hook_command: Some(
                     "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
                 ),
+                agy_customization_dir: None,
                 attachments: &[],
             },
         )
@@ -2143,6 +2160,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 hook_command: None,
+                agy_customization_dir: None,
                 attachments: &[],
             },
         )
@@ -2162,6 +2180,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 hook_command: Some("/tmp/tokenstat-hostd"),
+                agy_customization_dir: None,
                 attachments: &[],
             },
         )
@@ -2181,6 +2200,7 @@ mod tests {
                 resume: None,
                 bypass: true,
                 hook_command: None,
+                agy_customization_dir: None,
                 attachments: &[],
             },
         )
@@ -2189,6 +2209,27 @@ mod tests {
             bypass
                 .iter()
                 .any(|arg| arg == "--dangerously-skip-permissions")
+        );
+        let agy_home = std::path::Path::new("/private/tmp/tokenstat-agy");
+        let guarded_agy = chat_agent_command(
+            "agy",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                hook_command: Some("/tmp/tokenstat-hostd"),
+                agy_customization_dir: Some(agy_home),
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            guarded_agy
+                .windows(2)
+                .any(|pair| pair == ["--add-dir", "/private/tmp/tokenstat-agy"])
         );
     }
 
@@ -2205,6 +2246,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 hook_command: None,
+                agy_customization_dir: None,
                 attachments: &[attachment.clone()],
             },
         )
@@ -2224,6 +2266,7 @@ mod tests {
                 resume: None,
                 bypass: false,
                 hook_command: None,
+                agy_customization_dir: None,
                 attachments: &[attachment],
             },
         )

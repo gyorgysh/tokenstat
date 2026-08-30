@@ -730,6 +730,8 @@ impl Store {
         } else {
             None
         };
+        let agy_customization_dir =
+            (chat.backend == "agy" && chat.autonomy == "standard").then(|| self.agy_hook_home(id));
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
             &prompt,
@@ -740,6 +742,7 @@ impl Store {
                 resume: chat.resume_token.as_deref(),
                 bypass: chat.autonomy == "bypass",
                 hook_command: hook_command.as_deref(),
+                agy_customization_dir: agy_customization_dir.as_deref(),
                 attachments: &attachments,
             },
         )?;
@@ -769,6 +772,39 @@ impl Store {
         let codex_hook_home = if chat.backend == "codex" && chat.autonomy == "standard" {
             let home = self.write_codex_hook_home(id, hook_command.as_deref())?;
             environment.push(("CODEX_HOME".into(), home.display().to_string()));
+            Some(home)
+        } else {
+            None
+        };
+        let agy_hook_home = if chat.backend == "agy" && chat.autonomy == "standard" {
+            Some(self.write_agy_hook_home(id, hook_command.as_deref())?)
+        } else {
+            None
+        };
+        let opencode_hook_home = if matches!(chat.backend.as_str(), "opencode" | "opencode2")
+            && chat.autonomy == "standard"
+        {
+            let (home, plugin) = self.write_opencode_hook_home(id)?;
+            environment.push(("OPENCODE_CONFIG_DIR".into(), home.display().to_string()));
+            environment.push((
+                "OPENCODE_CONFIG_CONTENT".into(),
+                json!({
+                    "plugin": [plugin.display().to_string()],
+                    "permission": {
+                        "edit": "allow",
+                        "bash": "allow",
+                        "webfetch": "allow",
+                        "external_directory": "allow"
+                    }
+                })
+                .to_string(),
+            ));
+            environment.push((
+                "TOKENSTAT_CHAT_HOOK_COMMAND".into(),
+                hook_command
+                    .clone()
+                    .ok_or("cannot locate the tokenstat host hook")?,
+            ));
             Some(home)
         } else {
             None
@@ -809,6 +845,8 @@ impl Store {
         let turn_token = turn.as_ref().map(|(token, _)| token.clone());
         let turn_file = turn.as_ref().map(|(_, file)| file.clone());
         let codex_hook_home = codex_hook_home.clone();
+        let agy_hook_home = agy_hook_home.clone();
+        let opencode_hook_home = opencode_hook_home.clone();
         std::thread::spawn(move || {
             Arc::clone(&store).drain(&chat_id, &backend, &info.id, &raw_path);
             if let Some(token) = turn_token {
@@ -818,6 +856,12 @@ impl Store {
                 let _ = fs::remove_file(file);
             }
             if let Some(home) = codex_hook_home {
+                let _ = fs::remove_dir_all(home);
+            }
+            if let Some(home) = agy_hook_home {
+                let _ = fs::remove_dir_all(home);
+            }
+            if let Some(home) = opencode_hook_home {
                 let _ = fs::remove_dir_all(home);
             }
         });
@@ -1033,6 +1077,40 @@ impl Store {
             }
         }
         Ok(home)
+    }
+
+    fn agy_hook_home(&self, id: &str) -> PathBuf {
+        self.root.join(id).join("agy-hook")
+    }
+
+    fn write_agy_hook_home(&self, id: &str, command: Option<&str>) -> Result<PathBuf, String> {
+        let command = command.ok_or("cannot locate the tokenstat host hook")?;
+        let home = self.agy_hook_home(id);
+        let agents = home.join(".agents");
+        fs::create_dir_all(&agents).map_err(|error| error.to_string())?;
+        let hooks = json!({"tokenstat": {
+            "PreToolUse": [{"matcher": "*", "hooks": [{
+                "type": "command", "command": format!("{command} hook agy pre"), "timeout": 5
+            }]}],
+            "PostToolUse": [{"matcher": "*", "hooks": [{
+                "type": "command", "command": format!("{command} hook agy post"), "timeout": 5
+            }]}]
+        }});
+        fs::write(agents.join("hooks.json"), hooks.to_string())
+            .map_err(|error| error.to_string())?;
+        Ok(home)
+    }
+
+    fn write_opencode_hook_home(&self, id: &str) -> Result<(PathBuf, PathBuf), String> {
+        let home = self.root.join(id).join("opencode-hook");
+        fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+        let plugin = home.join("tokenstat-gate.js");
+        fs::write(
+            &plugin,
+            include_str!("../../../scripts/cli-bridge/opencode-plugin.js"),
+        )
+        .map_err(|error| error.to_string())?;
+        Ok((home, plugin))
     }
 
     fn attachment_path(&self, chat_id: &str, attachment_id: &str, name: &str) -> PathBuf {
@@ -1373,6 +1451,18 @@ mod tests {
         assert!(hooks.contains("PostToolUse"));
         assert!(hooks.contains("hook codex post"));
         let _ = fs::remove_dir_all(codex_home);
+        let agy_home = store
+            .write_agy_hook_home("chat-test", Some("/tmp/tokenstat-hostd"))
+            .unwrap();
+        let agy_hooks = fs::read_to_string(agy_home.join(".agents/hooks.json")).unwrap();
+        assert!(agy_hooks.contains("hook agy pre"));
+        assert!(agy_hooks.contains("hook agy post"));
+        let _ = fs::remove_dir_all(agy_home);
+        let (opencode_home, opencode_plugin) = store.write_opencode_hook_home("chat-test").unwrap();
+        let plugin = fs::read_to_string(opencode_plugin).unwrap();
+        assert!(plugin.contains("tool.execute.before"));
+        assert!(plugin.contains("TOKENSTAT_CHAT_HOOK_COMMAND"));
+        let _ = fs::remove_dir_all(opencode_home);
         let hook_approval = store
             .request_turn_approval(&turn_token, "Edit", "Edit src/main.rs", None)
             .unwrap();

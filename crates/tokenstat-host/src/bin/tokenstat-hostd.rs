@@ -106,6 +106,32 @@ fn run() -> Result<(), String> {
 /// missing credential, malformed hook payload, socket failure, or malformed
 /// daemon reply all deny. Never turn one of those failures into an allow.
 fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
+    if flavor == "agy" {
+        return run_agy_hook(phase);
+    }
+    run_hook_inner(flavor, phase)
+}
+
+/// Agy command hooks communicate exclusively with JSON. A malformed request or
+/// unreachable daemon must become an explicit denial, never an unstructured
+/// command failure that the CLI could interpret as permission to continue.
+fn run_agy_hook(phase: &str) -> Result<(), String> {
+    if phase != "pre" && phase != "post" {
+        return Err("hook phase must be pre or post".into());
+    }
+    match run_hook_inner("agy", phase) {
+        Ok(()) if phase == "pre" => println!(r#"{{"decision":"allow"}}"#),
+        Ok(()) => println!("{{}}"),
+        Err(reason) if phase == "pre" => println!(
+            "{}",
+            json!({"decision": "deny", "reason": format!("Tokenstat approval unavailable: {reason}")})
+        ),
+        Err(_) => println!("{{}}"),
+    }
+    Ok(())
+}
+
+fn run_hook_inner(flavor: &str, phase: &str) -> Result<(), String> {
     if phase != "pre" && phase != "post" {
         return Err("hook phase must be pre or post".into());
     }
@@ -135,7 +161,7 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
         let answer = hook_call(&socket, &request)?;
         return (answer.pointer("/result/recorded").and_then(Value::as_bool) == Some(true))
             .then_some(())
-            .ok_or("chat approval is unavailable: host rejected tool result");
+            .ok_or_else(|| "chat approval is unavailable: host rejected tool result".to_string());
     }
     let (verb, preview, shell_prefix) = hook_tool(flavor, &input);
     let request = json!({
@@ -169,9 +195,12 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
         .or_else(|| input.get("call_id"))
         .or_else(|| input.get("callId"))
         .or_else(|| input.get("id"))
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
+        .or_else(|| input.get("stepIdx"))
+        .and_then(|id| match id {
+            Value::String(id) if !id.is_empty() => Some(id.to_owned()),
+            Value::Number(id) => Some(id.to_string()),
+            _ => None,
+        })
         .unwrap_or_else(|| format!("{flavor}-{}", std::process::id()));
     let ok = input
         .get("success")
@@ -193,17 +222,19 @@ fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
 }
 
 fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
-    let verb = input
+    let tool = input.get("toolCall").unwrap_or(input);
+    let verb = tool
         .get("tool_name")
         .or_else(|| input.get("tool"))
-        .or_else(|| input.get("name"))
+        .or_else(|| tool.get("name"))
         .and_then(Value::as_str)
         .unwrap_or(flavor)
         .to_string();
-    let detail = input
+    let detail = tool
         .get("tool_input")
-        .or_else(|| input.get("input"))
-        .or_else(|| input.get("arguments"))
+        .or_else(|| tool.get("input"))
+        .or_else(|| tool.get("arguments"))
+        .or_else(|| tool.get("args"))
         .cloned()
         .unwrap_or(Value::Null);
     let rendered = serde_json::to_string(&detail).unwrap_or_default();
@@ -335,5 +366,21 @@ mod tests {
         assert_eq!(call_id, "tool-7");
         assert!(!ok);
         assert_eq!(detail.as_deref(), Some("permission denied"));
+    }
+
+    #[test]
+    fn agy_hook_input_uses_its_nested_tool_and_step() {
+        let input = json!({
+            "stepIdx": 19,
+            "toolCall": {"name": "run_command", "args": {"CommandLine": "git status --short"}},
+            "error": "exit status 1"
+        });
+        let (verb, preview, _) = hook_tool("agy", &input);
+        assert_eq!(verb, "run_command");
+        assert!(preview.contains("git status --short"));
+        let (call_id, ok, detail) = hook_result("agy", &input);
+        assert_eq!(call_id, "19");
+        assert!(!ok);
+        assert_eq!(detail.as_deref(), Some("exit status 1"));
     }
 }
