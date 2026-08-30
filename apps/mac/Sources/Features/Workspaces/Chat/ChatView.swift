@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ChatView: View {
     @Bindable var model: ChatModel
@@ -9,7 +8,6 @@ struct ChatView: View {
     var workspaceName: String? = nil
     var onOpenInspector: (() -> Void)? = nil
     @State private var draft = ""
-    @State private var importingAttachment = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -24,7 +22,17 @@ struct ChatView: View {
             #endif
             if let chat = model.selected {
                 transcript(chat)
-                composer(chat)
+                ChatComposer(
+                    draft: $draft,
+                    attachments: model.attachments,
+                    previews: model.attachmentPreviews,
+                    running: chat.running,
+                    placeholder: "Ask about \(workspaceName ?? "this folder")",
+                    onSend: { submit(from: chat) },
+                    onStop: { Task { await model.stop() } },
+                    onAttach: { item in await model.attach(item) },
+                    onRemove: { model.removeAttachment($0) }
+                )
             } else {
                 empty
             }
@@ -157,77 +165,6 @@ struct ChatView: View {
             }
         } else {
             proxy.scrollTo("chat-bottom", anchor: .bottom)
-        }
-    }
-
-    private func composer(_ chat: ChatConversation) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if !model.attachments.isEmpty {
-                HStack(spacing: Theme.Space.xs) {
-                    ForEach(model.attachments) { attachment in
-                        HStack(spacing: 6) {
-                            Image(systemName: ActionIcon.attach.symbol)
-                                .foregroundStyle(Theme.accent)
-                            Text(attachment.name)
-                                .font(Theme.caption)
-                                .lineLimit(1)
-                            Button("Remove", .dismiss) { model.removeAttachment(attachment) }
-                                .buttonStyle(.plain)
-                                .labelStyle(.iconOnly)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Theme.panel, in: Capsule())
-                        .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1) }
-                    }
-                }
-            }
-            HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                Button("Attach", .attach) { importingAttachment = true }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-                    .environment(\.compactActions, true)
-                    .disabled(chat.running)
-                TextField("Ask about \(workspaceName ?? "this folder")", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .padding(.horizontal, Theme.Space.m)
-                    .padding(.vertical, 10)
-                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(Theme.border, lineWidth: 1)
-                    }
-                    #if os(macOS)
-                    .onKeyPress(.return, phases: .down) { press in
-                        if press.modifiers.contains(.command) {
-                            submit(from: chat)
-                            return .handled
-                        }
-                        return .ignored
-                    }
-                    #endif
-                if chat.running {
-                    Button("Stop", .stop) { Task { await model.stop() } }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                        .environment(\.compactActions, true)
-                } else {
-                    Button("Send", .send) { submit(from: chat) }
-                        .buttonStyle(AccentButtonStyle(small: true))
-                        .environment(\.compactActions, true)
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.background)
-        .fileImporter(
-            isPresented: $importingAttachment,
-            allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]
-        ) { result in
-            if case let .success(file) = result {
-                Task { await model.attach(file) }
-            }
         }
     }
 

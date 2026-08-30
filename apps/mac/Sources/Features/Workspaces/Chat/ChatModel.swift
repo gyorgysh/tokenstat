@@ -11,6 +11,8 @@ final class ChatModel {
     var approvals: [ChatApproval] = []
     var offset: UInt64 = 0
     var attachments: [ChatAttachment] = []
+    /// Downsampled JPEG for the composer strip, keyed by attachment id.
+    var attachmentPreviews: [String: Data] = [:]
     var backends: [ChatBackend] = []
     var personas: [ChatPersona] = []
     var isLoading = false
@@ -46,6 +48,7 @@ final class ChatModel {
     func select(_ chat: ChatConversation?) async {
         selected = chat
         attachments = []
+        attachmentPreviews = [:]
         approvals = []
         events = []
         offset = 0
@@ -145,6 +148,7 @@ final class ChatModel {
             )
             replace(updated)
             attachments = []
+            attachmentPreviews = [:]
             await loadEvents(id: updated.id, reset: false)
         } catch {
             self.error = error.localizedDescription
@@ -152,9 +156,30 @@ final class ChatModel {
     }
 
     func attach(_ file: URL) async {
+        guard let item = ChatInbox.item(from: file) else {
+            error = "That file could not be read."
+            return
+        }
+        await attach(item)
+    }
+
+    func attach(_ item: ChatInboxItem) async {
         guard let selected else { return }
+        if item.data.count > ChatInbox.maxBytes {
+            error = "An attachment is limited to 12 MB."
+            return
+        }
         do {
-            attachments.append(try await Bridge.attachToChat(id: selected.id, file: file))
+            let attachment = try await Bridge.attachToChat(
+                id: selected.id,
+                name: item.name,
+                data: item.data,
+                mediaType: item.mediaType
+            )
+            attachments.append(attachment)
+            if let preview = ChatThumbnail.make(from: item.data) {
+                attachmentPreviews[attachment.id] = preview
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -162,6 +187,7 @@ final class ChatModel {
 
     func removeAttachment(_ attachment: ChatAttachment) {
         attachments.removeAll { $0.id == attachment.id }
+        attachmentPreviews.removeValue(forKey: attachment.id)
     }
 
     func stop() async {

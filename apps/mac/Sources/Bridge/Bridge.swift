@@ -975,11 +975,29 @@ extension Bridge {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: file)
-        return try await background(
-            "chat.attach",
-            ["id": id, "name": file.lastPathComponent, "data": data.base64EncodedString()],
-            as: ChatAttachment.self
+        return try await attachToChat(
+            id: id,
+            name: file.lastPathComponent,
+            data: data,
+            mediaType: nil
         )
+    }
+
+    static func attachToChat(
+        id: String,
+        name: String,
+        data: Data,
+        mediaType: String?
+    ) async throws -> ChatAttachment {
+        var params: [String: Any] = [
+            "id": id,
+            "name": name,
+            "data": data.base64EncodedString(),
+        ]
+        if let mediaType, !mediaType.isEmpty {
+            params["mediaType"] = mediaType
+        }
+        return try await background("chat.attach", params, as: ChatAttachment.self)
     }
 }
 
