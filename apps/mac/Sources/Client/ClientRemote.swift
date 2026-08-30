@@ -380,6 +380,10 @@ enum ClientRemote {
 
     // MARK: - Chat on a peer
 
+    static func chatBackends(peer: String) async throws -> [ChatBackend] {
+        try await Bridge.onPeer(peer, "chat.backends", as: [ChatBackend].self)
+    }
+
     static func chats(peer: String, workspaceID: String) async throws -> [ChatConversation] {
         try await Bridge.onPeer(peer, "chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
     }

@@ -229,6 +229,7 @@ private struct ChatSetupSheet: View {
     @State private var mode = "plan"
     @State private var bypass = false
     @State private var personas: [ChatPersona] = []
+    @State private var backends: [ChatBackend] = []
     @State private var personaID: String?
 
     var body: some View {
@@ -239,12 +240,9 @@ private struct ChatSetupSheet: View {
                     .font(Theme.callout).foregroundStyle(.secondary)
             }
             Picker("Agent", selection: $backend) {
-                Text("Claude").tag("claude")
-                Text("Codex").tag("codex")
-                Text("Grok").tag("grok")
-                Text("Cursor").tag("cursor")
-                Text("Antigravity").tag("agy")
-                Text("OpenCode").tag("opencode")
+                ForEach(backends) { option in
+                    Text(option.name).tag(option.id)
+                }
             }
             if !personas.isEmpty {
                 Picker("Persona", selection: $personaID) {
@@ -267,7 +265,7 @@ private struct ChatSetupSheet: View {
                 .toggleStyle(.brandCheckbox)
             Text(bypass
                 ? "This agent can use its backend's bypass mode in this folder."
-                : "tokenstat asks before a tool changes work when the selected backend supports it.")
+                : gateCopy)
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             HStack {
@@ -279,7 +277,20 @@ private struct ChatSetupSheet: View {
         }
         .padding(Theme.Space.xl)
         .frame(width: 460)
-        .task { personas = (try? await Bridge.chatPersonas()) ?? [] }
+        .task {
+            personas = (try? await Bridge.chatPersonas()) ?? []
+            backends = (try? await Bridge.chatBackends()) ?? []
+            if !backends.contains(where: { $0.id == backend }) { backend = backends.first?.id ?? "claude" }
+        }
+    }
+
+    private var gateCopy: String {
+        switch backends.first(where: { $0.id == backend })?.gateTier {
+        case "full": return "Tokenstat asks before every tool action."
+        case "rules": return "Saved permission rules run; anything else is denied."
+        case "bypassOnly": return "This backend has no Tokenstat approval gate. Use Bypass only if you intend that."
+        default: return "Checking this backend’s permission support."
+        }
     }
 }
 

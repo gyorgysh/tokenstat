@@ -13,10 +13,12 @@ private final class ClientChatModel {
     var approvals: [ChatApproval] = []
     var offset: UInt64 = 0
     var attachments: [ChatAttachment] = []
+    var backends: [ChatBackend] = []
     var error: String?
 
     func load(peer: String, workspaceID: String) async {
         do {
+            backends = try await ClientRemote.chatBackends(peer: peer)
             chats = try await ClientRemote.chats(peer: peer, workspaceID: workspaceID)
             if chat == nil { chat = chats.first }
             if let chat {
@@ -87,7 +89,13 @@ struct ClientChatView: View {
             if let chat = model.chat {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        HStack { Image(systemName: "sparkles").foregroundStyle(Theme.accent); Text(chat.title).font(Theme.title3.weight(.semibold)); Spacer(); Text(chat.mode == "plan" ? "Plan" : "Execute").font(Theme.caption).foregroundStyle(Theme.accent) }
+                        HStack {
+                            Image(systemName: "sparkles").foregroundStyle(Theme.accent)
+                            Text(chat.title).font(Theme.title3.weight(.semibold))
+                            Spacer()
+                            Text(chat.mode == "plan" ? "Plan" : "Execute").font(Theme.caption).foregroundStyle(Theme.accent)
+                            Text(gateLabel(chat)).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent).padding(.horizontal, 8).padding(.vertical, 4).background(Theme.accentSoft, in: Capsule())
+                        }
                             .padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         ForEach(model.events) { row in
                             ClientChatRow(
@@ -110,6 +118,15 @@ struct ClientChatView: View {
         .task { await model.load(peer: peer, workspaceID: workspaceID) }
         .task(id: model.chat?.id) { while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(400)); await model.poll(peer: peer) } }
         .alert("Chat unavailable", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.error ?? "") }
+    }
+
+    private func gateLabel(_ chat: ChatConversation) -> String {
+        switch model.backends.first(where: { $0.id == chat.backend })?.gateTier {
+        case "full": return "Approvals"
+        case "rules": return "Rules"
+        case "bypassOnly": return "Bypass only"
+        default: return "Checking"
+        }
     }
 
     private func composer(_ chat: ChatConversation) -> some View {

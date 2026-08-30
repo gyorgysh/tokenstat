@@ -2296,6 +2296,14 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var running: Bool
 }
 
+/// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
+/// must not imply an interactive approval channel where a CLI only has rules.
+struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var gateTier: String
+}
+
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var name: String

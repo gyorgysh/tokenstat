@@ -867,6 +867,10 @@ extension Bridge {
 // MARK: - Chat
 
 extension Bridge {
+    static func chatBackends() async throws -> [ChatBackend] {
+        try await background("chat.backends", as: [ChatBackend].self)
+    }
+
     static func chats(workspaceID: String) async throws -> [ChatConversation] {
         try await background("chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
     }
