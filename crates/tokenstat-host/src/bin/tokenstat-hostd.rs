@@ -132,9 +132,6 @@ fn run_agy_hook(phase: &str) -> Result<(), String> {
 }
 
 fn run_hook_inner(flavor: &str, phase: &str) -> Result<(), String> {
-    if phase != "pre" && phase != "post" {
-        return Err("hook phase must be pre or post".into());
-    }
     let token_file = std::env::var("TOKENSTAT_CHAT_TURN_FILE")
         .map_err(|_| "chat approval is unavailable: no turn credential")?;
     let token = std::fs::read_to_string(token_file)
@@ -151,25 +148,40 @@ fn run_hook_inner(flavor: &str, phase: &str) -> Result<(), String> {
         .map_err(|_| "chat approval is unavailable: invalid tool request")?;
     let socket = std::env::var("TOKENSTAT_CHAT_SOCKET")
         .map_err(|_| "chat approval is unavailable: no host socket")?;
+    hook_phase(flavor, phase, token, &socket, &input)
+}
+
+/// Ask the daemon, or report the outcome, for one tool call. Split from
+/// stdin and env so a missing host can be tested without parking on stdin.
+fn hook_phase(
+    flavor: &str,
+    phase: &str,
+    token: &str,
+    socket: &str,
+    input: &Value,
+) -> Result<(), String> {
+    if phase != "pre" && phase != "post" {
+        return Err("hook phase must be pre or post".into());
+    }
     if phase == "post" {
-        let (call_id, ok, detail) = hook_result(flavor, &input);
+        let (call_id, ok, detail) = hook_result(flavor, input);
         let request = json!({
             "id": "chat-hook",
             "method": "chat.toolResult",
             "params": {"turnToken": token, "callId": call_id, "ok": ok, "detail": detail}
         });
-        let answer = hook_call(&socket, &request)?;
+        let answer = hook_call(socket, &request)?;
         return (answer.pointer("/result/recorded").and_then(Value::as_bool) == Some(true))
             .then_some(())
             .ok_or_else(|| "chat approval is unavailable: host rejected tool result".to_string());
     }
-    let (verb, preview, shell_prefix) = hook_tool(flavor, &input);
+    let (verb, preview, shell_prefix) = hook_tool(flavor, input);
     let request = json!({
         "id": "chat-hook",
         "method": "chat.toolRequest",
         "params": {"turnToken": token, "verb": verb, "preview": preview, "shellPrefix": shell_prefix}
     });
-    let answer = hook_call(&socket, &request)?;
+    let answer = hook_call(socket, &request)?;
     let request_id = answer
         .pointer("/result/requestId")
         .and_then(Value::as_str)
@@ -179,7 +191,7 @@ fn run_hook_inner(flavor: &str, phase: &str) -> Result<(), String> {
     }
     loop {
         let poll = json!({"id":"chat-hook", "method":"chat.toolAwait", "params":{"requestId": request_id, "waitMs": 2000}});
-        let answer = hook_call(&socket, &poll)?;
+        let answer = hook_call(socket, &poll)?;
         match answer.pointer("/result/decision").and_then(Value::as_str) {
             Some("allow") => return Ok(()),
             Some("deny") => return Err("tokenstat denied this tool request".into()),
@@ -382,5 +394,51 @@ mod tests {
         assert_eq!(call_id, "19");
         assert!(!ok);
         assert_eq!(detail.as_deref(), Some("exit status 1"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_host_socket_is_a_deny_not_an_allow() {
+        let err = hook_call(
+            "/tmp/tokenstat-chat-host-missing.sock",
+            &json!({"id": "chat-hook", "method": "chat.toolRequest"}),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("not reachable"),
+            "an unreachable host must fail closed: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn standard_mode_denies_when_the_host_disappears() {
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("gone.sock");
+        let input = json!({"tool_name": "Edit", "tool_input": {"file_path": "src/main.rs"}});
+        let err = hook_phase(
+            "claude",
+            "pre",
+            "turn-token",
+            socket.to_str().unwrap(),
+            &input,
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("not reachable") || err.contains("unavailable"),
+            "a disappeared host must deny the tool: {err}"
+        );
+        let err = hook_phase(
+            "claude",
+            "post",
+            "turn-token",
+            socket.to_str().unwrap(),
+            &json!({"tool_use_id": "tool-1", "success": true}),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("not reachable") || err.contains("unavailable"),
+            "a disappeared host must fail the post hook too: {err}"
+        );
     }
 }
