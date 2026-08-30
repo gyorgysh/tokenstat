@@ -9,6 +9,7 @@ final class ChatModel {
     var chats: [ChatConversation] = []
     var selected: ChatConversation?
     var events: [ChatTimelineEvent] = []
+    var approvals: [ChatApproval] = []
     var offset: UInt64 = 0
     var attachments: [ChatAttachment] = []
     var isLoading = false
@@ -20,13 +21,16 @@ final class ChatModel {
         do {
             chats = try await Bridge.chats(workspaceID: workspaceID)
             if selected == nil { selected = chats.first }
-            if let selected { await loadEvents(id: selected.id, reset: true) }
+            if let selected {
+                await loadEvents(id: selected.id, reset: true)
+                await loadApprovals(id: selected.id)
+            }
         } catch { self.error = error.localizedDescription }
     }
 
-    func create(workspaceID: String, backend: String = "claude", mode: String = "plan", personaID: String? = nil) async {
+    func create(workspaceID: String, backend: String = "claude", mode: String = "plan", autonomy: String = "standard", personaID: String? = nil) async {
         do {
-            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode, personaID: personaID)
+            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode, autonomy: autonomy, personaID: personaID)
             chats.insert(chat, at: 0)
             selected = chat
             events = []
@@ -57,9 +61,17 @@ final class ChatModel {
         } catch { self.error = error.localizedDescription }
     }
 
+    func resolve(_ approval: ChatApproval, choice: String) async {
+        do {
+            _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice)
+            await loadApprovals(id: approval.conversationID)
+        } catch { self.error = error.localizedDescription }
+    }
+
     func poll() async {
         guard let selected, selected.running else { return }
         await loadEvents(id: selected.id, reset: false)
+        await loadApprovals(id: selected.id)
         do { replace(try await Bridge.chats(workspaceID: selected.workspaceID).first(where: { $0.id == selected.id }) ?? selected) } catch {}
     }
 
@@ -69,6 +81,11 @@ final class ChatModel {
             if reset { events = chunk.events } else { events.append(contentsOf: chunk.events) }
             offset = chunk.nextOffset
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func loadApprovals(id: String) async {
+        do { approvals = try await Bridge.chatApprovals(id: id) }
+        catch { self.error = error.localizedDescription }
     }
 
     private func replace(_ chat: ChatConversation) {
@@ -111,9 +128,9 @@ struct ChatView: View {
             Button("OK", role: .cancel) { model.error = nil }
         } message: { Text(model.error ?? "") }
         .sheet(isPresented: $showingSetup) {
-            ChatSetupSheet { backend, mode, personaID in
+            ChatSetupSheet { backend, mode, autonomy, personaID in
                 showingSetup = false
-                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode, personaID: personaID) }
+                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode, autonomy: autonomy, personaID: personaID) }
             }
         }
     }
@@ -122,7 +139,13 @@ struct ChatView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                 setup(chat)
-                ForEach(model.events) { row in ChatEventRow(row: row) }
+                ForEach(model.events) { row in
+                    ChatEventRow(
+                        row: row,
+                        isPending: row.approval.map { approval in model.approvals.contains(where: { $0.id == approval.id }) } ?? false,
+                        resolve: { approval, choice in Task { await model.resolve(approval, choice: choice) } }
+                    )
+                }
                 if chat.running { HStack(spacing: Theme.Space.s) { ProgressView().controlSize(.small); Text("Working").font(Theme.caption).foregroundStyle(.secondary) }.padding(.horizontal, Theme.Space.l) }
             }
             .frame(maxWidth: 780, alignment: .leading)
@@ -193,17 +216,18 @@ struct ChatView: View {
             ChatScene(reduceMotion: false)
             Text("Start a chat").font(Theme.title2.weight(.semibold))
             Text("Ask an agent to explore, plan, or work in this folder.").font(Theme.callout).foregroundStyle(.secondary)
-            Button("New chat") { showingSetup = true }.buttonStyle(AccentButtonStyle())
+            Button("New chat", .create) { showingSetup = true }.buttonStyle(AccentButtonStyle())
             Spacer()
         }
     }
 }
 
 private struct ChatSetupSheet: View {
-    let create: (String, String, String?) -> Void
+    let create: (String, String, String, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var backend = "claude"
     @State private var mode = "plan"
+    @State private var bypass = false
     @State private var personas: [ChatPersona] = []
     @State private var personaID: String?
 
@@ -239,7 +263,19 @@ private struct ChatSetupSheet: View {
                 Text("Plan — explore before changing work").tag("plan")
                 Text("Execute — work directly in the folder").tag("execute")
             }
-            HStack { Spacer(); Button("Cancel", role: .cancel) { dismiss() }; Button("Create chat") { create(backend, mode, personaID) }.buttonStyle(AccentButtonStyle()) }
+            Toggle("Let this chat work without asking", isOn: $bypass)
+                .toggleStyle(.brandCheckbox)
+            Text(bypass
+                ? "This agent can use its backend's bypass mode in this folder."
+                : "tokenstat asks before a tool changes work when the selected backend supports it.")
+                .font(Theme.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Cancel", .dismiss, role: .cancel) { dismiss() }
+                Button("Create chat", .create) { create(backend, mode, bypass ? "bypass" : "standard", personaID) }
+                    .buttonStyle(AccentButtonStyle())
+            }
         }
         .padding(Theme.Space.xl)
         .frame(width: 460)
@@ -249,9 +285,13 @@ private struct ChatSetupSheet: View {
 
 private struct ChatEventRow: View {
     let row: ChatTimelineEvent
+    let isPending: Bool
+    let resolve: (ChatApproval, String) -> Void
     var body: some View {
         if row.kind == "user" {
             HStack { Spacer(minLength: 48); Text(row.text ?? "").font(Theme.body).padding(Theme.Space.m).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous)) }
+        } else if let approval = row.approval {
+            ChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         } else if let event = row.event {
             switch event.kind {
             case "text": Text(event.delta ?? "").font(Theme.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -263,5 +303,52 @@ private struct ChatEventRow: View {
             default: EmptyView()
             }
         }
+    }
+}
+
+/// A decision stays where the agent stopped, so the person can see the tool,
+/// its target and the surrounding response without losing their reading place.
+private struct ChatApprovalCard: View {
+    let approval: ChatApproval
+    let isPending: Bool
+    let resolve: (ChatApproval, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "hand.raised.fill")
+                    .foregroundStyle(Theme.accent)
+                Text(isPending ? "Permission needed" : "Permission answered")
+                    .font(Theme.callout.weight(.semibold))
+                Spacer()
+                Text(approval.verb)
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Theme.accentSoft, in: Capsule())
+            }
+            Text(approval.preview)
+                .font(.system(.footnote, design: .monospaced))
+                .textSelection(.enabled)
+                .foregroundStyle(.primary)
+                .lineLimit(4)
+            if isPending {
+                HStack(spacing: Theme.Space.s) {
+                    Button("Allow", .approve) { resolve(approval, "allow") }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                    Button("Always allow", .approve) { resolve(approval, "allowAlways") }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                    Button("Deny", .dismiss, role: .destructive) { resolve(approval, "deny") }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                }
+            } else {
+                Label("This request is no longer waiting.", systemImage: "checkmark.circle")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1) }
     }
 }

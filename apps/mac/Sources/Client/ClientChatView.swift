@@ -10,6 +10,7 @@ private final class ClientChatModel {
     var chats: [ChatConversation] = []
     var chat: ChatConversation?
     var events: [ChatTimelineEvent] = []
+    var approvals: [ChatApproval] = []
     var offset: UInt64 = 0
     var attachments: [ChatAttachment] = []
     var error: String?
@@ -18,7 +19,10 @@ private final class ClientChatModel {
         do {
             chats = try await ClientRemote.chats(peer: peer, workspaceID: workspaceID)
             if chat == nil { chat = chats.first }
-            if let chat { await eventsFor(peer: peer, id: chat.id, reset: true) }
+            if let chat {
+                await eventsFor(peer: peer, id: chat.id, reset: true)
+                await approvalsFor(peer: peer, id: chat.id)
+            }
         } catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
     }
 
@@ -45,14 +49,27 @@ private final class ClientChatModel {
         catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
     }
 
+    func resolve(peer: String, approval: ChatApproval, choice: String) async {
+        do {
+            _ = try await ClientRemote.resolveChatApproval(peer: peer, id: approval.id, choice: choice)
+            await approvalsFor(peer: peer, id: approval.conversationID)
+        } catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
+    }
+
     func poll(peer: String) async {
         guard let chat, chat.running else { return }
         await eventsFor(peer: peer, id: chat.id, reset: false)
+        await approvalsFor(peer: peer, id: chat.id)
         if let current = try? await ClientRemote.chats(peer: peer, workspaceID: chat.workspaceID).first(where: { $0.id == chat.id }) { self.chat = current }
     }
 
     private func eventsFor(peer: String, id: String, reset: Bool) async {
         do { let chunk = try await ClientRemote.chatEvents(peer: peer, id: id, offset: reset ? 0 : offset); if reset { events = chunk.events } else { events += chunk.events }; offset = chunk.nextOffset }
+        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
+    }
+
+    private func approvalsFor(peer: String, id: String) async {
+        do { approvals = try await ClientRemote.chatApprovals(peer: peer, id: id) }
         catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
     }
 }
@@ -72,13 +89,19 @@ struct ClientChatView: View {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
                         HStack { Image(systemName: "sparkles").foregroundStyle(Theme.accent); Text(chat.title).font(Theme.title3.weight(.semibold)); Spacer(); Text(chat.mode == "plan" ? "Plan" : "Execute").font(Theme.caption).foregroundStyle(Theme.accent) }
                             .padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        ForEach(model.events) { ClientChatRow(row: $0) }
+                        ForEach(model.events) { row in
+                            ClientChatRow(
+                                row: row,
+                                isPending: row.approval.map { approval in model.approvals.contains(where: { $0.id == approval.id }) } ?? false,
+                                resolve: { approval, choice in Task { await model.resolve(peer: peer, approval: approval, choice: choice) } }
+                            )
+                        }
                     }.padding(Theme.Space.m)
                 }
                 composer(chat)
             } else {
                 ContentUnavailableView("Start a chat", systemImage: "bubble.left.and.bubble.right", description: Text("Ask an agent to help with \(folderName)."))
-                    .overlay(alignment: .bottom) { Button("New chat") { Task { await model.create(peer: peer, workspaceID: workspaceID) } }.buttonStyle(AccentButtonStyle()).padding(.bottom, Theme.Space.xl) }
+                    .overlay(alignment: .bottom) { Button("New chat", .create) { Task { await model.create(peer: peer, workspaceID: workspaceID) } }.buttonStyle(AccentButtonStyle()).padding(.bottom, Theme.Space.xl) }
             }
         }
         .background(Theme.background)
@@ -113,8 +136,13 @@ struct ClientChatView: View {
 
 private struct ClientChatRow: View {
     let row: ChatTimelineEvent
+    let isPending: Bool
+    let resolve: (ChatApproval, String) -> Void
     var body: some View {
         if row.kind == "user" { HStack { Spacer(); Text(row.text ?? "").padding(Theme.Space.m).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous)) } }
+        else if let approval = row.approval {
+            ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
+        }
         else if let event = row.event {
             switch event.kind {
             case "text": Text(event.delta ?? "").frame(maxWidth: .infinity, alignment: .leading)
@@ -124,6 +152,49 @@ private struct ClientChatRow: View {
             default: EmptyView()
             }
         }
+    }
+}
+
+private struct ClientChatApprovalCard: View {
+    let approval: ChatApproval
+    let isPending: Bool
+    let resolve: (ChatApproval, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack {
+                Label(isPending ? "Permission needed" : "Permission answered", systemImage: "hand.raised.fill")
+                    .font(Theme.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                Spacer()
+                Text(approval.verb).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
+            }
+            Text(approval.preview)
+                .font(.system(.footnote, design: .monospaced))
+                .lineLimit(4)
+                .textSelection(.enabled)
+            if isPending {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Theme.Space.s) { actions }
+                    VStack(alignment: .leading, spacing: Theme.Space.s) { actions }
+                }
+            } else {
+                Text("This request is no longer waiting.")
+                    .font(Theme.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(Theme.Space.m)
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1) }
+    }
+
+    @ViewBuilder private var actions: some View {
+        Button("Allow", .approve) { resolve(approval, "allow") }
+            .buttonStyle(SecondaryButtonStyle(small: true))
+        Button("Always allow", .approve) { resolve(approval, "allowAlways") }
+            .buttonStyle(AccentButtonStyle(small: true))
+        Button("Deny", .dismiss, role: .destructive) { resolve(approval, "deny") }
+            .buttonStyle(SecondaryButtonStyle(small: true))
     }
 }
 #endif

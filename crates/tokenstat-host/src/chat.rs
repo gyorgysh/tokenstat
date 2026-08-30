@@ -140,8 +140,21 @@ pub struct Update {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum StoredEvent {
-    User { text: String, at_ms: i64 },
-    Agent { event: Event, at_ms: i64 },
+    User {
+        text: String,
+        at_ms: i64,
+    },
+    Agent {
+        event: Event,
+        at_ms: i64,
+    },
+    /// An approval belongs in the transcript, not in a disconnected modal.
+    /// The queue remains the source of truth for its live decision; this
+    /// record preserves the place where the agent paused after it is settled.
+    Approval {
+        approval: Approval,
+        at_ms: i64,
+    },
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -275,6 +288,13 @@ impl Store {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .push(approval.clone());
+            self.append(
+                conversation_id,
+                &StoredEvent::Approval {
+                    approval: approval.clone(),
+                    at_ms: now,
+                },
+            )?;
         }
         Ok(approval)
     }
@@ -1102,6 +1122,10 @@ mod tests {
             .request_approval("chat-test", "Edit", "Edit src/main.rs", None)
             .unwrap();
         assert_eq!(store.approvals(Some("chat-test")).len(), 1);
+        let (events, _) = store.events("chat-test", 0).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["kind"], "approval");
+        assert_eq!(events[0]["approval"]["id"], pending.id);
         assert_eq!(
             store
                 .resolve_approval(&pending.id, "allowAlways")

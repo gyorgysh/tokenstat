@@ -400,6 +400,14 @@ enum ClientRemote {
         try await Bridge.onPeer(peer, "chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
     }
 
+    static func chatApprovals(peer: String, id: String) async throws -> [ChatApproval] {
+        try await Bridge.onPeer(peer, "chat.approvals", ["id": id], as: [ChatApproval].self)
+    }
+
+    static func resolveChatApproval(peer: String, id: String, choice: String) async throws -> ChatApproval {
+        try await Bridge.onPeer(peer, "chat.resolveApproval", ["id": id, "choice": choice], as: ChatApproval.self)
+    }
+
     static func attachToChat(peer: String, id: String, file: URL) async throws -> ChatAttachment {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }

@@ -876,9 +876,10 @@ extension Bridge {
         backend: String,
         title: String = "New chat",
         mode: String = "plan",
+        autonomy: String = "standard",
         personaID: String? = nil
     ) async throws -> ChatConversation {
-        var params: [String: Any] = ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode]
+        var params: [String: Any] = ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode, "autonomy": autonomy]
         if let personaID { params["personaId"] = personaID }
         return try await background(
             "chat.create",
@@ -897,6 +898,14 @@ extension Bridge {
 
     static func chatEvents(id: String, offset: UInt64) async throws -> ChatEventChunk {
         try await background("chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+    }
+
+    static func chatApprovals(id: String) async throws -> [ChatApproval] {
+        try await background("chat.approvals", ["id": id], as: [ChatApproval].self)
+    }
+
+    static func resolveChatApproval(id: String, choice: String) async throws -> ChatApproval {
+        try await background("chat.resolveApproval", ["id": id, "choice": choice], as: ChatApproval.self)
     }
 
     static func chatPersonas() async throws -> [ChatPersona] {

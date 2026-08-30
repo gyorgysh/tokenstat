@@ -2324,9 +2324,21 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var text: String?
     var atMs: Int64?
     var event: ChatAgentEvent?
+    var approval: ChatApproval?
     var id: String {
-        "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? "event")"
+        "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? approval?.id ?? "event")"
     }
+}
+
+struct ChatApproval: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var conversationID: String
+    var verb: String
+    var preview: String
+    var shellPrefix: String?
+    var createdAtMs: Int64
+    var expiresAtMs: Int64
+    var decision: String?
 }
 
 struct ChatAgentEvent: Codable, Sendable {
