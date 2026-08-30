@@ -100,7 +100,7 @@ struct ChatView: View {
     private func transcript(_ chat: ChatConversation) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
                     #if !os(macOS)
                     if !model.chats.isEmpty {
                         conversationMenu
@@ -112,12 +112,10 @@ struct ChatView: View {
                         collapsed: model.hasStarted,
                         onOpenInspector: onOpenInspector
                     )
-                    ForEach(model.events) { row in
+                    ForEach(model.displayItems) { item in
                         ChatEventRow(
-                            row: row,
-                            isPending: row.approval.map { approval in
-                                model.approvals.contains { $0.id == approval.id }
-                            } ?? false,
+                            item: item,
+                            isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }
                             }
@@ -141,7 +139,7 @@ struct ChatView: View {
                 .padding(.horizontal, Theme.Space.l)
                 .frame(maxWidth: .infinity, alignment: .top)
             }
-            .onChange(of: model.events.count) { _, _ in
+            .onChange(of: scrollToken) { _, _ in
                 scrollToLatest(proxy)
             }
             .onChange(of: chat.running) { _, _ in
@@ -233,6 +231,26 @@ struct ChatView: View {
         }
     }
 
+    /// Count alone misses streaming: coalesced text grows in place.
+    private var scrollToken: String {
+        guard let last = model.displayItems.last else { return "" }
+        switch last.kind {
+        case let .assistant(text), let .thinking(text):
+            return "\(last.id)-\(text.count)"
+        case let .tool(state):
+            return "\(last.id)-\(state.running)-\(state.failed)-\(state.detail?.count ?? 0)"
+        default:
+            return last.id
+        }
+    }
+
+    private func pendingApproval(_ item: ChatDisplayItem) -> Bool {
+        if case let .approval(approval) = item.kind {
+            return model.approvals.contains { $0.id == approval.id }
+        }
+        return false
+    }
+
     private func submit(from chat: ChatConversation) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !chat.running else { return }
@@ -259,113 +277,5 @@ struct ChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Theme.Space.l)
-    }
-}
-
-private struct ChatEventRow: View {
-    let row: ChatTimelineEvent
-    let isPending: Bool
-    let resolve: (ChatApproval, String) -> Void
-    var body: some View {
-        if row.kind == "user" {
-            HStack {
-                Spacer(minLength: 48)
-                Text(row.text ?? "")
-                    .font(Theme.body)
-                    .padding(Theme.Space.m)
-                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-        } else if let approval = row.approval {
-            ChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
-        } else if let event = row.event {
-            switch event.kind {
-            case "text":
-                Text(event.delta ?? "")
-                    .font(Theme.body)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            case "thinking":
-                Label(event.delta ?? "Thinking", systemImage: "brain")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 2)
-            case "toolStart":
-                Label(
-                    [event.verb, event.target].compactMap { $0 }.joined(separator: " "),
-                    systemImage: "hammer"
-                )
-                .font(Theme.callout)
-                .padding(Theme.Space.s)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            case "edit":
-                Label(
-                    "\(event.path ?? "File")  +\(event.added ?? 0)  −\(event.removed ?? 0)",
-                    systemImage: "pencil.line"
-                )
-                .font(Theme.callout)
-                .foregroundStyle(Theme.accent)
-            case "failed":
-                Label(event.text ?? "The turn failed", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(Theme.warning)
-            case "usage":
-                Text("\(event.input ?? 0) in · \(event.output ?? 0) out")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            default:
-                EmptyView()
-            }
-        }
-    }
-}
-
-/// A decision stays where the agent stopped, so the person can see the tool,
-/// its target and the surrounding response without losing their reading place.
-private struct ChatApprovalCard: View {
-    let approval: ChatApproval
-    let isPending: Bool
-    let resolve: (ChatApproval, String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack(spacing: Theme.Space.s) {
-                Image(systemName: "hand.raised.fill")
-                    .foregroundStyle(Theme.accent)
-                Text(isPending ? "Permission needed" : "Permission answered")
-                    .font(Theme.callout.weight(.semibold))
-                Spacer()
-                Text(approval.verb)
-                    .font(Theme.caption.weight(.medium))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.accentSoft, in: Capsule())
-            }
-            Text(approval.preview)
-                .font(.system(.footnote, design: .monospaced))
-                .textSelection(.enabled)
-                .foregroundStyle(.primary)
-                .lineLimit(4)
-            if isPending {
-                HStack(spacing: Theme.Space.s) {
-                    Button("Allow", .allow) { resolve(approval, "allow") }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                    Button("Always allow", .allow) { resolve(approval, "allowAlways") }
-                        .buttonStyle(AccentButtonStyle(small: true))
-                    Button("Deny", .deny, role: .destructive) { resolve(approval, "deny") }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
-                }
-            } else {
-                Label("This request is no longer waiting.", systemImage: "checkmark.circle")
-                    .font(Theme.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
-        }
     }
 }

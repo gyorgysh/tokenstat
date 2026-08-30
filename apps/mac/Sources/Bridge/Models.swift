@@ -2057,6 +2057,49 @@ struct FileDiff: Codable, Sendable, Hashable {
     var untracked: Bool
 
     var fileName: String { String(path.split(separator: "/").last ?? "") }
+
+    /// Build a diff from a chat Edit snippet (`- old` / `+ new` lines).
+    ///
+    /// Those previews are not unified diffs: they have no hunk header and no
+    /// line numbers. DiffBody still needs a FileDiff, so this invents a single
+    /// hunk and sequential gutters so the existing renderer can draw it.
+    static func fromEditPatch(path: String, patch: String) -> FileDiff {
+        var lines: [DiffLine] = []
+        var oldLine: UInt32 = 1
+        var newLine: UInt32 = 1
+        for raw in patch.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(raw)
+            if line.hasPrefix("+") {
+                lines.append(
+                    DiffLine(kind: .added, oldLine: nil, newLine: newLine, text: strip(line, mark: "+"))
+                )
+                newLine += 1
+            } else if line.hasPrefix("-") {
+                lines.append(
+                    DiffLine(kind: .removed, oldLine: oldLine, newLine: nil, text: strip(line, mark: "-"))
+                )
+                oldLine += 1
+            } else if !line.isEmpty {
+                lines.append(
+                    DiffLine(kind: .context, oldLine: oldLine, newLine: newLine, text: line)
+                )
+                oldLine += 1
+                newLine += 1
+            }
+        }
+        return FileDiff(
+            path: path,
+            hunks: lines.isEmpty ? [] : [DiffHunk(header: "@@ preview @@", lines: lines)],
+            binary: false,
+            untracked: false
+        )
+    }
+
+    private static func strip(_ line: String, mark: String) -> String {
+        if line.hasPrefix("\(mark) ") { return String(line.dropFirst(2)) }
+        if line.hasPrefix(mark) { return String(line.dropFirst()) }
+        return line
+    }
 }
 
 /// What a git command that changed something reported.
@@ -2466,6 +2509,12 @@ struct ChatAgentEvent: Codable, Sendable {
     var input: UInt64?
     var output: UInt64?
     var costUsd: Double?
+    var callId: String?
+    var ok: Bool?
+    var detail: String?
+    var cacheRead: UInt64?
+    var cacheWrite: UInt64?
+    var exitCode: Int32?
 }
 
 /// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a

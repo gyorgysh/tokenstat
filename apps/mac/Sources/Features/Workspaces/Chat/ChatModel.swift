@@ -236,6 +236,13 @@ final class ChatModel {
         !events.isEmpty || selected?.resumeToken != nil
     }
 
+    /// Consecutive text and thinking deltas become one block each, and a
+    /// ToolEnd lands on the ToolStart it belongs to so the row can show
+    /// running, duration and failure without a second line.
+    var displayItems: [ChatDisplayItem] {
+        ChatDisplayItem.coalesce(events)
+    }
+
     private func loadEvents(id: String, reset: Bool) async {
         do {
             let chunk = try await Bridge.chatEvents(id: id, offset: reset ? 0 : offset)
@@ -266,6 +273,196 @@ final class ChatModel {
             chats.insert(chat, at: 0)
         }
         chats.sort { $0.updatedAtMs > $1.updatedAtMs }
+    }
+}
+
+struct ChatToolState {
+    var callId: String
+    var verb: String
+    var target: String
+    var running: Bool
+    var failed: Bool
+    var detail: String?
+    var startedAtMs: Int64
+    var endedAtMs: Int64?
+
+    var duration: String? {
+        guard let endedAtMs else { return nil }
+        let ms = max(0, endedAtMs - startedAtMs)
+        if ms < 1000 { return "\(ms)ms" }
+        let seconds = Double(ms) / 1000
+        if seconds < 10 {
+            return String(format: "%.1fs", seconds)
+        }
+        return "\(Int(seconds.rounded()))s"
+    }
+
+    var snippet: [String] {
+        guard let detail, !detail.isEmpty else { return [] }
+        return detail
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "| \($0)" }
+    }
+}
+
+struct ChatDisplayItem: Identifiable {
+    let id: String
+    let kind: Kind
+
+    enum Kind {
+        case user(String)
+        case assistant(String)
+        case thinking(String)
+        case tool(ChatToolState)
+        case edit(path: String, added: UInt32, removed: UInt32, patch: String)
+        case approval(ChatApproval)
+        case usage(input: UInt64, output: UInt64, cost: Double?)
+        case failed(String)
+    }
+
+    static func coalesce(_ events: [ChatTimelineEvent]) -> [ChatDisplayItem] {
+        var items: [ChatDisplayItem] = []
+        var toolIndex: [String: Int] = [:]
+        var text = ""
+        var textID = ""
+        var thinking = ""
+        var thinkingID = ""
+
+        func flushText() {
+            let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                items.append(ChatDisplayItem(id: textID, kind: .assistant(body)))
+            }
+            text = ""
+            textID = ""
+        }
+
+        func flushThinking() {
+            let body = thinking.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !body.isEmpty {
+                items.append(ChatDisplayItem(id: thinkingID, kind: .thinking(body)))
+            }
+            thinking = ""
+            thinkingID = ""
+        }
+
+        for event in events {
+            if event.kind == "user" {
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "user-\(event.atMs ?? 0)-\(items.count)",
+                        kind: .user(event.text ?? "")
+                    )
+                )
+                continue
+            }
+            if let approval = event.approval {
+                flushText()
+                flushThinking()
+                items.append(ChatDisplayItem(id: "approval-\(approval.id)", kind: .approval(approval)))
+                continue
+            }
+            guard let agent = event.event else { continue }
+            switch agent.kind {
+            case "text":
+                flushThinking()
+                if text.isEmpty { textID = "text-\(event.atMs ?? 0)-\(items.count)" }
+                text += agent.delta ?? ""
+            case "thinking":
+                flushText()
+                if thinking.isEmpty { thinkingID = "think-\(event.atMs ?? 0)-\(items.count)" }
+                thinking += agent.delta ?? ""
+            case "toolStart":
+                flushText()
+                flushThinking()
+                let callId = agent.callId ?? "tool-\(event.atMs ?? 0)-\(items.count)"
+                let state = ChatToolState(
+                    callId: callId,
+                    verb: agent.verb ?? "Tool",
+                    target: agent.target ?? "",
+                    running: true,
+                    failed: false,
+                    detail: nil,
+                    startedAtMs: event.atMs ?? 0,
+                    endedAtMs: nil
+                )
+                toolIndex[callId] = items.count
+                items.append(ChatDisplayItem(id: "tool-\(callId)", kind: .tool(state)))
+            case "toolEnd":
+                flushText()
+                flushThinking()
+                let callId = agent.callId ?? ""
+                if let index = toolIndex[callId], case .tool(var state) = items[index].kind {
+                    state.running = false
+                    state.failed = !(agent.ok ?? true)
+                    state.detail = agent.detail
+                    state.endedAtMs = event.atMs
+                    items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
+                } else {
+                    let fallback = callId.isEmpty ? "end-\(event.atMs ?? 0)-\(items.count)" : callId
+                    items.append(
+                        ChatDisplayItem(
+                            id: "tool-\(fallback)",
+                            kind: .tool(
+                                ChatToolState(
+                                    callId: fallback,
+                                    verb: agent.verb ?? "Tool",
+                                    target: agent.target ?? "",
+                                    running: false,
+                                    failed: !(agent.ok ?? true),
+                                    detail: agent.detail,
+                                    startedAtMs: event.atMs ?? 0,
+                                    endedAtMs: event.atMs
+                                )
+                            )
+                        )
+                    )
+                }
+            case "edit":
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "edit-\(agent.callId ?? agent.path ?? "\(items.count)")",
+                        kind: .edit(
+                            path: agent.path ?? "File",
+                            added: agent.added ?? 0,
+                            removed: agent.removed ?? 0,
+                            patch: agent.patch ?? ""
+                        )
+                    )
+                )
+            case "usage":
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "usage-\(event.atMs ?? 0)-\(items.count)",
+                        kind: .usage(
+                            input: agent.input ?? 0,
+                            output: agent.output ?? 0,
+                            cost: agent.costUsd
+                        )
+                    )
+                )
+            case "failed":
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "failed-\(event.atMs ?? 0)-\(items.count)",
+                        kind: .failed(agent.text ?? "The turn failed")
+                    )
+                )
+            default:
+                continue
+            }
+        }
+        flushText()
+        flushThinking()
+        return items
     }
 }
 
