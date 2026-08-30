@@ -109,9 +109,6 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
     if phase != "pre" && phase != "post" {
         return Err("hook phase must be pre or post".into());
     }
-    if phase == "post" {
-        return Ok(());
-    }
     let token_file = std::env::var("TOKENSTAT_CHAT_TURN_FILE")
         .map_err(|_| "chat approval is unavailable: no turn credential")?;
     let token = std::fs::read_to_string(token_file)
@@ -126,9 +123,21 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
         .map_err(|_| "chat approval is unavailable: cannot read tool request")?;
     let input: Value = serde_json::from_str(&body)
         .map_err(|_| "chat approval is unavailable: invalid tool request")?;
-    let (verb, preview, shell_prefix) = hook_tool(flavor, &input);
     let socket = std::env::var("TOKENSTAT_CHAT_SOCKET")
         .map_err(|_| "chat approval is unavailable: no host socket")?;
+    if phase == "post" {
+        let (call_id, ok, detail) = hook_result(flavor, &input);
+        let request = json!({
+            "id": "chat-hook",
+            "method": "chat.toolResult",
+            "params": {"turnToken": token, "callId": call_id, "ok": ok, "detail": detail}
+        });
+        let answer = hook_call(&socket, &request)?;
+        return (answer.pointer("/result/recorded").and_then(Value::as_bool) == Some(true))
+            .then_some(())
+            .ok_or("chat approval is unavailable: host rejected tool result");
+    }
+    let (verb, preview, shell_prefix) = hook_tool(flavor, &input);
     let request = json!({
         "id": "chat-hook",
         "method": "chat.toolRequest",
@@ -151,6 +160,36 @@ fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
             _ => continue,
         }
     }
+}
+
+fn hook_result(flavor: &str, input: &Value) -> (String, bool, Option<String>) {
+    let call_id = input
+        .get("tool_use_id")
+        .or_else(|| input.get("toolUseId"))
+        .or_else(|| input.get("call_id"))
+        .or_else(|| input.get("callId"))
+        .or_else(|| input.get("id"))
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{flavor}-{}", std::process::id()));
+    let ok = input
+        .get("success")
+        .or_else(|| input.get("ok"))
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| input.get("error").is_none());
+    let detail = input
+        .get("error")
+        .or_else(|| input.get("result"))
+        .or_else(|| input.get("output"))
+        .and_then(|value| match value {
+            Value::String(text) => Some(text.chars().take(360).collect()),
+            Value::Null => None,
+            other => serde_json::to_string(other)
+                .ok()
+                .map(|text| text.chars().take(360).collect()),
+        });
+    (call_id, ok, detail)
 }
 
 fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
@@ -285,5 +324,16 @@ mod tests {
         assert_eq!(verb, "Bash");
         assert!(preview.starts_with("Bash"));
         assert_eq!(prefix.as_deref(), Some("git status"));
+    }
+
+    #[test]
+    fn hook_result_uses_backend_call_id_and_bounds_detail() {
+        let (call_id, ok, detail) = hook_result(
+            "claude",
+            &json!({"tool_use_id":"tool-7", "success":false, "error":"permission denied"}),
+        );
+        assert_eq!(call_id, "tool-7");
+        assert!(!ok);
+        assert_eq!(detail.as_deref(), Some("permission denied"));
     }
 }

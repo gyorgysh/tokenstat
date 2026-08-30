@@ -12,10 +12,11 @@ steps are a browser session on [play.google.com/console](https://play.google.com
 
 - Application id `ai.tokenstat.tokenstat`, `targetSdk` 36.
 - Subscription product ids: `ai.tokenstat.supporter.yearly`,
-  `ai.tokenstat.patron.yearly`, `ai.tokenstat.legend.yearly`,
-  `ai.tokenstat.patron.monthly`, `ai.tokenstat.legend.monthly`.
-  Paywall UI still lists yearly. Monthly ids are queried so a later
-  Play catalog can return them.
+  `ai.tokenstat.patron.yearly`, `ai.tokenstat.legend.yearly`.
+  Duration lives on those products as a second base plan (`monthly` on
+  Patron and Legend), not as a separate product id. Paywall UI still
+  lists yearly. Leave the monthly base plans draft until the client
+  picks offers by `basePlanId`.
 - Gradle `signingConfigs.play` reads `TOKENSTAT_ANDROID_KEYSTORE` and friends.
 - `.github/workflows/release.yml` job `android` publishes to the internal
   track when the `release` environment has the secrets below.
@@ -118,15 +119,18 @@ first app.
 
 ## Subscription products
 
-Create these yearly auto-renewing subscriptions, same ids the Android client
+Create these auto-renewing subscriptions, same ids the Android client
 already queries:
 
-- `ai.tokenstat.supporter.yearly`
-- `ai.tokenstat.patron.yearly`
-- `ai.tokenstat.legend.yearly`
+- `ai.tokenstat.supporter.yearly` — yearly base plan only
+- `ai.tokenstat.patron.yearly` — yearly base plan `annual`, plus a
+  monthly base plan `monthly` (draft until the paywall can pick it)
+- `ai.tokenstat.legend.yearly` — same shape as Patron
 
-Base plans should match the Apple / Paddle yearly prices. Activate them on
-the internal track first, then production.
+Base plans should match the Apple / Paddle prices. Activate yearly on
+the internal track first, then production. Do not create separate
+`…patron.monthly` / `…legend.monthly` products. Trial stays an offer
+on the yearly base plan (`trial-3d`), not a way to sell monthly.
 
 The account service must implement `POST /api/v1/billing/google/activate`,
 verify the package, product and purchase token with the Play Developer API,

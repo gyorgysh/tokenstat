@@ -125,8 +125,6 @@ class PlayBillingManager(context: Context) : PurchasesUpdatedListener, BillingCl
             "ai.tokenstat.supporter.yearly",
             "ai.tokenstat.patron.yearly",
             "ai.tokenstat.legend.yearly",
-            "ai.tokenstat.patron.monthly",
-            "ai.tokenstat.legend.monthly",
         )
     }
 }

@@ -436,10 +436,16 @@ pub fn chat_agent_command(
             // fail-closed decision; keeping this inline avoids a settings file
             // in the person's project or home directory.
             let settings = serde_json::json!({
-                "hooks": {"PreToolUse": [{
-                    "matcher": ".*",
-                    "hooks": [{"type": "command", "command": format!("{command} hook claude pre")}]
-                }]}
+                "hooks": {
+                    "PreToolUse": [{
+                        "matcher": ".*",
+                        "hooks": [{"type": "command", "command": format!("{command} hook claude pre")}]
+                    }],
+                    "PostToolUse": [{
+                        "matcher": ".*",
+                        "hooks": [{"type": "command", "command": format!("{command} hook claude post")}]
+                    }]
+                }
             })
             .to_string();
             let at = argv
@@ -2125,6 +2131,8 @@ mod tests {
             .expect("a standard Claude chat must install its pre-tool hook");
         assert!(settings.contains("PreToolUse"));
         assert!(settings.contains("hook claude pre"));
+        assert!(settings.contains("PostToolUse"));
+        assert!(settings.contains("hook claude post"));
         let codex = chat_agent_command(
             "codex",
             "inspect this",

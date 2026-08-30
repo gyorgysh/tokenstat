@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -23,6 +24,7 @@ const EVENTS_CAP: u64 = 1024 * 1024;
 const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
 const APPROVAL_TTL_MS: i64 = 10 * 60 * 1000;
 const POLL: Duration = Duration::from_millis(400);
+static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -290,7 +292,13 @@ impl Store {
             });
         let now = now_ms();
         let approval = Approval {
-            id: format!("approval-{now}"),
+            // A timestamp alone collides for back-to-back tool requests. The
+            // sequence keeps request IDs unique for this daemon lifetime,
+            // which is all the in-memory approval queue needs.
+            id: format!(
+                "approval-{now}-{}",
+                APPROVAL_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ),
             conversation_id: conversation_id.into(),
             verb: verb.into(),
             preview: preview.into(),
@@ -337,6 +345,39 @@ impl Store {
             .cloned()
             .ok_or("the chat turn credential is invalid or expired")?;
         self.request_approval(&conversation_id, verb, preview, shell_prefix)
+    }
+
+    /// Record the outcome reported by a backend post-tool hook. Like an
+    /// approval, this resolves the conversation only through the short-lived
+    /// turn credential; hook input must never choose the transcript it writes.
+    pub fn record_turn_result(
+        &self,
+        turn_token: &str,
+        call_id: &str,
+        ok: bool,
+        detail: Option<String>,
+    ) -> Result<(), String> {
+        let conversation_id = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .cloned()
+            .ok_or("the chat turn credential is invalid or expired")?;
+        if call_id.trim().is_empty() {
+            return Err("chat.toolResult needs callId".into());
+        }
+        self.append(
+            &conversation_id,
+            &StoredEvent::Agent {
+                event: Event::ToolEnd {
+                    call_id: call_id.into(),
+                    ok,
+                    detail,
+                },
+                at_ms: now_ms(),
+            },
+        )
     }
 
     /// Give one spawned turn an opaque credential. This is separate from the
@@ -971,9 +1012,14 @@ impl Store {
         let command = command.ok_or("cannot locate the tokenstat host hook")?;
         let home = self.root.join(id).join("codex-hook");
         fs::create_dir_all(&home).map_err(|error| error.to_string())?;
-        let hooks = json!({"hooks": {"PreToolUse": [{"hooks": [{
-            "type": "command", "command": format!("{command} hook codex pre"), "timeout": 5
-        }]}]}});
+        let hooks = json!({"hooks": {
+            "PreToolUse": [{"hooks": [{
+                "type": "command", "command": format!("{command} hook codex pre"), "timeout": 5
+            }]}],
+            "PostToolUse": [{"hooks": [{
+                "type": "command", "command": format!("{command} hook codex post"), "timeout": 5
+            }]}]
+        }});
         fs::write(home.join("hooks.json"), hooks.to_string()).map_err(|error| error.to_string())?;
         #[cfg(unix)]
         {
@@ -1324,11 +1370,16 @@ mod tests {
         let hooks = fs::read_to_string(codex_home.join("hooks.json")).unwrap();
         assert!(hooks.contains("PreToolUse"));
         assert!(hooks.contains("hook codex pre"));
+        assert!(hooks.contains("PostToolUse"));
+        assert!(hooks.contains("hook codex post"));
         let _ = fs::remove_dir_all(codex_home);
         let hook_approval = store
             .request_turn_approval(&turn_token, "Edit", "Edit src/main.rs", None)
             .unwrap();
         store.resolve_approval(&hook_approval.id, "deny").unwrap();
+        store
+            .record_turn_result(&turn_token, "call-1", false, Some("denied".into()))
+            .unwrap();
         store.revoke_turn_token(&turn_token);
         assert!(
             store
@@ -1345,10 +1396,11 @@ mod tests {
             "a hook gets pending without parking a connection"
         );
         let (events, _) = store.events("chat-test", 0).unwrap();
-        assert_eq!(events.len(), 2);
-        let event = events.last().unwrap();
-        assert_eq!(event["kind"], "approval");
-        assert_eq!(event["approval"]["id"], pending.id);
+        assert_eq!(events.len(), 3);
+        let event = &events[1];
+        assert_eq!(event["kind"], "agent");
+        assert_eq!(event["event"]["kind"], "toolEnd");
+        assert_eq!(events[2]["approval"]["id"], pending.id);
         assert_eq!(
             store
                 .resolve_approval(&pending.id, "allowAlways")

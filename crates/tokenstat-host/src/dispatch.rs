@@ -485,6 +485,9 @@ struct ChatParams {
     request_id: Option<String>,
     turn_token: Option<String>,
     wait_ms: Option<u64>,
+    call_id: Option<String>,
+    ok: Option<bool>,
+    detail: Option<String>,
     offset: Option<u64>,
 }
 
@@ -1716,6 +1719,15 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
             p.wait_ms.unwrap_or(2_000),
         ))
         .map_err(|error| error.to_string().into()),
+        "chat.toolResult" => {
+            store.record_turn_result(
+                &p.turn_token.ok_or("chat.toolResult needs turnToken")?,
+                &p.call_id.ok_or("chat.toolResult needs callId")?,
+                p.ok.unwrap_or(false),
+                p.detail,
+            )?;
+            Ok(json!({ "recorded": true }))
+        }
         "chat.resolveApproval" => serde_json::to_value(store.resolve_approval(
             &p.id.ok_or("chat.resolveApproval needs id")?,
             &p.choice.ok_or("chat.resolveApproval needs choice")?,
