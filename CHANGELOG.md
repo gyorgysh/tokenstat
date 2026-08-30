@@ -33,6 +33,14 @@ desktop and Android builds remain previews. Newest first.
   exposes repository selection and sign-out for the app-owned grant.
 - The Windows preview gains the pull-request list, conversation, lazy diff,
   checks, review actions, connection status, and branch controls in WinUI.
+- A workspace Chat section talks to the agents already installed for that
+  folder. Conversations persist and resume. Default mode asks before a tool
+  runs, on the backends that can ask, and says so when a backend cannot.
+  Setup stays until the first message, then collapses. The phone is a list
+  first, then a transcript with a glass composer. Windows has the same list,
+  setup, transcript, approvals and cost meter. Sidebar badges show how many
+  chats a folder holds. Token cost is a quiet in/out bar, and a plan-covered
+  turn is not drawn as money charged.
 
 ### Changed
 
