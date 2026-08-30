@@ -44,6 +44,11 @@ pub enum ChannelPurpose {
     Screen,
     /// A terminal on the far machine.
     Ssh,
+    /// File transfer over the same remote path. Own label so it does not hide
+    /// inside ssh once that lands.
+    Sftp,
+    /// A one-off file payload that is not a session.
+    Files,
     /// Anything else the app relays. Honest rather than flattering: these are
     /// a mix, and none of them is big enough yet to be worth splitting.
     Unknown,
@@ -54,6 +59,8 @@ impl ChannelPurpose {
         match self {
             Self::Screen => "screen",
             Self::Ssh => "ssh",
+            Self::Sftp => "sftp",
+            Self::Files => "files",
             Self::Unknown => "unknown",
         }
     }
@@ -1365,6 +1372,8 @@ mod tests {
     fn a_purpose_is_a_word_from_the_fixed_list() {
         assert_eq!(ChannelPurpose::Screen.as_str(), "screen");
         assert_eq!(ChannelPurpose::Ssh.as_str(), "ssh");
+        assert_eq!(ChannelPurpose::Sftp.as_str(), "sftp");
+        assert_eq!(ChannelPurpose::Files.as_str(), "files");
         assert_eq!(ChannelPurpose::Unknown.as_str(), "unknown");
     }
 
