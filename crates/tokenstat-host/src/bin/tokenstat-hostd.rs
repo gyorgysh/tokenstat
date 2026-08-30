@@ -16,7 +16,14 @@
 //! the Windows scheduled task, not to this binary: a daemon that forks itself
 //! is one the supervisor cannot see, restart, or stop.
 
-use std::process::ExitCode;
+use std::{io::Read, process::ExitCode};
+#[cfg(unix)]
+use std::{
+    io::{BufRead, BufReader, Write},
+    os::unix::net::UnixStream,
+};
+
+use serde_json::{Value, json};
 
 use tokenstat_host::{Session, ownership, server};
 
@@ -40,6 +47,11 @@ fn run() -> Result<(), String> {
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "hook" => {
+                let flavor = args.next().ok_or("hook needs a backend flavor")?;
+                let phase = args.next().ok_or("hook needs pre or post")?;
+                return run_hook(&flavor, &phase);
+            }
             "--socket" | "-s" | "--pipe" => {
                 socket = Some(args.next().ok_or("--socket / --pipe needs a path")?);
             }
@@ -88,6 +100,112 @@ fn run() -> Result<(), String> {
     eprintln!("tokenstat-hostd listening on {}", path.display());
 
     server::serve(listener, session)
+}
+
+/// Called by an agent's lifecycle hook. The host daemon is authoritative: a
+/// missing credential, malformed hook payload, socket failure, or malformed
+/// daemon reply all deny. Never turn one of those failures into an allow.
+fn run_hook(flavor: &str, phase: &str) -> Result<(), String> {
+    if phase != "pre" && phase != "post" {
+        return Err("hook phase must be pre or post".into());
+    }
+    if phase == "post" {
+        return Ok(());
+    }
+    let token_file = std::env::var("TOKENSTAT_CHAT_TURN_FILE")
+        .map_err(|_| "chat approval is unavailable: no turn credential")?;
+    let token = std::fs::read_to_string(token_file)
+        .map_err(|_| "chat approval is unavailable: cannot read turn credential")?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("chat approval is unavailable: empty turn credential".into());
+    }
+    let mut body = String::new();
+    std::io::stdin()
+        .read_to_string(&mut body)
+        .map_err(|_| "chat approval is unavailable: cannot read tool request")?;
+    let input: Value = serde_json::from_str(&body)
+        .map_err(|_| "chat approval is unavailable: invalid tool request")?;
+    let (verb, preview, shell_prefix) = hook_tool(flavor, &input);
+    let socket = std::env::var("TOKENSTAT_CHAT_SOCKET")
+        .map_err(|_| "chat approval is unavailable: no host socket")?;
+    let request = json!({
+        "id": "chat-hook",
+        "method": "chat.toolRequest",
+        "params": {"turnToken": token, "verb": verb, "preview": preview, "shellPrefix": shell_prefix}
+    });
+    let answer = hook_call(&socket, &request)?;
+    let request_id = answer
+        .pointer("/result/requestId")
+        .and_then(Value::as_str)
+        .ok_or("chat approval is unavailable: host rejected tool request")?;
+    if answer.pointer("/result/decision").and_then(Value::as_str) == Some("allow") {
+        return Ok(());
+    }
+    loop {
+        let poll = json!({"id":"chat-hook", "method":"chat.toolAwait", "params":{"requestId": request_id, "waitMs": 2000}});
+        let answer = hook_call(&socket, &poll)?;
+        match answer.pointer("/result/decision").and_then(Value::as_str) {
+            Some("allow") => return Ok(()),
+            Some("deny") => return Err("tokenstat denied this tool request".into()),
+            _ => continue,
+        }
+    }
+}
+
+fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
+    let verb = input
+        .get("tool_name")
+        .or_else(|| input.get("tool"))
+        .or_else(|| input.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or(flavor)
+        .to_string();
+    let detail = input
+        .get("tool_input")
+        .or_else(|| input.get("input"))
+        .or_else(|| input.get("arguments"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let rendered = serde_json::to_string(&detail).unwrap_or_default();
+    let preview = format!("{verb} {}", rendered.chars().take(360).collect::<String>());
+    let shell_prefix = detail
+        .get("command")
+        .or_else(|| detail.get("command_line"))
+        .or_else(|| detail.get("commandLine"))
+        .and_then(Value::as_str)
+        .map(|command| {
+            command
+                .split_whitespace()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join(" ")
+        });
+    (verb, preview, shell_prefix)
+}
+
+#[cfg(unix)]
+fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
+    let mut stream = UnixStream::connect(socket)
+        .map_err(|_| "chat approval is unavailable: host is not reachable")?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .write_all(request.to_string().as_bytes())
+        .and_then(|_| stream.write_all(b"\n"))
+        .map_err(|_| "chat approval is unavailable: cannot reach host")?;
+    let mut line = String::new();
+    BufReader::new(&mut stream)
+        .read_line(&mut line)
+        .map_err(|_| "chat approval is unavailable: host did not reply")?;
+    serde_json::from_str(&line)
+        .map_err(|_| "chat approval is unavailable: invalid host reply".into())
+}
+
+#[cfg(windows)]
+fn hook_call(_: &str, _: &Value) -> Result<Value, String> {
+    Err("chat approval is unavailable on this host".into())
 }
 
 /// A second daemon that started while nothing else was running still has to
@@ -153,3 +271,19 @@ Options:
 
 Runs in the foreground. Use launchd to keep it alive; see docs/desktop-app.md.
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hook_input_keeps_the_tool_and_short_shell_prefix() {
+        let (verb, preview, prefix) = hook_tool(
+            "claude",
+            &json!({"tool_name":"Bash", "tool_input":{"command":"git status --short"}}),
+        );
+        assert_eq!(verb, "Bash");
+        assert!(preview.starts_with("Bash"));
+        assert_eq!(prefix.as_deref(), Some("git status"));
+    }
+}

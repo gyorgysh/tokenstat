@@ -102,6 +102,16 @@ pub struct Approval {
     pub decision: Option<String>,
 }
 
+/// The short answer a hook needs after asking the daemon about one tool call.
+/// It deliberately contains no transcript text: a hook has one job, to learn
+/// whether it may proceed, not to become a second client API.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalDecision {
+    pub request_id: String,
+    pub decision: Option<String>,
+}
+
 fn default_mode() -> String {
     "plan".into()
 }
@@ -169,6 +179,10 @@ pub struct Store {
     active: Mutex<HashMap<String, String>>,
     personas: Mutex<Vec<Persona>>,
     approvals: Mutex<Vec<Approval>>,
+    /// Per-turn credentials are intentionally memory-only. The 0600 file a
+    /// hook reads contains the opaque value, while this map is what binds it
+    /// to exactly one live conversation at the daemon boundary.
+    turn_tokens: Mutex<HashMap<String, String>>,
 }
 
 pub fn shared() -> Arc<Store> {
@@ -185,6 +199,7 @@ impl Store {
             active: Mutex::new(HashMap::new()),
             personas: Mutex::new(Vec::new()),
             approvals: Mutex::new(Vec::new()),
+            turn_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -204,6 +219,7 @@ impl Store {
             active: Mutex::new(HashMap::new()),
             personas: Mutex::new(personas),
             approvals: Mutex::new(Vec::new()),
+            turn_tokens: Mutex::new(HashMap::new()),
         }
     }
 
@@ -295,8 +311,88 @@ impl Store {
                     at_ms: now,
                 },
             )?;
+            // This fixed reason carries no prompt, path, or tool details.
+            // Paired devices learn only that an answer is needed, then fetch
+            // the ordinary protected conversation API themselves.
+            tokenstat_sync::push::notify_in_background(tokenstat_sync::push::Reason::RunNeedsInput);
         }
         Ok(approval)
+    }
+
+    /// The hook-facing form never accepts a conversation id from its stdin.
+    /// A leaked workspace identifier must not let an arbitrary process create
+    /// approvals in someone else's conversation.
+    pub fn request_turn_approval(
+        &self,
+        turn_token: &str,
+        verb: &str,
+        preview: &str,
+        shell_prefix: Option<String>,
+    ) -> Result<Approval, String> {
+        let conversation_id = self
+            .turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(turn_token)
+            .cloned()
+            .ok_or("the chat turn credential is invalid or expired")?;
+        self.request_approval(&conversation_id, verb, preview, shell_prefix)
+    }
+
+    /// Give one spawned turn an opaque credential. This is separate from the
+    /// conversation id so a hook cannot be replayed after the turn finishes.
+    fn register_turn_token(&self, conversation_id: &str) -> Result<String, String> {
+        let mut bytes = [0u8; 24];
+        getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
+        let token: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        self.turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(token.clone(), conversation_id.into());
+        Ok(token)
+    }
+
+    fn revoke_turn_token(&self, token: &str) {
+        self.turn_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(token);
+    }
+
+    /// Wait briefly for a single approval without holding the socket's session
+    /// lock. Hooks call this repeatedly: a process that cannot reach us, times
+    /// out, or receives an unknown request must deny rather than guessing.
+    pub fn await_approval(&self, request_id: &str, wait_ms: u64) -> ApprovalDecision {
+        let deadline = Instant::now() + Duration::from_millis(wait_ms.min(2_000));
+        loop {
+            self.prune_approvals();
+            if let Some(approval) = self
+                .approvals
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .find(|approval| approval.id == request_id)
+            {
+                if approval.decision.is_some() {
+                    return ApprovalDecision {
+                        request_id: request_id.into(),
+                        decision: approval.decision.clone(),
+                    };
+                }
+            } else {
+                return ApprovalDecision {
+                    request_id: request_id.into(),
+                    decision: Some("deny".into()),
+                };
+            }
+            if Instant::now() >= deadline {
+                return ApprovalDecision {
+                    request_id: request_id.into(),
+                    decision: None,
+                };
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 
     pub fn resolve_approval(&self, id: &str, choice: &str) -> Result<Approval, String> {
@@ -586,6 +682,13 @@ impl Store {
             &prompt_with_system_prompt(prompt, &chat.system_prompt),
             &attachments,
         );
+        let hook_command = if chat.autonomy == "standard" {
+            std::env::current_exe()
+                .ok()
+                .and_then(|path| path.to_str().map(str::to_owned))
+        } else {
+            None
+        };
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
             &prompt,
@@ -595,9 +698,40 @@ impl Store {
             crate::automations::ChatLaunch {
                 resume: chat.resume_token.as_deref(),
                 bypass: chat.autonomy == "bypass",
+                hook_command: hook_command.as_deref(),
                 attachments: &attachments,
             },
         )?;
+        let turn = if chat.autonomy == "standard" {
+            let token = self.register_turn_token(id)?;
+            match self.write_turn_file(id, &token) {
+                Ok(file) => Some((token, file)),
+                Err(error) => {
+                    self.revoke_turn_token(&token);
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        let mut environment = Vec::new();
+        if let Some((_, turn_file)) = &turn {
+            environment.push((
+                "TOKENSTAT_CHAT_SOCKET".into(),
+                crate::server::default_socket_path()?.display().to_string(),
+            ));
+            environment.push((
+                "TOKENSTAT_CHAT_TURN_FILE".into(),
+                turn_file.display().to_string(),
+            ));
+        }
+        let codex_hook_home = if chat.backend == "codex" && chat.autonomy == "standard" {
+            let home = self.write_codex_hook_home(id, hook_command.as_deref())?;
+            environment.push(("CODEX_HOME".into(), home.display().to_string()));
+            Some(home)
+        } else {
+            None
+        };
         let info = tokenstat_pty::manager()
             .spawn(&tokenstat_pty::Spawn {
                 command: argv[0].clone(),
@@ -609,7 +743,7 @@ impl Store {
                 cols: 120,
                 no_color: false,
                 dark: None,
-                environment: Vec::new(),
+                environment,
             })
             .map_err(|e| e.to_string())?;
         self.append(
@@ -631,7 +765,21 @@ impl Store {
         // are what the UI reads, but raw output lets a parser correction
         // rematerialize an older conversation without rerunning an agent.
         let raw_path = self.raw_path(id, now_ms());
-        std::thread::spawn(move || store.drain(&chat_id, &backend, &info.id, &raw_path));
+        let turn_token = turn.as_ref().map(|(token, _)| token.clone());
+        let turn_file = turn.as_ref().map(|(_, file)| file.clone());
+        let codex_hook_home = codex_hook_home.clone();
+        std::thread::spawn(move || {
+            Arc::clone(&store).drain(&chat_id, &backend, &info.id, &raw_path);
+            if let Some(token) = turn_token {
+                store.revoke_turn_token(&token);
+            }
+            if let Some(file) = turn_file {
+                let _ = fs::remove_file(file);
+            }
+            if let Some(home) = codex_hook_home {
+                let _ = fs::remove_dir_all(home);
+            }
+        });
         Ok(running)
     }
 
@@ -798,6 +946,47 @@ impl Store {
             .join(id)
             .join("raw")
             .join(format!("{turn_started_at_ms}.ndjson"))
+    }
+
+    fn write_turn_file(&self, id: &str, token: &str) -> Result<PathBuf, String> {
+        let path = self.root.join(id).join(format!("turn-{}.token", now_ms()));
+        fs::create_dir_all(path.parent().ok_or("invalid chat turn path")?)
+            .map_err(|error| error.to_string())?;
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Set at creation, not afterward: a credential briefly readable
+            // under the process umask would defeat the point of this file.
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path).map_err(|error| error.to_string())?;
+        file.write_all(token.as_bytes())
+            .map_err(|error| error.to_string())?;
+        Ok(path)
+    }
+
+    fn write_codex_hook_home(&self, id: &str, command: Option<&str>) -> Result<PathBuf, String> {
+        let command = command.ok_or("cannot locate the tokenstat host hook")?;
+        let home = self.root.join(id).join("codex-hook");
+        fs::create_dir_all(&home).map_err(|error| error.to_string())?;
+        let hooks = json!({"hooks": {"PreToolUse": [{"hooks": [{
+            "type": "command", "command": format!("{command} hook codex pre"), "timeout": 5
+        }]}]}});
+        fs::write(home.join("hooks.json"), hooks.to_string()).map_err(|error| error.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            if let Ok(user_home) = std::env::var("HOME") {
+                let auth = PathBuf::from(user_home).join(".codex").join("auth.json");
+                let target = home.join("auth.json");
+                if auth.is_file() && !target.exists() {
+                    symlink(auth, target).map_err(|error| error.to_string())?;
+                }
+            }
+        }
+        Ok(home)
     }
 
     fn attachment_path(&self, chat_id: &str, attachment_id: &str, name: &str) -> PathBuf {
@@ -1118,20 +1307,58 @@ mod tests {
             updated_at_ms: 1,
             running: false,
         });
+        let turn_token = store.register_turn_token("chat-test").unwrap();
+        let turn_file = store.write_turn_file("chat-test", &turn_token).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&turn_file).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let _ = fs::remove_file(turn_file);
+        let codex_home = store
+            .write_codex_hook_home("chat-test", Some("/tmp/tokenstat-hostd"))
+            .unwrap();
+        let hooks = fs::read_to_string(codex_home.join("hooks.json")).unwrap();
+        assert!(hooks.contains("PreToolUse"));
+        assert!(hooks.contains("hook codex pre"));
+        let _ = fs::remove_dir_all(codex_home);
+        let hook_approval = store
+            .request_turn_approval(&turn_token, "Edit", "Edit src/main.rs", None)
+            .unwrap();
+        store.resolve_approval(&hook_approval.id, "deny").unwrap();
+        store.revoke_turn_token(&turn_token);
+        assert!(
+            store
+                .request_turn_approval(&turn_token, "Edit", "Edit src/main.rs", None)
+                .is_err()
+        );
         let pending = store
             .request_approval("chat-test", "Edit", "Edit src/main.rs", None)
             .unwrap();
         assert_eq!(store.approvals(Some("chat-test")).len(), 1);
+        assert_eq!(
+            store.await_approval(&pending.id, 0).decision,
+            None,
+            "a hook gets pending without parking a connection"
+        );
         let (events, _) = store.events("chat-test", 0).unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0]["kind"], "approval");
-        assert_eq!(events[0]["approval"]["id"], pending.id);
+        assert_eq!(events.len(), 2);
+        let event = events.last().unwrap();
+        assert_eq!(event["kind"], "approval");
+        assert_eq!(event["approval"]["id"], pending.id);
         assert_eq!(
             store
                 .resolve_approval(&pending.id, "allowAlways")
                 .unwrap()
                 .decision
                 .as_deref(),
+            Some("allow")
+        );
+        assert_eq!(
+            store.await_approval(&pending.id, 0).decision.as_deref(),
             Some("allow")
         );
         assert!(store.approvals(Some("chat-test")).is_empty());

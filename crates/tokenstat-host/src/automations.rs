@@ -394,6 +394,9 @@ pub fn agent_command(
 pub struct ChatLaunch<'a> {
     pub resume: Option<&'a str>,
     pub bypass: bool,
+    /// Absolute path of this daemon for lifecycle hooks. Relative PATH lookup
+    /// is wrong for launchd and for the private environment of an agent CLI.
+    pub hook_command: Option<&'a str>,
     pub attachments: &'a [std::path::PathBuf],
 }
 
@@ -426,6 +429,35 @@ pub fn chat_agent_command(
             "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
             _ => {}
         }
+    }
+    if backend == "claude" && !launch.bypass {
+        if let Some(command) = launch.hook_command {
+            // Claude accepts settings JSON directly. The hook itself owns the
+            // fail-closed decision; keeping this inline avoids a settings file
+            // in the person's project or home directory.
+            let settings = serde_json::json!({
+                "hooks": {"PreToolUse": [{
+                    "matcher": ".*",
+                    "hooks": [{"type": "command", "command": format!("{command} hook claude pre")}]
+                }]}
+            })
+            .to_string();
+            let at = argv
+                .iter()
+                .position(|arg| arg == "-p")
+                .unwrap_or(argv.len());
+            argv.splice(at..at, ["--settings".into(), settings]);
+        }
+    }
+    if backend == "codex" && !launch.bypass && launch.hook_command.is_some() {
+        // Codex otherwise silently skips an untrusted hook. The caller gives
+        // it a private, tokenstat-owned CODEX_HOME, so this flag is safe only
+        // beside that setup and must never be used for the user's home.
+        let at = argv
+            .iter()
+            .position(|arg| arg == "exec")
+            .unwrap_or(argv.len());
+        argv.splice(at + 1..at + 1, ["--dangerously-bypass-hook-trust".into()]);
     }
     // These two CLIs accept image files natively. The other backends receive
     // the staged paths in the prompt, which lets their normal Read tool make
@@ -2060,6 +2092,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                hook_command: None,
                 attachments: &[],
             },
         )
@@ -2069,6 +2102,29 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "--dangerously-skip-permissions")
         );
+        let guarded_claude = chat_agent_command(
+            "claude",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                hook_command: Some(
+                    "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
+                ),
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        let settings = guarded_claude
+            .windows(2)
+            .find(|pair| pair[0] == "--settings")
+            .map(|pair| &pair[1])
+            .expect("a standard Claude chat must install its pre-tool hook");
+        assert!(settings.contains("PreToolUse"));
+        assert!(settings.contains("hook claude pre"));
         let codex = chat_agent_command(
             "codex",
             "inspect this",
@@ -2078,6 +2134,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                hook_command: None,
                 attachments: &[],
             },
         )
@@ -2086,6 +2143,25 @@ mod tests {
             !codex
                 .iter()
                 .any(|arg| arg == "--dangerously-bypass-approvals-and-sandbox")
+        );
+        let guarded_codex = chat_agent_command(
+            "codex",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                hook_command: Some("/tmp/tokenstat-hostd"),
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            guarded_codex
+                .iter()
+                .any(|arg| arg == "--dangerously-bypass-hook-trust")
         );
         let bypass = chat_agent_command(
             "claude",
@@ -2096,6 +2172,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: true,
+                hook_command: None,
                 attachments: &[],
             },
         )
@@ -2119,6 +2196,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                hook_command: None,
                 attachments: &[attachment.clone()],
             },
         )
@@ -2137,6 +2215,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                hook_command: None,
                 attachments: &[attachment],
             },
         )
