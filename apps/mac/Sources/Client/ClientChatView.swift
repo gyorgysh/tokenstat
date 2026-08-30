@@ -3,215 +3,327 @@
 #if !os(macOS)
 import Observation
 import SwiftUI
-import UniformTypeIdentifiers
 
-@MainActor @Observable
-private final class ClientChatModel {
-    var chats: [ChatConversation] = []
-    var chat: ChatConversation?
-    var events: [ChatTimelineEvent] = []
-    var approvals: [ChatApproval] = []
-    var offset: UInt64 = 0
-    var attachments: [ChatAttachment] = []
-    var backends: [ChatBackend] = []
-    var error: String?
-
-    func load(peer: String, workspaceID: String) async {
-        do {
-            backends = try await ClientRemote.chatBackends(peer: peer)
-            chats = try await ClientRemote.chats(peer: peer, workspaceID: workspaceID)
-            if chat == nil { chat = chats.first }
-            if let chat {
-                await eventsFor(peer: peer, id: chat.id, reset: true)
-                await approvalsFor(peer: peer, id: chat.id)
-            }
-        } catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func create(peer: String, workspaceID: String) async {
-        do { chat = try await ClientRemote.createChat(peer: peer, workspaceID: workspaceID); events = []; offset = 0 }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func send(peer: String, text: String) async {
-        guard let chat else { return }
-        do { self.chat = try await ClientRemote.sendChat(peer: peer, id: chat.id, text: text, attachmentIDs: attachments.map(\.id)); attachments = []; await eventsFor(peer: peer, id: chat.id, reset: false) }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func attach(peer: String, file: URL) async {
-        guard let chat else { return }
-        do { attachments.append(try await ClientRemote.attachToChat(peer: peer, id: chat.id, file: file)) }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func stop(peer: String) async {
-        guard let chat else { return }
-        do { try await ClientRemote.stopChat(peer: peer, id: chat.id) }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func resolve(peer: String, approval: ChatApproval, choice: String) async {
-        do {
-            _ = try await ClientRemote.resolveChatApproval(peer: peer, id: approval.id, choice: choice)
-            await approvalsFor(peer: peer, id: approval.conversationID)
-        } catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    func poll(peer: String) async {
-        guard let chat, chat.running else { return }
-        await eventsFor(peer: peer, id: chat.id, reset: false)
-        await approvalsFor(peer: peer, id: chat.id)
-        if let current = try? await ClientRemote.chats(peer: peer, workspaceID: chat.workspaceID).first(where: { $0.id == chat.id }) { self.chat = current }
-    }
-
-    private func eventsFor(peer: String, id: String, reset: Bool) async {
-        do { let chunk = try await ClientRemote.chatEvents(peer: peer, id: id, offset: reset ? 0 : offset); if reset { events = chunk.events } else { events += chunk.events }; offset = chunk.nextOffset }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-
-    private func approvalsFor(peer: String, id: String) async {
-        do { approvals = try await ClientRemote.chatApprovals(peer: peer, id: id) }
-        catch { self.error = ClientTunnelCopy.display(error.localizedDescription, host: nil) }
-    }
-}
-
+/// Conversations in this folder, on the machine that owns it.
+///
+/// A list first, the way Notes and Tasks are lists. Tapping one opens the
+/// transcript. Setup lives in the conversation until the first turn, then
+/// behind Edit setup, because the phone has no inspector column.
 struct ClientChatView: View {
     let peer: String
     let workspaceID: String
     let folderName: String
-    @State private var model = ClientChatModel()
-    @State private var draft = ""
-    @State private var importingAttachment = false
+    var hostName: String = ""
+
+    @State private var model = ChatModel()
+    @State private var loaded = false
+    @State private var created: ChatConversation?
+    @State private var pendingDelete: ChatConversation?
+
+    private var place: String { folderName.isEmpty ? "this folder" : folderName }
 
     var body: some View {
-        Group {
-            if let chat = model.chat {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                        HStack {
-                            Image(systemName: "sparkles").foregroundStyle(Theme.accent)
-                            Text(chat.title).font(Theme.title3.weight(.semibold))
-                            Spacer()
-                            Text(chat.mode == "plan" ? "Plan" : "Execute").font(Theme.caption).foregroundStyle(Theme.accent)
-                            Text(gateLabel(chat)).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent).padding(.horizontal, 8).padding(.vertical, 4).background(Theme.accentSoft, in: Capsule())
-                        }
-                            .padding(Theme.Space.m).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        ForEach(model.events) { row in
-                            ClientChatRow(
-                                row: row,
-                                isPending: row.approval.map { approval in model.approvals.contains(where: { $0.id == approval.id }) } ?? false,
-                                resolve: { approval, choice in Task { await model.resolve(peer: peer, approval: approval, choice: choice) } }
-                            )
-                        }
-                    }.padding(Theme.Space.m)
+        ClientCardList(
+            title: "Chat",
+            errorMessage: model.error.map { ClientTunnelCopy.display($0, host: hostName) },
+            isLoaded: loaded,
+            isEmpty: model.chats.isEmpty,
+            emptyText: "Start a chat",
+            emptyArt: .chat,
+            emptyMessage: "Ask an agent to explore, plan, or work in \(place).",
+            emptyActionTitle: "New chat",
+            emptyActionIcon: .create,
+            emptyAction: { Task { await create() } },
+            refreshKey: "workspace-chat-\(workspaceID)",
+            reload: { await reload() }
+        ) {
+            ForEach(model.chats) { chat in
+                NavigationLink {
+                    ClientChatThread(
+                        model: model,
+                        chatID: chat.id,
+                        folderName: folderName,
+                        hostName: hostName
+                    )
+                } label: {
+                    row(chat)
                 }
-                composer(chat)
+                .navigationLinkIndicatorVisibility(.hidden)
+                .clientCardRow()
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button("Delete", role: .destructive) { pendingDelete = chat }
+                }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New chat", .create) { Task { await create() } }
+            }
+        }
+        .navigationDestination(item: $created) { chat in
+            ClientChatThread(
+                model: model,
+                chatID: chat.id,
+                folderName: folderName,
+                hostName: hostName
+            )
+        }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete chat", role: .destructive) {
+                if let chat = pendingDelete {
+                    Task { await model.remove(chat) }
+                }
+                pendingDelete = nil
+            }
+            Button("Keep it", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("The transcript stays on \(hostName.isEmpty ? "the computer" : hostName) until you delete it. This cannot be undone.")
+        }
+        .task {
+            await reload()
+        }
+    }
+
+    private func row(_ chat: ChatConversation) -> some View {
+        HStack(spacing: Theme.Space.s) {
+            HarnessMark(id: chat.backend, size: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    if chat.running {
+                        Circle()
+                            .fill(Theme.accent)
+                            .frame(width: 7, height: 7)
+                    }
+                    Text(chat.title)
+                        .font(ClientType.label.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                Text(rowDetail(chat))
+                    .font(ClientType.caption)
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: ActionIcon.next.symbol)
+                .font(Theme.font(12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(Theme.Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    private func rowDetail(_ chat: ChatConversation) -> String {
+        let agent = model.backend(for: chat.backend)?.label ?? chat.backend
+        let mode = chat.mode == "plan" ? "Plan" : "Execute"
+        return "\(agent) · \(mode)"
+    }
+
+    private func reload() async {
+        await model.load(workspaceID: workspaceID, peer: peer, selectFirst: false)
+        loaded = true
+    }
+
+    private func create() async {
+        await model.create()
+        created = model.selected
+    }
+}
+
+/// One conversation: setup, transcript, glass composer.
+private struct ClientChatThread: View {
+    @Bindable var model: ChatModel
+    let chatID: String
+    let folderName: String
+    let hostName: String
+    @State private var draft = ""
+    @State private var showingSetup = false
+    @State private var showingPersonas = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var chat: ChatConversation? {
+        model.chats.first { $0.id == chatID } ?? model.selected
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let chat {
+                transcript(chat)
+                ClientChatComposer(
+                    draft: $draft,
+                    attachments: model.attachments,
+                    previews: model.attachmentPreviews,
+                    running: chat.running,
+                    placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
+                    onSend: { submit(from: chat) },
+                    onStop: { Task { await model.stop() } },
+                    onAttach: { item in await model.attach(item) },
+                    onRemove: { model.removeAttachment($0) }
+                )
             } else {
-                ContentUnavailableView("Start a chat", systemImage: "bubble.left.and.bubble.right", description: Text("Ask an agent to help with \(folderName)."))
-                    .overlay(alignment: .bottom) { Button("New chat", .create) { Task { await model.create(peer: peer, workspaceID: workspaceID) } }.buttonStyle(AccentButtonStyle()).padding(.bottom, Theme.Space.xl) }
+                ClientEmptyState(
+                    kind: .nothingYet,
+                    title: "This chat is gone",
+                    message: "It was deleted on \(hostName.isEmpty ? "the computer" : hostName).",
+                    art: .chat
+                )
+                .padding(Theme.Space.m)
             }
         }
         .background(Theme.background)
-        .navigationTitle("Chat")
+        .navigationTitle(chat?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await model.load(peer: peer, workspaceID: workspaceID) }
-        .task(id: model.chat?.id) { while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(400)); await model.poll(peer: peer) } }
-        .alert("Chat unavailable", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) { Button("OK", role: .cancel) {} } message: { Text(model.error ?? "") }
-    }
-
-    private func gateLabel(_ chat: ChatConversation) -> String {
-        switch model.backends.first(where: { $0.id == chat.backend })?.gateTier {
-        case "full": return "Approvals"
-        case "rules": return "Rules"
-        case "bypassOnly": return "Bypass only"
-        default: return "Checking"
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if chat != nil {
+                    Button("Setup", .settings) { showingSetup = true }
+                }
+            }
+        }
+        .sheet(isPresented: $showingSetup) {
+            setupSheet
+        }
+        .sheet(isPresented: $showingPersonas) {
+            PersonaEditor(model: model, onClose: { showingPersonas = false })
+                .presentationBackground(Theme.background)
+        }
+        .task {
+            if let chat = model.chats.first(where: { $0.id == chatID }) {
+                await model.select(chat)
+            }
+        }
+        .task(id: chatID) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(400))
+                await model.poll()
+            }
+        }
+        .alert("Chat unavailable", isPresented: Binding(
+            get: { model.error != nil },
+            set: { if !$0 { model.error = nil } }
+        )) {
+            Button("OK", role: .cancel) { model.error = nil }
+        } message: {
+            Text(model.error.map { ClientTunnelCopy.display($0, host: hostName) } ?? "")
         }
     }
 
-    private func composer(_ chat: ChatConversation) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            if !model.attachments.isEmpty {
-                HStack(spacing: Theme.Space.xs) {
-                    ForEach(model.attachments) { attachment in
-                        Label(attachment.name, systemImage: "paperclip").font(Theme.caption).lineLimit(1).padding(.horizontal, 8).padding(.vertical, 5).background(Theme.panel, in: Capsule())
+    private func transcript(_ chat: ChatConversation) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.m) {
+                    ChatSetupHeader(
+                        model: model,
+                        chat: chat,
+                        collapsed: model.hasStarted,
+                        onOpenInspector: { showingSetup = true }
+                    )
+                    ForEach(model.displayItems) { item in
+                        ClientChatEventRow(
+                            item: item,
+                            isPending: pendingApproval(item),
+                            resolve: { approval, choice in
+                                Task { await model.resolve(approval, choice: choice) }
+                            }
+                        )
+                    }
+                    if chat.running {
+                        HStack(spacing: Theme.Space.s) {
+                            ProgressView().controlSize(.small)
+                            Text("Working")
+                                .font(ClientType.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("chat-bottom")
+                }
+                .padding(.horizontal, Theme.Space.m)
+                .padding(.top, Theme.Space.m)
+                .padding(.bottom, Theme.Space.l)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .clientHideScrollEdgeEffect()
+            .onChange(of: scrollToken) { _, _ in scrollToLatest(proxy) }
+            .onChange(of: chat.running) { _, _ in scrollToLatest(proxy) }
+            .onAppear { scrollToLatest(proxy) }
+        }
+    }
+
+    private var setupSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.l) {
+                    if let chat {
+                        ChatSetupHeader(
+                            model: model,
+                            chat: chat,
+                            collapsed: false,
+                            showsIntro: false
+                        )
+                        Button("Personas", .persona) { showingPersonas = true }
+                            .buttonStyle(SecondaryButtonStyle())
                     }
                 }
+                .padding(Theme.Space.m)
             }
-            HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                Button { importingAttachment = true } label: { Image(systemName: "paperclip") }.buttonStyle(SecondaryButtonStyle(small: true))
-                TextField("Ask about \(folderName)", text: $draft, axis: .vertical).lineLimit(1...5).padding(10).background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            Button { if chat.running { Task { await model.stop(peer: peer) } } else { let text = draft; draft = ""; Task { await model.send(peer: peer, text: text) } } } label: { Image(systemName: chat.running ? "stop.fill" : "arrow.up") }
-                .buttonStyle(AccentButtonStyle(small: true)).disabled(!chat.running && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }.padding(Theme.Space.m)
-        .fileImporter(isPresented: $importingAttachment, allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]) {
-            if case let .success(file) = $0 { Task { await model.attach(peer: peer, file: file) } }
-        }
-    }
-}
-
-private struct ClientChatRow: View {
-    let row: ChatTimelineEvent
-    let isPending: Bool
-    let resolve: (ChatApproval, String) -> Void
-    var body: some View {
-        if row.kind == "user" { HStack { Spacer(); Text(row.text ?? "").padding(Theme.Space.m).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous)) } }
-        else if let approval = row.approval {
-            ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
-        }
-        else if let event = row.event {
-            switch event.kind {
-            case "text": Text(event.delta ?? "").frame(maxWidth: .infinity, alignment: .leading)
-            case "toolStart": Label([event.verb, event.target].compactMap { $0 }.joined(separator: " "), systemImage: "hammer").font(Theme.callout).padding(Theme.Space.s).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            case "edit": Label("\(event.path ?? "File")  +\(event.added ?? 0)  −\(event.removed ?? 0)", systemImage: "pencil.line").foregroundStyle(Theme.accent)
-            case "failed": Label(event.text ?? "The turn failed", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-            default: EmptyView()
-            }
-        }
-    }
-}
-
-private struct ClientChatApprovalCard: View {
-    let approval: ChatApproval
-    let isPending: Bool
-    let resolve: (ChatApproval, String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.s) {
-            HStack {
-                Label(isPending ? "Permission needed" : "Permission answered", systemImage: "hand.raised.fill")
-                    .font(Theme.callout.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                Spacer()
-                Text(approval.verb).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent)
-            }
-            Text(approval.preview)
-                .font(.system(.footnote, design: .monospaced))
-                .lineLimit(4)
-                .textSelection(.enabled)
-            if isPending {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: Theme.Space.s) { actions }
-                    VStack(alignment: .leading, spacing: Theme.Space.s) { actions }
+            .background(Theme.background)
+            .navigationTitle("Chat setup")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", .done) { showingSetup = false }
                 }
-            } else {
-                Text("This request is no longer waiting.")
-                    .font(Theme.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1) }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(Theme.background)
     }
 
-    @ViewBuilder private var actions: some View {
-        Button("Allow", .approve) { resolve(approval, "allow") }
-            .buttonStyle(SecondaryButtonStyle(small: true))
-        Button("Always allow", .approve) { resolve(approval, "allowAlways") }
-            .buttonStyle(AccentButtonStyle(small: true))
-        Button("Deny", .dismiss, role: .destructive) { resolve(approval, "deny") }
-            .buttonStyle(SecondaryButtonStyle(small: true))
+    private var scrollToken: String {
+        guard let last = model.displayItems.last else { return "" }
+        switch last.kind {
+        case let .assistant(text), let .thinking(text):
+            return "\(last.id)-\(text.count)"
+        case let .tool(state):
+            return "\(last.id)-\(state.running)-\(state.failed)-\(state.detail?.count ?? 0)"
+        default:
+            return last.id
+        }
+    }
+
+    private func pendingApproval(_ item: ChatDisplayItem) -> Bool {
+        if case let .approval(approval) = item.kind {
+            return model.approvals.contains { $0.id == approval.id }
+        }
+        return false
+    }
+
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        if reduceMotion {
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
+        } else {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        }
+    }
+
+    private func submit(from chat: ChatConversation) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !chat.running else { return }
+        draft = ""
+        Task { await model.send(text) }
     }
 }
+
 #endif

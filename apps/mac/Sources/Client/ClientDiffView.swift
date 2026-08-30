@@ -194,7 +194,7 @@ struct ClientDiffView: View {
 /// `−` says which, and a second column of dashes would spend width saying what
 /// the marker already said. The number is the line's position on whichever
 /// side it belongs to.
-private struct DiffLineRow: View {
+struct DiffLineRow: View {
     let line: DiffLine
     /// At least this wide, so the tint behind a short line spans the screen
     /// rather than stopping at the last character. Zero sizes to content.

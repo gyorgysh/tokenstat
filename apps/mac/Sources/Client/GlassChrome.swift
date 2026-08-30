@@ -79,6 +79,23 @@ extension View {
             self
         }
     }
+
+    /// A bar that floats over opaque content. Glass on iOS 26, a panel
+    /// with a hairline below that. The transcript stays solid.
+    @ViewBuilder
+    func clientFloatingBar(cornerRadius: CGFloat = 22) -> some View {
+        if #available(iOS 26, *) {
+            glassEffect(
+                .regular,
+                in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            )
+        } else {
+            background(Theme.panel)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
+                }
+        }
+    }
 }
 
 /// Section title with the same FeatureMark cards use on the Mac.

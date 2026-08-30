@@ -5,7 +5,7 @@ import SwiftUI
 /// Conversation setup before the first turn, then a one-line chip strip.
 ///
 /// Settings matter most before you commit and least once you are reading.
-/// After a turn has run, the same controls live in the inspector.
+/// After a turn has run, the same controls live behind Edit setup.
 struct ChatSetupHeader: View {
     @Bindable var model: ChatModel
     let chat: ChatConversation
@@ -32,7 +32,7 @@ struct ChatSetupHeader: View {
             if showsIntro {
                 Text("How this chat should work")
                     .font(Theme.callout.weight(.semibold))
-                Text("These stay here until the first message. After that they move to the inspector.")
+                Text("These stay here until the first message. After that they collapse, and Edit setup still has them.")
                     .font(Theme.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

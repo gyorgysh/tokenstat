@@ -867,12 +867,31 @@ extension Bridge {
 // MARK: - Chat
 
 extension Bridge {
-    static func chatBackends() async throws -> [ChatBackend] {
-        try await background("chat.backends", as: [ChatBackend].self)
+    /// Local hostd, or the same method on a peer. Chat is the same store
+    /// either way, and the phone talks to it over the tunnel.
+    private static func chatInvoke<T: Decodable & Sendable>(
+        peer: String?,
+        _ method: String,
+        _ params: [String: Any] = [:],
+        as type: T.Type
+    ) async throws -> T {
+        if let peer {
+            return try await onPeer(peer, method, params, as: type)
+        }
+        return try await background(method, params, as: type)
     }
 
-    static func chats(workspaceID: String) async throws -> [ChatConversation] {
-        try await background("chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
+    static func chatBackends(peer: String? = nil) async throws -> [ChatBackend] {
+        try await chatInvoke(peer: peer, "chat.backends", as: [ChatBackend].self)
+    }
+
+    static func chats(workspaceID: String, peer: String? = nil) async throws -> [ChatConversation] {
+        try await chatInvoke(
+            peer: peer,
+            "chat.list",
+            ["workspaceId": workspaceID],
+            as: [ChatConversation].self
+        )
     }
 
     static func createChat(
@@ -883,7 +902,8 @@ extension Bridge {
         autonomy: String = "standard",
         model: String? = nil,
         effort: String? = nil,
-        personaID: String? = nil
+        personaID: String? = nil,
+        peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = [
             "workspaceId": workspaceID,
@@ -895,11 +915,7 @@ extension Bridge {
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
         if let personaID, !personaID.isEmpty { params["personaId"] = personaID }
-        return try await background(
-            "chat.create",
-            params,
-            as: ChatConversation.self
-        )
+        return try await chatInvoke(peer: peer, "chat.create", params, as: ChatConversation.self)
     }
 
     static func updateChat(
@@ -913,7 +929,8 @@ extension Bridge {
         personaID: String? = nil,
         systemPrompt: String? = nil,
         allowedTools: [String]? = nil,
-        allowedShellPrefixes: [String]? = nil
+        allowedShellPrefixes: [String]? = nil,
+        peer: String? = nil
     ) async throws -> ChatConversation {
         var params: [String: Any] = ["id": id]
         if let title { params["title"] = title }
@@ -926,52 +943,73 @@ extension Bridge {
         if let systemPrompt { params["systemPrompt"] = systemPrompt }
         if let allowedTools { params["allowedTools"] = allowedTools }
         if let allowedShellPrefixes { params["allowedShellPrefixes"] = allowedShellPrefixes }
-        return try await background("chat.update", params, as: ChatConversation.self)
+        return try await chatInvoke(peer: peer, "chat.update", params, as: ChatConversation.self)
     }
 
-    static func removeChat(id: String) async throws {
+    static func removeChat(id: String, peer: String? = nil) async throws {
         struct Removed: Codable, Sendable { var removed: Bool? }
-        _ = try await background("chat.remove", ["id": id], as: Removed.self)
+        _ = try await chatInvoke(peer: peer, "chat.remove", ["id": id], as: Removed.self)
     }
 
-    static func sendChat(id: String, text: String, attachmentIDs: [String] = []) async throws -> ChatConversation {
-        try await background("chat.send", ["id": id, "text": text, "attachmentIds": attachmentIDs], as: ChatConversation.self)
+    static func sendChat(
+        id: String,
+        text: String,
+        attachmentIDs: [String] = [],
+        peer: String? = nil
+    ) async throws -> ChatConversation {
+        try await chatInvoke(
+            peer: peer,
+            "chat.send",
+            ["id": id, "text": text, "attachmentIds": attachmentIDs],
+            as: ChatConversation.self
+        )
     }
 
-    static func stopChat(id: String) async throws {
-        _ = try await background("chat.stop", ["id": id], as: Ack.self)
+    static func stopChat(id: String, peer: String? = nil) async throws {
+        _ = try await chatInvoke(peer: peer, "chat.stop", ["id": id], as: Ack.self)
     }
 
-    static func chatEvents(id: String, offset: UInt64) async throws -> ChatEventChunk {
-        try await background("chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+    static func chatEvents(id: String, offset: UInt64, peer: String? = nil) async throws -> ChatEventChunk {
+        try await chatInvoke(
+            peer: peer,
+            "chat.events",
+            ["id": id, "offset": offset],
+            as: ChatEventChunk.self
+        )
     }
 
-    static func chatApprovals(id: String) async throws -> [ChatApproval] {
-        try await background("chat.approvals", ["id": id], as: [ChatApproval].self)
+    static func chatApprovals(id: String, peer: String? = nil) async throws -> [ChatApproval] {
+        try await chatInvoke(peer: peer, "chat.approvals", ["id": id], as: [ChatApproval].self)
     }
 
-    static func resolveChatApproval(id: String, choice: String) async throws -> ChatApproval {
-        try await background("chat.resolveApproval", ["id": id, "choice": choice], as: ChatApproval.self)
+    static func resolveChatApproval(id: String, choice: String, peer: String? = nil) async throws -> ChatApproval {
+        try await chatInvoke(
+            peer: peer,
+            "chat.resolveApproval",
+            ["id": id, "choice": choice],
+            as: ChatApproval.self
+        )
     }
 
-    static func chatPersonas() async throws -> [ChatPersona] {
-        try await background("chat.personas", as: [ChatPersona].self)
+    static func chatPersonas(peer: String? = nil) async throws -> [ChatPersona] {
+        try await chatInvoke(peer: peer, "chat.personas", as: [ChatPersona].self)
     }
 
-    static func saveChatPersona(_ persona: ChatPersona) async throws -> ChatPersona {
-        try await background(
+    static func saveChatPersona(_ persona: ChatPersona, peer: String? = nil) async throws -> ChatPersona {
+        try await chatInvoke(
+            peer: peer,
             "chat.personaSave",
             ["persona": try persona.jsonObject()],
             as: ChatPersona.self
         )
     }
 
-    static func removeChatPersona(id: String) async throws {
+    static func removeChatPersona(id: String, peer: String? = nil) async throws {
         struct Removed: Codable, Sendable { var removed: Bool? }
-        _ = try await background("chat.personaRemove", ["id": id], as: Removed.self)
+        _ = try await chatInvoke(peer: peer, "chat.personaRemove", ["id": id], as: Removed.self)
     }
 
-    static func attachToChat(id: String, file: URL) async throws -> ChatAttachment {
+    static func attachToChat(id: String, file: URL, peer: String? = nil) async throws -> ChatAttachment {
         let access = file.startAccessingSecurityScopedResource()
         defer { if access { file.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: file)
@@ -979,7 +1017,8 @@ extension Bridge {
             id: id,
             name: file.lastPathComponent,
             data: data,
-            mediaType: nil
+            mediaType: nil,
+            peer: peer
         )
     }
 
@@ -987,7 +1026,8 @@ extension Bridge {
         id: String,
         name: String,
         data: Data,
-        mediaType: String?
+        mediaType: String?,
+        peer: String? = nil
     ) async throws -> ChatAttachment {
         var params: [String: Any] = [
             "id": id,
@@ -997,7 +1037,7 @@ extension Bridge {
         if let mediaType, !mediaType.isEmpty {
             params["mediaType"] = mediaType
         }
-        return try await background("chat.attach", params, as: ChatAttachment.self)
+        return try await chatInvoke(peer: peer, "chat.attach", params, as: ChatAttachment.self)
     }
 }
 

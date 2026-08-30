@@ -38,7 +38,6 @@ enum ClientTunnelCopy {
 
 /// `todo.remove`'s answer. `Bridge`'s own is private to that file.
 private struct TodoRemoved: Codable, Sendable { let removed: Bool }
-private struct ClientChatAck: Codable, Sendable { let stopped: Bool? }
 
 enum ClientRemote {
     /// Split a folder id from `Bridge.remoteWorkspaces` (`remote:<peer>:<id>`).
@@ -381,42 +380,111 @@ enum ClientRemote {
     // MARK: - Chat on a peer
 
     static func chatBackends(peer: String) async throws -> [ChatBackend] {
-        try await Bridge.onPeer(peer, "chat.backends", as: [ChatBackend].self)
+        try await Bridge.chatBackends(peer: peer)
     }
 
     static func chats(peer: String, workspaceID: String) async throws -> [ChatConversation] {
-        try await Bridge.onPeer(peer, "chat.list", ["workspaceId": workspaceID], as: [ChatConversation].self)
+        try await Bridge.chats(workspaceID: workspaceID, peer: peer)
     }
 
-    static func createChat(peer: String, workspaceID: String, backend: String = "claude") async throws -> ChatConversation {
-        try await Bridge.onPeer(peer, "chat.create", ["workspaceId": workspaceID, "backend": backend], as: ChatConversation.self)
+    static func createChat(
+        peer: String,
+        workspaceID: String,
+        backend: String = "claude",
+        mode: String = "plan",
+        autonomy: String = "standard",
+        personaID: String? = nil
+    ) async throws -> ChatConversation {
+        try await Bridge.createChat(
+            workspaceID: workspaceID,
+            backend: backend,
+            mode: mode,
+            autonomy: autonomy,
+            personaID: personaID,
+            peer: peer
+        )
+    }
+
+    static func updateChat(
+        peer: String,
+        id: String,
+        title: String? = nil,
+        backend: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        mode: String? = nil,
+        autonomy: String? = nil,
+        personaID: String? = nil,
+        systemPrompt: String? = nil
+    ) async throws -> ChatConversation {
+        try await Bridge.updateChat(
+            id: id,
+            title: title,
+            backend: backend,
+            model: model,
+            effort: effort,
+            mode: mode,
+            autonomy: autonomy,
+            personaID: personaID,
+            systemPrompt: systemPrompt,
+            peer: peer
+        )
+    }
+
+    static func removeChat(peer: String, id: String) async throws {
+        try await Bridge.removeChat(id: id, peer: peer)
     }
 
     static func sendChat(peer: String, id: String, text: String, attachmentIDs: [String] = []) async throws -> ChatConversation {
-        try await Bridge.onPeer(peer, "chat.send", ["id": id, "text": text, "attachmentIds": attachmentIDs], as: ChatConversation.self)
+        try await Bridge.sendChat(id: id, text: text, attachmentIDs: attachmentIDs, peer: peer)
     }
 
     static func stopChat(peer: String, id: String) async throws {
-        _ = try await Bridge.onPeer(peer, "chat.stop", ["id": id], as: ClientChatAck.self)
+        try await Bridge.stopChat(id: id, peer: peer)
     }
 
     static func chatEvents(peer: String, id: String, offset: UInt64) async throws -> ChatEventChunk {
-        try await Bridge.onPeer(peer, "chat.events", ["id": id, "offset": offset], as: ChatEventChunk.self)
+        try await Bridge.chatEvents(id: id, offset: offset, peer: peer)
     }
 
     static func chatApprovals(peer: String, id: String) async throws -> [ChatApproval] {
-        try await Bridge.onPeer(peer, "chat.approvals", ["id": id], as: [ChatApproval].self)
+        try await Bridge.chatApprovals(id: id, peer: peer)
     }
 
     static func resolveChatApproval(peer: String, id: String, choice: String) async throws -> ChatApproval {
-        try await Bridge.onPeer(peer, "chat.resolveApproval", ["id": id, "choice": choice], as: ChatApproval.self)
+        try await Bridge.resolveChatApproval(id: id, choice: choice, peer: peer)
+    }
+
+    static func chatPersonas(peer: String) async throws -> [ChatPersona] {
+        try await Bridge.chatPersonas(peer: peer)
+    }
+
+    static func saveChatPersona(peer: String, persona: ChatPersona) async throws -> ChatPersona {
+        try await Bridge.saveChatPersona(persona, peer: peer)
+    }
+
+    static func removeChatPersona(peer: String, id: String) async throws {
+        try await Bridge.removeChatPersona(id: id, peer: peer)
+    }
+
+    static func attachToChat(
+        peer: String,
+        id: String,
+        name: String,
+        data: Data,
+        mediaType: String?
+    ) async throws -> ChatAttachment {
+        try await Bridge.attachToChat(
+            id: id,
+            name: name,
+            data: data,
+            mediaType: mediaType,
+            peer: peer
+        )
     }
 
     static func attachToChat(peer: String, id: String, file: URL) async throws -> ChatAttachment {
-        let access = file.startAccessingSecurityScopedResource()
-        defer { if access { file.stopAccessingSecurityScopedResource() } }
-        let data = try Data(contentsOf: file)
-        return try await Bridge.onPeer(peer, "chat.attach", ["id": id, "name": file.lastPathComponent, "data": data.base64EncodedString()], as: ChatAttachment.self)
+        try await Bridge.attachToChat(id: id, file: file, peer: peer)
     }
 
     static func runWorkflow(

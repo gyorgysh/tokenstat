@@ -147,7 +147,7 @@ struct ClientWorkspaceDetailView: View {
             // written out rather than driven from `WorkspaceSection.allCases`,
             // which is why adding the case alone left the phone without it.
             NavigationLink {
-                ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name)
+                ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
             } label: {
                 ClientSectionRow(section: .chat, count: nil)
             }

@@ -18,27 +18,32 @@ final class ChatModel {
     var isLoading = false
     var error: String?
     private(set) var workspaceID: String?
+    /// Set when this model is talking to a peer over the tunnel, nil on the Mac.
+    private(set) var peer: String?
 
     func count(in workspaceID: String) -> Int {
         guard self.workspaceID == workspaceID else { return 0 }
         return chats.count
     }
 
-    func load(workspaceID: String) async {
+    func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
         isLoading = true
         defer { isLoading = false }
         self.workspaceID = workspaceID
+        self.peer = peer
         do {
-            async let loadedBackends = Bridge.chatBackends()
-            async let loadedPersonas = Bridge.chatPersonas()
-            async let loadedChats = Bridge.chats(workspaceID: workspaceID)
+            async let loadedBackends = Bridge.chatBackends(peer: peer)
+            async let loadedPersonas = Bridge.chatPersonas(peer: peer)
+            async let loadedChats = Bridge.chats(workspaceID: workspaceID, peer: peer)
             backends = try await loadedBackends
             personas = try await loadedPersonas
             chats = try await loadedChats
             if let selected, chats.contains(where: { $0.id == selected.id }) {
                 await select(chats.first(where: { $0.id == selected.id }) ?? selected)
-            } else {
+            } else if selectFirst {
                 await select(chats.first)
+            } else {
+                await select(nil)
             }
         } catch {
             self.error = error.localizedDescription
@@ -61,14 +66,15 @@ final class ChatModel {
         guard let workspaceID else { return }
         do {
             if backends.isEmpty {
-                backends = try await Bridge.chatBackends()
+                backends = try await Bridge.chatBackends(peer: peer)
             }
             let chosen = backends.first(where: { $0.id != "sh" }) ?? backends.first
             let chat = try await Bridge.createChat(
                 workspaceID: workspaceID,
                 backend: chosen?.id ?? "claude",
                 mode: "plan",
-                autonomy: chosen?.gateTier == "bypassOnly" ? "bypass" : "standard"
+                autonomy: chosen?.gateTier == "bypassOnly" ? "bypass" : "standard",
+                peer: peer
             )
             chats.insert(chat, at: 0)
             await select(chat)
@@ -102,7 +108,8 @@ final class ChatModel {
                 personaID: personaID,
                 systemPrompt: systemPrompt,
                 allowedTools: allowedTools,
-                allowedShellPrefixes: allowedShellPrefixes
+                allowedShellPrefixes: allowedShellPrefixes,
+                peer: peer
             )
             replace(updated)
         } catch {
@@ -128,7 +135,7 @@ final class ChatModel {
 
     func remove(_ chat: ChatConversation) async {
         do {
-            try await Bridge.removeChat(id: chat.id)
+            try await Bridge.removeChat(id: chat.id, peer: peer)
             chats.removeAll { $0.id == chat.id }
             if selected?.id == chat.id {
                 await select(chats.first)
@@ -144,7 +151,8 @@ final class ChatModel {
             let updated = try await Bridge.sendChat(
                 id: selected.id,
                 text: text,
-                attachmentIDs: attachments.map(\.id)
+                attachmentIDs: attachments.map(\.id),
+                peer: peer
             )
             replace(updated)
             attachments = []
@@ -174,7 +182,8 @@ final class ChatModel {
                 id: selected.id,
                 name: item.name,
                 data: item.data,
-                mediaType: item.mediaType
+                mediaType: item.mediaType,
+                peer: peer
             )
             attachments.append(attachment)
             if let preview = ChatThumbnail.make(from: item.data) {
@@ -193,7 +202,7 @@ final class ChatModel {
     func stop() async {
         guard let selected else { return }
         do {
-            try await Bridge.stopChat(id: selected.id)
+            try await Bridge.stopChat(id: selected.id, peer: peer)
         } catch {
             self.error = error.localizedDescription
         }
@@ -201,7 +210,7 @@ final class ChatModel {
 
     func resolve(_ approval: ChatApproval, choice: String) async {
         do {
-            _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice)
+            _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
             await loadApprovals(id: approval.conversationID)
         } catch {
             self.error = error.localizedDescription
@@ -210,7 +219,7 @@ final class ChatModel {
 
     func savePersona(_ persona: ChatPersona) async -> ChatPersona? {
         do {
-            let saved = try await Bridge.saveChatPersona(persona)
+            let saved = try await Bridge.saveChatPersona(persona, peer: peer)
             if let index = personas.firstIndex(where: { $0.id == saved.id }) {
                 personas[index] = saved
             } else {
@@ -225,7 +234,7 @@ final class ChatModel {
 
     func removePersona(_ persona: ChatPersona) async {
         do {
-            try await Bridge.removeChatPersona(id: persona.id)
+            try await Bridge.removeChatPersona(id: persona.id, peer: peer)
             personas.removeAll { $0.id == persona.id }
         } catch {
             self.error = error.localizedDescription
@@ -237,7 +246,7 @@ final class ChatModel {
         await loadEvents(id: selected.id, reset: false)
         await loadApprovals(id: selected.id)
         do {
-            let latest = try await Bridge.chats(workspaceID: selected.workspaceID)
+            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
             chats = latest
             if let current = latest.first(where: { $0.id == selected.id }) {
                 self.selected = current
@@ -271,7 +280,7 @@ final class ChatModel {
 
     private func loadEvents(id: String, reset: Bool) async {
         do {
-            let chunk = try await Bridge.chatEvents(id: id, offset: reset ? 0 : offset)
+            let chunk = try await Bridge.chatEvents(id: id, offset: reset ? 0 : offset, peer: peer)
             if reset {
                 events = chunk.events
             } else {
@@ -285,7 +294,7 @@ final class ChatModel {
 
     private func loadApprovals(id: String) async {
         do {
-            approvals = try await Bridge.chatApprovals(id: id)
+            approvals = try await Bridge.chatApprovals(id: id, peer: peer)
         } catch {
             self.error = error.localizedDescription
         }

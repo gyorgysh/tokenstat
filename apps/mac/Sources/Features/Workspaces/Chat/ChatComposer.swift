@@ -87,9 +87,11 @@ struct ChatComposer: View {
             Task { await ingest(providers: providers) }
             return true
         }
+        #if os(macOS)
         .onPasteCommand(of: [.image, .fileURL, .png, .jpeg, .pdf]) { providers in
             Task { await ingest(providers: providers) }
         }
+        #endif
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: dropTargeted)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: attachments.count)
         .accessibilityElement(children: .contain)
@@ -205,7 +207,7 @@ struct ChatComposer: View {
 }
 
 /// A 76-point tile: the picture itself for images, a typed seat for files.
-private struct ChatAttachmentTile: View {
+struct ChatAttachmentTile: View {
     let attachment: ChatAttachment
     var preview: Data?
     var onRemove: () -> Void
