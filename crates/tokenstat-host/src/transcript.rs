@@ -89,6 +89,14 @@ pub struct Parser {
     leftover: String,
     last_block: String,
     last_was_text: bool,
+    /// Tool starts that have not seen a matching end yet. Closed on Done,
+    /// Failed, or [`Self::finish_events`], so a cancelled grok call cannot
+    /// leave the row spinning after the turn is over.
+    open_tools: Vec<String>,
+    /// Claude repeats the final assistant text in its `result` record. Keep the
+    /// last assistant payload so structured chat events can drop that summary
+    /// copy while retaining result-only output from older CLI versions.
+    last_claude_assistant: Option<String>,
 }
 
 impl Parser {
@@ -98,6 +106,8 @@ impl Parser {
             leftover: String::new(),
             last_block: String::new(),
             last_was_text: false,
+            open_tools: Vec::new(),
+            last_claude_assistant: None,
         }
     }
 
@@ -141,11 +151,14 @@ impl Parser {
 
     /// Flush a final structured event from a line without a trailing newline.
     pub fn finish_events(&mut self) -> Vec<Event> {
-        if self.leftover.is_empty() {
-            return Vec::new();
-        }
-        let line = std::mem::take(&mut self.leftover);
-        self.line_events(&line)
+        let mut events = if self.leftover.is_empty() {
+            Vec::new()
+        } else {
+            let line = std::mem::take(&mut self.leftover);
+            self.line_events(&line)
+        };
+        events.extend(self.close_open_tools(false, Some("ended".into())));
+        events
     }
 
     /// Treat any leftover partial line as complete. Call when the process
@@ -231,7 +244,7 @@ impl Parser {
         }
     }
 
-    fn line_events(&self, raw: &str) -> Vec<Event> {
+    fn line_events(&mut self, raw: &str) -> Vec<Event> {
         let cleaned = strip_ansi(raw)
             .trim()
             .trim_start_matches('\u{feff}')
@@ -240,16 +253,79 @@ impl Parser {
             return Vec::new();
         }
         if !cleaned.starts_with('{') {
-            return if self.is_json_backend() && cleaned.contains("\"type\":") {
+            let events = if self.is_json_backend() && cleaned.contains("\"type\":") {
                 Vec::new()
+            } else if let Some(text) = cli_refusal_text(&cleaned) {
+                vec![Event::Failed { text }]
             } else {
                 vec![Event::Text { delta: cleaned }]
             };
+            return self.take_events(events);
         }
         let Ok(value) = serde_json::from_str(&cleaned) else {
             return Vec::new();
         };
-        events_for_value(&self.backend, &value)
+        let mut events = events_for_value(&self.backend, &value);
+        if self.backend == "claude" {
+            match value.get("type").and_then(Value::as_str) {
+                Some("assistant") => {
+                    if let Some(text) = claude_assistant_text(&value) {
+                        self.last_claude_assistant = Some(text);
+                    }
+                }
+                Some("result") => {
+                    if let Some(repeated) = self.last_claude_assistant.as_deref() {
+                        events.retain(
+                            |event| !matches!(event, Event::Text { delta } if delta == repeated),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.take_events(events)
+    }
+
+    fn take_events(&mut self, events: Vec<Event>) -> Vec<Event> {
+        let mut out = Vec::with_capacity(events.len() + self.open_tools.len());
+        for event in events {
+            match &event {
+                Event::ToolStart { call_id, .. } => {
+                    if !self.open_tools.iter().any(|id| id == call_id) {
+                        self.open_tools.push(call_id.clone());
+                    }
+                    out.push(event);
+                }
+                Event::ToolEnd { call_id, .. } => {
+                    self.open_tools.retain(|id| id != call_id);
+                    out.push(event);
+                }
+                Event::Done { status, .. } => {
+                    let cancelled = matches!(status.as_str(), "cancelled" | "canceled" | "error");
+                    out.extend(
+                        self.close_open_tools(!cancelled, cancelled.then(|| status.clone())),
+                    );
+                    out.push(event);
+                }
+                Event::Failed { text } => {
+                    out.extend(self.close_open_tools(false, Some(text.clone())));
+                    out.push(event);
+                }
+                _ => out.push(event),
+            }
+        }
+        out
+    }
+
+    fn close_open_tools(&mut self, ok: bool, detail: Option<String>) -> Vec<Event> {
+        std::mem::take(&mut self.open_tools)
+            .into_iter()
+            .map(|call_id| Event::ToolEnd {
+                call_id,
+                ok,
+                detail: detail.clone(),
+            })
+            .collect()
     }
 
     fn is_json_backend(&self) -> bool {
@@ -258,6 +334,27 @@ impl Parser {
             "grok" | "claude" | "cursor" | "codex" | "opencode" | "opencode2" | "agy"
         )
     }
+}
+
+/// Headless CLIs print a refusal as plain text, not NDJSON. That is a failed
+/// turn, not the agent talking. Keep the original line unless it is one of
+/// the two refusals we have copy for.
+fn cli_refusal_text(line: &str) -> Option<String> {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("please run /login") {
+        return Some(
+            "Claude Code is not signed in on this Mac. Open a terminal, run claude, and use /login."
+                .into(),
+        );
+    }
+    if lower.contains("named models unavailable") || lower.contains("free plans can only use auto")
+    {
+        return Some("This Cursor plan can only use Auto.".into());
+    }
+    if lower.starts_with("error:") || lower.contains("actionrequirederror") {
+        return Some(line.to_string());
+    }
+    None
 }
 
 /// Decode one complete backend record. Keep this vocabulary here: the
@@ -317,6 +414,7 @@ fn events_grok(value: &Value) -> Vec<Event> {
                 .unwrap_or("tool"),
             value.get("rawInput").cloned().unwrap_or(Value::Null),
         )],
+        Some("tool_call_update") => events_grok_tool_update(value),
         Some("error") => event_failed(value.get("message").and_then(Value::as_str)),
         Some("usage") => event_usage(value),
         Some("end") => vec![done(
@@ -328,6 +426,55 @@ fn events_grok(value: &Value) -> Vec<Event> {
         )],
         _ => Vec::new(),
     }
+}
+
+fn events_grok_tool_update(value: &Value) -> Vec<Event> {
+    let status = value.get("status").and_then(Value::as_str).unwrap_or("");
+    if status.is_empty() {
+        return Vec::new();
+    }
+    let ok = matches!(
+        status,
+        "completed" | "complete" | "success" | "succeeded" | "ok"
+    );
+    let failed = matches!(status, "failed" | "error" | "cancelled" | "canceled");
+    if !ok && !failed {
+        return Vec::new();
+    }
+    vec![Event::ToolEnd {
+        call_id: item_id(value),
+        ok,
+        detail: grok_tool_detail(value),
+    }]
+}
+
+fn grok_tool_detail(value: &Value) -> Option<String> {
+    value
+        .get("rawOutput")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .pointer("/content/0/content/text")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            value
+                .pointer("/content/0/text")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
 }
 
 fn events_claude(value: &Value) -> Vec<Event> {
@@ -377,6 +524,18 @@ fn events_claude(value: &Value) -> Vec<Event> {
         return events;
     }
     Vec::new()
+}
+
+fn claude_assistant_text(value: &Value) -> Option<String> {
+    let text = value
+        .pointer("/message/content")
+        .or_else(|| value.get("content"))?
+        .as_array()?
+        .iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|block| block.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    (!text.is_empty()).then_some(text)
 }
 
 fn events_cursor(value: &Value) -> Vec<Event> {
@@ -624,6 +783,7 @@ fn item_id(value: &Value) -> String {
         .get("id")
         .or_else(|| value.get("call_id"))
         .or_else(|| value.get("tool_call_id"))
+        .or_else(|| value.get("toolCallId"))
         .and_then(Value::as_str)
         .unwrap_or("tool")
         .to_string()
@@ -817,6 +977,13 @@ fn render_grok(value: &serde_json::Value) -> Option<Piece> {
                 &display_verb(title),
                 value.get("rawInput"),
             )))
+        }
+        "tool_call_update" => {
+            let status = value.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if !matches!(status, "failed" | "error" | "cancelled" | "canceled") {
+                return None;
+            }
+            grok_tool_detail(value).map(Piece::Block)
         }
         _ => None,
     }
@@ -1377,6 +1544,63 @@ mod tests {
     }
 
     #[test]
+    fn cli_refusals_are_failed_turns_not_assistant_prose() {
+        let mut grok = Parser::new("grok");
+        let grok_events = grok.push_events(
+            b"error: a value is required for '--output-format <OUTPUT_FORMAT>' but none was supplied\n",
+        );
+        assert!(
+            matches!(grok_events.first(), Some(Event::Failed { text }) if text.starts_with("error:")),
+            "{grok_events:?}"
+        );
+
+        let mut claude = Parser::new("claude");
+        let claude_events = claude.push_events("Not logged in · Please run /login\n".as_bytes());
+        assert!(
+            matches!(
+                claude_events.first(),
+                Some(Event::Failed { text }) if text.contains("not signed in")
+            ),
+            "{claude_events:?}"
+        );
+
+        let mut cursor = Parser::new("cursor");
+        let cursor_events = cursor.push_events(
+            b"ActionRequiredError: Named models unavailable Free plans can only use Auto.\n",
+        );
+        assert!(
+            matches!(
+                cursor_events.first(),
+                Some(Event::Failed { text }) if text.contains("can only use Auto")
+            ),
+            "{cursor_events:?}"
+        );
+    }
+
+    #[test]
+    fn tool_start_serializes_input_as_an_object_beside_usage_counts() {
+        let start = Event::ToolStart {
+            call_id: "item_3".into(),
+            verb: "Shell".into(),
+            target: "/bin/zsh -lc pwd".into(),
+            input: serde_json::json!({"command": "/bin/zsh -lc pwd"}),
+        };
+        let usage = Event::Usage {
+            input: 12,
+            output: 4,
+            cache_read: 0,
+            cache_write: 0,
+            cost_usd: None,
+        };
+        let start_v = serde_json::to_value(&start).unwrap();
+        assert_eq!(start_v["kind"], "toolStart");
+        assert!(start_v["input"].is_object(), "{start_v}");
+        let usage_v = serde_json::to_value(&usage).unwrap();
+        assert_eq!(usage_v["kind"], "usage");
+        assert_eq!(usage_v["input"], 12);
+    }
+
+    #[test]
     fn events_preserve_session_usage_and_edits() {
         let raw = include_str!("../../../fixtures/chat/claude.ndjson");
         let mut parser = Parser::new("claude");
@@ -1393,10 +1617,74 @@ mod tests {
                 ..
             }
         )));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Event::Text { delta } if delta == "I found it."))
+                .count(),
+            1,
+            "Claude's result record must not repeat the assistant event: {events:?}"
+        );
 
         let mut agy = Parser::new("agy");
         let edits = agy.push_events(include_str!("../../../fixtures/chat/agy.ndjson").as_bytes());
         assert!(edits.iter().any(|event| matches!(event, Event::Edit { path, added: 1, removed: 1, .. } if path == "a.rs")));
+    }
+
+    #[test]
+    fn grok_tool_call_update_ends_the_call() {
+        let raw = concat!(
+            r#"{"type":"tool_call","toolCallId":"call-abc","toolName":"run_terminal_command","status":"pending","rawInput":{"command":"mkdir tmp"}}"#,
+            "\n",
+            r#"{"type":"tool_call_update","toolCallId":"call-abc","status":null}"#,
+            "\n",
+            r#"{"type":"tool_call_update","toolCallId":"call-abc","status":"failed","rawOutput":"User cancelled the execution for tool `run_terminal_command`","content":[{"content":{"text":"User cancelled the execution for tool `run_terminal_command`"}}]}"#,
+            "\n",
+            r#"{"type":"end","stopReason":"cancelled"}"#,
+            "\n",
+        );
+        let mut parser = Parser::new("grok");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolStart { call_id, verb, .. } if call_id == "call-abc" && verb == "Shell"
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: false, detail: Some(detail) }
+                    if call_id == "call-abc" && detail.contains("cancelled")
+            )),
+            "{events:?}"
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Done { status, .. } if status == "cancelled")),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn leftover_tools_close_when_the_stream_ends() {
+        let raw = concat!(
+            r#"{"type":"tool_call","id":"read-1","title":"read_file","rawInput":{"path":"src/lib.rs"}}"#,
+            "\n",
+            r#"{"type":"end","stopReason":"end_turn"}"#,
+            "\n",
+        );
+        let mut parser = Parser::new("grok");
+        let events = parser.push_events(raw.as_bytes());
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::ToolEnd { call_id, ok: true, .. } if call_id == "read-1"
+            )),
+            "{events:?}"
+        );
     }
 
     #[test]

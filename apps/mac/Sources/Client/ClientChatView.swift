@@ -158,15 +158,18 @@ private struct ClientChatThread: View {
             if let chat {
                 transcript(chat)
                 ClientChatComposer(
+                    model: model,
+                    chat: chat,
                     draft: $draft,
                     attachments: model.attachments,
                     previews: model.attachmentPreviews,
-                    running: chat.running,
+                    running: model.busy,
                     placeholder: "Ask about \(folderName.isEmpty ? "this folder" : folderName)",
                     onSend: { submit(from: chat) },
                     onStop: { Task { await model.stop() } },
                     onAttach: { item in await model.attach(item) },
-                    onRemove: { model.removeAttachment($0) }
+                    onRemove: { model.removeAttachment($0) },
+                    onOpenSetup: { showingSetup = true }
                 )
             } else {
                 ClientEmptyState(
@@ -220,12 +223,6 @@ private struct ClientChatThread: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.m) {
-                    ChatSetupHeader(
-                        model: model,
-                        chat: chat,
-                        collapsed: model.hasStarted,
-                        onOpenInspector: { showingSetup = true }
-                    )
                     ForEach(model.displayItems) { item in
                         ClientChatEventRow(
                             item: item,
@@ -235,7 +232,7 @@ private struct ClientChatThread: View {
                             }
                         )
                     }
-                    if chat.running {
+                    if model.busy {
                         HStack(spacing: Theme.Space.s) {
                             ProgressView().controlSize(.small)
                             Text("Working")
@@ -321,7 +318,7 @@ private struct ClientChatThread: View {
 
     private func submit(from chat: ChatConversation) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !chat.running else { return }
+        guard !text.isEmpty, !model.busy else { return }
         draft = ""
         Task { await model.send(text) }
     }

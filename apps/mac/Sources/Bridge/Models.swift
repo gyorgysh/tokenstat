@@ -2469,6 +2469,32 @@ struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
 struct ChatEventChunk: Codable, Sendable {
     var events: [ChatTimelineEvent]
     var nextOffset: UInt64
+
+    enum CodingKeys: String, CodingKey { case events, nextOffset }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        nextOffset = try c.decodeIfPresent(UInt64.self, forKey: .nextOffset) ?? 0
+        // One ugly toolStart must not fail the whole poll. The host writes
+        // `input` as an object on tools and as a count on usage.
+        events = (try c.decodeIfPresent([FailableChatEvent].self, forKey: .events) ?? [])
+            .compactMap(\.value)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(events, forKey: .events)
+        try c.encode(nextOffset, forKey: .nextOffset)
+    }
+}
+
+/// Skips a single timeline row that cannot be decoded, so a new backend field
+/// cannot empty the conversation.
+private struct FailableChatEvent: Decodable {
+    var value: ChatTimelineEvent?
+    init(from decoder: Decoder) throws {
+        value = try? ChatTimelineEvent(from: decoder)
+    }
 }
 
 struct ChatTimelineEvent: Codable, Sendable, Identifiable {
@@ -2510,6 +2536,8 @@ struct ChatAgentEvent: Codable, Sendable {
     var patch: String?
     var status: String?
     var text: String?
+    /// Token count on `usage`. Tool calls send `input` as an object, which
+    /// this field ignores so the row can still decode.
     var input: UInt64?
     var output: UInt64?
     var costUsd: Double?
@@ -2519,6 +2547,73 @@ struct ChatAgentEvent: Codable, Sendable {
     var cacheRead: UInt64?
     var cacheWrite: UInt64?
     var exitCode: Int32?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, delta, verb, target, path, added, removed, patch, status, text
+        case input, output, costUsd, callId, ok, detail, cacheRead, cacheWrite, exitCode
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        delta = try c.decodeIfPresent(String.self, forKey: .delta)
+        verb = try c.decodeIfPresent(String.self, forKey: .verb)
+        target = try c.decodeIfPresent(String.self, forKey: .target)
+        path = try c.decodeIfPresent(String.self, forKey: .path)
+        added = try c.decodeIfPresent(UInt32.self, forKey: .added)
+        removed = try c.decodeIfPresent(UInt32.self, forKey: .removed)
+        patch = try c.decodeIfPresent(String.self, forKey: .patch)
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        input = c.decodeCount(forKey: .input)
+        output = c.decodeCount(forKey: .output)
+        costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
+        callId = try c.decodeIfPresent(String.self, forKey: .callId)
+        ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        cacheRead = c.decodeCount(forKey: .cacheRead)
+        cacheWrite = c.decodeCount(forKey: .cacheWrite)
+        exitCode = try c.decodeIfPresent(Int32.self, forKey: .exitCode)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(delta, forKey: .delta)
+        try c.encodeIfPresent(verb, forKey: .verb)
+        try c.encodeIfPresent(target, forKey: .target)
+        try c.encodeIfPresent(path, forKey: .path)
+        try c.encodeIfPresent(added, forKey: .added)
+        try c.encodeIfPresent(removed, forKey: .removed)
+        try c.encodeIfPresent(patch, forKey: .patch)
+        try c.encodeIfPresent(status, forKey: .status)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(input, forKey: .input)
+        try c.encodeIfPresent(output, forKey: .output)
+        try c.encodeIfPresent(costUsd, forKey: .costUsd)
+        try c.encodeIfPresent(callId, forKey: .callId)
+        try c.encodeIfPresent(ok, forKey: .ok)
+        try c.encodeIfPresent(detail, forKey: .detail)
+        try c.encodeIfPresent(cacheRead, forKey: .cacheRead)
+        try c.encodeIfPresent(cacheWrite, forKey: .cacheWrite)
+        try c.encodeIfPresent(exitCode, forKey: .exitCode)
+    }
+}
+
+private extension KeyedDecodingContainer where K == ChatAgentEvent.CodingKeys {
+    /// Usage counters are numbers. Tool `input` is an object. Never throw.
+    func decodeCount(forKey key: K) -> UInt64? {
+        if let value = try? decodeIfPresent(UInt64.self, forKey: key) {
+            return value
+        }
+        if let value = try? decodeIfPresent(Int64.self, forKey: key), value >= 0 {
+            return UInt64(value)
+        }
+        if let value = try? decodeIfPresent(Double.self, forKey: key), value >= 0 {
+            return UInt64(value)
+        }
+        return nil
+    }
 }
 
 /// An agent CLI the daemon can run: a backend, a prompt, a workspace, and a

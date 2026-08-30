@@ -307,7 +307,7 @@ impl Store {
             || shell_prefix.as_ref().is_some_and(|prefix| {
                 chat.allowed_shell_prefixes
                     .iter()
-                    .any(|allowed| prefix.starts_with(allowed))
+                    .any(|allowed| prefix == allowed)
             });
         let now = now_ms();
         let approval = Approval {
@@ -456,7 +456,7 @@ impl Store {
     }
 
     pub fn resolve_approval(&self, id: &str, choice: &str) -> Result<Approval, String> {
-        if !matches!(choice, "allow" | "allowAlways" | "deny" | "denyAlways") {
+        if !matches!(choice, "allow" | "allowAlways" | "deny") {
             return Err("unknown approval choice".into());
         }
         self.prune_approvals();
@@ -482,7 +482,7 @@ impl Store {
             );
             approval.clone()
         };
-        if choice.ends_with("Always") {
+        if choice == "allowAlways" {
             let mut chats = self
                 .conversations
                 .lock()
@@ -772,6 +772,7 @@ impl Store {
             crate::automations::ChatLaunch {
                 resume: chat.resume_token.as_deref(),
                 bypass: chat.autonomy == "bypass",
+                mode: &chat.mode,
                 hook_command: hook_command.as_deref(),
                 agy_customization_dir: agy_customization_dir.as_deref(),
                 grok_allow_rules: &grok_allow_rules,
@@ -907,12 +908,19 @@ impl Store {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
-            .cloned()
-            .ok_or("this chat is not responding")?;
-        match tokenstat_pty::manager().kill(&pty) {
-            Ok(()) | Err(tokenstat_pty::PtyError::NoSession(_)) => Ok(()),
-            Err(error) => Err(error.to_string()),
+            .cloned();
+        if let Some(pty) = pty {
+            match tokenstat_pty::manager().kill(&pty) {
+                Ok(()) | Err(tokenstat_pty::PtyError::NoSession(_)) => {}
+                Err(error) => return Err(error.to_string()),
+            }
+        } else {
+            // A daemon restart can leave the persisted bit behind without an
+            // in-memory PTY. Clear that stale state, but keep a live turn
+            // marked running until its drain thread observes process exit.
+            self.set_running(id, false)?;
         }
+        Ok(())
     }
 
     fn drain(self: Arc<Self>, id: &str, backend: &str, pty: &str, raw_path: &PathBuf) {
@@ -1364,6 +1372,33 @@ fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
 mod tests {
     use super::*;
     #[test]
+    fn stop_without_an_active_session_clears_running() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: true,
+        });
+        store.stop("chat-test").unwrap();
+        assert!(!store.list("workspace-a")[0].running);
+    }
+
+    #[test]
     fn counts_are_per_workspace() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::at(root.path().join("chat"));
@@ -1722,5 +1757,40 @@ mod tests {
             .request_approval("chat-test", "Edit", "Edit src/lib.rs", None)
             .unwrap();
         assert_eq!(allowed.decision.as_deref(), Some("allow"));
+
+        let rejected = store
+            .request_approval("chat-test", "Read", "Read secrets.txt", None)
+            .unwrap();
+        assert!(store.resolve_approval(&rejected.id, "denyAlways").is_err());
+        assert_eq!(store.await_approval(&rejected.id, 0).decision, None);
+        store.resolve_approval(&rejected.id, "deny").unwrap();
+
+        let shell = store
+            .request_approval(
+                "chat-test",
+                "Bash",
+                "Bash git status",
+                Some("git status".into()),
+            )
+            .unwrap();
+        store.resolve_approval(&shell.id, "allowAlways").unwrap();
+        let exact = store
+            .request_approval(
+                "chat-test",
+                "Bash",
+                "Bash git status",
+                Some("git status".into()),
+            )
+            .unwrap();
+        assert_eq!(exact.decision.as_deref(), Some("allow"));
+        let broader = store
+            .request_approval(
+                "chat-test",
+                "Bash",
+                "Bash git status --short",
+                Some("git status --short".into()),
+            )
+            .unwrap();
+        assert_eq!(broader.decision, None);
     }
 }

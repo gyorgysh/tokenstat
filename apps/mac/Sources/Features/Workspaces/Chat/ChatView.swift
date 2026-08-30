@@ -23,21 +23,29 @@ struct ChatView: View {
             if let chat = model.selected {
                 transcript(chat)
                 ChatComposer(
+                    model: model,
+                    chat: chat,
                     draft: $draft,
                     attachments: model.attachments,
                     previews: model.attachmentPreviews,
-                    running: chat.running,
+                    running: model.busy,
                     placeholder: "Ask about \(workspaceName ?? "this folder")",
                     onSend: { submit(from: chat) },
                     onStop: { Task { await model.stop() } },
                     onAttach: { item in await model.attach(item) },
-                    onRemove: { model.removeAttachment($0) }
+                    onRemove: { model.removeAttachment($0) },
+                    onOpenInspector: onOpenInspector
                 )
             } else {
                 empty
             }
         }
         .background(Theme.background)
+        #if os(macOS)
+        .onExitCommand {
+            if model.busy { Task { await model.stop() } }
+        }
+        #endif
         #if !os(macOS)
         .navigationTitle(model.selected?.title ?? "Chat")
         .navigationBarTitleDisplayMode(.inline)
@@ -114,12 +122,9 @@ struct ChatView: View {
                         conversationMenu
                     }
                     #endif
-                    ChatSetupHeader(
-                        model: model,
-                        chat: chat,
-                        collapsed: model.hasStarted,
-                        onOpenInspector: onOpenInspector
-                    )
+                    if model.displayItems.isEmpty, !chat.running {
+                        emptyConversation
+                    }
                     ForEach(model.displayItems) { item in
                         ChatEventRow(
                             item: item,
@@ -129,7 +134,7 @@ struct ChatView: View {
                             }
                         )
                     }
-                    if chat.running {
+                    if model.busy {
                         HStack(spacing: Theme.Space.s) {
                             ProgressView().controlSize(.small)
                             Text("Working")
@@ -190,9 +195,22 @@ struct ChatView: View {
 
     private func submit(from chat: ChatConversation) {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !chat.running else { return }
+        guard !text.isEmpty, !model.busy else { return }
         draft = ""
         Task { await model.send(text) }
+    }
+
+    private var emptyConversation: some View {
+        VStack(spacing: Theme.Space.m) {
+            ChatScene(reduceMotion: reduceMotion)
+            Text("Ask about \(workspaceName ?? "this folder")")
+                .font(Theme.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, Theme.Space.xl)
+        .padding(.bottom, Theme.Space.m)
     }
 
     private var empty: some View {

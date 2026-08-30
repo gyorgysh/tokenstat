@@ -3,12 +3,14 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The bar under the transcript: attachments as thumbnails, a field, Send.
+/// The bar under the transcript: setup, attachments, a field, Send.
 ///
-/// One well, not three controls sitting on the page. Drop and paste land here
-/// so a screenshot does not have to be saved first. The well lights up in the
-/// accent when a drag is over it, the same signal the rest of the app uses.
+/// Controls sit above the field, each in its own place. The field is the
+/// message. Drop and paste land here so a screenshot does not have to be
+/// saved first. The well lights up in the accent when a drag is over it.
 struct ChatComposer: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
     @Binding var draft: String
     var attachments: [ChatAttachment]
     var previews: [String: Data]
@@ -18,26 +20,22 @@ struct ChatComposer: View {
     var onStop: () -> Void
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
+    var onOpenInspector: (() -> Void)? = nil
 
     @State private var importing = false
     @State private var dropTargeted = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack {
-            Spacer(minLength: 0)
-            well
-                .frame(maxWidth: 780)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Theme.Space.l)
-        .padding(.vertical, Theme.Space.m)
-        .background(Theme.background)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Theme.border)
-                .frame(height: 1)
-        }
+        well
+            .padding(.horizontal, Theme.Space.l)
+            .padding(.vertical, Theme.Space.m)
+            .background(Theme.background)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(height: 1)
+            }
         .fileImporter(
             isPresented: $importing,
             allowedContentTypes: [.item],
@@ -51,6 +49,12 @@ struct ChatComposer: View {
 
     private var well: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ChatComposerControls(
+                model: model,
+                chat: chat,
+                locked: running,
+                onOpenInspector: onOpenInspector
+            )
             if !attachments.isEmpty {
                 strip
             }
@@ -59,8 +63,9 @@ struct ChatComposer: View {
                 field
                 if running {
                     Button("Stop", .stop) { onStop() }
-                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .buttonStyle(DestructiveButtonStyle(small: true))
                         .environment(\.compactActions, true)
+                        .keyboardShortcut(.cancelAction)
                 } else {
                     Button("Send", .send) { onSend() }
                         .buttonStyle(AccentButtonStyle(small: true))
@@ -69,6 +74,11 @@ struct ChatComposer: View {
                 }
             }
         }
+        #if os(macOS)
+        .onExitCommand {
+            if running { onStop() }
+        }
+        #endif
         .padding(10)
         .background(wellFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
@@ -138,27 +148,33 @@ struct ChatComposer: View {
     }
 
     private var field: some View {
+        #if os(macOS)
+        ChatDraftView(
+            text: $draft,
+            placeholder: placeholder,
+            enabled: !running,
+            onSend: {
+                if !cannotSend { onSend() }
+            },
+            onStop: {
+                if running { onStop() }
+            },
+            onPasteAttachments: {
+                ingest(items: ChatInbox.pasteboardItems())
+            }
+        )
+        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 160, alignment: .topLeading)
+        .layoutPriority(1)
+        .fixedSize(horizontal: false, vertical: true)
+        #else
         TextField(placeholder, text: $draft, axis: .vertical)
             .textFieldStyle(.plain)
             .font(Theme.body)
             .lineLimit(1...8)
             .padding(.vertical, 6)
-            #if os(macOS)
-            .onKeyPress(.return, phases: .down) { press in
-                if press.modifiers.contains(.command) {
-                    if !cannotSend { onSend() }
-                    return .handled
-                }
-                return .ignored
-            }
-            .onKeyPress(KeyEquivalent("v"), phases: .down) { press in
-                guard press.modifiers.contains(.command),
-                      ChatInbox.pasteboardHasAttachment()
-                else { return .ignored }
-                ingest(items: ChatInbox.pasteboardItems())
-                return .handled
-            }
-            #endif
+            .submitLabel(.send)
+            .onSubmit { if !cannotSend { onSend() } }
+        #endif
     }
 
     private var dropHint: some View {

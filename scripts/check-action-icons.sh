@@ -67,6 +67,9 @@ ALLOWED = [
     ("Client/ClientLaunchTile.swift", "Button(action: action)"),
     ("Client/ClientLoginView.swift", "Button(title) {"),
     ("Client/ClientOnboarding.swift", 'Button("Skip")'),
+    # Billing interval is a two-option segmented pill. The text is the whole
+    # label, as with the shared segmented control allowlisted above.
+    ("Client/ClientPaywallView.swift", "bill = value"),
     # The rail's step button. The glyph is an ActionIcon like everywhere else,
     # it just arrives as the step's own field rather than spelled at the call
     # site, because one component draws every step.
@@ -135,6 +138,10 @@ ALLOWED = [
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),
+    # Composer plan / execute / ask / bypass pills. The whole surface is the
+    # word, like the segmented tabs in Theme.swift. A glyph on Plan would be
+    # a second mark next to a control that is already a pill.
+    ("Features/Workspaces/Chat/ChatSetupHeader.swift", "selection = option.value"),
     # Whole-row persona pick. The ActionSeat already carries the glyph.
     ("Features/Workspaces/Chat/PersonaEditor.swift", "draft = persona"),
 ]

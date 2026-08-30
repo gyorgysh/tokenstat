@@ -394,6 +394,9 @@ pub fn agent_command(
 pub struct ChatLaunch<'a> {
     pub resume: Option<&'a str>,
     pub bypass: bool,
+    /// `plan` or `execute`. Plan uses a native CLI flag where the backend has
+    /// one. Backends without a flag keep their existing prompt path.
+    pub mode: &'a str,
     /// Absolute path of this daemon for lifecycle hooks. Relative PATH lookup
     /// is wrong for launchd and for the private environment of an agent CLI.
     pub hook_command: Option<&'a str>,
@@ -404,6 +407,27 @@ pub struct ChatLaunch<'a> {
     /// fall through to `dontAsk`, which denies in a headless turn.
     pub grok_allow_rules: &'a [String],
     pub attachments: &'a [std::path::PathBuf],
+}
+
+/// Index at which extra flags can be spliced without splitting a
+/// `--flag value` pair. Headless CLIs put the prompt at `-p` / `--print` /
+/// `--single` or after `--`. Inserting at `len - 1` used to land between
+/// `--output-format` and `streaming-json`, which is the clap error a grok
+/// Standard turn printed as its whole reply.
+fn headless_flag_at(argv: &[String]) -> usize {
+    argv.iter()
+        .position(|arg| {
+            matches!(
+                arg.as_str(),
+                "-p" | "--print" | "--single" | "--prompt-interactive" | "--"
+            )
+        })
+        .unwrap_or_else(|| argv.len().max(1))
+}
+
+fn insert_flags(argv: &mut Vec<String>, flags: impl IntoIterator<Item = String>) {
+    let at = headless_flag_at(argv);
+    argv.splice(at..at, flags);
 }
 
 /// Headless argv for a chat turn. Unlike an automation, a chat retains the
@@ -418,27 +442,66 @@ pub fn chat_agent_command(
     budget_seconds: u64,
     launch: ChatLaunch<'_>,
 ) -> Result<Vec<String>, String> {
+    let plan = launch.mode == "plan";
+    // Codex and OpenCode do not expose the same first-class plan switch as the
+    // other backends. Give them an explicit turn instruction; Codex also gets
+    // a read-only sandbox below, while OpenCode loses its headless auto grant.
+    let plan_prompt = (plan && matches!(backend, "codex" | "opencode" | "opencode2")).then(|| {
+        format!(
+            "Plan mode: inspect and reason only. Do not modify files, run commands that change state, or perform external side effects. Return a proposed plan instead.\n\n{prompt}"
+        )
+    });
+    let prompt = plan_prompt.as_deref().unwrap_or(prompt);
+    // Cursor's Free plan refuses every named model. An empty pick used to
+    // omit `--model` and let the CLI choose, which on this machine was not
+    // Auto. Always name Auto unless the person picked something else.
+    let cursor_default = matches!(backend, "cursor")
+        && model
+            .map(|value| value.trim().is_empty() || value.trim() == "auto")
+            .unwrap_or(true);
+    let model = if cursor_default { Some("auto") } else { model };
     let mut argv = agent_command(backend, prompt, model, effort, budget_seconds)?;
     // Automations are an explicit background action and retain their existing
     // bypass contract. Chat is interactive: until a backend's hook-based
     // approval channel decides otherwise, it must not inherit those flags.
     // Removing them means a CLI that cannot prompt headlessly fails closed
     // instead of silently editing the workspace.
-    if !launch.bypass {
+    if !launch.bypass || plan {
         match backend {
             "claude" | "agy" => argv.retain(|arg| arg != "--dangerously-skip-permissions"),
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
-            "grok" => {
-                argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
-                let at = argv.len().saturating_sub(1);
-                let mut rules = vec!["--permission-mode".into(), "dontAsk".into()];
-                for rule in launch.grok_allow_rules {
-                    rules.extend(["--allow".into(), rule.clone()]);
-                }
-                argv.splice(at..at, rules);
-            }
             "cursor" => argv.retain(|arg| arg != "--trust"),
             "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
+            _ => {}
+        }
+    }
+    let mut extra = Vec::new();
+    if backend == "grok" {
+        // Rebuild the pair as a whole. Stripping `bypassPermissions` and then
+        // splicing at `len - 1` used to leave `--output-format` without a
+        // value, which is the error a Standard grok turn printed instead of
+        // answering.
+        argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
+        let permission = if plan {
+            "plan"
+        } else if launch.bypass {
+            "bypassPermissions"
+        } else {
+            "dontAsk"
+        };
+        extra.extend(["--permission-mode".into(), permission.into()]);
+        if permission == "dontAsk" {
+            for rule in launch.grok_allow_rules {
+                extra.extend(["--allow".into(), rule.clone()]);
+            }
+        }
+    }
+    if plan {
+        match backend {
+            "claude" => extra.extend(["--permission-mode".into(), "plan".into()]),
+            "codex" => extra.extend(["--sandbox".into(), "read-only".into()]),
+            "cursor" => extra.push("--plan".into()),
+            "agy" => extra.extend(["--mode".into(), "plan".into()]),
             _ => {}
         }
     }
@@ -460,11 +523,7 @@ pub fn chat_agent_command(
                 }
             })
             .to_string();
-            let at = argv
-                .iter()
-                .position(|arg| arg == "-p")
-                .unwrap_or(argv.len());
-            argv.splice(at..at, ["--settings".into(), settings]);
+            insert_flags(&mut argv, ["--settings".into(), settings]);
         }
     }
     if backend == "codex" && !launch.bypass && launch.hook_command.is_some() {
@@ -479,12 +538,8 @@ pub fn chat_agent_command(
     }
     if backend == "agy" && !launch.bypass {
         if let Some(directory) = launch.agy_customization_dir {
-            let at = argv
-                .iter()
-                .position(|arg| arg == "--prompt-interactive")
-                .unwrap_or(argv.len());
-            argv.splice(
-                at..at,
+            insert_flags(
+                &mut argv,
                 ["--add-dir".into(), directory.display().to_string()],
             );
         }
@@ -504,42 +559,29 @@ pub fn chat_agent_command(
             .flat_map(|path| [flag.to_string(), path.display().to_string()]);
         argv.splice(at..at, flags);
     }
-    let Some(token) = launch.resume.filter(|token| !token.trim().is_empty()) else {
-        return Ok(argv);
-    };
-    match backend {
-        "claude" => {
-            // `--resume` belongs with Claude's print flags, before the prompt.
-            let at = argv
-                .iter()
-                .position(|arg| arg == "-p")
-                .unwrap_or(argv.len());
-            argv.splice(at..at, ["--resume".into(), token.into()]);
-        }
-        "codex" => {
-            // `codex exec resume <thread>` is a different subcommand shape.
-            if let Some(at) = argv.iter().position(|arg| arg == "exec") {
-                argv.splice(at + 1..at + 1, ["resume".into(), token.into()]);
+    if let Some(token) = launch.resume.filter(|token| !token.trim().is_empty()) {
+        match backend {
+            "claude" | "grok" | "cursor" => {
+                extra.extend(["--resume".into(), token.into()]);
             }
-        }
-        "grok" | "cursor" => {
-            let at = argv.len().saturating_sub(1);
-            argv.splice(at..at, ["--resume".into(), token.into()]);
-        }
-        "agy" => {
-            let at = argv
-                .iter()
-                .position(|arg| arg == "--print")
-                .unwrap_or(argv.len());
-            argv.splice(at..at, ["--conversation".into(), token.into()]);
-        }
-        "opencode" | "opencode2" => {
-            if let Some(at) = argv.iter().position(|arg| arg == "run") {
-                argv.splice(at + 1..at + 1, ["-s".into(), token.into()]);
+            "codex" => {
+                // `codex exec resume <thread>` is a different subcommand shape.
+                if let Some(at) = argv.iter().position(|arg| arg == "exec") {
+                    argv.splice(at + 1..at + 1, ["resume".into(), token.into()]);
+                }
             }
+            "agy" => extra.extend(["--conversation".into(), token.into()]),
+            "opencode" | "opencode2" => {
+                if let Some(at) = argv.iter().position(|arg| arg == "run") {
+                    argv.splice(at + 1..at + 1, ["-s".into(), token.into()]);
+                }
+            }
+            "sh" => return Err("shell conversations cannot be resumed".into()),
+            _ => {}
         }
-        "sh" => return Err("shell conversations cannot be resumed".into()),
-        _ => {}
+    }
+    if !extra.is_empty() {
+        insert_flags(&mut argv, extra);
     }
     Ok(argv)
 }
@@ -2122,6 +2164,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2143,6 +2186,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: Some(
                     "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
                 ),
@@ -2170,6 +2214,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2191,6 +2236,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: Some("/tmp/tokenstat-hostd"),
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2212,6 +2258,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: true,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
@@ -2234,6 +2281,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: Some("/tmp/tokenstat-hostd"),
                 agy_customization_dir: Some(agy_home),
                 grok_allow_rules: &[],
@@ -2256,6 +2304,7 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &rules,
@@ -2271,6 +2320,161 @@ mod tests {
             grok.windows(2)
                 .any(|pair| pair == ["--allow", "Bash(git status*)"])
         );
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--output-format", "streaming-json"]),
+            "Standard grok must keep --output-format next to its value: {grok:?}"
+        );
+    }
+
+    #[test]
+    fn grok_resume_does_not_split_output_format() {
+        let grok = chat_agent_command(
+            "grok",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: Some("sess-1"),
+                bypass: false,
+                mode: "execute",
+                hook_command: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--output-format", "streaming-json"]),
+            "{grok:?}"
+        );
+        assert!(grok.windows(2).any(|pair| pair == ["--resume", "sess-1"]));
+    }
+
+    #[test]
+    fn cursor_without_a_model_passes_auto() {
+        let cursor = chat_agent_command(
+            "cursor",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: true,
+                mode: "execute",
+                hook_command: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &[],
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            cursor.windows(2).any(|pair| pair == ["--model", "auto"]),
+            "{cursor:?}"
+        );
+    }
+
+    #[test]
+    fn plan_mode_uses_native_flags() {
+        let launch = |backend: &str| {
+            chat_agent_command(
+                backend,
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass: false,
+                    mode: "plan",
+                    hook_command: None,
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+        let claude = launch("claude");
+        assert!(
+            claude
+                .windows(2)
+                .any(|pair| pair == ["--permission-mode", "plan"]),
+            "{claude:?}"
+        );
+        let grok = launch("grok");
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--permission-mode", "plan"]),
+            "{grok:?}"
+        );
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--output-format", "streaming-json"]),
+            "{grok:?}"
+        );
+        let cursor = launch("cursor");
+        assert!(cursor.iter().any(|arg| arg == "--plan"), "{cursor:?}");
+        let codex = launch("codex");
+        assert!(
+            codex
+                .windows(2)
+                .any(|pair| pair == ["--sandbox", "read-only"]),
+            "{codex:?}"
+        );
+        assert!(
+            codex.iter().any(|arg| arg.contains("Plan mode:")),
+            "{codex:?}"
+        );
+        let opencode = launch("opencode");
+        assert!(!opencode.iter().any(|arg| arg == "--auto"), "{opencode:?}");
+        assert!(
+            opencode.iter().any(|arg| arg.contains("Plan mode:")),
+            "{opencode:?}"
+        );
+        let agy = launch("agy");
+        assert!(
+            agy.windows(2).any(|pair| pair == ["--mode", "plan"]),
+            "{agy:?}"
+        );
+    }
+
+    #[test]
+    fn plan_mode_overrides_bypass_flags() {
+        for backend in ["claude", "codex", "cursor", "agy", "opencode", "opencode2"] {
+            let argv = chat_agent_command(
+                backend,
+                "inspect this",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass: true,
+                    mode: "plan",
+                    hook_command: None,
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap();
+            assert!(
+                !argv.iter().any(|arg| matches!(
+                    arg.as_str(),
+                    "--dangerously-skip-permissions"
+                        | "--dangerously-bypass-approvals-and-sandbox"
+                        | "--trust"
+                        | "--auto"
+                )),
+                "{backend}: {argv:?}"
+            );
+        }
     }
 
     #[test]
@@ -2285,10 +2489,11 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
-                attachments: &[attachment.clone()],
+                attachments: std::slice::from_ref(&attachment),
             },
         )
         .unwrap();
@@ -2306,10 +2511,11 @@ mod tests {
             ChatLaunch {
                 resume: None,
                 bypass: false,
+                mode: "execute",
                 hook_command: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
-                attachments: &[attachment],
+                attachments: std::slice::from_ref(&attachment),
             },
         )
         .unwrap();

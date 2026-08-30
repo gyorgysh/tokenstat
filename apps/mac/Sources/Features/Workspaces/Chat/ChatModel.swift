@@ -24,6 +24,10 @@ final class ChatModel {
     private(set) var workspaceID: String?
     /// Set when this model is talking to a peer over the tunnel.
     private(set) var peer: String?
+    /// Async bridge calls may finish after navigation. Only the generation
+    /// that started them may mutate the currently displayed workspace/chat.
+    private var loadGeneration: UInt64 = 0
+    private var selectionGeneration: UInt64 = 0
 
     func count(in workspaceID: String) -> Int {
         guard folderID == workspaceID || self.workspaceID == workspaceID else { return 0 }
@@ -31,19 +35,33 @@ final class ChatModel {
     }
 
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
-        isLoading = true
-        defer { isLoading = false }
-        folderID = workspaceID
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
+        isLoading = true
+        defer {
+            if generation == loadGeneration { isLoading = false }
+        }
+        if folderID != workspaceID || self.workspaceID != route.workspaceID || self.peer != route.peer {
+            chats = []
+            selected = nil
+            events = []
+            approvals = []
+            offset = 0
+            selectionGeneration &+= 1
+        }
+        folderID = workspaceID
         self.workspaceID = route.workspaceID
         self.peer = route.peer
         do {
-            async let loadedBackends = Bridge.chatBackends(peer: peer)
-            async let loadedPersonas = Bridge.chatPersonas(peer: peer)
-            async let loadedChats = Bridge.chats(workspaceID: workspaceID, peer: peer)
-            backends = try await loadedBackends
-            personas = try await loadedPersonas
-            chats = try await loadedChats
+            async let loadedBackends = Bridge.chatBackends(peer: route.peer)
+            async let loadedPersonas = Bridge.chatPersonas(peer: route.peer)
+            async let loadedChats = Bridge.chats(workspaceID: route.workspaceID, peer: route.peer)
+            let loaded = try await (loadedBackends, loadedPersonas, loadedChats)
+            guard generation == loadGeneration else { return }
+            backends = loaded.0
+            personas = loaded.1
+            chats = loaded.2
             if let selected, chats.contains(where: { $0.id == selected.id }) {
                 await select(chats.first(where: { $0.id == selected.id }) ?? selected)
             } else if selectFirst {
@@ -52,11 +70,15 @@ final class ChatModel {
                 await select(nil)
             }
         } catch {
-            self.error = error.localizedDescription
+            if generation == loadGeneration {
+                self.error = error.localizedDescription
+            }
         }
     }
 
     func select(_ chat: ChatConversation?) async {
+        selectionGeneration &+= 1
+        let generation = selectionGeneration
         selected = chat
         attachments = []
         attachmentPreviews = [:]
@@ -64,15 +86,19 @@ final class ChatModel {
         events = []
         offset = 0
         guard let chat else { return }
-        await loadEvents(id: chat.id, reset: true)
-        await loadApprovals(id: chat.id)
+        await loadEvents(id: chat.id, reset: true, generation: generation)
+        await loadApprovals(id: chat.id, generation: generation)
     }
 
     func create() async {
         guard let workspaceID else { return }
+        let context = loadGeneration
+        let targetPeer = peer
         do {
             if backends.isEmpty {
-                backends = try await Bridge.chatBackends(peer: peer)
+                let loaded = try await Bridge.chatBackends(peer: targetPeer)
+                guard context == loadGeneration else { return }
+                backends = loaded
             }
             let chosen = backends.first(where: { $0.id != "sh" }) ?? backends.first
             let chat = try await Bridge.createChat(
@@ -80,12 +106,13 @@ final class ChatModel {
                 backend: chosen?.id ?? "claude",
                 mode: "plan",
                 autonomy: chosen?.gateTier == "bypassOnly" ? "bypass" : "standard",
-                peer: peer
+                peer: targetPeer
             )
+            guard context == loadGeneration else { return }
             chats.insert(chat, at: 0)
             await select(chat)
         } catch {
-            self.error = error.localizedDescription
+            if context == loadGeneration { self.error = error.localizedDescription }
         }
     }
 
@@ -102,6 +129,7 @@ final class ChatModel {
         allowedShellPrefixes: [String]? = nil
     ) async {
         guard let selected else { return }
+        let generation = selectionGeneration
         do {
             let updated = try await Bridge.updateChat(
                 id: selected.id,
@@ -117,9 +145,12 @@ final class ChatModel {
                 allowedShellPrefixes: allowedShellPrefixes,
                 peer: peer
             )
+            guard selectionMatches(id: selected.id, generation: generation) else { return }
             replace(updated)
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: selected.id, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
@@ -140,32 +171,39 @@ final class ChatModel {
     }
 
     func remove(_ chat: ChatConversation) async {
+        let context = loadGeneration
         do {
             try await Bridge.removeChat(id: chat.id, peer: peer)
+            guard context == loadGeneration else { return }
             chats.removeAll { $0.id == chat.id }
             if selected?.id == chat.id {
                 await select(chats.first)
             }
         } catch {
-            self.error = error.localizedDescription
+            if context == loadGeneration { self.error = error.localizedDescription }
         }
     }
 
     func send(_ text: String) async {
         guard let selected else { return }
+        let generation = selectionGeneration
+        let attachmentIDs = attachments.map(\.id)
         do {
             let updated = try await Bridge.sendChat(
                 id: selected.id,
                 text: text,
-                attachmentIDs: attachments.map(\.id),
+                attachmentIDs: attachmentIDs,
                 peer: peer
             )
+            guard selectionMatches(id: updated.id, generation: generation) else { return }
             replace(updated)
             attachments = []
             attachmentPreviews = [:]
-            await loadEvents(id: updated.id, reset: false)
+            await loadEvents(id: updated.id, reset: false, generation: generation)
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: selected.id, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
@@ -179,6 +217,7 @@ final class ChatModel {
 
     func attach(_ item: ChatInboxItem) async {
         guard let selected else { return }
+        let generation = selectionGeneration
         if item.data.count > ChatInbox.maxBytes {
             error = "An attachment is limited to 12 MB."
             return
@@ -191,12 +230,15 @@ final class ChatModel {
                 mediaType: item.mediaType,
                 peer: peer
             )
+            guard selectionMatches(id: selected.id, generation: generation) else { return }
             attachments.append(attachment)
             if let preview = ChatThumbnail.make(from: item.data) {
                 attachmentPreviews[attachment.id] = preview
             }
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: selected.id, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
@@ -207,19 +249,39 @@ final class ChatModel {
 
     func stop() async {
         guard let selected else { return }
+        let generation = selectionGeneration
         do {
             try await Bridge.stopChat(id: selected.id, peer: peer)
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: selected.id, generation: generation) {
+                self.error = error.localizedDescription
+            }
+            return
         }
+        guard selectionMatches(id: selected.id, generation: generation) else { return }
+        await loadEvents(id: selected.id, reset: false, generation: generation)
+        await loadApprovals(id: selected.id, generation: generation)
+        guard selectionMatches(id: selected.id, generation: generation) else { return }
+        do {
+            let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            guard selectionMatches(id: selected.id, generation: generation) else { return }
+            chats = latest
+            if let current = latest.first(where: { $0.id == selected.id }) {
+                self.selected = current
+            }
+        } catch {}
     }
 
     func resolve(_ approval: ChatApproval, choice: String) async {
+        let generation = selectionGeneration
         do {
             _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
-            await loadApprovals(id: approval.conversationID)
+            guard selectionMatches(id: approval.conversationID, generation: generation) else { return }
+            await loadApprovals(id: approval.conversationID, generation: generation)
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: approval.conversationID, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
@@ -248,16 +310,31 @@ final class ChatModel {
     }
 
     func poll() async {
-        guard let selected, selected.running else { return }
-        await loadEvents(id: selected.id, reset: false)
-        await loadApprovals(id: selected.id)
+        guard let selected, selected.running || hasRunningTool else { return }
+        let generation = selectionGeneration
+        await loadEvents(id: selected.id, reset: false, generation: generation)
+        guard selectionMatches(id: selected.id, generation: generation) else { return }
+        await loadApprovals(id: selected.id, generation: generation)
+        guard selectionMatches(id: selected.id, generation: generation) else { return }
         do {
             let latest = try await Bridge.chats(workspaceID: selected.workspaceID, peer: peer)
+            guard selectionMatches(id: selected.id, generation: generation) else { return }
             chats = latest
             if let current = latest.first(where: { $0.id == selected.id }) {
                 self.selected = current
             }
         } catch {}
+    }
+
+    var busy: Bool {
+        selected?.running == true || hasRunningTool
+    }
+
+    var hasRunningTool: Bool {
+        displayItems.contains { item in
+            if case let .tool(state) = item.kind { return state.running }
+            return false
+        }
     }
 
     func backend(for id: String) -> ChatBackend? {
@@ -287,9 +364,12 @@ final class ChatModel {
         ChatDisplayItem.coalesce(events)
     }
 
-    private func loadEvents(id: String, reset: Bool) async {
+    private func loadEvents(id: String, reset: Bool, generation: UInt64) async {
+        let requestedOffset = reset ? 0 : offset
         do {
-            let chunk = try await Bridge.chatEvents(id: id, offset: reset ? 0 : offset, peer: peer)
+            let chunk = try await Bridge.chatEvents(id: id, offset: requestedOffset, peer: peer)
+            guard selectionMatches(id: id, generation: generation) else { return }
+            guard reset || requestedOffset == offset else { return }
             if reset {
                 events = chunk.events
             } else {
@@ -297,20 +377,32 @@ final class ChatModel {
             }
             offset = chunk.nextOffset
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: id, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
     }
 
-    private func loadApprovals(id: String) async {
+    private func loadApprovals(id: String, generation: UInt64) async {
         do {
-            approvals = try await Bridge.chatApprovals(id: id, peer: peer)
+            let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
+            guard selectionMatches(id: id, generation: generation) else { return }
+            approvals = loaded
         } catch {
-            self.error = error.localizedDescription
+            if selectionMatches(id: id, generation: generation) {
+                self.error = error.localizedDescription
+            }
         }
+    }
+
+    private func selectionMatches(id: String, generation: UInt64) -> Bool {
+        selectionGeneration == generation && selected?.id == id
     }
 
     private func replace(_ chat: ChatConversation) {
-        selected = chat
+        if selected?.id == chat.id {
+            selected = chat
+        }
         if let index = chats.firstIndex(where: { $0.id == chat.id }) {
             chats[index] = chat
         } else {
@@ -388,6 +480,17 @@ struct ChatDisplayItem: Identifiable {
             }
             thinking = ""
             thinkingID = ""
+        }
+
+        func closeRunningTools(failed: Bool, at: Int64?, detail: String?) {
+            for (_, index) in toolIndex {
+                guard case .tool(var state) = items[index].kind, state.running else { continue }
+                state.running = false
+                state.failed = failed
+                if state.detail == nil { state.detail = detail }
+                state.endedAtMs = at
+                items[index] = ChatDisplayItem(id: items[index].id, kind: .tool(state))
+            }
         }
 
         for event in events {
@@ -494,12 +597,19 @@ struct ChatDisplayItem: Identifiable {
             case "failed":
                 flushText()
                 flushThinking()
+                closeRunningTools(failed: true, at: event.atMs, detail: agent.text)
                 items.append(
                     ChatDisplayItem(
                         id: "failed-\(event.atMs ?? 0)-\(items.count)",
                         kind: .failed(agent.text ?? "The turn failed")
                     )
                 )
+            case "done":
+                flushText()
+                flushThinking()
+                let status = agent.status ?? ""
+                let failed = status == "cancelled" || status == "canceled" || status == "error"
+                closeRunningTools(failed: failed, at: event.atMs, detail: failed ? status : nil)
             default:
                 continue
             }

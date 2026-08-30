@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
 #if !os(macOS)
+import Observation
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -11,6 +12,8 @@ import UniformTypeIdentifiers
 /// screenshot on iOS lives in the pasteboard or the library, not on a Finder
 /// thumbnail.
 struct ClientChatComposer: View {
+    @Bindable var model: ChatModel
+    let chat: ChatConversation
     @Binding var draft: String
     var attachments: [ChatAttachment]
     var previews: [String: Data]
@@ -20,6 +23,7 @@ struct ClientChatComposer: View {
     var onStop: () -> Void
     var onAttach: (ChatInboxItem) async -> Void
     var onRemove: (ChatAttachment) -> Void
+    var onOpenSetup: () -> Void
 
     @State private var importing = false
     @State private var pickingPhotos = false
@@ -28,6 +32,12 @@ struct ClientChatComposer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
+            ChatComposerControls(
+                model: model,
+                chat: chat,
+                locked: running,
+                onOpenInspector: onOpenSetup
+            )
             if !attachments.isEmpty {
                 strip
             }
@@ -113,6 +123,8 @@ struct ClientChatComposer: View {
             .lineLimit(1...6)
             .focused($focused)
             .padding(.vertical, 8)
+            .submitLabel(.send)
+            .onSubmit { if !cannotSend { onSend() } }
     }
 
     private var cannotSend: Bool {

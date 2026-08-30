@@ -5,21 +5,25 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 using Microsoft.UI;
+using Microsoft.UI.Input;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Tokenstat.Design;
 using Windows.Storage.Pickers;
+using Windows.System;
+using Windows.UI.Core;
 using WinRT.Interop;
 
 namespace Tokenstat.Pages;
 
 /// <summary>
 /// Conversations in a folder, over the same host methods the Mac uses.
-/// The list comes first. Setup stays until the first message, then collapses
-/// to chips. Approvals sit in the transcript. Bypass is a checkbox in the
-/// product violet, never a system switch.
+/// The list comes first. One field picks agent, model and effort. Plan and
+/// bypass sit as pills beside it. Enter sends, Shift+Enter inserts a
+/// newline, Escape stops a running turn. Approvals sit in the transcript.
 /// </summary>
 internal sealed class ChatPage : Page
 {
@@ -38,7 +42,7 @@ internal sealed class ChatPage : Page
         AcceptsReturn = true,
         TextWrapping = TextWrapping.Wrap,
         PlaceholderText = "Ask about this folder",
-        MinHeight = 72,
+        MinHeight = 44,
     };
     private readonly StackPanel _composerActions = new()
     {
@@ -57,6 +61,7 @@ internal sealed class ChatPage : Page
     private ulong _offset;
     private bool _started;
     private bool _running;
+    private bool _setupExpanded;
     private bool _suppress;
     private JsonArray _chats = new();
     private JsonArray _backends = new();
@@ -70,6 +75,8 @@ internal sealed class ChatPage : Page
     {
         _workspaceId = workspaceId;
         _draft.PlaceholderText = "Ask about this folder";
+        _draft.PreviewKeyDown += DraftOnPreviewKeyDown;
+        PreviewKeyDown += PageOnPreviewKeyDown;
         _titleBox.LostFocus += async (_, _) =>
         {
             var next = _titleBox.Text.Trim();
@@ -308,42 +315,11 @@ internal sealed class ChatPage : Page
         }
         _root.Children.Add(_titleBox);
 
-        if (_started)
-        {
-            _root.Children.Add(Chips());
-        }
-        else
-        {
-            _root.Children.Add(SetupCard());
-        }
-
         RebuildTranscript();
         _root.Children.Add(_transcript);
         RefreshCost();
         _root.Children.Add(_costHost);
         _root.Children.Add(Composer());
-    }
-
-    private UIElement Chips()
-    {
-        var chat = _openChat ?? new JsonObject();
-        var backend = Backend(Format.Text(chat, "backend"));
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
-        row.Children.Add(Chip(Format.Text(backend, "label", Format.Text(chat, "backend"))));
-        row.Children.Add(Chip(Format.Text(chat, "mode") == "plan" ? "Plan" : "Execute"));
-        var model = Format.Text(chat, "model");
-        if (!string.IsNullOrEmpty(model)) row.Children.Add(Chip(model));
-        row.Children.Add(Chip(Format.Text(chat, "autonomy") == "bypass"
-            ? "Bypass"
-            : GateChip(Format.Text(backend, "gateTier"))));
-        var wrap = new StackPanel { Spacing = Theme.SpaceS };
-        wrap.Children.Add(row);
-        wrap.Children.Add(ActionIconGlyph.Button("Edit setup", ActionIcon.Settings, (_, _) =>
-        {
-            _started = false;
-            PaintConversation();
-        }));
-        return Card("This chat", wrap);
     }
 
     private UIElement SetupCard()
@@ -355,8 +331,13 @@ internal sealed class ChatPage : Page
         var bypassOnly = gate == "bypassOnly";
         var running = Format.Flag(chat, "running");
         var body = new StackPanel { Spacing = Theme.SpaceM };
+        body.Children.Add(ActionIconGlyph.Button("Done", ActionIcon.Done, (_, _) =>)
+        {
+            _setupExpanded = false;
+            PaintConversation();
+        }));
         body.Children.Add(Caption("How this chat should work"));
-        body.Children.Add(Muted("These stay here until the first message. After that they collapse, and Edit setup still has them."));
+        body.Children.Add(Muted("Agent, model and mode also live on the composer. Personas stay here."));
 
         body.Children.Add(Labeled("Agent", AgentPicker(backendId, running)));
         if (_personas.Count > 0)
@@ -547,7 +528,7 @@ internal sealed class ChatPage : Page
         {
             _transcript.Children.Add(Render(item));
         }
-        if (_running)
+        if (Busy())
         {
             _transcript.Children.Add(new TextBlock
             {
@@ -872,11 +853,23 @@ internal sealed class ChatPage : Page
     private UIElement Composer()
     {
         var well = new StackPanel { Spacing = Theme.SpaceS };
+        well.Children.Add(_setupExpanded ? SetupCard() : CompactSetup());
         RebuildAttachStrip();
         well.Children.Add(_attachStrip);
-        well.Children.Add(_draft);
+        var row = new Grid();
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var attach = ActionIconGlyph.Button("Attach", ActionIcon.Attach, async (_, _) => await AttachAsync());
+        attach.IsEnabled = !Busy();
+        Grid.SetColumn(attach, 0);
+        Grid.SetColumn(_draft, 1);
         RebuildComposerActions();
-        well.Children.Add(_composerActions);
+        Grid.SetColumn(_composerActions, 2);
+        row.Children.Add(attach);
+        row.Children.Add(_draft);
+        row.Children.Add(_composerActions);
+        well.Children.Add(row);
         return new Border
         {
             Background = Theme.PanelBrush,
@@ -886,6 +879,189 @@ internal sealed class ChatPage : Page
             Padding = new Thickness(10),
             Child = well,
         };
+    }
+
+    private void DraftOnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape)
+        {
+            if (!Busy()) return;
+            e.Handled = true;
+            _ = StopAsync();
+            return;
+        }
+        if (e.Key != VirtualKey.Enter) return;
+        var shift = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift);
+        if (shift.HasFlag(CoreVirtualKeyStates.Down)) return;
+        e.Handled = true;
+        _ = SendAsync();
+    }
+
+    private void PageOnPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Escape || !Busy()) return;
+        e.Handled = true;
+        _ = StopAsync();
+    }
+
+    private UIElement CompactSetup()
+    {
+        var chat = _openChat ?? new JsonObject();
+        var locked = Busy();
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        row.Children.Add(CompactAgentMenu(locked));
+        row.Children.Add(ModePills(Format.Text(chat, "mode", "plan"), !locked));
+        var gate = Format.Text(Backend(Format.Text(chat, "backend")), "gateTier", "full");
+        var bypassOnly = gate == "bypassOnly";
+        if (bypassOnly)
+        {
+            row.Children.Add(Chip("Bypass"));
+        }
+        else
+        {
+            row.Children.Add(AutonomyPills(Format.Text(chat, "autonomy", "standard"), !locked));
+        }
+        row.Children.Add(ActionIconGlyph.Button("Setup", ActionIcon.Settings, (_, _) =>
+        {
+            _setupExpanded = true;
+            PaintConversation();
+        }));
+        return row;
+    }
+
+    private UIElement CompactAgentMenu(bool locked)
+    {
+        var chat = _openChat ?? new JsonObject();
+        var backendId = Format.Text(chat, "backend");
+        var backend = Backend(backendId);
+        var model = Format.Text(chat, "model");
+        var effort = Format.Text(chat, "effort");
+        var label = Format.Text(backend, "label", backendId);
+        label += string.IsNullOrEmpty(model) ? " · Default" : " · " + model;
+        if (!string.IsNullOrEmpty(effort)) label += " · " + effort;
+
+        var flyout = new MenuFlyout();
+        var agentMenu = new MenuFlyoutSubItem { Text = "Agent" };
+        foreach (var item in _backends)
+        {
+            if (item is null) continue;
+            var id = Format.Text(item, "id");
+            if (id == "sh" && id != backendId) continue;
+            var pick = new MenuFlyoutItem
+            {
+                Text = Format.Text(item, "label", id),
+                Tag = id,
+            };
+            pick.Click += async (_, _) =>
+            {
+                if (_suppress) return;
+                var next = pick.Tag as string ?? "";
+                var patch = new JsonObject { ["backend"] = next };
+                if (Format.Text(Backend(next), "gateTier") == "bypassOnly")
+                {
+                    patch["autonomy"] = "bypass";
+                }
+                await UpdateAsync(patch);
+                PaintConversation();
+            };
+            agentMenu.Items.Add(pick);
+        }
+        flyout.Items.Add(agentMenu);
+
+        var models = backend?["models"] as JsonArray;
+        if (models is { Count: > 0 })
+        {
+            var modelMenu = new MenuFlyoutSubItem { Text = "Model" };
+            var def = new MenuFlyoutItem { Text = "Default", Tag = "" };
+            def.Click += async (_, _) =>
+            {
+                await UpdateAsync(new JsonObject { ["model"] = "" });
+                PaintConversation();
+            };
+            modelMenu.Items.Add(def);
+            foreach (var option in models)
+            {
+                var value = option is JsonValue v && v.TryGetValue<string>(out var text) ? text : option?.ToString() ?? "";
+                if (string.IsNullOrEmpty(value)) continue;
+                var pick = new MenuFlyoutItem { Text = value, Tag = value };
+                pick.Click += async (_, _) =>
+                {
+                    await UpdateAsync(new JsonObject { ["model"] = value });
+                    PaintConversation();
+                };
+                modelMenu.Items.Add(pick);
+            }
+            flyout.Items.Add(modelMenu);
+        }
+
+        var efforts = backend?["efforts"] as JsonArray;
+        if (efforts is { Count: > 0 })
+        {
+            var effortMenu = new MenuFlyoutSubItem { Text = "Effort" };
+            var def = new MenuFlyoutItem { Text = "Default", Tag = "" };
+            def.Click += async (_, _) =>
+            {
+                await UpdateAsync(new JsonObject { ["effort"] = "" });
+                PaintConversation();
+            };
+            effortMenu.Items.Add(def);
+            foreach (var option in efforts)
+            {
+                var value = option is JsonValue v && v.TryGetValue<string>(out var text) ? text : option?.ToString() ?? "";
+                if (string.IsNullOrEmpty(value)) continue;
+                var pick = new MenuFlyoutItem { Text = value, Tag = value };
+                pick.Click += async (_, _) =>
+                {
+                    await UpdateAsync(new JsonObject { ["effort"] = value });
+                    PaintConversation();
+                };
+                effortMenu.Items.Add(pick);
+            }
+            flyout.Items.Add(effortMenu);
+        }
+
+        return new Button
+        {
+            Content = label,
+            Flyout = flyout,
+            IsEnabled = !locked,
+            Background = Theme.PanelBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 6, 10, 6),
+        };
+    }
+
+    private UIElement AutonomyPills(string current, bool enabled)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = Theme.SpaceS };
+        row.Children.Add(AutonomyPill("Ask", "standard", current, enabled));
+        row.Children.Add(AutonomyPill("Bypass", "bypass", current, enabled));
+        return row;
+    }
+
+    private UIElement AutonomyPill(string label, string value, string current, bool enabled)
+    {
+        var selected = value == current;
+        var button = new Button
+        {
+            Content = label,
+            IsEnabled = enabled,
+            Background = selected ? Theme.AccentSoftBrush : Theme.PanelBrush,
+            Foreground = selected ? Theme.AccentBrush : Theme.Brush(Theme.Secondary),
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(10, 6, 10, 6),
+        };
+        button.Click += async (_, _) =>
+        {
+            if (value == current) return;
+            await UpdateAsync(new JsonObject { ["autonomy"] = value });
+            PaintConversation();
+        };
+        return button;
     }
 
     private void RebuildAttachStrip()
@@ -918,8 +1094,7 @@ internal sealed class ChatPage : Page
     private void RebuildComposerActions()
     {
         _composerActions.Children.Clear();
-        _composerActions.Children.Add(ActionIconGlyph.Button("Attach", ActionIcon.Attach, async (_, _) => await AttachAsync()));
-        if (_running)
+        if (Busy())
         {
             _composerActions.Children.Add(ActionIconGlyph.Button("Stop", ActionIcon.Stop, async (_, _) => await StopAsync()));
         }
@@ -970,7 +1145,7 @@ internal sealed class ChatPage : Page
 
     private async Task SendAsync()
     {
-        if (_openId is null || _running) return;
+        if (_openId is null || Busy()) return;
         var text = _draft.Text.Trim();
         if (text.Length == 0) return;
         var ids = new JsonArray();
@@ -1003,8 +1178,7 @@ internal sealed class ChatPage : Page
         try
         {
             await AppServices.Host.CallAsync("chat.stop", new JsonObject { ["id"] = _openId });
-            _running = false;
-            RebuildComposerActions();
+            StartPoll();
         }
         catch (Exception ex)
         {
@@ -1083,38 +1257,49 @@ internal sealed class ChatPage : Page
 
     private async Task PollLoop(CancellationToken token)
     {
-        while (!token.IsCancellationRequested && _openId is not null)
+        var chatId = _openId;
+        if (chatId is null) return;
+        while (!token.IsCancellationRequested && _openId == chatId)
         {
             try
             {
                 await Task.Delay(400, token);
+                var wasBusy = Busy();
                 var chunk = await AppServices.Host.CallAsync("chat.events", new JsonObject
                 {
-                    ["id"] = _openId,
+                    ["id"] = chatId,
                     ["offset"] = _offset,
                 });
+                if (token.IsCancellationRequested || _openId != chatId) return;
                 var next = AsArray(chunk, "events");
                 foreach (var row in next) _events.Add(row?.DeepClone());
                 _offset = (ulong)Format.Long(chunk, "nextOffset");
                 _approvals = AsArray(await AppServices.Host.CallAsync(
-                    "chat.approvals", new JsonObject { ["id"] = _openId }));
+                    "chat.approvals", new JsonObject { ["id"] = chatId }));
+                if (token.IsCancellationRequested || _openId != chatId) return;
                 await RefreshCatalogAsync();
-                _openChat = FindChat(_openId);
+                if (token.IsCancellationRequested || _openId != chatId) return;
+                _openChat = FindChat(chatId);
                 var running = Format.Flag(_openChat, "running");
                 var started = _events.Count > 0 || !string.IsNullOrEmpty(Format.Text(_openChat, "resumeToken"));
-                var composerChanged = running != _running;
                 _running = running;
                 _started = started;
                 if (_titleBox.FocusState == FocusState.Unfocused)
                 {
                     _titleBox.Text = Format.Text(_openChat, "title", "New chat");
                 }
-                RebuildTranscript();
-                RefreshCost();
-                if (composerChanged) RebuildComposerActions();
-                if (!_running) return;
+                if (wasBusy != Busy())
+                {
+                    PaintConversation();
+                }
+                else
+                {
+                    RebuildTranscript();
+                    RefreshCost();
+                }
+                if (!Busy()) return;
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException)
             {
                 return;
             }
@@ -1319,6 +1504,7 @@ internal sealed class ChatPage : Page
                 case "failed":
                     FlushText();
                     FlushThinking();
+                    CloseRunningTools(items, tools, true, Format.Text(ev, "text"));
                     items.Add(new DisplayItem
                     {
                         Id = "failed-" + items.Count,
@@ -1326,11 +1512,47 @@ internal sealed class ChatPage : Page
                         Text = Format.Text(ev, "text", "The turn failed"),
                     });
                     break;
+                case "done":
+                {
+                    FlushText();
+                    FlushThinking();
+                    var status = Format.Text(ev, "status");
+                    var failed = status is "cancelled" or "canceled" or "error";
+                    CloseRunningTools(items, tools, failed, failed ? status : "");
+                    break;
+                }
             }
         }
         FlushText();
         FlushThinking();
         return items;
+    }
+
+    private static void CloseRunningTools(List<DisplayItem> items, Dictionary<string, int> tools, bool failed, string detail)
+    {
+        foreach (var index in tools.Values)
+        {
+            if (index < 0 || index >= items.Count) continue;
+            var tool = items[index];
+            if (tool.Kind != ItemKind.Tool || !tool.Running) continue;
+            tool.Running = false;
+            tool.Failed = failed;
+            if (string.IsNullOrEmpty(tool.Detail) && !string.IsNullOrEmpty(detail))
+            {
+                tool.Detail = detail;
+            }
+            items[index] = tool;
+        }
+    }
+
+    private bool Busy()
+    {
+        if (_running) return true;
+        foreach (var item in Coalesce(_events))
+        {
+            if (item.Kind == ItemKind.Tool && item.Running) return true;
+        }
+        return false;
     }
 
     private static string Duration(long start, long end)

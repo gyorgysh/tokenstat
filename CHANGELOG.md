@@ -36,11 +36,17 @@ desktop and Android builds remain previews. Newest first.
 - A workspace Chat section talks to the agents already installed for that
   folder. Conversations persist and resume. Default mode asks before a tool
   runs, on the backends that can ask, and says so when a backend cannot.
-  Setup stays until the first message, then collapses. The phone is a list
-  first, then a transcript with a glass composer. Windows has the same list,
-  setup, transcript, approvals and cost meter. Sidebar badges show how many
-  chats a folder holds. Token cost is a quiet in/out bar, and a plan-covered
-  turn is not drawn as money charged.
+  The composer sits at the bottom of the conversation: Return sends,
+  Shift+Return inserts a newline, Escape stops a running turn, and one
+  field picks agent, model and effort. Plan, execute and bypass sit as
+  pills beside it. Full setup stays in the inspector (Setup on the phone).
+  A grok Standard turn keeps its output format, Cursor without a named
+  model uses Auto, and a tool call no longer blanks the transcript or
+  stays Running after the turn ends. The phone is a list first, then a
+  transcript with a glass composer. Windows has the same list, composer,
+  transcript, approvals and cost meter. Sidebar badges show how many
+  chats a folder holds. Token cost is a quiet in/out bar, and a
+  plan-covered turn is not drawn as money charged.
 
 ### Changed
 

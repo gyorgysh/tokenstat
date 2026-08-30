@@ -16,11 +16,11 @@
 //! the Windows scheduled task, not to this binary: a daemon that forks itself
 //! is one the supervisor cannot see, restart, or stop.
 
-use std::{io::Read, process::ExitCode};
 #[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::{
-    io::{BufRead, BufReader, Write},
-    os::unix::net::UnixStream,
+    io::{BufRead, BufReader, Read, Write},
+    process::ExitCode,
 };
 
 use serde_json::{Value, json};
@@ -256,14 +256,24 @@ fn hook_tool(flavor: &str, input: &Value) -> (String, String, Option<String>) {
         .or_else(|| detail.get("command_line"))
         .or_else(|| detail.get("commandLine"))
         .and_then(Value::as_str)
-        .map(|command| {
-            command
-                .split_whitespace()
-                .take(2)
-                .collect::<Vec<_>>()
-                .join(" ")
-        });
+        .and_then(safe_shell_prefix);
     (verb, preview, shell_prefix)
+}
+
+/// Remember only simple argv-shaped commands. Shell operators, substitutions
+/// and redirections can hide another action after an innocuous prefix, so such
+/// requests must always come back through the approval queue.
+fn safe_shell_prefix(command: &str) -> Option<String> {
+    const SHELL_SYNTAX: &[char] = &[';', '&', '|', '\n', '\r', '`', '>', '<'];
+    if command.contains(SHELL_SYNTAX) || command.contains("$(") {
+        return None;
+    }
+    let prefix = command
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!prefix.is_empty()).then_some(prefix)
 }
 
 #[cfg(unix)]
@@ -286,8 +296,20 @@ fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
 }
 
 #[cfg(windows)]
-fn hook_call(_: &str, _: &Value) -> Result<Value, String> {
-    Err("chat approval is unavailable on this host".into())
+fn hook_call(socket: &str, request: &Value) -> Result<Value, String> {
+    let mut stream = tokenstat_host::server::connect(std::path::Path::new(socket), 3_000)
+        .map_err(|_| "chat approval is unavailable: host is not reachable")?;
+    stream
+        .write_all(request.to_string().as_bytes())
+        .and_then(|_| stream.write_all(b"\n"))
+        .and_then(|_| stream.flush())
+        .map_err(|_| "chat approval is unavailable: cannot reach host")?;
+    let mut line = String::new();
+    BufReader::new(&mut stream)
+        .read_line(&mut line)
+        .map_err(|_| "chat approval is unavailable: host did not reply")?;
+    serde_json::from_str(&line)
+        .map_err(|_| "chat approval is unavailable: invalid host reply".into())
 }
 
 /// A second daemon that started while nothing else was running still has to
@@ -367,6 +389,23 @@ mod tests {
         assert_eq!(verb, "Bash");
         assert!(preview.starts_with("Bash"));
         assert_eq!(prefix.as_deref(), Some("git status"));
+    }
+
+    #[test]
+    fn compound_shell_commands_are_never_remembered() {
+        for command in [
+            "git status && rm -rf build",
+            "git status; curl example.invalid",
+            "git status | tee leaked.txt",
+            "git status $(touch leaked)",
+            "git status > report.txt",
+        ] {
+            let (_, _, prefix) = hook_tool(
+                "claude",
+                &json!({"tool_name":"Bash", "tool_input":{"command":command}}),
+            );
+            assert_eq!(prefix, None, "{command}");
+        }
     }
 
     #[test]
