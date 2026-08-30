@@ -17,20 +17,26 @@ final class ChatModel {
     var personas: [ChatPersona] = []
     var isLoading = false
     var error: String?
+    /// The folder id RootView knows, which is `remote:<peer>:<id>` for a
+    /// workspace on another machine. Host methods use `workspaceID` instead.
+    private(set) var folderID: String?
+    /// The workspace id the owning host stores. Local, even for a remote folder.
     private(set) var workspaceID: String?
-    /// Set when this model is talking to a peer over the tunnel, nil on the Mac.
+    /// Set when this model is talking to a peer over the tunnel.
     private(set) var peer: String?
 
     func count(in workspaceID: String) -> Int {
-        guard self.workspaceID == workspaceID else { return 0 }
+        guard folderID == workspaceID || self.workspaceID == workspaceID else { return 0 }
         return chats.count
     }
 
     func load(workspaceID: String, peer: String? = nil, selectFirst: Bool = true) async {
         isLoading = true
         defer { isLoading = false }
-        self.workspaceID = workspaceID
-        self.peer = peer
+        folderID = workspaceID
+        let route = Bridge.chatRoute(workspaceID: workspaceID, peer: peer)
+        self.workspaceID = route.workspaceID
+        self.peer = route.peer
         do {
             async let loadedBackends = Bridge.chatBackends(peer: peer)
             async let loadedPersonas = Bridge.chatPersonas(peer: peer)

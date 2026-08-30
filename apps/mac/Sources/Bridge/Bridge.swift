@@ -881,15 +881,32 @@ extension Bridge {
         return try await background(method, params, as: type)
     }
 
+    /// A Mac remote folder is stored as `remote:<peer>:<id>`. The phone already
+    /// passes the peer separately. Either way the host on the owning machine
+    /// only ever sees its own workspace id.
+    static func chatRoute(workspaceID: String, peer: String? = nil) -> (workspaceID: String, peer: String?) {
+        if let peer, !peer.isEmpty {
+            if let target = remoteWorkspace(workspaceID) {
+                return (target.workspace, peer)
+            }
+            return (workspaceID, peer)
+        }
+        if let target = remoteWorkspace(workspaceID) {
+            return (target.workspace, target.peer)
+        }
+        return (workspaceID, nil)
+    }
+
     static func chatBackends(peer: String? = nil) async throws -> [ChatBackend] {
         try await chatInvoke(peer: peer, "chat.backends", as: [ChatBackend].self)
     }
 
     static func chats(workspaceID: String, peer: String? = nil) async throws -> [ChatConversation] {
-        try await chatInvoke(
-            peer: peer,
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
+        return try await chatInvoke(
+            peer: route.peer,
             "chat.list",
-            ["workspaceId": workspaceID],
+            ["workspaceId": route.workspaceID],
             as: [ChatConversation].self
         )
     }
@@ -905,8 +922,9 @@ extension Bridge {
         personaID: String? = nil,
         peer: String? = nil
     ) async throws -> ChatConversation {
+        let route = chatRoute(workspaceID: workspaceID, peer: peer)
         var params: [String: Any] = [
-            "workspaceId": workspaceID,
+            "workspaceId": route.workspaceID,
             "backend": backend,
             "title": title,
             "mode": mode,
@@ -915,7 +933,7 @@ extension Bridge {
         if let model, !model.isEmpty { params["model"] = model }
         if let effort, !effort.isEmpty { params["effort"] = effort }
         if let personaID, !personaID.isEmpty { params["personaId"] = personaID }
-        return try await chatInvoke(peer: peer, "chat.create", params, as: ChatConversation.self)
+        return try await chatInvoke(peer: route.peer, "chat.create", params, as: ChatConversation.self)
     }
 
     static func updateChat(

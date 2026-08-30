@@ -2452,7 +2452,7 @@ struct RootView: View {
         switch section {
         case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
         case .chat:
-            if chat.workspaceID == folder.id {
+            if chat.folderID == folder.id || chat.workspaceID == folder.id {
                 value = chat.chats.count
             } else {
                 value = workspaces.summary(for: folder.id)?.chats ?? 0
