@@ -587,6 +587,16 @@ fn billing_from_raw(raw: &Value) -> Option<AccountBillingDto> {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_string),
+        scheduled_interval: b
+            .get("scheduled_interval")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        interval: b
+            .get("interval")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         trial_used: b
             .get("trial_used")
             .and_then(|v| v.as_bool())

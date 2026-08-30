@@ -10,36 +10,50 @@ import StoreKit
 
 #if !os(macOS)
 
-/// App Store yearly plans. Same rungs and prices as the website, billed by
+enum ClientStoreInterval: String {
+    case year
+    case month
+}
+
+/// App Store plans. Same rungs and prices as the website, billed by
 /// Apple. The Mac target must not compile this file into a purchase path.
 enum ClientStoreProduct: String, CaseIterable, Identifiable {
     case supporter = "ai.tokenstat.supporter.yearly"
     case patron = "ai.tokenstat.patron.yearly"
     case legend = "ai.tokenstat.legend.yearly"
+    case patronMonthly = "ai.tokenstat.patron.monthly"
+    case legendMonthly = "ai.tokenstat.legend.monthly"
 
     var id: String { rawValue }
+
+    var interval: ClientStoreInterval {
+        switch self {
+        case .supporter, .patron, .legend: return .year
+        case .patronMonthly, .legendMonthly: return .month
+        }
+    }
 
     var tier: String {
         switch self {
         case .supporter: return "supporter"
-        case .patron: return "patron"
-        case .legend: return "legend"
+        case .patron, .patronMonthly: return "patron"
+        case .legend, .legendMonthly: return "legend"
         }
     }
 
     var title: String {
         switch self {
         case .supporter: return "Supporter"
-        case .patron: return "Patron"
-        case .legend: return "Legend"
+        case .patron, .patronMonthly: return "Patron"
+        case .legend, .legendMonthly: return "Legend"
         }
     }
 
     var summary: String {
         switch self {
         case .supporter: return "A year of heatmap across your devices, encrypted vault sync, and a public profile worth sharing."
-        case .patron: return "For people running agents on everything they own, and reaching those machines from anywhere."
-        case .legend: return "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API."
+        case .patron, .patronMonthly: return "For people running agents on everything they own, and reaching those machines from anywhere."
+        case .legend, .legendMonthly: return "The top plan. View and control your own screen remotely, plus more devices, faster sync, and the read API."
         }
     }
 
@@ -47,8 +61,8 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
     var rank: Int {
         switch self {
         case .supporter: return 1
-        case .patron: return 2
-        case .legend: return 3
+        case .patron, .patronMonthly: return 2
+        case .legend, .legendMonthly: return 3
         }
     }
 
@@ -63,7 +77,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
                 "End-to-end encrypted SSH vault sync across your devices",
                 "The supporter star next to your name",
             ]
-        case .patron:
+        case .patron, .patronMonthly:
             return [
                 "Everything in Supporter",
                 "Remote management: your other devices, from the app",
@@ -72,7 +86,7 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
                 "Profile updates every 10 minutes",
                 "The patron badge next to your name",
             ]
-        case .legend:
+        case .legend, .legendMonthly:
             return [
                 "Everything in Patron",
                 "Remote screen viewing and control",
@@ -86,13 +100,23 @@ enum ClientStoreProduct: String, CaseIterable, Identifiable {
         }
     }
 
-    static func from(tier: String?) -> ClientStoreProduct? {
-        switch tier?.lowercased() {
-        case "supporter": return .supporter
-        case "patron": return .patron
-        case "legend": return .legend
+    static func from(tier: String?, interval: ClientStoreInterval = .year) -> ClientStoreProduct? {
+        switch (tier?.lowercased(), interval) {
+        case ("supporter", _): return .supporter
+        case ("patron", .month): return .patronMonthly
+        case ("patron", _): return .patron
+        case ("legend", .month): return .legendMonthly
+        case ("legend", _): return .legend
         default: return nil
         }
+    }
+
+    static func interval(from raw: String?) -> ClientStoreInterval {
+        raw == "month" ? .month : .year
+    }
+
+    static func catalog(interval: ClientStoreInterval) -> [ClientStoreProduct] {
+        allCases.filter { $0.interval == interval }
     }
 }
 
@@ -351,7 +375,10 @@ final class ClientStore {
         if let id = currentProductID {
             return ClientStoreProduct(rawValue: id)
         }
-        return ClientStoreProduct.from(tier: account.tier)
+        return ClientStoreProduct.from(
+            tier: account.tier,
+            interval: ClientStoreProduct.interval(from: account.billing?.interval)
+        )
     }
 
     func queuedProduct() -> ClientStoreProduct? {

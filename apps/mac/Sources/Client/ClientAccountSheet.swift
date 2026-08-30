@@ -196,7 +196,9 @@ private struct ClientAccountContent: View {
                     .font(ClientType.sectionTitle)
             }
             if let tier = account.tier, !tier.isEmpty {
-                Text(tier.capitalized
+                let period = account.billing?.interval == "month" ? " monthly"
+                    : account.isPaidTier ? " yearly" : ""
+                Text(tier.capitalized + period
                     + (account.billing?.periodEnd.map { " · until \(Self.shortDay($0))" } ?? ""))
                     .font(ClientType.body)
                     .foregroundStyle(.secondary)
@@ -207,7 +209,9 @@ private struct ClientAccountContent: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if let next = account.billing?.scheduledTier, !next.isEmpty {
-                    Text("Switches to \(next.capitalized) at the next renewal.")
+                    let nextPeriod = account.billing?.scheduledInterval == "month" ? " monthly"
+                        : " yearly"
+                    Text("Switches to \(next.capitalized)\(nextPeriod) at the next renewal.")
                         .font(ClientType.caption)
                         .foregroundStyle(Theme.accent)
                 }

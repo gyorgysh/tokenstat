@@ -10,7 +10,7 @@ import SwiftUI
 
 #if !os(macOS)
 
-/// In-app yearly plans. Required chrome: Restore, Privacy, Terms.
+/// In-app plans, yearly by default. Required chrome: Restore, Privacy, Terms.
 ///
 /// Always shows every rung. A live Apple plan still lists the others so
 /// upgrade, switch-at-renewal, and cancel are on this page, not only in
@@ -22,6 +22,7 @@ struct ClientPaywallView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var webURL: URL?
+    @State private var bill: ClientStoreInterval = .year
 
     /// What a failed purchase says.
     ///
@@ -131,15 +132,28 @@ struct ClientPaywallView: View {
             current = nil
         }
         let queued = store.queuedProduct()
-            ?? ClientStoreProduct.from(tier: signed?.billing?.scheduledTier)
+            ?? ClientStoreProduct.from(
+                tier: signed?.billing?.scheduledTier,
+                interval: ClientStoreProduct.interval(from: signed?.billing?.scheduledInterval)
+            )
         return VStack(alignment: .leading, spacing: Theme.Space.m) {
-            ClientSectionTitle(title: "Yearly plans", mark: "mark_plan")
+            ClientSectionTitle(title: bill == .year ? "Yearly plans" : "Monthly plans", mark: "mark_plan")
             Text("The app stays free. A plan unlocks more devices, longer history, and remote management.")
                 .font(ClientType.body)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            intervalSwitch
+            if bill == .year {
+                Text("Two months free versus monthly.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Supporter is yearly only.")
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+            }
 
-            ForEach(ClientStoreProduct.allCases) { item in
+            ForEach(ClientStoreProduct.catalog(interval: bill)) { item in
                 planCard(item, account: signed, current: current, queued: queued)
             }
 
@@ -157,7 +171,7 @@ struct ClientPaywallView: View {
         let product = store.product(for: item)
         let trialUsed = account?.billing?.trialUsed == true
         let intro = product?.subscription?.introductoryOffer
-        let showTrial = item == .patron && current == nil && !trialUsed && intro != nil
+        let showTrial = item == .patron && item.interval == .year && current == nil && !trialUsed && intro != nil
         let busy = store.purchasingProductID == item.rawValue
         let isCurrent = current == item
         let isQueued = queued == item && current != item
@@ -180,7 +194,7 @@ struct ClientPaywallView: View {
                 }
                 Spacer(minLength: 0)
                 if let product {
-                    Text(product.displayPrice + " / year")
+                    Text(product.displayPrice + (item.interval == .month ? " / month" : " / year"))
                         .font(ClientType.label.weight(.semibold))
                         .foregroundStyle(.secondary)
                 } else {
@@ -207,7 +221,7 @@ struct ClientPaywallView: View {
                 }
             }
             .padding(.top, 4)
-            if item == .legend {
+            if item.tier == "legend" {
                 Text("Screen connections try a direct path first. If a relay is needed, it remains end-to-end encrypted. The current generous relay allowance is 20 GiB per rolling 30 days, one relayed screen at a time, with up to 10 minutes per relayed session before reconnecting.")
                     .font(ClientType.caption)
                     .foregroundStyle(.secondary)
@@ -275,7 +289,10 @@ struct ClientPaywallView: View {
                 guard let product, let account else { return }
                 Task { await store.purchase(product, account: account) }
             }
-        } else if let current, item.rank > current.rank {
+        } else if let current, item.rank > current.rank,
+                  !(current.interval == .year && item.interval == .month) {
+            // Same duration, or monthly to yearly. Yearly to monthly of a
+            // higher plan is an Apple duration change, not a mid-period climb.
             actionButton(
                 "Upgrade to \(item.title)",
                 .plans,
@@ -486,6 +503,36 @@ struct ClientPaywallView: View {
         return "Renewal is off. You keep \(item.title) until the period ends."
     }
 
+    private var intervalSwitch: some View {
+        HStack(spacing: 0) {
+            intervalOption("Yearly", .year)
+            intervalOption("Monthly", .month)
+        }
+        .padding(4)
+        .background(Theme.accentSoft, in: Capsule())
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Billing period")
+    }
+
+    private func intervalOption(_ title: String, _ value: ClientStoreInterval) -> some View {
+        Button {
+            bill = value
+        } label: {
+            Text(title)
+                .font(ClientType.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(bill == value ? Color.white : Theme.accent)
+                .background(
+                    bill == value ? Theme.accent : Color.clear,
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(bill == value ? .isSelected : [])
+    }
+
     private var restoreRow: some View {
         Button {
             guard account.account != nil else { return }
@@ -519,7 +566,7 @@ struct ClientPaywallView: View {
     }
 
     private var renewNote: some View {
-        Text("Yearly plans renew automatically unless you turn auto-renew off at least 24 hours before the period ends. Payment is charged to your Apple ID. Manage or cancel in Apple ID subscriptions.")
+        Text("Plans renew automatically unless you turn auto-renew off at least 24 hours before the period ends. Payment is charged to your Apple ID. A duration change at the same plan takes effect at the next Apple renewal. Manage or cancel in Apple ID subscriptions.")
             .font(ClientType.caption)
             .foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)

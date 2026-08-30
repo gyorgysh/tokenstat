@@ -104,6 +104,56 @@
           "referenceName" : "Legend Yearly",
           "subscriptionGroupID" : "C3E81B04",
           "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "5.00",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "A1000005",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly Patron plan. Full history, more devices, remote management.",
+              "displayName" : "Patron",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.tokenstat.patron.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Patron Monthly",
+          "subscriptionGroupID" : "C3E81B04",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "10.00",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A1000006",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Monthly Legend plan. Remote screen viewing and control, ten devices, faster sync, and the read API.",
+              "displayName" : "Legend",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "ai.tokenstat.legend.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Legend Monthly",
+          "subscriptionGroupID" : "C3E81B04",
+          "type" : "RecurringSubscription"
         }
       ]
     }

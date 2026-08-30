@@ -12,7 +12,10 @@ steps are a browser session on [play.google.com/console](https://play.google.com
 
 - Application id `ai.tokenstat.tokenstat`, `targetSdk` 36.
 - Subscription product ids: `ai.tokenstat.supporter.yearly`,
-  `ai.tokenstat.patron.yearly`, `ai.tokenstat.legend.yearly`.
+  `ai.tokenstat.patron.yearly`, `ai.tokenstat.legend.yearly`,
+  `ai.tokenstat.patron.monthly`, `ai.tokenstat.legend.monthly`.
+  Paywall UI still lists yearly. Monthly ids are queried so a later
+  Play catalog can return them.
 - Gradle `signingConfigs.play` reads `TOKENSTAT_ANDROID_KEYSTORE` and friends.
 - `.github/workflows/release.yml` job `android` publishes to the internal
   track when the `release` environment has the secrets below.
