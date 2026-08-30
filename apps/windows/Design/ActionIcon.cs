@@ -25,7 +25,7 @@ internal enum ActionIcon
     Merge, Comment, Reopen, Checkout, Filter,
     Delete,
     External, Next, Back, More, Search, Reveal, Docs, Source, Profile, Home, Help,
-    Send, Apply, Calculate, Compare, Benchmarks,
+    Send, Attach, Persona, Plan, Allow, Deny, Apply, Calculate, Compare, Benchmarks,
     Dismiss, Done, Scheduled, CurrentPlan,
 }
 
@@ -81,6 +81,11 @@ internal static class ActionIconGlyph
         ActionIcon.Home => Microsoft.UI.Xaml.Controls.Symbol.Home,
         ActionIcon.Help => Microsoft.UI.Xaml.Controls.Symbol.Help,
         ActionIcon.Send => Microsoft.UI.Xaml.Controls.Symbol.Send,
+        ActionIcon.Attach => Microsoft.UI.Xaml.Controls.Symbol.Attach,
+        ActionIcon.Persona => Microsoft.UI.Xaml.Controls.Symbol.Contact,
+        ActionIcon.Plan => Microsoft.UI.Xaml.Controls.Symbol.Document,
+        ActionIcon.Allow => Microsoft.UI.Xaml.Controls.Symbol.Accept,
+        ActionIcon.Deny => Microsoft.UI.Xaml.Controls.Symbol.Cancel,
         _ => Microsoft.UI.Xaml.Controls.Symbol.Placeholder,
     };
 

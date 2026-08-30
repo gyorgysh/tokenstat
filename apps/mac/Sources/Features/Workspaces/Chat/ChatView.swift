@@ -1,112 +1,25 @@
 // SPDX-License-Identifier: LicenseRef-tokenstat-source-available
 
-import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
-@MainActor @Observable
-final class ChatModel {
-    var chats: [ChatConversation] = []
-    var selected: ChatConversation?
-    var events: [ChatTimelineEvent] = []
-    var approvals: [ChatApproval] = []
-    var offset: UInt64 = 0
-    var attachments: [ChatAttachment] = []
-    var isLoading = false
-    var error: String?
-
-    func load(workspaceID: String) async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            chats = try await Bridge.chats(workspaceID: workspaceID)
-            if selected == nil { selected = chats.first }
-            if let selected {
-                await loadEvents(id: selected.id, reset: true)
-                await loadApprovals(id: selected.id)
-            }
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func create(workspaceID: String, backend: String = "claude", mode: String = "plan", autonomy: String = "standard", personaID: String? = nil) async {
-        do {
-            let chat = try await Bridge.createChat(workspaceID: workspaceID, backend: backend, mode: mode, autonomy: autonomy, personaID: personaID)
-            chats.insert(chat, at: 0)
-            selected = chat
-            events = []
-            offset = 0
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func send(_ text: String) async {
-        guard let selected else { return }
-        do {
-            let updated = try await Bridge.sendChat(id: selected.id, text: text, attachmentIDs: attachments.map(\.id))
-            replace(updated)
-            attachments = []
-            await loadEvents(id: updated.id, reset: false)
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func attach(_ file: URL) async {
-        guard let selected else { return }
-        do { attachments.append(try await Bridge.attachToChat(id: selected.id, file: file)) }
-        catch { self.error = error.localizedDescription }
-    }
-
-    func stop() async {
-        guard let selected else { return }
-        do {
-            try await Bridge.stopChat(id: selected.id)
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func resolve(_ approval: ChatApproval, choice: String) async {
-        do {
-            _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice)
-            await loadApprovals(id: approval.conversationID)
-        } catch { self.error = error.localizedDescription }
-    }
-
-    func poll() async {
-        guard let selected, selected.running else { return }
-        await loadEvents(id: selected.id, reset: false)
-        await loadApprovals(id: selected.id)
-        do { replace(try await Bridge.chats(workspaceID: selected.workspaceID).first(where: { $0.id == selected.id }) ?? selected) } catch {}
-    }
-
-    private func loadEvents(id: String, reset: Bool) async {
-        do {
-            let chunk = try await Bridge.chatEvents(id: id, offset: reset ? 0 : offset)
-            if reset { events = chunk.events } else { events.append(contentsOf: chunk.events) }
-            offset = chunk.nextOffset
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func loadApprovals(id: String) async {
-        do { approvals = try await Bridge.chatApprovals(id: id) }
-        catch { self.error = error.localizedDescription }
-    }
-
-    private func replace(_ chat: ChatConversation) {
-        selected = chat
-        if let index = chats.firstIndex(where: { $0.id == chat.id }) { chats[index] = chat }
-    }
-}
-
 struct ChatView: View {
+    @Bindable var model: ChatModel
     let workspaceID: String
     var workspaceName: String? = nil
-    @State private var model = ChatModel()
+    var onOpenInspector: (() -> Void)? = nil
     @State private var draft = ""
-    @State private var showingSetup = false
     @State private var importingAttachment = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
             DetailChromeBar(scope: workspaceName.map { ScopeChip(label: $0, symbol: "folder.fill") }) {
-                ToolbarIconButton(systemImage: "plus", help: "New chat") { showingSetup = true }
+                conversationMenu
+                ToolbarIconButton(systemImage: "plus", help: "New chat") {
+                    Task { await model.create() }
+                }
             }
             #endif
             if let chat = model.selected {
@@ -117,6 +30,15 @@ struct ChatView: View {
             }
         }
         .background(Theme.background)
+        #if !os(macOS)
+        .navigationTitle(model.selected?.title ?? "Chat")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("New chat", .create) { Task { await model.create() } }
+            }
+        }
+        #endif
         .task(id: workspaceID) { await model.load(workspaceID: workspaceID) }
         .task(id: model.selected?.id) {
             while !Task.isCancelled {
@@ -124,52 +46,120 @@ struct ChatView: View {
                 await model.poll()
             }
         }
-        .alert("Chat unavailable", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        .alert("Chat unavailable", isPresented: Binding(
+            get: { model.error != nil },
+            set: { if !$0 { model.error = nil } }
+        )) {
             Button("OK", role: .cancel) { model.error = nil }
-        } message: { Text(model.error ?? "") }
-        .sheet(isPresented: $showingSetup) {
-            ChatSetupSheet { backend, mode, autonomy, personaID in
-                showingSetup = false
-                Task { await model.create(workspaceID: workspaceID, backend: backend, mode: mode, autonomy: autonomy, personaID: personaID) }
+        } message: {
+            Text(model.error ?? "")
+        }
+    }
+
+    private var conversationMenu: some View {
+        Menu {
+            if model.chats.isEmpty {
+                Text("No chats yet")
+            } else {
+                ForEach(model.chats) { chat in
+                    Button(chat.running ? "\(chat.title) · working" : chat.title, .comment) {
+                        Task { await model.select(chat) }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if model.selected?.running == true {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 7, height: 7)
+                }
+                Text(model.selected?.title ?? "Chat")
+                    .font(Theme.callout.weight(.medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Theme.border, lineWidth: 1)
             }
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .disabled(model.chats.isEmpty)
+        .frame(maxWidth: 260, alignment: .leading)
+        .help("Switch conversation")
     }
 
     private func transcript(_ chat: ChatConversation) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
-                setup(chat)
-                ForEach(model.events) { row in
-                    ChatEventRow(
-                        row: row,
-                        isPending: row.approval.map { approval in model.approvals.contains(where: { $0.id == approval.id }) } ?? false,
-                        resolve: { approval, choice in Task { await model.resolve(approval, choice: choice) } }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.m) {
+                    #if !os(macOS)
+                    if !model.chats.isEmpty {
+                        conversationMenu
+                    }
+                    #endif
+                    ChatSetupHeader(
+                        model: model,
+                        chat: chat,
+                        collapsed: model.hasStarted,
+                        onOpenInspector: onOpenInspector
                     )
+                    ForEach(model.events) { row in
+                        ChatEventRow(
+                            row: row,
+                            isPending: row.approval.map { approval in
+                                model.approvals.contains { $0.id == approval.id }
+                            } ?? false,
+                            resolve: { approval, choice in
+                                Task { await model.resolve(approval, choice: choice) }
+                            }
+                        )
+                    }
+                    if chat.running {
+                        HStack(spacing: Theme.Space.s) {
+                            ProgressView().controlSize(.small)
+                            Text("Working")
+                                .font(Theme.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, Theme.Space.l)
+                    }
+                    Color.clear
+                        .frame(height: 1)
+                        .id("chat-bottom")
                 }
-                if chat.running { HStack(spacing: Theme.Space.s) { ProgressView().controlSize(.small); Text("Working").font(Theme.caption).foregroundStyle(.secondary) }.padding(.horizontal, Theme.Space.l) }
+                .frame(maxWidth: 780, alignment: .leading)
+                .padding(.vertical, Theme.Space.xl)
+                .padding(.horizontal, Theme.Space.l)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(maxWidth: 780, alignment: .leading)
-            .padding(.vertical, Theme.Space.xl)
-            .padding(.horizontal, Theme.Space.l)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .onChange(of: model.events.count) { _, _ in
+                scrollToLatest(proxy)
+            }
+            .onChange(of: chat.running) { _, _ in
+                scrollToLatest(proxy)
+            }
+            .onAppear { scrollToLatest(proxy) }
         }
     }
 
-    private func setup(_ chat: ChatConversation) -> some View {
-        HStack(spacing: Theme.Space.s) {
-            Image(systemName: "sparkles").foregroundStyle(Theme.accent)
-            Text(chat.title).font(Theme.title3.weight(.semibold))
-            chip(chat.backend.capitalized)
-            if chat.mode == "plan" { chip("Plan") }
-            Spacer()
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        let animated = !reduceMotion
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo("chat-bottom", anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
         }
-        .padding(Theme.Space.m)
-        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.border, lineWidth: 1) }
-    }
-
-    private func chip(_ text: String) -> some View {
-        Text(text).font(Theme.caption.weight(.medium)).foregroundStyle(Theme.accent).padding(.horizontal, 8).padding(.vertical, 4).background(Theme.accentSoft, in: Capsule())
     }
 
     private func composer(_ chat: ChatConversation) -> some View {
@@ -177,120 +167,98 @@ struct ChatView: View {
             if !model.attachments.isEmpty {
                 HStack(spacing: Theme.Space.xs) {
                     ForEach(model.attachments) { attachment in
-                        Label(attachment.name, systemImage: "paperclip")
-                            .font(Theme.caption).lineLimit(1)
-                            .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(Theme.panel, in: Capsule())
+                        HStack(spacing: 6) {
+                            Image(systemName: ActionIcon.attach.symbol)
+                                .foregroundStyle(Theme.accent)
+                            Text(attachment.name)
+                                .font(Theme.caption)
+                                .lineLimit(1)
+                            Button("Remove", .dismiss) { model.removeAttachment(attachment) }
+                                .buttonStyle(.plain)
+                                .labelStyle(.iconOnly)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Theme.panel, in: Capsule())
+                        .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1) }
                     }
                 }
             }
             HStack(alignment: .bottom, spacing: Theme.Space.s) {
-                Button { importingAttachment = true } label: { Image(systemName: "paperclip").frame(width: 30, height: 34) }
+                Button("Attach", .attach) { importingAttachment = true }
                     .buttonStyle(SecondaryButtonStyle(small: true))
-            TextField("Ask about \(workspaceName ?? "this folder")", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .padding(.horizontal, Theme.Space.m).padding(.vertical, 10)
-                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Theme.border, lineWidth: 1) }
-            if chat.running {
-                Button { Task { await model.stop() } } label: { Image(systemName: "stop.fill").frame(width: 34, height: 34) }
-                    .buttonStyle(SecondaryButtonStyle(small: true))
-            } else {
-                Button { let text = draft; draft = ""; Task { await model.send(text) } } label: { Image(systemName: "arrow.up").frame(width: 34, height: 34) }
-                    .buttonStyle(AccentButtonStyle(small: true))
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+                    .environment(\.compactActions, true)
+                    .disabled(chat.running)
+                TextField("Ask about \(workspaceName ?? "this folder")", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...6)
+                    .padding(.horizontal, Theme.Space.m)
+                    .padding(.vertical, 10)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    }
+                    #if os(macOS)
+                    .onKeyPress(.return, phases: .down) { press in
+                        if press.modifiers.contains(.command) {
+                            submit(from: chat)
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    #endif
+                if chat.running {
+                    Button("Stop", .stop) { Task { await model.stop() } }
+                        .buttonStyle(SecondaryButtonStyle(small: true))
+                        .environment(\.compactActions, true)
+                } else {
+                    Button("Send", .send) { submit(from: chat) }
+                        .buttonStyle(AccentButtonStyle(small: true))
+                        .environment(\.compactActions, true)
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
         .padding(Theme.Space.m)
         .background(Theme.background)
-        .fileImporter(isPresented: $importingAttachment, allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]) { result in
-            if case let .success(file) = result { Task { await model.attach(file) } }
+        .fileImporter(
+            isPresented: $importingAttachment,
+            allowedContentTypes: [.image, .pdf, .plainText, .sourceCode]
+        ) { result in
+            if case let .success(file) = result {
+                Task { await model.attach(file) }
+            }
         }
+    }
+
+    private func submit(from chat: ChatConversation) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !chat.running else { return }
+        draft = ""
+        Task { await model.send(text) }
     }
 
     private var empty: some View {
         VStack(spacing: Theme.Space.l) {
             Spacer()
-            ChatScene(reduceMotion: false)
-            Text("Start a chat").font(Theme.title2.weight(.semibold))
-            Text("Ask an agent to explore, plan, or work in this folder.").font(Theme.callout).foregroundStyle(.secondary)
-            Button("New chat", .create) { showingSetup = true }.buttonStyle(AccentButtonStyle())
+            ChatScene(reduceMotion: reduceMotion)
+            Text("Start a chat")
+                .font(Theme.title2.weight(.semibold))
+            Text("Ask an agent to explore, plan, or work in this folder.")
+                .font(Theme.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            Button("New chat", .create) {
+                Task { await model.create() }
+            }
+            .buttonStyle(AccentButtonStyle())
             Spacer()
         }
-    }
-}
-
-private struct ChatSetupSheet: View {
-    let create: (String, String, String, String?) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var backend = "claude"
-    @State private var mode = "plan"
-    @State private var bypass = false
-    @State private var personas: [ChatPersona] = []
-    @State private var backends: [ChatBackend] = []
-    @State private var personaID: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.l) {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("New chat").font(Theme.title2.weight(.semibold))
-                Text("Choose how this conversation should begin. You can refine its settings before the first message.")
-                    .font(Theme.callout).foregroundStyle(.secondary)
-            }
-            Picker("Agent", selection: $backend) {
-                ForEach(backends) { option in
-                    Text(option.name).tag(option.id)
-                }
-            }
-            if !personas.isEmpty {
-                Picker("Persona", selection: $personaID) {
-                    Text("No preset").tag(String?.none)
-                    ForEach(personas) { persona in
-                        Text(persona.mark.isEmpty ? persona.name : "\(persona.mark)  \(persona.name)").tag(Optional(persona.id))
-                    }
-                }
-                .onChange(of: personaID) { _, id in
-                    guard let id, let persona = personas.first(where: { $0.id == id }) else { return }
-                    backend = persona.backend
-                    mode = persona.defaultMode
-                }
-            }
-            Picker("Starting mode", selection: $mode) {
-                Text("Plan — explore before changing work").tag("plan")
-                Text("Execute — work directly in the folder").tag("execute")
-            }
-            Toggle("Let this chat work without asking", isOn: $bypass)
-                .toggleStyle(.brandCheckbox)
-            Text(bypass
-                ? "This agent can use its backend's bypass mode in this folder."
-                : gateCopy)
-                .font(Theme.caption)
-                .foregroundStyle(.secondary)
-            HStack {
-                Spacer()
-                Button("Cancel", .dismiss, role: .cancel) { dismiss() }
-                Button("Create chat", .create) { create(backend, mode, bypass ? "bypass" : "standard", personaID) }
-                    .buttonStyle(AccentButtonStyle())
-            }
-        }
-        .padding(Theme.Space.xl)
-        .frame(width: 460)
-        .task {
-            personas = (try? await Bridge.chatPersonas()) ?? []
-            backends = (try? await Bridge.chatBackends()) ?? []
-            if !backends.contains(where: { $0.id == backend }) { backend = backends.first?.id ?? "claude" }
-        }
-    }
-
-    private var gateCopy: String {
-        switch backends.first(where: { $0.id == backend })?.gateTier {
-        case "full": return "Tokenstat asks before every tool action."
-        case "rules": return "Saved permission rules run; anything else is denied."
-        case "bypassOnly": return "This backend has no Tokenstat approval gate. Use Bypass only if you intend that."
-        default: return "Checking this backend’s permission support."
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(Theme.Space.l)
     }
 }
 
@@ -300,18 +268,52 @@ private struct ChatEventRow: View {
     let resolve: (ChatApproval, String) -> Void
     var body: some View {
         if row.kind == "user" {
-            HStack { Spacer(minLength: 48); Text(row.text ?? "").font(Theme.body).padding(Theme.Space.m).background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous)) }
+            HStack {
+                Spacer(minLength: 48)
+                Text(row.text ?? "")
+                    .font(Theme.body)
+                    .padding(Theme.Space.m)
+                    .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
         } else if let approval = row.approval {
             ChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         } else if let event = row.event {
             switch event.kind {
-            case "text": Text(event.delta ?? "").font(Theme.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            case "thinking": Label(event.delta ?? "Thinking", systemImage: "brain").font(Theme.caption).foregroundStyle(.secondary).padding(.vertical, 2)
-            case "toolStart": Label([event.verb, event.target].compactMap { $0 }.joined(separator: " "), systemImage: "hammer").font(Theme.callout).padding(Theme.Space.s).frame(maxWidth: .infinity, alignment: .leading).background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            case "edit": Label("\(event.path ?? "File")  +\(event.added ?? 0)  −\(event.removed ?? 0)", systemImage: "pencil.line").font(Theme.callout).foregroundStyle(Theme.accent)
-            case "failed": Label(event.text ?? "The turn failed", systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-            case "usage": Text("\(event.input ?? 0) in · \(event.output ?? 0) out").font(Theme.caption).foregroundStyle(.secondary)
-            default: EmptyView()
+            case "text":
+                Text(event.delta ?? "")
+                    .font(Theme.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case "thinking":
+                Label(event.delta ?? "Thinking", systemImage: "brain")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 2)
+            case "toolStart":
+                Label(
+                    [event.verb, event.target].compactMap { $0 }.joined(separator: " "),
+                    systemImage: "hammer"
+                )
+                .font(Theme.callout)
+                .padding(Theme.Space.s)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            case "edit":
+                Label(
+                    "\(event.path ?? "File")  +\(event.added ?? 0)  −\(event.removed ?? 0)",
+                    systemImage: "pencil.line"
+                )
+                .font(Theme.callout)
+                .foregroundStyle(Theme.accent)
+            case "failed":
+                Label(event.text ?? "The turn failed", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(Theme.warning)
+            case "usage":
+                Text("\(event.input ?? 0) in · \(event.output ?? 0) out")
+                    .font(Theme.caption)
+                    .foregroundStyle(.secondary)
+            default:
+                EmptyView()
             }
         }
     }
@@ -335,7 +337,8 @@ private struct ChatApprovalCard: View {
                 Text(approval.verb)
                     .font(Theme.caption.weight(.medium))
                     .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
                     .background(Theme.accentSoft, in: Capsule())
             }
             Text(approval.preview)
@@ -345,11 +348,11 @@ private struct ChatApprovalCard: View {
                 .lineLimit(4)
             if isPending {
                 HStack(spacing: Theme.Space.s) {
-                    Button("Allow", .approve) { resolve(approval, "allow") }
+                    Button("Allow", .allow) { resolve(approval, "allow") }
                         .buttonStyle(SecondaryButtonStyle(small: true))
-                    Button("Always allow", .approve) { resolve(approval, "allowAlways") }
+                    Button("Always allow", .allow) { resolve(approval, "allowAlways") }
                         .buttonStyle(AccentButtonStyle(small: true))
-                    Button("Deny", .dismiss, role: .destructive) { resolve(approval, "deny") }
+                    Button("Deny", .deny, role: .destructive) { resolve(approval, "deny") }
                         .buttonStyle(SecondaryButtonStyle(small: true))
                 }
             } else {
@@ -360,6 +363,9 @@ private struct ChatApprovalCard: View {
         }
         .padding(Theme.Space.m)
         .background(Theme.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1) }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(isPending ? Theme.accent.opacity(0.45) : Theme.border, lineWidth: 1)
+        }
     }
 }

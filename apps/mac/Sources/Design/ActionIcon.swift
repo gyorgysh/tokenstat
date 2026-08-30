@@ -84,6 +84,11 @@ enum ActionIcon {
 
     // Tools
     case send
+    case attach
+    case persona
+    case plan
+    case allow
+    case deny
     case apply
     case calculate
     case compare
@@ -169,6 +174,11 @@ enum ActionIcon {
         case .help: return "questionmark.circle"
 
         case .send: return "paperplane"
+        case .attach: return "paperclip"
+        case .persona: return "person.text.rectangle"
+        case .plan: return "list.clipboard"
+        case .allow: return "checkmark.circle"
+        case .deny: return "xmark.circle"
         case .apply: return "line.3.horizontal.decrease.circle"
         case .calculate: return "plus.forwardslash.minus"
         case .compare: return "rectangle.split.2x1"

@@ -147,6 +147,8 @@ pub struct Update {
     pub allowed_tools: Option<Vec<String>>,
     pub allowed_shell_prefixes: Option<Vec<String>>,
     pub budget_seconds: Option<u64>,
+    pub system_prompt: Option<String>,
+    pub persona_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -611,11 +613,11 @@ impl Store {
         if let Some(backend) = changes.backend {
             chat.backend = backend;
         }
-        if changes.model.is_some() {
-            chat.model = changes.model;
+        if let Some(model) = changes.model {
+            chat.model = Some(model).filter(|value| !value.trim().is_empty());
         }
-        if changes.effort.is_some() {
-            chat.effort = changes.effort;
+        if let Some(effort) = changes.effort {
+            chat.effort = Some(effort).filter(|value| !value.trim().is_empty());
         }
         if let Some(mode) = changes.mode {
             chat.mode = mode;
@@ -631,6 +633,17 @@ impl Store {
         }
         if let Some(budget) = changes.budget_seconds {
             chat.budget_seconds = budget;
+        }
+        if let Some(prompt) = changes.system_prompt {
+            chat.system_prompt = prompt;
+        }
+        if let Some(persona_id) = changes.persona_id {
+            let trimmed = persona_id.trim();
+            chat.persona_id = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
         chat.updated_at_ms = now_ms();
         let out = chat.clone();
@@ -832,6 +845,7 @@ impl Store {
                 at_ms: now_ms(),
             },
         )?;
+        self.retitle_if_untitled(id, text.trim())?;
         self.active
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -994,6 +1008,23 @@ impl Store {
             .cloned()
             .ok_or_else(|| "no chat with that id".into())
     }
+    fn retitle_if_untitled(&self, id: &str, prompt: &str) -> Result<(), String> {
+        let mut chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let chat = chats
+            .iter_mut()
+            .find(|chat| chat.id == id)
+            .ok_or("no chat with that id")?;
+        if chat.title == "New chat" {
+            chat.title = title_from_prompt(prompt);
+            chat.updated_at_ms = now_ms();
+        }
+        drop(chats);
+        self.save()
+    }
+
     fn set_running(&self, id: &str, running: bool) -> Result<Conversation, String> {
         let mut chats = self
             .conversations
@@ -1227,6 +1258,21 @@ fn prompt_with_attachments(prompt: &str, attachments: &[PathBuf]) -> String {
     format!("{prompt}\n\nThe user attached these local files. Read them when useful:\n{paths}")
 }
 
+fn title_from_prompt(prompt: &str) -> String {
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("New chat");
+    let mut chars = line.chars();
+    let title: String = chars.by_ref().take(48).collect();
+    if chars.next().is_some() {
+        format!("{title}…")
+    } else {
+        title.to_string()
+    }
+}
+
 fn prompt_with_system_prompt(prompt: &str, system_prompt: &str) -> String {
     let system_prompt = system_prompt.trim();
     if system_prompt.is_empty() {
@@ -1434,6 +1480,95 @@ mod tests {
             })
             .unwrap();
         assert_eq!(saved.system_prompt, "Review changes carefully.");
+    }
+
+    #[test]
+    fn backends_declare_a_gate_tier_and_keep_the_agent_label() {
+        let rows = backends();
+        let grok = rows
+            .iter()
+            .find(|backend| backend["id"] == "grok")
+            .expect("grok");
+        assert_eq!(grok["gateTier"], "rules");
+        assert_eq!(grok["label"], "Grok");
+        let cursor = rows
+            .iter()
+            .find(|backend| backend["id"] == "cursor")
+            .expect("cursor");
+        assert_eq!(cursor["gateTier"], "bypassOnly");
+        let claude = rows
+            .iter()
+            .find(|backend| backend["id"] == "claude")
+            .expect("claude");
+        assert_eq!(claude["gateTier"], "full");
+        assert!(claude.get("models").is_some());
+        assert!(claude.get("efforts").is_some());
+    }
+
+    #[test]
+    fn the_first_prompt_names_an_untitled_chat() {
+        assert_eq!(title_from_prompt("Fix the inspector"), "Fix the inspector");
+        assert_eq!(
+            title_from_prompt("\n  Plan the checkout flow  \nmore"),
+            "Plan the checkout flow"
+        );
+        let long = "a".repeat(60);
+        let titled = title_from_prompt(&long);
+        assert!(titled.ends_with('…'));
+        assert_eq!(titled.chars().count(), 49);
+    }
+
+    #[test]
+    fn setup_changes_apply_a_persona_without_rewriting_a_running_turn() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        store.conversations.lock().unwrap().push(Conversation {
+            id: "chat-test".into(),
+            workspace_id: "workspace-a".into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        });
+        let updated = store
+            .update(
+                "chat-test",
+                Update {
+                    backend: Some("grok".into()),
+                    model: Some("grok-4.6".into()),
+                    mode: Some("execute".into()),
+                    system_prompt: Some("Be concise.".into()),
+                    persona_id: Some("persona-1".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.backend, "grok");
+        assert_eq!(updated.model.as_deref(), Some("grok-4.6"));
+        assert_eq!(updated.system_prompt, "Be concise.");
+        assert_eq!(updated.persona_id.as_deref(), Some("persona-1"));
+        store.conversations.lock().unwrap()[0].running = true;
+        let err = store
+            .update(
+                "chat-test",
+                Update {
+                    backend: Some("claude".into()),
+                    ..Update::default()
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("stop this turn") || err.contains("before changing"));
     }
 
     #[test]

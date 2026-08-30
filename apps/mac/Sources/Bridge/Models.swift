@@ -2283,8 +2283,10 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var workspaceID: String
     var title: String
     var backend: String
+    var personaID: String?
     var model: String?
     var effort: String?
+    var systemPrompt: String
     var mode: String
     var autonomy: String
     var resumeToken: String?
@@ -2294,14 +2296,95 @@ struct ChatConversation: Codable, Sendable, Identifiable, Hashable {
     var createdAtMs: Int64
     var updatedAtMs: Int64
     var running: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceID = "workspaceId"
+        case title, backend
+        case personaID = "personaId"
+        case model, effort, systemPrompt, mode, autonomy, resumeToken
+        case allowedTools, allowedShellPrefixes, budgetSeconds
+        case createdAtMs, updatedAtMs, running
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        workspaceID = try c.decode(String.self, forKey: .workspaceID)
+        title = try c.decode(String.self, forKey: .title)
+        backend = try c.decode(String.self, forKey: .backend)
+        personaID = try c.decodeIfPresent(String.self, forKey: .personaID)
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        effort = try c.decodeIfPresent(String.self, forKey: .effort)
+        systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt) ?? ""
+        mode = try c.decodeIfPresent(String.self, forKey: .mode) ?? "plan"
+        autonomy = try c.decodeIfPresent(String.self, forKey: .autonomy) ?? "standard"
+        resumeToken = try c.decodeIfPresent(String.self, forKey: .resumeToken)
+        allowedTools = try c.decodeIfPresent([String].self, forKey: .allowedTools) ?? []
+        allowedShellPrefixes = try c.decodeIfPresent([String].self, forKey: .allowedShellPrefixes) ?? []
+        budgetSeconds = try c.decodeIfPresent(UInt64.self, forKey: .budgetSeconds) ?? 0
+        createdAtMs = try c.decodeIfPresent(Int64.self, forKey: .createdAtMs) ?? 0
+        updatedAtMs = try c.decodeIfPresent(Int64.self, forKey: .updatedAtMs) ?? 0
+        running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(workspaceID, forKey: .workspaceID)
+        try c.encode(title, forKey: .title)
+        try c.encode(backend, forKey: .backend)
+        try c.encodeIfPresent(personaID, forKey: .personaID)
+        try c.encodeIfPresent(model, forKey: .model)
+        try c.encodeIfPresent(effort, forKey: .effort)
+        try c.encode(systemPrompt, forKey: .systemPrompt)
+        try c.encode(mode, forKey: .mode)
+        try c.encode(autonomy, forKey: .autonomy)
+        try c.encodeIfPresent(resumeToken, forKey: .resumeToken)
+        try c.encode(allowedTools, forKey: .allowedTools)
+        try c.encode(allowedShellPrefixes, forKey: .allowedShellPrefixes)
+        try c.encode(budgetSeconds, forKey: .budgetSeconds)
+        try c.encode(createdAtMs, forKey: .createdAtMs)
+        try c.encode(updatedAtMs, forKey: .updatedAtMs)
+        try c.encode(running, forKey: .running)
+    }
 }
 
 /// Chat-only backend metadata. `gateTier` is deliberately host-owned: clients
 /// must not imply an interactive approval channel where a CLI only has rules.
 struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     var id: String
-    var name: String
+    var label: String
+    var command: String
+    var models: [String]
+    var efforts: [String]
     var gateTier: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, label, name, command, models, efforts, gateTier
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+            ?? c.decodeIfPresent(String.self, forKey: .name)
+            ?? id
+        command = try c.decodeIfPresent(String.self, forKey: .command) ?? ""
+        models = try c.decodeIfPresent([String].self, forKey: .models) ?? []
+        efforts = try c.decodeIfPresent([String].self, forKey: .efforts) ?? []
+        gateTier = try c.decodeIfPresent(String.self, forKey: .gateTier) ?? "full"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(label, forKey: .label)
+        try c.encode(command, forKey: .command)
+        try c.encode(models, forKey: .models)
+        try c.encode(efforts, forKey: .efforts)
+        try c.encode(gateTier, forKey: .gateTier)
+    }
 }
 
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
@@ -2314,6 +2397,20 @@ struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var systemPrompt: String
     var defaultMode: String
     var defaultAutonomy: String
+
+    static func blank(backend: String = "claude") -> ChatPersona {
+        ChatPersona(
+            id: "",
+            name: "",
+            mark: "",
+            backend: backend,
+            model: nil,
+            effort: nil,
+            systemPrompt: "",
+            defaultMode: "plan",
+            defaultAutonomy: "standard"
+        )
+    }
 }
 
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {
@@ -2347,6 +2444,12 @@ struct ChatApproval: Codable, Sendable, Identifiable, Hashable {
     var createdAtMs: Int64
     var expiresAtMs: Int64
     var decision: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case conversationID = "conversationId"
+        case verb, preview, shellPrefix, createdAtMs, expiresAtMs, decision
+    }
 }
 
 struct ChatAgentEvent: Codable, Sendable {

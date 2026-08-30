@@ -135,6 +135,8 @@ ALLOWED = [
     ("Design/Theme.swift", "Button(title) { isOn.toggle() }"),
     ("Design/Theme.swift", "Button(title) { action() }"),
     ("Design/Theme.swift", "selection = option.value"),
+    # Whole-row persona pick. The ActionSeat already carries the glyph.
+    ("Features/Workspaces/Chat/PersonaEditor.swift", "draft = persona"),
 ]
 
 GLYPH = re.compile(

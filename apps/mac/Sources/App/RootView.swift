@@ -47,6 +47,7 @@ struct RootView: View {
     @State private var automations = AutomationsModel()
     @State private var workflows = WorkflowsModel()
     @State private var todo = TodoModel()
+    @State private var chat = ChatModel()
     @State private var appUpdate = AppUpdateModel()
     @State private var connectivity = ConnectivityModel()
     /// The service and the tunnel, alongside the internet. See
@@ -957,6 +958,12 @@ struct RootView: View {
                 todoInspector
             case .workspace(_, .notes):
                 notesInspector
+            case .workspace(_, .chat):
+                ChatInspector(
+                    model: chat,
+                    folder: workspaces.folders.first { $0.id == route.workspaceID },
+                    onClose: { closeInspector() }
+                )
             case .workspace(_, .workflows), .global(.workflows):
                 WorkflowsInspector(
                     model: workflows,
@@ -2154,8 +2161,16 @@ struct RootView: View {
             EmptyView()
         case let .workspace(id, .chat):
             ChatView(
+                model: chat,
                 workspaceID: id,
-                workspaceName: workspaces.folders.first { $0.id == id }?.name
+                workspaceName: workspaces.folders.first { $0.id == id }?.name,
+                onOpenInspector: {
+                    isInspectorPresented = true
+                    if !inspectorFits {
+                        isOverlayVisible = true
+                        overlayHeldByPress = true
+                    }
+                }
             )
         case let .workspace(id, .pulls):
             let folder = workspaces.folders.first { $0.id == id }

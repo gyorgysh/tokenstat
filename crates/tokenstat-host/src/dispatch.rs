@@ -477,6 +477,7 @@ struct ChatParams {
     data: Option<String>,
     media_type: Option<String>,
     persona_id: Option<String>,
+    system_prompt: Option<String>,
     persona: Option<crate::chat::Persona>,
     choice: Option<String>,
     verb: Option<String>,
@@ -518,6 +519,8 @@ impl ChatParams {
             allowed_tools: self.allowed_tools,
             allowed_shell_prefixes: self.allowed_shell_prefixes,
             budget_seconds: self.budget_seconds,
+            system_prompt: self.system_prompt,
+            persona_id: self.persona_id,
         }
     }
 }

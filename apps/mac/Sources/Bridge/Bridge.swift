@@ -881,15 +881,57 @@ extension Bridge {
         title: String = "New chat",
         mode: String = "plan",
         autonomy: String = "standard",
+        model: String? = nil,
+        effort: String? = nil,
         personaID: String? = nil
     ) async throws -> ChatConversation {
-        var params: [String: Any] = ["workspaceId": workspaceID, "backend": backend, "title": title, "mode": mode, "autonomy": autonomy]
-        if let personaID { params["personaId"] = personaID }
+        var params: [String: Any] = [
+            "workspaceId": workspaceID,
+            "backend": backend,
+            "title": title,
+            "mode": mode,
+            "autonomy": autonomy,
+        ]
+        if let model, !model.isEmpty { params["model"] = model }
+        if let effort, !effort.isEmpty { params["effort"] = effort }
+        if let personaID, !personaID.isEmpty { params["personaId"] = personaID }
         return try await background(
             "chat.create",
             params,
             as: ChatConversation.self
         )
+    }
+
+    static func updateChat(
+        id: String,
+        title: String? = nil,
+        backend: String? = nil,
+        model: String? = nil,
+        effort: String? = nil,
+        mode: String? = nil,
+        autonomy: String? = nil,
+        personaID: String? = nil,
+        systemPrompt: String? = nil,
+        allowedTools: [String]? = nil,
+        allowedShellPrefixes: [String]? = nil
+    ) async throws -> ChatConversation {
+        var params: [String: Any] = ["id": id]
+        if let title { params["title"] = title }
+        if let backend { params["backend"] = backend }
+        if let model { params["model"] = model }
+        if let effort { params["effort"] = effort }
+        if let mode { params["mode"] = mode }
+        if let autonomy { params["autonomy"] = autonomy }
+        if let personaID { params["personaId"] = personaID }
+        if let systemPrompt { params["systemPrompt"] = systemPrompt }
+        if let allowedTools { params["allowedTools"] = allowedTools }
+        if let allowedShellPrefixes { params["allowedShellPrefixes"] = allowedShellPrefixes }
+        return try await background("chat.update", params, as: ChatConversation.self)
+    }
+
+    static func removeChat(id: String) async throws {
+        struct Removed: Codable, Sendable { var removed: Bool? }
+        _ = try await background("chat.remove", ["id": id], as: Removed.self)
     }
 
     static func sendChat(id: String, text: String, attachmentIDs: [String] = []) async throws -> ChatConversation {
@@ -914,6 +956,19 @@ extension Bridge {
 
     static func chatPersonas() async throws -> [ChatPersona] {
         try await background("chat.personas", as: [ChatPersona].self)
+    }
+
+    static func saveChatPersona(_ persona: ChatPersona) async throws -> ChatPersona {
+        try await background(
+            "chat.personaSave",
+            ["persona": try persona.jsonObject()],
+            as: ChatPersona.self
+        )
+    }
+
+    static func removeChatPersona(id: String) async throws {
+        struct Removed: Codable, Sendable { var removed: Bool? }
+        _ = try await background("chat.personaRemove", ["id": id], as: Removed.self)
     }
 
     static func attachToChat(id: String, file: URL) async throws -> ChatAttachment {
