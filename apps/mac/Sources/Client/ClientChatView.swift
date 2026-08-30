@@ -270,6 +270,7 @@ private struct ClientChatThread: View {
                             collapsed: false,
                             showsIntro: false
                         )
+                        ChatCostMeter(totals: model.turnUsage)
                         Button("Personas", .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())
                     }

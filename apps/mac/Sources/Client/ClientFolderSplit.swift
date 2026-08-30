@@ -152,6 +152,7 @@ struct ClientFolderSplit: View {
     private func count(for section: WorkspaceSection) -> Int? {
         switch section {
         case .sessions: return counts.sessions
+        case .chat: return counts.chats
         case .changes: return counts.changes
         case .pulls: return counts.pulls > 0
             ? counts.pulls
@@ -160,7 +161,7 @@ struct ClientFolderSplit: View {
         case .workflows: return counts.workflows
         case .automations: return counts.automations
         case .notes: return counts.notes
-        case .chat, .files, .browser: return nil
+        case .files, .browser: return nil
         }
     }
 
@@ -206,6 +207,7 @@ struct ClientFolderSplit: View {
         }
         counts = WorkspaceSectionCounts(
             sessions: summary.sessions,
+            chats: summary.chats ?? 0,
             changes: summary.changed ?? current.git?.files.count ?? 0,
             pulls: summary.pulls ?? pullCounts.count(workspaceID: workspaceID, peer: peer) ?? 0,
             todo: summary.tasks,

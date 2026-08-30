@@ -258,13 +258,16 @@ final class ChatModel {
         backends.first { $0.id == id }
     }
 
-    var turnUsage: (input: UInt64, output: UInt64, cost: Double)? {
+    var turnUsage: ChatUsageTotals? {
         let usages = events.compactMap(\.event).filter { $0.kind == "usage" }
         guard !usages.isEmpty else { return nil }
-        let input = usages.reduce(UInt64(0)) { $0 + ($1.input ?? 0) }
-        let output = usages.reduce(UInt64(0)) { $0 + ($1.output ?? 0) }
-        let cost = usages.reduce(0.0) { $0 + ($1.costUsd ?? 0) }
-        return (input, output, cost)
+        return ChatUsageTotals(
+            input: usages.reduce(0) { $0 + ($1.input ?? 0) },
+            output: usages.reduce(0) { $0 + ($1.output ?? 0) },
+            cacheRead: usages.reduce(0) { $0 + ($1.cacheRead ?? 0) },
+            cacheWrite: usages.reduce(0) { $0 + ($1.cacheWrite ?? 0) },
+            cost: usages.reduce(0) { $0 + ($1.costUsd ?? 0) }
+        )
     }
 
     var hasStarted: Bool {

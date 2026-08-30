@@ -259,13 +259,12 @@ final class WorkspacesModel {
     /// Payload for `.browser` surfaces: the url, and the forwarded peer port
     /// when the page lives on another machine.
     private(set) var browserTabs: [String: [WorkspaceBrowserTab]] = [:]
-    /// What another machine says its folders are holding, keyed by the
-    /// prefixed id this side uses.
+    /// What a folder is holding, keyed by the id this side uses.
     ///
-    /// Only remote folders are in here. A local folder's counts come from the
-    /// models this app is already polling, which are instant and free; a
-    /// remote folder's are not knowable without asking, which is why the
-    /// sidebar drew no task, workflow or automation badge on one at all.
+    /// Remote folders are prefixed. Local folders use the host's own ids.
+    /// Chat has no global in-memory store the way tasks do, so local chat
+    /// badges also come from `workspace.summary`. The currently open
+    /// conversation list still counts itself, and wins when both are present.
     private(set) var summaries: [String: WorkspaceSummary] = [:]
     private(set) var diffs: [String: FileDiff] = [:]
     /// One document per open file, keyed the same way as the diffs.
@@ -370,7 +369,7 @@ final class WorkspacesModel {
         }
     }
 
-    /// What another machine reports this folder is holding, if it has said.
+    /// What this folder is holding, if a summary has landed.
     func summary(for workspaceID: String) -> WorkspaceSummary? {
         summaries[workspaceID]
     }
@@ -797,6 +796,15 @@ final class WorkspacesModel {
             localFolders = loaded
             publishFolders()
             errorMessage = nil
+            if let counts = try? await Bridge.workspaceSummaries() {
+                let localIDs = Set(loaded.map(\.id))
+                summaries = summaries.filter { key, _ in
+                    key.hasPrefix("remote:") || localIDs.contains(key)
+                }
+                for summary in counts {
+                    summaries[summary.id] = summary
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

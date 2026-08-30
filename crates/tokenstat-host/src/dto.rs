@@ -484,6 +484,9 @@ pub struct WorkspaceSummaryDto {
     /// Live ptys in this folder, hidden daemon jobs excluded: the front end
     /// does not draw those as sessions either.
     pub sessions: usize,
+    /// Conversations in this folder. Zero is omitted on the badge the same
+    /// way the other counts are: a folder with no chats is not news.
+    pub chats: usize,
     /// Files git reports as changed. Absent rather than zero when the folder
     /// is missing, so "we did not look" is not drawn as "nothing changed".
     pub changed: Option<usize>,

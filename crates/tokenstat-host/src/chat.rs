@@ -256,6 +256,23 @@ impl Store {
         rows
     }
 
+    /// How many conversations sit in each workspace, for sidebar badges.
+    ///
+    /// One pass over the in-memory index. The summary must not open
+    /// transcripts or the events file to count a row.
+    pub fn counts_by_workspace(&self) -> HashMap<String, usize> {
+        let mut counts = HashMap::new();
+        for chat in self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+        {
+            *counts.entry(chat.workspace_id.clone()).or_default() += 1;
+        }
+        counts
+    }
+
     pub fn personas(&self) -> Vec<Persona> {
         self.personas
             .lock()
@@ -1346,6 +1363,40 @@ fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn counts_are_per_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let sample = |id: &str, workspace: &str| Conversation {
+            id: id.into(),
+            workspace_id: workspace.into(),
+            title: "New chat".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: default_mode(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        };
+        store.conversations.lock().unwrap().extend([
+            sample("chat-a1", "workspace-a"),
+            sample("chat-a2", "workspace-a"),
+            sample("chat-b1", "workspace-b"),
+        ]);
+        let counts = store.counts_by_workspace();
+        assert_eq!(counts.get("workspace-a"), Some(&2));
+        assert_eq!(counts.get("workspace-b"), Some(&1));
+        assert_eq!(counts.get("workspace-c"), None);
+    }
+
     #[test]
     fn conversations_are_workspace_scoped_and_events_are_offset_tailable() {
         let root = tempfile::tempdir().unwrap();

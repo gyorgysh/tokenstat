@@ -2451,8 +2451,12 @@ struct RootView: View {
         let value: Int
         switch section {
         case .sessions: value = terminals.sessions(in: folder.id).filter(\.alive).count
-        // Nothing to count yet.
-        case .chat: value = 0
+        case .chat:
+            if chat.workspaceID == folder.id {
+                value = chat.chats.count
+            } else {
+                value = workspaces.summary(for: folder.id)?.chats ?? 0
+            }
         case .changes: value = folder.git?.files.count ?? 0
         case .pulls: value = remote?.pulls ?? pullCounts.count(key: folder.id) ?? 0
         case .todo: value = remote?.tasks ?? todo.openCount(in: folder.id)

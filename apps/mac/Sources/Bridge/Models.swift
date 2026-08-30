@@ -2256,6 +2256,10 @@ struct CommitDetail: Codable, Sendable, Hashable, Identifiable {
 struct WorkspaceSummary: Codable, Sendable, Hashable, Identifiable {
     var id: String
     var sessions: Int
+    /// Conversations in this folder. Optional because a host older than this
+    /// field answers without it, and a missing badge is honest where a zero
+    /// would not be.
+    var chats: Int?
     /// Nil when the folder is missing, so "we did not look" is not drawn as
     /// "nothing changed".
     var changed: Int?

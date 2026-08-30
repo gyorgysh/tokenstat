@@ -361,6 +361,7 @@ struct ClientSidebarRoot: View {
         }
         switch section {
         case .sessions: return summary.sessions
+        case .chat: return summary.chats
         case .changes: return summary.changed ?? folder.git?.files.count
         case .pulls:
             return summary.pulls
@@ -374,7 +375,7 @@ struct ClientSidebarRoot: View {
             ? summary.workflowsRunning
             : summary.workflows
         case .automations: return summary.automations
-        case .chat, .files, .browser: return nil
+        case .files, .browser: return nil
         }
     }
 

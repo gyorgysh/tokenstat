@@ -2082,6 +2082,7 @@ struct FolderContents {
     automations: Vec<Automation>,
     workflows: Vec<crate::workflows::Workflow>,
     runs: Vec<crate::workflows::WorkflowRun>,
+    chats: HashMap<String, usize>,
 }
 
 #[cfg(feature = "local-host")]
@@ -2093,6 +2094,7 @@ impl FolderContents {
             automations: crate::automations::shared().list(),
             workflows: crate::workflows::shared().list(),
             runs: crate::workflows::shared().runs(),
+            chats: crate::chat::shared().counts_by_workspace(),
         }
     }
 }
@@ -2118,6 +2120,7 @@ fn summarize(ws: &tokenstat_workspace::Workspace, live: &FolderContents) -> Work
                 _ => s.cwd == path || s.cwd.starts_with(&inside),
             })
             .count(),
+        chats: live.chats.get(&ws.id).copied().unwrap_or(0),
         changed: described.git.as_ref().map(|g| g.files.len()),
         pulls: crate::pulls::cached_open_count(&ws.id),
         tasks: live
@@ -3723,10 +3726,12 @@ mod tests {
             automations: Vec::new(),
             workflows: Vec::new(),
             runs: Vec::new(),
+            chats: std::collections::HashMap::from([("ws1".into(), 3), ("ws2".into(), 1)]),
         };
         let summary = summarize(&ws, &live);
         assert_eq!(summary.tasks, 1, "a note is not a task");
         assert_eq!(summary.notes, 2, "archived and another folder's are out");
+        assert_eq!(summary.chats, 3);
     }
 
     #[test]
@@ -4529,6 +4534,12 @@ mod tests {
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["ok"], true, "{out}");
         assert!(v["result"].is_array(), "{out}");
+        for row in v["result"].as_array().unwrap() {
+            assert!(
+                row["chats"].is_number(),
+                "workspace.summary must include chats: {row}"
+            );
+        }
     }
 
     #[cfg(feature = "local-host")]

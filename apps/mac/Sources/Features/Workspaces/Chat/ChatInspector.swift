@@ -32,9 +32,7 @@ struct ChatInspector: View {
                             ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false)
                             folderCard
                             allowlist(chat)
-                            if let usage = model.turnUsage {
-                                costCard(usage)
-                            }
+                            ChatCostMeter(totals: model.turnUsage)
                             Button("Delete chat", .delete, role: .destructive) {
                                 pendingDelete = true
                             }
@@ -184,20 +182,6 @@ struct ChatInspector: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(Theme.accentSoft, in: Capsule())
-    }
-
-    private func costCard(_ usage: (input: UInt64, output: UInt64, cost: Double)) -> some View {
-        group("This conversation") {
-            VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                Text("\(usage.input.formatted()) in · \(usage.output.formatted()) out")
-                    .font(Theme.callout)
-                if usage.cost > 0 {
-                    Text(usage.cost, format: .currency(code: "USD").precision(.fractionLength(2...4)))
-                        .font(Theme.callout.weight(.medium))
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-        }
     }
 
     private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {

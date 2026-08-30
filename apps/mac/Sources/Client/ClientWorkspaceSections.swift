@@ -149,7 +149,7 @@ struct ClientWorkspaceDetailView: View {
             NavigationLink {
                 ClientChatView(peer: peer, workspaceID: workspaceID, folderName: current.name, hostName: hostName)
             } label: {
-                ClientSectionRow(section: .chat, count: nil)
+                ClientSectionRow(section: .chat, count: counts.chats)
             }
             .buttonStyle(.plain)
 
@@ -306,6 +306,7 @@ struct ClientWorkspaceDetailView: View {
         }
         counts = WorkspaceSectionCounts(
             sessions: summary.sessions,
+            chats: summary.chats ?? 0,
             changes: summary.changed ?? current.git?.files.count ?? 0,
             pulls: summary.pulls ?? pullCounts.count(workspaceID: workspaceID, peer: peer) ?? 0,
             todo: summary.tasks,
@@ -335,6 +336,7 @@ struct ClientWorkspaceDetailView: View {
 /// What the badges say. One value each, filled by one pass.
 struct WorkspaceSectionCounts {
     var sessions = 0
+    var chats = 0
     var changes = 0
     var pulls = 0
     var todo = 0
