@@ -32,6 +32,10 @@ internal static class Theme
     public static Color Warning => Color.FromArgb(255, 0xE0, 0xA9, 0x3B);
     public static Color Danger => Color.FromArgb(255, 0xD6, 0x45, 0x3F);
     public static Color StateIdle => Hex(IsDark ? 0x6E6A80u : 0x9A97A6u);
+    /// <summary>Muted green for added lines. A diff is the one place this colour is not a traffic light.</summary>
+    public static Color DiffAdded => Hex(IsDark ? 0x5FBF8Bu : 0x2E8B57u);
+    /// <summary>Muted red for removed lines, matching the Mac Theme.</summary>
+    public static Color DiffRemoved => Hex(IsDark ? 0xE8827Cu : 0xC2453Fu);
 
     public static Color[] Heat { get; } =
     [

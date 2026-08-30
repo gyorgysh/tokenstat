@@ -26,6 +26,7 @@ internal enum GlobalSection
 internal enum WorkspaceSection
 {
     Sessions,
+    Chat,
     Changes,
     Pulls,
     Todo,
@@ -77,6 +78,7 @@ internal static class Sections
     public static string Label(this WorkspaceSection section) => section switch
     {
         WorkspaceSection.Sessions => "Sessions",
+        WorkspaceSection.Chat => "Chat",
         WorkspaceSection.Changes => "Changes",
         WorkspaceSection.Pulls => "Pull requests",
         WorkspaceSection.Todo => "Tasks",

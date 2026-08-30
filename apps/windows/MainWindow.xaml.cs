@@ -249,6 +249,7 @@ public sealed partial class MainWindow : Window
                     WorkspaceSection.Workflows => new WorkflowsPage(id),
                     WorkspaceSection.Automations => new AutomationsPage(id),
                     WorkspaceSection.Pulls => new PullsPage(id),
+                    WorkspaceSection.Chat => new ChatPage(id),
                     _ => new WorkspacePage(id, section),
                 };
             }

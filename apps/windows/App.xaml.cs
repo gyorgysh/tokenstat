@@ -16,6 +16,12 @@ public partial class App : Application
 {
     private MainWindow? _window;
 
+    /// <summary>
+    /// The live window, so a file picker can attach to it. Unpackaged WinUI
+    /// pickers need an HWND and have no other way to find one.
+    /// </summary>
+    public static Window? CurrentWindow { get; private set; }
+
     public App()
     {
         InitializeComponent();
@@ -44,8 +50,10 @@ public partial class App : Application
     {
         HostOwnerLock.Acquire();
         _window = new MainWindow();
+        CurrentWindow = _window;
         _window.Closed += (_, _) =>
         {
+            CurrentWindow = null;
             HostOwnerLock.Release();
         };
         _window.Activate();
