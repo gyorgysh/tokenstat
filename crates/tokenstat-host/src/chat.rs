@@ -732,6 +732,7 @@ impl Store {
         };
         let agy_customization_dir =
             (chat.backend == "agy" && chat.autonomy == "standard").then(|| self.agy_hook_home(id));
+        let grok_allow_rules = grok_allow_rules(&chat);
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
             &prompt,
@@ -743,6 +744,7 @@ impl Store {
                 bypass: chat.autonomy == "bypass",
                 hook_command: hook_command.as_deref(),
                 agy_customization_dir: agy_customization_dir.as_deref(),
+                grok_allow_rules: &grok_allow_rules,
                 attachments: &attachments,
             },
         )?;
@@ -1255,7 +1257,7 @@ pub fn backends() -> Vec<Value> {
                 let id = map.get("id").and_then(Value::as_str).unwrap_or("");
                 map.insert(
                     "gateTier".into(),
-                    json!(if id == "cursor" {
+                    json!(if matches!(id, "cursor" | "sh") {
                         "bypassOnly"
                     } else if id == "grok" {
                         "rules"
@@ -1267,6 +1269,32 @@ pub fn backends() -> Vec<Value> {
             backend
         })
         .collect()
+}
+
+/// Grok evaluates explicit rules before its headless `dontAsk` fallback. A
+/// saved tool name maps to its documented bare `ToolPrefix`; a saved shell
+/// prefix maps to `Bash(glob)`. Never turn arbitrary labels into rule syntax.
+fn grok_allow_rules(chat: &Conversation) -> Vec<String> {
+    let mut rules: Vec<String> = chat
+        .allowed_tools
+        .iter()
+        .filter(|tool| {
+            !tool.is_empty()
+                && tool
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        })
+        .cloned()
+        .collect();
+    rules.extend(
+        chat.allowed_shell_prefixes
+            .iter()
+            .filter(|prefix| !prefix.is_empty() && !prefix.contains(['(', ')', '\n', '\r']))
+            .map(|prefix| format!("Bash({prefix}*)")),
+    );
+    rules.sort();
+    rules.dedup();
+    rules
 }
 
 #[cfg(test)]

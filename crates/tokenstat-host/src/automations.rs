@@ -400,6 +400,9 @@ pub struct ChatLaunch<'a> {
     /// Agy discovers hooks from each supplied workspace. The private root goes
     /// first; the person's workspace remains last, preserving its normal cwd.
     pub agy_customization_dir: Option<&'a Path>,
+    /// Grok's documented rules are its Standard-mode contract. Unmatched calls
+    /// fall through to `dontAsk`, which denies in a headless turn.
+    pub grok_allow_rules: &'a [String],
     pub attachments: &'a [std::path::PathBuf],
 }
 
@@ -427,6 +430,12 @@ pub fn chat_agent_command(
             "codex" => argv.retain(|arg| arg != "--dangerously-bypass-approvals-and-sandbox"),
             "grok" => {
                 argv.retain(|arg| arg != "--permission-mode" && arg != "bypassPermissions");
+                let at = argv.len().saturating_sub(1);
+                let mut rules = vec!["--permission-mode".into(), "dontAsk".into()];
+                for rule in launch.grok_allow_rules {
+                    rules.extend(["--allow".into(), rule.clone()]);
+                }
+                argv.splice(at..at, rules);
             }
             "cursor" => argv.retain(|arg| arg != "--trust"),
             "opencode" | "opencode2" => argv.retain(|arg| arg != "--auto"),
@@ -2115,6 +2124,7 @@ mod tests {
                 bypass: false,
                 hook_command: None,
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2137,6 +2147,7 @@ mod tests {
                     "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
                 ),
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2161,6 +2172,7 @@ mod tests {
                 bypass: false,
                 hook_command: None,
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2181,6 +2193,7 @@ mod tests {
                 bypass: false,
                 hook_command: Some("/tmp/tokenstat-hostd"),
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2201,6 +2214,7 @@ mod tests {
                 bypass: true,
                 hook_command: None,
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2222,6 +2236,7 @@ mod tests {
                 bypass: false,
                 hook_command: Some("/tmp/tokenstat-hostd"),
                 agy_customization_dir: Some(agy_home),
+                grok_allow_rules: &[],
                 attachments: &[],
             },
         )
@@ -2230,6 +2245,31 @@ mod tests {
             guarded_agy
                 .windows(2)
                 .any(|pair| pair == ["--add-dir", "/private/tmp/tokenstat-agy"])
+        );
+        let rules = vec!["Read".into(), "Bash(git status*)".into()];
+        let grok = chat_agent_command(
+            "grok",
+            "inspect this",
+            None,
+            None,
+            DEFAULT_BUDGET_SECONDS,
+            ChatLaunch {
+                resume: None,
+                bypass: false,
+                hook_command: None,
+                agy_customization_dir: None,
+                grok_allow_rules: &rules,
+                attachments: &[],
+            },
+        )
+        .unwrap();
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--permission-mode", "dontAsk"])
+        );
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair == ["--allow", "Bash(git status*)"])
         );
     }
 
@@ -2247,6 +2287,7 @@ mod tests {
                 bypass: false,
                 hook_command: None,
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[attachment.clone()],
             },
         )
@@ -2267,6 +2308,7 @@ mod tests {
                 bypass: false,
                 hook_command: None,
                 agy_customization_dir: None,
+                grok_allow_rules: &[],
                 attachments: &[attachment],
             },
         )
