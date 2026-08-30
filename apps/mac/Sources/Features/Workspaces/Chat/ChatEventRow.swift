@@ -137,7 +137,7 @@ struct ChatApprovalCard: View {
                     .background(Theme.accentSoft, in: Capsule())
             }
             Text(approval.preview)
-                .font(.system(.footnote, design: .monospaced))
+                .font(Theme.monoText(11))
                 .textSelection(.enabled)
                 .foregroundStyle(.primary)
                 .lineLimit(4)

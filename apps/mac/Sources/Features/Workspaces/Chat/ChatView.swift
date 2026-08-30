@@ -94,7 +94,7 @@ struct ChatView: View {
                     .font(Theme.callout.weight(.medium))
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(Theme.fixed(9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)

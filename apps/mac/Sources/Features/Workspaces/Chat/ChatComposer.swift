@@ -234,7 +234,7 @@ struct ChatAttachmentTile: View {
             Button("Remove", .dismiss) { onRemove() }
                 .buttonStyle(.plain)
                 .environment(\.compactActions, true)
-                .font(.system(size: 8, weight: .bold))
+                .font(Theme.fixed(8, weight: .bold))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 18, height: 18)
                 .background(Theme.panel, in: Circle())

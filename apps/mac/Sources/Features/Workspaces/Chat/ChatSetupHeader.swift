@@ -266,7 +266,7 @@ struct ChatComposerControls: View {
         .disabled(locked)
         if isBypassOnly {
             Text("Bypass")
-                .font(.system(size: 12, weight: .medium))
+                .font(Theme.font(12, weight: .medium))
                 .foregroundStyle(Theme.accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -394,10 +394,10 @@ private struct ChatAgentMenu: View {
             HStack(spacing: 6) {
                 HarnessMark(id: chat.backend, size: 16)
                 Text(summary)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Theme.font(12, weight: .medium))
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(Theme.fixed(8, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
@@ -467,7 +467,7 @@ struct ChatCompactPills: View {
                     selection = option.value
                 } label: {
                     Text(option.label)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(Theme.font(12, weight: .medium))
                         .foregroundStyle(option.value == selection ? Theme.accent : Color.secondary)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
