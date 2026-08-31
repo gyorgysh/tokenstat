@@ -75,6 +75,8 @@ struct ChatEventRow: View {
         case let .attachment(attachment):
             ChatResponseAttachment(attachment: attachment, data: attachmentData)
                 .id("\(attachment.id)-\(attachmentRevision)")
+        case let .handoff(to, brief):
+            ChatHandoffRow(agent: agentLabel(to), brief: brief)
         case let .approval(approval):
             ChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         case let .usage(input, output, cost):
@@ -278,6 +280,76 @@ private struct ChatEditRow: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
         }
+    }
+}
+
+/// The point where a conversation changed hands.
+///
+/// A backend switch used to be invisible and lossy: the incoming agent got a
+/// blank page and the person had to re-explain their own project to a second
+/// robot in the same window. It now receives a summary folded from the
+/// transcript, and this row is where that fact lives.
+///
+/// The summary is disclosed, not hidden. It is text tokenstat wrote and put in
+/// front of somebody's agent on their behalf, which is exactly the kind of
+/// thing that should never be invisible to them.
+struct ChatHandoffRow: View {
+    let agent: String
+    let brief: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(height: 1)
+                    .frame(maxWidth: 40)
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(Theme.font(10, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Handed to \(agent)")
+                    .font(Theme.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                    .fixedSize()
+                if !brief.isEmpty {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(expanded ? "Hide summary" : "What it was told")
+                            Image(systemName: "chevron.right")
+                                .font(Theme.font(9, weight: .semibold))
+                                .rotationEffect(.degrees(expanded ? 90 : 0))
+                        }
+                        .font(Theme.caption)
+                        .foregroundStyle(.secondary)
+                        .contentShape(.rect)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(height: 1)
+            }
+            if expanded {
+                Text(brief)
+                    .font(Theme.monoText(11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Theme.Space.s)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Theme.border, lineWidth: 1)
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Handed to \(agent), with a summary of the conversation so far")
     }
 }
 

@@ -199,6 +199,16 @@ enum StoredEvent {
         approval: Approval,
         at_ms: i64,
     },
+    /// One agent handing the conversation to another.
+    ///
+    /// Recorded in full, brief included, for the same reason the instructions
+    /// card exists: this is text tokenstat put in front of somebody's agent,
+    /// so the conversation is where they can read it.
+    Handoff {
+        to: String,
+        brief: String,
+        at_ms: i64,
+    },
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -821,6 +831,37 @@ impl Store {
         Ok((events, end as u64))
     }
 
+    /// The handover an incoming backend should be given, if any.
+    ///
+    /// Due exactly when this conversation has history and the backend about to
+    /// run has no session of its own to resume. That covers the case this
+    /// exists for (somebody switched agent mid-conversation) and excludes the
+    /// two it must not fire on: a first turn, which has nothing to hand over,
+    /// and an ordinary resume, where the agent already remembers.
+    fn handoff_brief(&self, chat: &Conversation) -> Result<Option<String>, String> {
+        if chat.resume_tokens.contains_key(&chat.backend) {
+            return Ok(None);
+        }
+        let (events, _) = self.events(&chat.id, 0)?;
+        let folder = crate::workspaces::folder(&chat.workspace_id)
+            .map(|workspace| workspace.path.display().to_string())
+            .unwrap_or_default();
+        let brief = crate::chat_brain::brief(&events, &folder, crate::chat_brain::BUDGET);
+        Ok((!brief.is_empty()).then_some(brief))
+    }
+
+    /// Keep the handover on disk beside the timeline it was folded from.
+    ///
+    /// Three reasons, all real: a person can read what their agent was told,
+    /// a later parser fix can regenerate it, and a backend with a file-reading
+    /// tool can be pointed at the path rather than handed the whole text.
+    fn write_brain(&self, id: &str, brief: &str) -> Result<(), String> {
+        let path = self.root.join(id).join("brain.md");
+        fs::create_dir_all(path.parent().ok_or("invalid chat path")?)
+            .map_err(|error| error.to_string())?;
+        fs::write(path, brief).map_err(|error| error.to_string())
+    }
+
     pub fn attach(
         &self,
         id: &str,
@@ -910,8 +951,23 @@ impl Store {
             output_dir: &response_output_dir,
             backend: &chat.backend,
         });
-        let system_append = standing_is_due(&chat, &composed.standing_fingerprint)
-            .then_some(composed.standing_text.as_str());
+        // Two separate things ride the same channel this turn. The standing
+        // rules repeat for as long as they are unchanged; the handover is sent
+        // exactly once, to the agent that has just been handed a conversation
+        // it did not have.
+        let standing_due = standing_is_due(&chat, &composed.standing_fingerprint);
+        let handoff = self.handoff_brief(&chat)?;
+        let mut instructions = String::new();
+        if standing_due {
+            instructions.push_str(&composed.standing_text);
+        }
+        if let Some(brief) = &handoff {
+            if !instructions.is_empty() {
+                instructions.push_str("\n\n");
+            }
+            instructions.push_str(brief);
+        }
+        let system_append = (!instructions.is_empty()).then_some(instructions.as_str());
         let prompt = composed.user_text.as_str();
         // The daemon asks its own tool calls back through itself. A relative
         // PATH lookup would be wrong under launchd and inside the private
@@ -1048,8 +1104,22 @@ impl Store {
         // Only once the process exists. A spawn that failed delivered nothing,
         // and marking it sent would silently drop this conversation's rules
         // from every later turn on that backend.
-        if system_append.is_some() {
+        if standing_due {
             self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
+        }
+        // The handover goes on the timeline, brief and all. It is text
+        // tokenstat put in front of somebody's agent, so their conversation is
+        // where it should be readable.
+        if let Some(brief) = &handoff {
+            self.write_brain(id, brief)?;
+            self.append(
+                id,
+                &StoredEvent::Handoff {
+                    to: chat.backend.clone(),
+                    brief: brief.clone(),
+                    at_ms: now_ms(),
+                },
+            )?;
         }
         self.append(
             id,
@@ -2006,6 +2076,84 @@ mod tests {
         assert_eq!(claude["gateTier"], "full");
         assert!(claude.get("models").is_some());
         assert!(claude.get("efforts").is_some());
+    }
+
+    /// A handover is due exactly when somebody switched agent mid-conversation.
+    /// Not on a first turn, which has nothing to hand over, and not on a
+    /// resume, where the agent already remembers.
+    #[test]
+    fn a_handover_is_due_only_when_a_conversation_changes_hands() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let mut chat = Conversation {
+            id: "chat-handoff".into(),
+            workspace_id: "ws".into(),
+            title: "Handoff".into(),
+            backend: "claude".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: "execute".into(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        };
+        store.conversations.lock().unwrap().push(chat.clone());
+
+        // Nothing has happened yet, so there is nothing to hand over.
+        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
+
+        store
+            .append(
+                "chat-handoff",
+                &StoredEvent::User {
+                    text: "Add a retry to the uploader".into(),
+                    at_ms: 1,
+                },
+            )
+            .unwrap();
+        store
+            .append(
+                "chat-handoff",
+                &StoredEvent::Agent {
+                    event: Event::Edit {
+                        call_id: "c1".into(),
+                        path: "src/upload.rs".into(),
+                        added: 12,
+                        removed: 3,
+                        patch: String::new(),
+                    },
+                    at_ms: 2,
+                    backend: "claude".into(),
+                },
+            )
+            .unwrap();
+
+        // Claude has run and holds its own session, so it needs no summary.
+        chat.resume_tokens
+            .insert("claude".into(), "session-1".into());
+        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
+
+        // Switching to an agent with no session of its own is the whole point.
+        chat.backend = "codex".into();
+        let brief = store
+            .handoff_brief(&chat)
+            .unwrap()
+            .expect("an incoming agent must be told what happened");
+        assert!(brief.contains("Add a retry to the uploader"));
+        assert!(brief.contains("src/upload.rs +12 −3"));
+
+        // And once codex has its own session, it stops being handed one.
+        chat.resume_tokens.insert("codex".into(), "thread-1".into());
+        assert_eq!(store.handoff_brief(&chat).unwrap(), None);
     }
 
     #[test]

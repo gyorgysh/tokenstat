@@ -606,6 +606,9 @@ struct ChatDisplayItem: Identifiable {
         case user(String)
         case assistant(String, backend: String?)
         case turnSeparator(String)
+        /// A conversation changing hands, with the summary the incoming agent
+        /// was given so the person can read exactly what it was told.
+        case handoff(to: String, brief: String)
         case thinking(String)
         case tool(ChatToolState)
         case edit(path: String, added: UInt32, removed: UInt32, patch: String)
@@ -671,6 +674,19 @@ struct ChatDisplayItem: Identifiable {
                         kind: .user(event.text ?? "")
                     )
                 )
+                continue
+            }
+            if event.kind == "handoff" {
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "handoff-\(event.atMs ?? 0)-\(items.count)",
+                        kind: .handoff(to: event.to ?? "", brief: event.brief ?? "")
+                    )
+                )
+                // The separator would say the same thing twice, less well.
+                lastBackend = event.to ?? lastBackend
                 continue
             }
             if let approval = event.approval {

@@ -2510,8 +2510,13 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var backend: String?
     var event: ChatAgentEvent?
     var approval: ChatApproval?
+    /// Handoff only: the agent picking the conversation up, and the summary it
+    /// was given. Recorded in the timeline rather than hidden, because it is
+    /// text tokenstat put in front of somebody's agent on their behalf.
+    var to: String?
+    var brief: String?
     var id: String {
-        "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? approval?.id ?? "event")"
+        "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? approval?.id ?? to ?? "event")"
     }
 }
 

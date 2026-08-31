@@ -54,6 +54,14 @@ desktop and Android builds remain previews. Newest first.
   one tool or one command prefix, for that conversation only, and the
   inspector lists what it remembered. A paired phone can answer the same
   card, and whichever surface answers first wins.
+- Changing agent mid-conversation no longer starts from nothing. The incoming
+  agent is handed a summary folded from the conversation itself: what was
+  asked, which files changed, which commands ran, what you refused, and where
+  it was left. It is sent once, to an agent that has no session of its own to
+  resume, never on an ordinary continuation. The transcript shows where the
+  conversation changed hands and will show you the exact summary that was
+  sent, and the same text is kept beside the chat as `brain.md`. Like the rest
+  of a conversation, none of it is eligible for sync.
 - Chat also brings a grok Standard turn that keeps its output format, Cursor
   without a named model using Auto, and a tool call that no longer blanks
   the transcript or stays Running after the turn ends. The phone is a list

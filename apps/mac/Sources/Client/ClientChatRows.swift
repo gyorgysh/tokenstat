@@ -73,6 +73,8 @@ struct ClientChatEventRow: View {
         case let .attachment(attachment):
             ClientChatResponseAttachment(attachment: attachment, data: attachmentData)
                 .id("\(attachment.id)-\(attachmentRevision)")
+        case let .handoff(to, brief):
+            ClientChatHandoffRow(agent: agentLabel(to), brief: brief)
         case let .approval(approval):
             ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         case let .usage(input, output, cost):
@@ -237,6 +239,48 @@ private struct ClientChatEditRow: View {
         .padding(Theme.Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardSurface()
+    }
+}
+
+/// The point where a conversation changed hands, and what the incoming agent
+/// was told. Same promise as the Mac: the summary is disclosed, never hidden.
+struct ClientChatHandoffRow: View {
+    let agent: String
+    let brief: String
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.s) {
+            HStack(spacing: Theme.Space.s) {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(Theme.font(10, weight: .semibold))
+                    .foregroundStyle(Theme.accent)
+                Text("Handed to \(agent)")
+                    .font(ClientType.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                Spacer(minLength: 0)
+                if !brief.isEmpty {
+                    Button(expanded ? "Hide" : "What it was told") {
+                        withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
+                    }
+                    .buttonStyle(.plain)
+                    .font(ClientType.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            if expanded {
+                Text(brief)
+                    .font(ClientType.code)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(Theme.Space.s)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+        .padding(.vertical, Theme.Space.xs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Handed to \(agent), with a summary of the conversation so far")
     }
 }
 
