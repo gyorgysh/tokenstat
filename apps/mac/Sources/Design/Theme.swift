@@ -689,10 +689,15 @@ extension EnvironmentValues {
 ///
 /// Toggles no longer live in the system toolbar, so Home and Insights share
 /// the same chrome shape and the window titlebar stays traffic lights only.
-struct DetailChromeBar<Leading: View, Trailing: View>: View {
+struct DetailChromeBar<Leading: View, Accessory: View, Trailing: View>: View {
     @Environment(\.detailChromeToggles) private var toggles
     /// Extra leading items after the shared toggles (back, etc.).
     @ViewBuilder var leading: () -> Leading
+    /// Something that belongs to the folder rather than to the screen, drawn
+    /// immediately after its name. A branch is the example: it says which
+    /// version of that folder is on screen, so it reads as part of the folder
+    /// and not as one more control at the far end of the bar.
+    @ViewBuilder var accessory: () -> Accessory
     @ViewBuilder var trailing: () -> Trailing
     /// Which folder this screen is showing, when it is showing one.
     ///
@@ -704,10 +709,12 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
     init(
         scope: ScopeChip? = nil,
         @ViewBuilder leading: @escaping () -> Leading = { EmptyView() },
+        @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() },
         @ViewBuilder trailing: @escaping () -> Trailing
     ) {
         self.scope = scope
         self.leading = leading
+        self.accessory = accessory
         self.trailing = trailing
     }
 
@@ -727,6 +734,7 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
                 if let scope {
                     scope
                 }
+                accessory()
             }
             Spacer(minLength: 0)
             HStack(spacing: Theme.Space.s) {

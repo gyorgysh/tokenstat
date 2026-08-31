@@ -16,6 +16,10 @@ desktop and Android builds remain previews. Newest first.
   persona new conversations inherit and offers "No persona" alongside them,
   replacing the "Make default" button, which could only ever say yes to
   whichever persona happened to be open.
+- Chat in a Git folder shows the branch beside the folder name, and switches
+  branches from there, the same control the workspace already had. Chat is not
+  drawn inside the workspace surface, so it never inherited that header and a
+  conversation about a repository could not say which branch it was about.
 - A chat in the sidebar no longer jumps when the pointer reaches it. The
   remove button used to be inserted into the row on hover, which made the row
   taller and the title narrower at that moment and shifted every row under it.

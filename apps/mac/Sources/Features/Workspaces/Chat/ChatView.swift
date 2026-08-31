@@ -6,6 +6,14 @@ struct ChatView: View {
     @Bindable var model: ChatModel
     let workspaceID: String
     var workspaceName: String? = nil
+    /// The folder's git state, when it has one. Chat is not drawn inside the
+    /// workspace surface, so it never inherited the header that carries the
+    /// branch control, and a chat about a repository could not say which
+    /// branch it was about or move to another one.
+    var git: GitStatus? = nil
+    /// Refresh the folder after a checkout, so the chip and everything else
+    /// reading git agree about where the folder now is.
+    var onBranchChanged: (() async -> Void)? = nil
     @State private var draft = ""
     @State private var draftSelection = NSRange(location: 0, length: 0)
     /// A row the transcript should jump to, set by the pending-approval bar.
@@ -21,7 +29,17 @@ struct ChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             #if os(macOS)
-            DetailChromeBar(scope: workspaceName.map { ScopeChip(label: $0, symbol: "folder.fill") }) {
+            DetailChromeBar(
+                scope: workspaceName.map { ScopeChip(label: $0, symbol: "folder.fill") },
+                accessory: {
+                    if let git, git.isRepo {
+                        BranchChip(workspaceID: workspaceID, git: git) {
+                            await onBranchChanged?()
+                        }
+                        .fixedSize()
+                    }
+                }
+            ) {
                 ToolbarIconButton(systemImage: "plus", help: "New chat") {
                     Task { await model.create() }
                 }

@@ -2203,10 +2203,13 @@ struct RootView: View {
              .workspace(_, .files), .workspace(_, .browser):
             EmptyView()
         case let .workspace(id, .chat):
+            let folder = workspaces.folders.first { $0.id == id }
             ChatView(
                 model: chat,
                 workspaceID: id,
-                workspaceName: workspaces.folders.first { $0.id == id }?.name
+                workspaceName: folder?.name,
+                git: folder?.git,
+                onBranchChanged: { await workspaces.refresh() }
             )
         case let .workspace(id, .pulls):
             let folder = workspaces.folders.first { $0.id == id }
