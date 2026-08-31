@@ -838,7 +838,7 @@ private struct NewCardForm: View {
                             .font(Theme.caption)
                             .foregroundStyle(.secondary)
                         TextField("180", text: $budgetMinutes)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.themed)
                             .frame(width: 56)
                             .multilineTextAlignment(.trailing)
                             .disabled(noTimeLimit)

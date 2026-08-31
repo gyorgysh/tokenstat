@@ -1749,7 +1749,7 @@ private struct RemotePortForm: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("Port", text: $port)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .frame(width: 120)
             HStack {
                 Spacer()

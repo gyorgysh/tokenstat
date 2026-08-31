@@ -12,6 +12,9 @@
 #   - a `.tint(…)` modifier whose argument is not a `Theme.` colour
 #   - `Divider()`, whose line colour comes from the platform material rather
 #     than the app palette. Use `ThemeRule` instead.
+#   - `.roundedBorder`, AppKit's bezel and UIKit's, which resolves to a flat
+#     mid grey on a dark panel. Use `.themed`, `.themedSmall`, or
+#     `.themedMultiline` for a field that grows.
 #
 # The action-icon guard is the precedent. A convention nobody can enforce by
 # remembering is a convention that comes back.
@@ -44,6 +47,7 @@ BANNED = [
     ("Color.blue", "system blue"),
     (".accentColor", "the system accent"),
     ("Divider()", "a system divider"),
+    (".roundedBorder", "the platform's field bezel"),
 ]
 
 
@@ -82,8 +86,9 @@ def main():
         print(f"{path}:{number}  {text}")
         print(f"    ^ {what}")
     print()
-    print(f"{len(problems)} place(s) not using the app's accent. Use Theme.accent,")
-    print("or, if the colour is genuinely somebody else's, add it to ALLOWED here.")
+    print(f"{len(problems)} place(s) not on the app's own surface. Use Theme.accent")
+    print("or a themed control, or, if it is genuinely somebody else's, add it")
+    print("to ALLOWED here.")
     return 1
 
 

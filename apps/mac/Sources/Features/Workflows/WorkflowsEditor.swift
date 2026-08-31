@@ -114,7 +114,7 @@ struct WorkflowsEditor: View {
                 .buttonStyle(SecondaryButtonStyle(small: true))
             }
             TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .frame(width: compact ? 150 : 220)
                 .onChange(of: name) { _, next in
                     guard next != model.working?.name else { return }
@@ -322,7 +322,7 @@ struct WorkflowDesignSheet: View {
                     Banner(text: error, severity: .warning)
                 }
                 TextField("Describe the run", text: $prompt, axis: .vertical)
-                    .textFieldStyle(.themed)
+                    .textFieldStyle(.themedMultiline)
                     .lineLimit(3...8)
                     .disabled(model.isDesigning)
                 if !designRecipes.isEmpty {

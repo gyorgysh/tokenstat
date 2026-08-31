@@ -16,6 +16,11 @@ desktop and Android builds remain previews. Newest first.
   persona new conversations inherit and offers "No persona" alongside them,
   replacing the "Make default" button, which could only ever say yes to
   whichever persona happened to be open.
+- Text fields across Workflows, Tasks, Automations, Devices, the browser bar
+  and the harness settings sit on the app's own surface instead of the
+  platform's grey bezel, which on a dark panel belonged to no part of the
+  design. A field asked to hold a paragraph is now as tall as it was asked to
+  be: the describe box in Workflows showed one line whatever it was given.
 - Chat in a Git folder shows the branch beside the folder name, and switches
   branches from there, the same control the workspace already had. Chat is not
   drawn inside the workspace surface, so it never inherited that header and a

@@ -188,7 +188,7 @@ struct AutomationsView: View {
                         .font(Theme.callout)
                     Spacer()
                     TextField("180", text: $model.queueBudgetMinutes)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.themed)
                         .frame(width: 56)
                         .multilineTextAlignment(.trailing)
                         .disabled(model.queueNoLimit)
@@ -216,7 +216,7 @@ struct AutomationsView: View {
                         uncapped: (Int(model.queueMaxConcurrent) ?? 0) == 0
                     )
                     TextField("2", text: $model.queueMaxConcurrent)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.themed)
                         .frame(width: 56)
                         .multilineTextAlignment(.trailing)
                         .onChange(of: model.queueMaxConcurrent) { _, _ in
@@ -1101,7 +1101,7 @@ struct NewAutomationSheet: View {
                 }
             }
         }
-        .textFieldStyle(.roundedBorder)
+        .textFieldStyle(.themed)
         .controlSize(.small)
     }
 

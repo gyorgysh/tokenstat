@@ -108,7 +108,7 @@ struct BrowserView: View {
             }
 
             TextField("Enter a URL, for example localhost:8000", text: $text)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .font(Theme.mono(11))
                 .onSubmit { commit(text) }
 

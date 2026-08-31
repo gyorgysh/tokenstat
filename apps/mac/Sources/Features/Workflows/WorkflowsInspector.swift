@@ -106,7 +106,7 @@ struct WorkflowsInspector: View {
                             model.writeWorking { $0.name = next }
                         }
                     ))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                     if graph.id.isEmpty {
                         Text("Unsaved draft. It will not run until you save and press Run.")
                             .font(Theme.caption)
@@ -136,7 +136,7 @@ struct WorkflowsInspector: View {
                         get: { model.draft?.name ?? graph.name },
                         set: { model.draft?.name = $0 }
                     ))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                     Text("Unsaved draft. It will not run until you save and press Run.")
                         .font(Theme.caption)
                         .foregroundStyle(.secondary)
@@ -327,7 +327,7 @@ private struct WorkflowBudgetField: View {
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
             TextField("180", text: $minutes)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .frame(width: 56)
                 .multilineTextAlignment(.trailing)
                 .disabled(noLimit)
@@ -477,7 +477,7 @@ private struct WorkflowNodeInspector: View {
             .font(Theme.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
         TextField("Title", text: $title)
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(.themed)
             .onChange(of: title) { _, next in
                 guard !applying else { return }
                 write(node.id) { $0.title = next }
@@ -701,7 +701,7 @@ private struct WorkflowNodeInspector: View {
                 ),
                 axis: axis == .vertical ? .vertical : .horizontal
             )
-            .textFieldStyle(.roundedBorder)
+            .textFieldStyle(axis == .vertical ? .themedMultiline : .themed)
             .lineLimit(axis == .vertical ? 3...10 : 1...1)
         }
     }

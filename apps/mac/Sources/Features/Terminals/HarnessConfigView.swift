@@ -127,7 +127,7 @@ struct HarnessConfigView: View {
                 numberSlider(field)
             default:
                 TextField(field.label, text: stringBinding(field.key))
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themed)
                     .font(Theme.font(13))
             }
             if let hint = field.hint {

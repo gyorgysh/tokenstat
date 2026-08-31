@@ -301,7 +301,7 @@ struct WorkflowsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: Theme.Space.s) {
                 TextField("Rewrite the prompt, plan it, build it, then review", text: $designPrompt, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.themedMultiline)
                     .lineLimit(3...8)
                     .focused($designFocused)
                     .disabled(model.isDesigning)

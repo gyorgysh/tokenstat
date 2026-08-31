@@ -501,7 +501,7 @@ struct ClientDeviceDetailView: View {
                 .font(ClientType.caption)
                 .foregroundStyle(.secondary)
             TextField("Name this device", text: $draft)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.themed)
                 .autocorrectionDisabled()
                 .focused($editingName)
                 .submitLabel(.done)

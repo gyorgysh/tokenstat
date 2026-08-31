@@ -1554,13 +1554,15 @@ struct SecondaryButtonStyle: ButtonStyle {
 struct ThemedFieldStyle: TextFieldStyle {
     /// Dense variant, for a field sharing a row with small buttons.
     var small = false
+    /// A field that grows with what is typed into it.
+    var multiline = false
     /// The face for the text. See `ThemedFieldBox.font`: chaining `.font`
     /// after the style does not reach the text.
     var font: Font?
 
     // The protocol's requirement is underscored. Nothing to be done about it.
     func _body(configuration: TextField<Self._Label>) -> some View {
-        configuration.themedFieldBox(small: small, font: font)
+        configuration.themedFieldBox(small: small, multiline: multiline, font: font)
     }
 }
 
@@ -1568,6 +1570,10 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
     /// `TextField("Name", text: $name).textFieldStyle(.themed)`
     static var themed: ThemedFieldStyle { ThemedFieldStyle() }
     static var themedSmall: ThemedFieldStyle { ThemedFieldStyle(small: true) }
+    /// For `TextField(..., axis: .vertical)`. The plain themed box pins a
+    /// field to one row's height, which is right for a name and wrong for a
+    /// paragraph: a field asked to hold three to eight lines still showed one.
+    static var themedMultiline: ThemedFieldStyle { ThemedFieldStyle(multiline: true) }
     /// For a code or a fingerprint, where the character shapes matter.
     static func themedMono(_ size: CGFloat) -> ThemedFieldStyle {
         ThemedFieldStyle(font: Theme.mono(size))
@@ -1588,6 +1594,8 @@ extension TextFieldStyle where Self == ThemedFieldStyle {
 /// the same field rather than a feature.
 struct ThemedFieldBox: ViewModifier {
     var small = false
+    /// Whether the field is allowed to be taller than one row.
+    var multiline = false
     /// The face for the text, where the default is wrong.
     ///
     /// A recovery code is the case this exists for. The box used to set its
@@ -1613,20 +1621,38 @@ struct ThemedFieldBox: ViewModifier {
     }
 
     func body(content: Content) -> some View {
-        content
+        let field = content
             .textFieldStyle(.plain)
             .font(font ?? defaultFont)
             .padding(.horizontal, Theme.Space.s)
+        return Group {
             #if os(macOS)
-            .frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            // A fixed height is what gives a row of single-line fields the
+            // same rhythm as the buttons beside them. A field that grows needs
+            // a floor instead, or it holds one line whatever it was asked for.
+            if multiline {
+                field
+                    .padding(.vertical, small ? 5 : 7)
+                    .frame(
+                        minHeight: small ? Theme.Control.heightSmall : Theme.Control.height,
+                        alignment: .topLeading
+                    )
+            } else {
+                field.frame(height: small ? Theme.Control.heightSmall : Theme.Control.height)
+            }
             #else
-            .padding(.vertical, small ? 5 : 7)
-            .frame(minHeight: small ? Theme.Control.heightSmall : Theme.Control.height)
+            field
+                .padding(.vertical, small ? 5 : 7)
+                .frame(
+                    minHeight: small ? Theme.Control.heightSmall : Theme.Control.height,
+                    alignment: multiline ? .topLeading : .leading
+                )
             #endif
-            .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1)
-            )
+        }
+        .background(Theme.panel, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1)
+        )
     }
 }
 
@@ -1636,8 +1662,12 @@ extension View {
     /// Pass `font` for a field whose face matters, such as a recovery code.
     /// Chaining `.font` after this does not work: the box sets the font
     /// nearer the text than the caller can.
-    func themedFieldBox(small: Bool = false, font: Font? = nil) -> some View {
-        modifier(ThemedFieldBox(small: small, font: font))
+    func themedFieldBox(
+        small: Bool = false,
+        multiline: Bool = false,
+        font: Font? = nil
+    ) -> some View {
+        modifier(ThemedFieldBox(small: small, multiline: multiline, font: font))
     }
 }
 
