@@ -1040,6 +1040,29 @@ extension Bridge {
         )
     }
 
+    /// One short turn on an installed agent, run to completion on the host.
+    ///
+    /// `Patience.long` because it spawns a CLI and waits for a whole answer,
+    /// and the host caps it at ninety seconds of its own. The standard budget
+    /// would give up first and leave a wizard saying the host was unreachable
+    /// when it was simply thinking.
+    static func draftChatPersona(
+        brief: String,
+        backend: String,
+        peer: String? = nil
+    ) async throws -> ChatPersonaDraft {
+        let params: [String: Any] = ["text": brief, "backend": backend]
+        if let peer {
+            return try await onPeer(peer, "chat.personaDraft", params, as: ChatPersonaDraft.self)
+        }
+        return try await background(
+            "chat.personaDraft",
+            params,
+            patience: Patience.long,
+            as: ChatPersonaDraft.self
+        )
+    }
+
     static func chatPersonas(peer: String? = nil) async throws -> [ChatPersona] {
         try await chatInvoke(peer: peer, "chat.personas", as: [ChatPersona].self)
     }

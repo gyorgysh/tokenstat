@@ -134,19 +134,25 @@ pub fn as_prompt_prefix(standing_text: &str, prompt: &str) -> String {
 }
 
 /// A short, stable identifier for a block of standing text.
-///
-/// FNV-1a, written out rather than taken from `DefaultHasher`, because this
-/// value is persisted in `conversations.json` and compared on a later run.
-/// `DefaultHasher` makes no promise across Rust versions, and a silent change
-/// there would re-send every conversation's rules once, to every backend, for
-/// no reason anybody could see.
 pub fn fingerprint(text: &str) -> String {
+    format!("{:016x}", stable_hash(text))
+}
+
+/// A stable number from a string.
+///
+/// FNV-1a, written out rather than taken from `DefaultHasher`, because these
+/// values are **persisted and compared on a later run**: a conversation's
+/// standing-rules fingerprint, and the seed a persona's face is drawn from.
+/// `DefaultHasher` makes no promise across Rust versions, and a silent change
+/// there would re-send every conversation's rules once and give every persona
+/// a new face, for no reason anybody could see.
+pub fn stable_hash(text: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("{hash:016x}")
+    hash
 }
 
 #[cfg(test)]

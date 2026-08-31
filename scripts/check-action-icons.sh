@@ -57,6 +57,15 @@ ALLOWED = [
     ("Features/Automations/AutomationsView.swift", "intervalMinutes = String(minutes)"),
     ("Features/Automations/AutomationsView.swift", "scheduleWeekday = day.0"),
     ("Features/Terminals/TerminalPane.swift", "start(profile)"),
+    # A menu row inside content. The platform draws the menu and its
+    # selection mark, exactly as it does for the main menu, so an action
+    # glyph on each conversation would be a second mark competing with it.
+    ("Features/Workspaces/Chat/ChatView.swift", "await model.select(conversation)"),
+    # Whole-surface controls: the tag is the label. A starting point fills the
+    # field it sits under, and "Show more" reveals the rows below it, so in
+    # both cases a glyph would name an action the surface already is.
+    ("Features/Workspaces/Chat/PersonaEditor.swift", "wish = point.1"),
+    ("App/RootView.swift", "expandedChatHistories"),
     # The busy variant of the editor footer's action. It carries a glyph when
     # it is idle; while a request is in flight the spinner stands in for it.
     ("Features/Machines/SSHLibraryEditors.swift", "ProgressView().controlSize(.small)"),

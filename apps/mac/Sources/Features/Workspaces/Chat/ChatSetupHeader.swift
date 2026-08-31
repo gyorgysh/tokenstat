@@ -27,6 +27,32 @@ struct ChatSetupHeader: View {
         .onChange(of: chat.backend) { _, _ in enforceBypassOnly() }
     }
 
+    /// The persona picker, with the chosen one's face beside it.
+    ///
+    /// The face is the point of the row: a name in a menu is a setting, and a
+    /// character sitting next to it is the thing you recognise from the
+    /// transcript. Split out of `form` because the type checker gave up on
+    /// that expression once the options list grew a second clause.
+    private var personaRow: some View {
+        HStack(spacing: Theme.Space.s) {
+            PersonaMark(seed: model.faceSeed, size: 30)
+            AppMenuPicker(
+                title: "Persona",
+                options: personaOptions,
+                selection: personaBinding
+            )
+            .disabled(chat.running)
+        }
+    }
+
+    private var personaOptions: [(value: String, label: String)] {
+        var options: [(value: String, label: String)] = [(value: "", label: "No persona")]
+        for persona in model.personas {
+            options.append((value: persona.id, label: persona.name))
+        }
+        return options
+    }
+
     private var form: some View {
         VStack(alignment: .leading, spacing: Theme.Space.m) {
             if showsIntro {
@@ -39,20 +65,7 @@ struct ChatSetupHeader: View {
             }
             agentRow
             if !model.personas.isEmpty {
-                AppMenuPicker(
-                    title: "Persona",
-                    options: [(value: "", label: "No preset")]
-                        + model.personas.map { persona in
-                            (
-                                value: persona.id,
-                                label: persona.mark.isEmpty
-                                    ? persona.name
-                                    : "\(persona.mark)  \(persona.name)"
-                            )
-                        },
-                    selection: personaBinding
-                )
-                .disabled(chat.running)
+                personaRow
             }
             SegmentedCapsulePicker(
                 options: [

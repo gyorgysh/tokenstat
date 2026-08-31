@@ -200,20 +200,29 @@ final class ChatModel {
         }
     }
 
+    /// Give this conversation a voice, and change nothing else.
+    ///
+    /// A persona no longer picks the agent, the model, the mode or the
+    /// autonomy: those belong to the conversation and the person adjusts them
+    /// there. That is what lets one persona be used with any agent, and what
+    /// lets it survive a chat being handed from one to another.
     func applyPersona(_ persona: ChatPersona?) async {
         guard let persona else {
             await update(personaID: "", systemPrompt: "")
             return
         }
-        await update(
-            backend: persona.backend,
-            model: persona.model ?? "",
-            effort: persona.effort ?? "",
-            mode: persona.defaultMode,
-            autonomy: persona.defaultAutonomy,
-            personaID: persona.id,
-            systemPrompt: persona.systemPrompt
-        )
+        await update(personaID: persona.id, systemPrompt: persona.systemPrompt)
+    }
+
+    /// Ask an agent for a starting point, from a sentence about what the
+    /// persona should be good at. Returns a draft for a form, never a save.
+    func draftPersona(brief: String, backend: String) async -> ChatPersonaDraft? {
+        do {
+            return try await Bridge.draftChatPersona(brief: brief, backend: backend, peer: peer)
+        } catch {
+            self.error = error.localizedDescription
+            return nil
+        }
     }
 
     func remove(_ chat: ChatConversation) async {
@@ -404,6 +413,28 @@ final class ChatModel {
         displayItems.contains { item in
             guard case let .attachment(attachment) = item.kind else { return false }
             return responseAttachmentData[attachment.id] == nil
+        }
+    }
+
+    /// The face of the conversation on screen.
+    ///
+    /// Its persona's, when it has one, so the same character follows a persona
+    /// between chats. Otherwise the chat's own, derived from its id, because
+    /// every conversation should have a face whether or not anybody has made a
+    /// persona yet.
+    var faceSeed: UInt64 {
+        if let personaID = selected?.personaID,
+           let persona = personas.first(where: { $0.id == personaID }) {
+            return persona.seed
+        }
+        return personaSeed(for: selected?.id ?? "chat")
+    }
+
+    /// True while a tool is actually running, as opposed to the agent thinking.
+    var isRunningTool: Bool {
+        displayItems.contains { item in
+            if case let .tool(state) = item.kind { return state.running }
+            return false
         }
     }
 

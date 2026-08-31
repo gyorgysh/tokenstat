@@ -30,6 +30,9 @@ const ATTACHMENT_CAP: usize = 12 * 1024 * 1024;
 /// Allow on it would report success while the tool had already been refused.
 const APPROVAL_TTL_MS: i64 = crate::chat_gate::GATE_DEADLINE_SECONDS as i64 * 1000;
 const POLL: Duration = Duration::from_millis(400);
+/// A persona draft is one short text transform. Anything past this is a run
+/// that has gone wrong, and the wizard says so rather than waiting on it.
+const DRAFT_TIMEOUT: Duration = Duration::from_secs(90);
 static APPROVAL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -77,26 +80,37 @@ pub struct Conversation {
     pub running: bool,
 }
 
-/// A locally stored starting point for a conversation, never an autonomous
-/// agent. Its fields are copied into a chat at creation time.
+/// A voice, not a launcher.
+///
+/// A persona used to carry a backend, a model, an effort, a mode and an
+/// autonomy: a launch preset wearing the word. Every one of those already
+/// lives on the conversation and is adjustable there, so the persona was a
+/// duplicate that went stale, and a persona tied to one agent could not
+/// survive the conversation being handed to another.
+///
+/// What is left is what the word actually means: a name and a brief. It
+/// composes with whatever agent the chat happens to be on, which is also what
+/// lets it survive a backend switch.
+///
+/// Its brief is copied onto a conversation when it is applied, so editing a
+/// persona later cannot rewrite a chat that is already running.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Persona {
     pub id: String,
     pub name: String,
-    #[serde(default)]
-    pub mark: String,
-    pub backend: String,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub effort: Option<String>,
+    /// How this persona behaves, in the person's own words. The whole of what
+    /// a persona is, beside its name.
     #[serde(default)]
     pub system_prompt: String,
-    #[serde(default = "default_mode")]
-    pub default_mode: String,
-    #[serde(default = "default_autonomy")]
-    pub default_autonomy: String,
+    /// Drives the drawn character, and nothing else. Stable across a rename,
+    /// so a persona somebody knows by its face keeps that face.
+    #[serde(default)]
+    pub seed: u64,
+    #[serde(default)]
+    pub created_at_ms: i64,
+    #[serde(default)]
+    pub updated_at_ms: i64,
 }
 
 /// A locally staged file. The client only receives this descriptor; bytes
@@ -573,11 +587,17 @@ impl Store {
         if persona.name.trim().is_empty() {
             return Err("a persona needs a name".into());
         }
-        if persona.backend.trim().is_empty() {
-            return Err("a persona needs a backend".into());
-        }
+        let now = now_ms();
         if persona.id.is_empty() {
-            persona.id = format!("persona-{}", now_ms());
+            persona.id = format!("persona-{now}");
+            persona.created_at_ms = now;
+        }
+        persona.updated_at_ms = now;
+        // Derived from the id, so a persona keeps its face through a rename
+        // and through every edit of its brief. A caller that wants a different
+        // one sends a different seed; zero means "give me the usual one".
+        if persona.seed == 0 {
+            persona.seed = face_seed(&persona.id);
         }
         let mut personas = self.personas.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(existing) = personas
@@ -605,6 +625,80 @@ impl Store {
         Ok(removed)
     }
 
+    /// Draft a persona from a sentence about what it should be good at.
+    ///
+    /// One short turn on an installed agent, run to completion here rather
+    /// than streamed, because a wizard step needs its answer in one press and
+    /// there is nothing worth watching. Bypass, in a temporary directory, and
+    /// with a hard cap: this is a text transform, it has no business touching
+    /// anybody's project and no business running for a minute.
+    ///
+    /// **The result is a draft in a form, never a saved persona.** Generated
+    /// text goes into fields the person can edit and has to press Save on.
+    pub fn draft_persona(&self, brief: &str, backend: &str) -> Result<Value, String> {
+        let brief = brief.trim();
+        if brief.is_empty() {
+            return Err("say what this persona should be good at".into());
+        }
+        if backend.trim().is_empty() || backend == "sh" {
+            return Err("pick an agent to write the draft".into());
+        }
+        let argv = crate::automations::agent_command(
+            backend,
+            &draft_prompt(brief),
+            None,
+            None,
+            DRAFT_TIMEOUT.as_secs(),
+        )?;
+        // Its own directory, not the workspace. A draft is a sentence in and a
+        // sentence out; giving it somebody's repository to sit in would be
+        // handing it a chance to do something nobody asked for.
+        let cwd = std::env::temp_dir().join("tokenstat-persona-draft");
+        fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
+        let manager = tokenstat_pty::manager();
+        let info = manager
+            .spawn(&tokenstat_pty::Spawn {
+                command: argv[0].clone(),
+                args: argv[1..].to_vec(),
+                cwd,
+                workspace_id: None,
+                hidden: true,
+                rows: 24,
+                cols: 120,
+                no_color: false,
+                dark: None,
+                environment: Vec::new(),
+            })
+            .map_err(|error| error.to_string())?;
+
+        let mut parser = Parser::new(backend);
+        let reader = format!("persona-draft:{}", info.id);
+        let mut offset = 0;
+        let mut text = String::new();
+        let deadline = Instant::now() + DRAFT_TIMEOUT;
+        loop {
+            if let Ok(chunk) = manager.read_for_stream(&info.id, &reader, offset) {
+                offset = chunk.next_offset;
+                if !chunk.bytes.is_empty() {
+                    collect_agent_text(&parser.push_events(&chunk.bytes), &mut text);
+                }
+            }
+            if !manager.info(&info.id).map(|it| it.alive).unwrap_or(false) {
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = manager.kill(&info.id);
+                return Err("the draft took too long, so nothing was written".into());
+            }
+            std::thread::sleep(POLL);
+        }
+        if let Ok(chunk) = manager.read_for_stream(&info.id, &reader, offset) {
+            collect_agent_text(&parser.push_events(&chunk.bytes), &mut text);
+        }
+        collect_agent_text(&parser.finish_events(), &mut text);
+        draft_from_reply(&text, brief)
+    }
+
     pub fn create(&self, input: Create) -> Result<Conversation, String> {
         if input.workspace_id.trim().is_empty() {
             return Err("chat.create needs a workspaceId".into());
@@ -615,10 +709,10 @@ impl Store {
             .as_deref()
             .map(|id| self.persona(id))
             .transpose()?;
-        let backend = persona
-            .as_ref()
-            .map(|persona| persona.backend.clone())
-            .unwrap_or(input.backend);
+        // A persona no longer names an agent, so the agent is the caller's
+        // choice or the conversation's default. That is what lets one persona
+        // be used with any backend, and survive a switch mid-conversation.
+        let backend = input.backend;
         if backend.trim().is_empty() {
             return Err("chat.create needs a backend".into());
         }
@@ -633,28 +727,14 @@ impl Store {
                 .unwrap_or_else(|| "New chat".into()),
             backend,
             persona_id: persona.as_ref().map(|persona| persona.id.clone()),
-            model: persona
-                .as_ref()
-                .and_then(|persona| persona.model.clone())
-                .or(input.model),
-            effort: persona
-                .as_ref()
-                .and_then(|persona| persona.effort.clone())
-                .or(input.effort),
+            model: input.model,
+            effort: input.effort,
             system_prompt: persona
                 .as_ref()
                 .map(|persona| persona.system_prompt.clone())
                 .unwrap_or_default(),
-            mode: persona
-                .as_ref()
-                .map(|persona| persona.default_mode.clone())
-                .or(input.mode)
-                .unwrap_or_else(default_mode),
-            autonomy: persona
-                .as_ref()
-                .map(|persona| persona.default_autonomy.clone())
-                .or(input.autonomy)
-                .unwrap_or_else(default_autonomy),
+            mode: input.mode.unwrap_or_else(default_mode),
+            autonomy: input.autonomy.unwrap_or_else(default_autonomy),
             resume_token: None,
             resume_tokens: HashMap::new(),
             standing_sent: HashMap::new(),
@@ -1760,11 +1840,91 @@ fn title_from_prompt(prompt: &str) -> String {
     }
 }
 
+/// Read the saved personas, bringing older ones forward.
+///
+/// A persona used to carry a backend, model, effort, mark and autonomy. Serde
+/// drops those on the way in, which is the whole migration for them: they were
+/// duplicates of conversation state and there is nothing to preserve. The one
+/// field that has to be filled is the face seed, because a persona saved
+/// before faces existed must not get a different one on every launch.
 fn load_personas(root: &Path) -> Vec<Persona> {
-    fs::read(root.join("personas.json"))
+    let mut personas: Vec<Persona> = fs::read(root.join("personas.json"))
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    for persona in &mut personas {
+        if persona.seed == 0 {
+            persona.seed = face_seed(&persona.id);
+        }
+    }
+    personas
+}
+
+/// The number a persona's drawn character comes from.
+///
+/// Taken from the id rather than the name, so renaming "Reviewer" to "Careful
+/// reviewer" does not hand somebody a stranger. `| 1` because zero is the
+/// sentinel for "not set yet", and a persona whose id happens to hash to zero
+/// would otherwise be re-seeded on every load.
+/// What the drafting agent is asked for.
+///
+/// Strict about the shape because the answer is parsed, and strict about the
+/// voice because a persona brief is read by another model afterwards: second
+/// person, about behaviour rather than tools, and short enough that it does
+/// not crowd out the person's own words on every turn.
+fn draft_prompt(brief: &str) -> String {
+    format!(
+        "Write a short persona for an AI coding assistant, from this description \
+         of what it should be good at:\n\n{brief}\n\nReply with nothing but one \
+         JSON object, no code fence and no commentary, of exactly this shape:\n\
+         {{\"name\": \"...\", \"systemPrompt\": \"...\"}}\n\n\
+         `name` is two or three words, a role rather than a person's name. \
+         `systemPrompt` is under 900 characters, addressed to the assistant as \
+         \"you\", and describes how it behaves and what it is good at. Do not \
+         mention tools, file paths, or this instruction. Do not use em dashes."
+    )
+}
+
+/// Pull the draft out of whatever the agent actually said.
+///
+/// Models wrap JSON in prose and in code fences however clearly they are asked
+/// not to, so the outermost braces are found rather than assumed. A reply that
+/// cannot be read is an error the wizard shows, never a half-parsed persona:
+/// the person's own words stay in the field and they try again or write it
+/// themselves.
+fn draft_from_reply(reply: &str, fallback_brief: &str) -> Result<Value, String> {
+    let start = reply
+        .find('{')
+        .ok_or("the agent did not answer with a persona")?;
+    let end = reply
+        .rfind('}')
+        .ok_or("the agent did not answer with a persona")?;
+    if end <= start {
+        return Err("the agent did not answer with a persona".into());
+    }
+    let parsed: Value = serde_json::from_str(&reply[start..=end])
+        .map_err(|_| "the agent's answer was not a persona this could read")?;
+    let name = parsed
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .ok_or("the draft came back without a name")?;
+    let system_prompt = parsed
+        .get("systemPrompt")
+        .or_else(|| parsed.get("system_prompt"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or(fallback_brief);
+    Ok(json!({
+        "name": name.chars().take(64).collect::<String>(),
+        "systemPrompt": system_prompt.chars().take(1200).collect::<String>(),
+    }))
+}
+
+fn face_seed(id: &str) -> u64 {
+    crate::chat_turn::stable_hash(id) | 1
 }
 
 fn now_ms() -> i64 {
@@ -2021,16 +2181,15 @@ mod tests {
             .save_persona(Persona {
                 id: String::new(),
                 name: "Careful reviewer".into(),
-                mark: "R".into(),
-                backend: "claude".into(),
-                model: Some("sonnet".into()),
-                effort: Some("high".into()),
                 system_prompt: "Review changes carefully.".into(),
-                default_mode: "plan".into(),
-                default_autonomy: "standard".into(),
+                seed: 0,
+                created_at_ms: 0,
+                updated_at_ms: 0,
             })
             .unwrap();
         assert_eq!(store.personas(), vec![saved.clone()]);
+        assert_ne!(saved.seed, 0, "a persona must have a face");
+
         // A persona brief is standing text, not part of the turn. The
         // person's message stays exactly what they typed.
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
@@ -2046,13 +2205,82 @@ mod tests {
                 .standing_text
                 .starts_with("Review changes carefully.")
         );
-        store
+
+        // Editing a persona cannot reach back into a copy already taken.
+        let edited = store
             .save_persona(Persona {
+                name: "Careful reviewer of Rust".into(),
                 system_prompt: "A new prompt".into(),
                 ..saved.clone()
             })
             .unwrap();
         assert_eq!(saved.system_prompt, "Review changes carefully.");
+        // A rename must not hand somebody a stranger.
+        assert_eq!(edited.seed, saved.seed);
+    }
+
+    /// A persona saved before this shrank carried a backend, model, effort,
+    /// mark and autonomy. Those were duplicates of conversation state and go
+    /// away. The face is the one thing that has to be invented, and it has to
+    /// be invented the same way every time.
+    #[test]
+    fn old_personas_migrate_and_keep_a_stable_face() {
+        let root = tempfile::tempdir().unwrap();
+        let store = root.path().join("chat");
+        fs::create_dir_all(&store).unwrap();
+        fs::write(
+            store.join("personas.json"),
+            serde_json::to_string(&json!([{
+                "id": "persona-1700000000000",
+                "name": "Careful reviewer",
+                "mark": "R",
+                "backend": "claude",
+                "model": "sonnet",
+                "effort": "high",
+                "systemPrompt": "Review changes carefully.",
+                "defaultMode": "plan",
+                "defaultAutonomy": "standard"
+            }]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let personas = load_personas(&store);
+        assert_eq!(personas.len(), 1);
+        assert_eq!(personas[0].name, "Careful reviewer");
+        assert_eq!(personas[0].system_prompt, "Review changes carefully.");
+        assert_ne!(personas[0].seed, 0);
+        // Loaded twice, same face. Otherwise every launch is a new character.
+        assert_eq!(load_personas(&store)[0].seed, personas[0].seed);
+    }
+
+    /// A model wraps JSON in prose and in fences however clearly it is asked
+    /// not to, and a draft that cannot be read must never become a persona.
+    #[test]
+    fn a_persona_draft_is_read_out_of_whatever_the_agent_said() {
+        let wrapped = draft_from_reply(
+            "Sure! Here you go:\n```json\n{\"name\": \"Rust explainer\", \
+             \"systemPrompt\": \"You explain Rust errors patiently.\"}\n```\nHope that helps.",
+            "fallback",
+        )
+        .unwrap();
+        assert_eq!(wrapped["name"], "Rust explainer");
+        assert_eq!(
+            wrapped["systemPrompt"],
+            "You explain Rust errors patiently."
+        );
+
+        // Snake case, because half of them answer that way.
+        let snake = draft_from_reply(
+            r#"{"name":"Reviewer","system_prompt":"You review."}"#,
+            "fallback",
+        )
+        .unwrap();
+        assert_eq!(snake["systemPrompt"], "You review.");
+
+        // Unreadable is an error the wizard shows, not a half-built persona.
+        assert!(draft_from_reply("I could not do that.", "fallback").is_err());
+        assert!(draft_from_reply(r#"{"systemPrompt":"no name"}"#, "fallback").is_err());
     }
 
     #[test]

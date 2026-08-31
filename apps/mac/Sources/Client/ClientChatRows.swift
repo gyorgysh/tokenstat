@@ -260,12 +260,20 @@ struct ClientChatHandoffRow: View {
                     .foregroundStyle(Theme.accent)
                 Spacer(minLength: 0)
                 if !brief.isEmpty {
-                    Button(expanded ? "Hide" : "What it was told") {
+                    Button {
                         withAnimation(.easeOut(duration: 0.14)) { expanded.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(expanded ? "Hide" : "What it was told")
+                            Image(systemName: "chevron.right")
+                                .font(Theme.font(9, weight: .semibold))
+                                .rotationEffect(.degrees(expanded ? 90 : 0))
+                        }
+                        .font(ClientType.caption)
+                        .foregroundStyle(.secondary)
+                        .contentShape(.rect)
                     }
                     .buttonStyle(.plain)
-                    .font(ClientType.caption)
-                    .foregroundStyle(.secondary)
                 }
             }
             if expanded {

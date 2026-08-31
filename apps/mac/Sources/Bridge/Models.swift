@@ -2434,30 +2434,37 @@ struct ChatBackend: Codable, Sendable, Identifiable, Hashable {
     }
 }
 
+/// A voice, not a launcher.
+///
+/// A persona used to carry a backend, model, effort, mode and autonomy, all of
+/// which already live on the conversation and are adjustable there. It was a
+/// duplicate that went stale, and it meant a persona was tied to one agent and
+/// could not survive the conversation being handed to another. What is left is
+/// what the word means: a name and a brief, plus the seed its face is drawn
+/// from.
 struct ChatPersona: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var name: String
-    var mark: String
-    var backend: String
-    var model: String?
-    var effort: String?
     var systemPrompt: String
-    var defaultMode: String
-    var defaultAutonomy: String
+    /// Drives `PersonaMark`, and nothing else. Stable across a rename, so a
+    /// persona somebody knows by its face keeps that face.
+    var seed: UInt64
 
-    static func blank(backend: String = "claude") -> ChatPersona {
-        ChatPersona(
-            id: "",
-            name: "",
-            mark: "",
-            backend: backend,
-            model: nil,
-            effort: nil,
-            systemPrompt: "",
-            defaultMode: "plan",
-            defaultAutonomy: "standard"
-        )
+    static func blank() -> ChatPersona {
+        // Zero asks the host for the usual seed, derived from the id it is
+        // about to mint. A face cannot be settled before the persona exists.
+        ChatPersona(id: "", name: "", systemPrompt: "", seed: 0)
     }
+}
+
+/// A generated starting point, before anybody has agreed to keep it.
+///
+/// Its own type rather than a `ChatPersona` so a draft cannot be mistaken for
+/// something saved: generated text goes into a form, and only a press turns it
+/// into a persona.
+struct ChatPersonaDraft: Codable, Sendable, Hashable {
+    var name: String
+    var systemPrompt: String
 }
 
 struct ChatAttachment: Codable, Sendable, Identifiable, Hashable {

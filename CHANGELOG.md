@@ -54,6 +54,24 @@ desktop and Android builds remain previews. Newest first.
   one tool or one command prefix, for that conversation only, and the
   inspector lists what it remembered. A paired phone can answer the same
   card, and whichever surface answers first wins.
+- Personas are a name and a brief now, and nothing else. They used to carry an
+  agent, a model, an effort, a mode and an autonomy, all of which already live
+  on the conversation, so a persona went stale and could only be used with the
+  one agent it named. The same persona now works with whichever agent a chat is
+  on, and survives that chat being handed to another. Existing personas keep
+  their name and brief; the duplicated settings simply go.
+- A persona can be written for you. Say what it should be good at in a
+  sentence, pick which installed agent drafts it, and edit the name and brief
+  that come back before anything is saved. Nothing is saved without a press,
+  the draft runs one short turn in a temporary folder and never touches your
+  project, and a draft that fails leaves your own words in the field.
+- Every persona and every conversation has a face: a small character drawn from
+  its own identity, so it exists the moment the persona does and stays the same
+  through renames and edits. It is one creature in different moods rather than
+  a set of icons, and it replaces the three dots that used to mean "working":
+  it squashes while an agent thinks, narrows its eyes while a tool runs, and
+  goes wide-eyed in amber when a turn is waiting on you. Colours are sampled
+  from tokenstat's own accent range, so a row of personas reads as one family.
 - Changing agent mid-conversation no longer starts from nothing. The incoming
   agent is handed a summary folded from the conversation itself: what was
   asked, which files changed, which commands ran, what you refused, and where

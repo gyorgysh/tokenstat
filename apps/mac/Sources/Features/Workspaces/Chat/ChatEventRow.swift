@@ -204,30 +204,23 @@ private struct ChatResponseAttachment: View {
 /// reply. It makes an in-progress turn feel like a conversation without
 /// reserving the visual weight of another card.
 struct ChatWorkingIndicator: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase = false
+    /// The conversation's own face, so the thing that moves while you wait is
+    /// the character you already associate with this chat.
+    var seed: UInt64
+    /// Narrowed once a tool is running, because "thinking" and "doing" are
+    /// different waits and the difference is worth a glance.
+    var isRunningTool: Bool = false
 
     var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 5, height: 5)
-                    .opacity(phase ? (index == 1 ? 1 : 0.42) : (index == 1 ? 0.42 : 1))
-            }
-            Text("Working")
+        HStack(spacing: Theme.Space.s) {
+            PersonaMark(seed: seed, size: 26, state: isRunningTool ? .working : .thinking)
+            Text(isRunningTool ? "Working" : "Thinking")
                 .font(Theme.caption)
                 .foregroundStyle(.secondary)
         }
         .padding(.horizontal, Theme.Space.m)
-        .padding(.vertical, Theme.Space.s)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                phase = true
-            }
-        }
-        .accessibilityLabel("Assistant is working")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isRunningTool ? "Running a tool" : "Thinking")
     }
 }
 

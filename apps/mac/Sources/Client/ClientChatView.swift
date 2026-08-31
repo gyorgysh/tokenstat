@@ -257,12 +257,10 @@ private struct ClientChatThread: View {
                         )
                     }
                     if model.busy {
-                        HStack(spacing: Theme.Space.s) {
-                            ProgressView().controlSize(.small)
-                            Text("Working")
-                                .font(ClientType.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        ChatWorkingIndicator(
+                            seed: model.faceSeed,
+                            isRunningTool: model.isRunningTool
+                        )
                     }
                     Color.clear
                         .frame(height: 1)

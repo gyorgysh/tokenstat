@@ -115,7 +115,10 @@ struct ChatView: View {
                         )
                     }
                     if model.busy {
-                        ChatWorkingIndicator()
+                        ChatWorkingIndicator(
+                            seed: model.faceSeed,
+                            isRunningTool: model.isRunningTool
+                        )
                     }
                     Color.clear
                         .frame(height: 1)
