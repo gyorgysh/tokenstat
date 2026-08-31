@@ -2569,9 +2569,49 @@ fn records(bytes: &[u8], base: u64) -> Vec<Value> {
             continue;
         };
         object.insert("seq".into(), json!(start));
+        alias(&mut object);
+        if let Some(Value::Object(event)) = object.get_mut("event") {
+            alias(event);
+        }
         out.push(Value::Object(object));
     }
     out
+}
+
+/// Names a client reads, written beside the ones the archive holds.
+///
+/// `Event` and `StoredEvent` are tagged enums carrying
+/// `rename_all = "camelCase"`, which renames the *variants* and not their
+/// fields. So the archive holds `at_ms`, `call_id`, `cache_read`,
+/// `cache_write`, `cost_usd` and `exit_code`, while every client reads those
+/// in camel case and has been getting nothing for them: a tool call never
+/// matched its own end and drew twice, a tool had no start to measure a
+/// duration from, and cache and cost were always zero.
+///
+/// Fixed on the way out rather than on the way in. Every archive already on
+/// disk carries the old spelling, so a client would have to accept both
+/// whatever the store did next, and this is the one place both the page and
+/// the tail pass through.
+const ALIASES: [(&str, &str); 6] = [
+    ("at_ms", "atMs"),
+    ("call_id", "callId"),
+    ("cache_read", "cacheRead"),
+    ("cache_write", "cacheWrite"),
+    ("cost_usd", "costUsd"),
+    ("exit_code", "exitCode"),
+];
+
+/// Added beside the original, never instead of it: the host's own readers,
+/// the handover brief among them, come through here too.
+fn alias(object: &mut serde_json::Map<String, Value>) {
+    for (from, to) in ALIASES {
+        if object.contains_key(to) {
+            continue;
+        }
+        if let Some(value) = object.get(from).cloned() {
+            object.insert(to.into(), value);
+        }
+    }
 }
 
 /// Walk backwards from `end` until `limit` whole records are in hand.
@@ -2820,6 +2860,40 @@ mod tests {
         }
         assert_eq!(seen, 21);
         assert_eq!(long, 1, "the long record arrives whole, exactly once");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn every_record_arrives_with_the_names_a_client_reads() {
+        let written = vec![
+            json!({"kind":"user","text":"Hi","at_ms":7}).to_string(),
+            json!({"kind":"agent","at_ms":8,"backend":"claude","event":{
+                "kind":"toolStart","call_id":"call-1","verb":"Read","target":"a"
+            }})
+            .to_string(),
+            json!({"kind":"agent","at_ms":9,"backend":"claude","event":{
+                "kind":"usage","input":10,"output":2,"cache_read":5,
+                "cache_write":1,"cost_usd":0.25
+            }})
+            .to_string(),
+            json!({"kind":"agent","at_ms":10,"backend":"claude","event":{
+                "kind":"done","status":"ok","exit_code":0
+            }})
+            .to_string(),
+        ];
+        let path = archive("names", &written);
+        let (_, events) = page(&path, file_len(&path), 300);
+        assert_eq!(events[0]["atMs"], json!(7));
+        assert_eq!(
+            events[0]["at_ms"],
+            json!(7),
+            "the archive's own spelling stays, so nothing that read it breaks"
+        );
+        assert_eq!(events[1]["event"]["callId"], json!("call-1"));
+        assert_eq!(events[2]["event"]["cacheRead"], json!(5));
+        assert_eq!(events[2]["event"]["cacheWrite"], json!(1));
+        assert_eq!(events[2]["event"]["costUsd"], json!(0.25));
+        assert_eq!(events[3]["event"]["exitCode"], json!(0));
         let _ = fs::remove_file(&path);
     }
 

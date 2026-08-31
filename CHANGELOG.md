@@ -9,6 +9,13 @@ desktop and Android builds remain previews. Newest first.
 
 ### Fixed
 
+- Every tool in a chat drew twice. A tool's start and its end are joined by a
+  call id, and the id was written under one name and read under another, so no
+  end ever found its start: one row sat running until the turn closed it, and
+  a second row appeared beside it with the result. The same mismatch emptied
+  every timestamp, which is what a tool's duration is measured from, and left
+  cached tokens and cost reading zero on every conversation. On the archive
+  here that was 186 tools drawn as 372 rows.
 - Chat records one truthful end to a turn. Agent CLIs may call their own tool
   stream "cancelled" even when the process exits successfully; that no longer
   becomes a second failed turn or says the person pressed Stop. The host now

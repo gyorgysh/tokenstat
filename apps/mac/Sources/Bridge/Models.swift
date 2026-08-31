@@ -2635,6 +2635,13 @@ private struct FailableChatEvent: Decodable {
 }
 
 struct ChatTimelineEvent: Codable, Sendable, Identifiable {
+    enum CodingKeys: String, CodingKey {
+        case kind, text, seq, atMs, backend, event, approval, to, brief
+        /// The spelling the archive itself holds. A host new enough writes
+        /// both; one that is not writes only this. Read, never written.
+        case atMsLegacy = "at_ms"
+    }
+
     var kind: String
     var text: String?
     /// Where this record starts in the conversation's archive.
@@ -2655,6 +2662,33 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     var brief: String?
     var id: String {
         "\(kind)-\(atMs ?? 0)-\(text ?? event?.delta ?? event?.verb ?? event?.status ?? approval?.id ?? to ?? "event")"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        text = try c.decodeIfPresent(String.self, forKey: .text)
+        seq = try c.decodeIfPresent(UInt64.self, forKey: .seq)
+        atMs = try c.decodeIfPresent(Int64.self, forKey: .atMs)
+            ?? c.decodeIfPresent(Int64.self, forKey: .atMsLegacy)
+        backend = try c.decodeIfPresent(String.self, forKey: .backend)
+        event = try c.decodeIfPresent(ChatAgentEvent.self, forKey: .event)
+        approval = try c.decodeIfPresent(ChatApproval.self, forKey: .approval)
+        to = try c.decodeIfPresent(String.self, forKey: .to)
+        brief = try c.decodeIfPresent(String.self, forKey: .brief)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(text, forKey: .text)
+        try c.encodeIfPresent(seq, forKey: .seq)
+        try c.encodeIfPresent(atMs, forKey: .atMs)
+        try c.encodeIfPresent(backend, forKey: .backend)
+        try c.encodeIfPresent(event, forKey: .event)
+        try c.encodeIfPresent(approval, forKey: .approval)
+        try c.encodeIfPresent(to, forKey: .to)
+        try c.encodeIfPresent(brief, forKey: .brief)
     }
 }
 
@@ -2722,6 +2756,13 @@ struct ChatAgentEvent: Codable, Sendable {
         case kind, delta, verb, target, path, added, removed, patch, status, text
         case input, output, costUsd, callId, ok, detail, cacheRead, cacheWrite, exitCode
         case id, name, mediaType, size
+        // The spellings the archive itself holds. A host new enough writes
+        // both, and one that is not writes only these. Read, never written.
+        case callIdLegacy = "call_id"
+        case cacheReadLegacy = "cache_read"
+        case cacheWriteLegacy = "cache_write"
+        case costUsdLegacy = "cost_usd"
+        case exitCodeLegacy = "exit_code"
     }
 
     init(from decoder: Decoder) throws {
@@ -2739,12 +2780,15 @@ struct ChatAgentEvent: Codable, Sendable {
         input = c.decodeCount(forKey: .input)
         output = c.decodeCount(forKey: .output)
         costUsd = try c.decodeIfPresent(Double.self, forKey: .costUsd)
+            ?? c.decodeIfPresent(Double.self, forKey: .costUsdLegacy)
         callId = try c.decodeIfPresent(String.self, forKey: .callId)
+            ?? c.decodeIfPresent(String.self, forKey: .callIdLegacy)
         ok = try c.decodeIfPresent(Bool.self, forKey: .ok)
         detail = try c.decodeIfPresent(String.self, forKey: .detail)
-        cacheRead = c.decodeCount(forKey: .cacheRead)
-        cacheWrite = c.decodeCount(forKey: .cacheWrite)
+        cacheRead = c.decodeCount(forKey: .cacheRead) ?? c.decodeCount(forKey: .cacheReadLegacy)
+        cacheWrite = c.decodeCount(forKey: .cacheWrite) ?? c.decodeCount(forKey: .cacheWriteLegacy)
         exitCode = try c.decodeIfPresent(Int32.self, forKey: .exitCode)
+            ?? c.decodeIfPresent(Int32.self, forKey: .exitCodeLegacy)
         id = try c.decodeIfPresent(String.self, forKey: .id)
         name = try c.decodeIfPresent(String.self, forKey: .name)
         mediaType = try c.decodeIfPresent(String.self, forKey: .mediaType)
