@@ -146,9 +146,23 @@ const STARTER_NAMES: [&str; 48] = [
     "Sage", "Slate", "Sora", "Thistle", "Umber", "Vale", "Wren",
 ];
 
-const STARTER_BRIEF: &str = "You understand the local context before changing \
-anything. Prefer the smallest complete change. Preserve existing work. Explain \
-real tradeoffs. Verify what you change.";
+const STARTER_BRIEF: &str = "Read the code before changing it. The call sites \
+and the tests around something say what it really does, which is not always \
+what a request assumes. Prefer the smallest complete change, and preserve work \
+that is already there. Treat edge cases and failures as seriously as the path \
+that works. Reproduce a bug before fixing it. A passing suite is evidence, not \
+proof: read what the tests actually assert. Do not stop at the edit. Finish \
+when the change is verified, and say plainly what you checked, what you did \
+not, and what the real tradeoffs were.";
+
+/// The brief every starter carried before it was sharpened.
+///
+/// Kept so a starter nobody has touched can be upgraded in place. An exact
+/// match means the text is ours and has never been edited, so replacing it
+/// takes nothing away from anybody.
+const LEGACY_STARTER_BRIEF: &str = "You understand the local context before \
+changing anything. Prefer the smallest complete change. Preserve existing \
+work. Explain real tradeoffs. Verify what you change.";
 
 /// A locally staged file. The client only receives this descriptor; bytes
 /// never leave the chat's host data directory except when its agent reads it.
@@ -1010,11 +1024,37 @@ impl Store {
     /// every conversation, and it is shown rather than hidden: a product that
     /// quietly appends instructions to somebody's chat should at minimum let
     /// them read what it appended.
+    /// What this conversation's persona is called, or empty.
+    ///
+    /// Read live from the persona rather than copied onto the conversation
+    /// the way its brief is. A brief is a copy on purpose, so editing a
+    /// persona does not rewrite what old conversations were told. A name is
+    /// identity: rename Lumen and the chats wearing that face are talking to
+    /// the renamed one, because that is the name on screen beside them.
+    fn persona_name(&self, chat: &Conversation) -> String {
+        chat.persona_id
+            .as_deref()
+            .and_then(|id| self.persona(id).ok())
+            .map(|persona| persona.name)
+            .unwrap_or_default()
+    }
+
     pub fn instructions(&self, id: &str) -> Result<Value, String> {
         let chat = self.get(id)?;
+        let name = self.persona_name(&chat);
+        // What tokenstat adds, shown exactly as the agent gets it. The name
+        // belongs on this side rather than in the brief: it is ours, not
+        // something the person wrote, and it must not become editable text
+        // that can drift from the name on the persona.
+        let mut added = String::new();
+        if !name.trim().is_empty() {
+            added.push_str(&crate::chat_turn::name_rule(name.trim()));
+            added.push_str("\n\n");
+        }
+        added.push_str(&crate::chat_turn::file_rule(&self.response_output_dir(id)));
         Ok(json!({
             "brief": chat.system_prompt,
-            "added": crate::chat_turn::file_rule(&self.response_output_dir(id)),
+            "added": added,
             "channel": if crate::chat_turn::accepts_system_prompt(&chat.backend) {
                 "systemPrompt"
             } else {
@@ -1159,6 +1199,7 @@ impl Store {
             });
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
             prompt,
+            persona_name: &self.persona_name(&chat),
             persona_brief: &chat.system_prompt,
             attachments: &attachments,
             output_dir: &response_output_dir,
@@ -2087,6 +2128,11 @@ fn load_persona_index(root: &Path) -> PersonaIndex {
         if persona.seed == 0 {
             persona.seed = face_seed(&persona.id);
         }
+        // Only an exact match, so a brief somebody has written a single word
+        // into is left exactly as they left it.
+        if persona.system_prompt == LEGACY_STARTER_BRIEF {
+            persona.system_prompt = STARTER_BRIEF.to_string();
+        }
     }
     index
 }
@@ -2442,6 +2488,7 @@ mod tests {
         // handed the file and told nothing, so it cannot describe its own
         // attachment back to the person.
         let spoken = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            persona_name: "",
             prompt: "Inspect this",
             persona_brief: "",
             attachments: &files,
@@ -2472,6 +2519,7 @@ mod tests {
         // A persona brief is standing text, not part of the turn. The
         // person's message stays exactly what they typed.
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            persona_name: "",
             prompt: "Check this",
             persona_brief: &saved.system_prompt,
             attachments: &[],
@@ -2864,6 +2912,7 @@ mod tests {
         };
         store.conversations.lock().unwrap().push(chat.clone());
         let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            persona_name: "",
             prompt: "Hey",
             persona_brief: "",
             attachments: &[],
@@ -2889,6 +2938,7 @@ mod tests {
         // had the old ones is told the new ones.
         chat.backend = "codex".into();
         let edited = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            persona_name: "",
             prompt: "Hey",
             persona_brief: "Be brief.",
             attachments: &[],

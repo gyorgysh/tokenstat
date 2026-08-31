@@ -43,6 +43,10 @@ pub fn accepts_attachment_flags(backend: &str) -> bool {
 pub struct Inputs<'a> {
     /// Exactly what the person typed, already trimmed.
     pub prompt: &'a str,
+    /// What this conversation's persona is called, possibly empty. Agents do
+    /// not otherwise know, so somebody calling their assistant by the name
+    /// tokenstat shows them was talking to nobody.
+    pub persona_name: &'a str,
     /// The conversation's persona brief, possibly empty.
     pub persona_brief: &'a str,
     pub attachments: &'a [PathBuf],
@@ -62,7 +66,7 @@ pub struct Composed {
 
 /// Split one turn into its channels.
 pub fn compose(inputs: Inputs<'_>) -> Composed {
-    let standing_text = standing_text(inputs.persona_brief, inputs.output_dir);
+    let standing_text = standing_text(inputs.persona_name, inputs.persona_brief, inputs.output_dir);
     Composed {
         standing_fingerprint: fingerprint(&standing_text),
         user_text: user_text(inputs.prompt, inputs.attachments, inputs.backend),
@@ -72,12 +76,16 @@ pub fn compose(inputs: Inputs<'_>) -> Composed {
 
 /// The rules that hold for every turn of this conversation.
 ///
-/// The persona comes first because it is the voice, and the file rule second
-/// because it is plumbing. The file rule ends by telling the agent not to
-/// narrate it: without that sentence, an opening turn with nothing else to do
-/// answers the plumbing instead of the person.
-fn standing_text(persona_brief: &str, output_dir: &Path) -> String {
+/// Name first, then the voice, then the plumbing. The file rule ends by
+/// telling the agent not to narrate it: without that sentence, an opening turn
+/// with nothing else to do answers the plumbing instead of the person.
+fn standing_text(persona_name: &str, persona_brief: &str, output_dir: &Path) -> String {
     let mut text = String::new();
+    let name = persona_name.trim();
+    if !name.is_empty() {
+        text.push_str(&name_rule(name));
+        text.push_str("\n\n");
+    }
     let brief = persona_brief.trim();
     if !brief.is_empty() {
         text.push_str(brief);
@@ -85,6 +93,23 @@ fn standing_text(persona_brief: &str, output_dir: &Path) -> String {
     }
     text.push_str(&file_rule(output_dir));
     text
+}
+
+/// Who the agent is being addressed as.
+///
+/// tokenstat draws a persona a name and a face and puts both in front of
+/// somebody all day, and the agent behind it was never told either. People
+/// address the thing they can see, so "Lumen, have another look at this"
+/// reached an assistant with no idea it was Lumen.
+///
+/// Deliberately about being addressed rather than about being someone. A CLI
+/// arrives with an identity of its own and this is appended to it, never
+/// instead of it, so it says how to answer to a name and stops there.
+pub fn name_rule(name: &str) -> String {
+    format!(
+        "You are called {name} in this conversation, which is running inside \
+         tokenstat. If somebody uses that name, they mean you."
+    )
 }
 
 /// The one rule tokenstat adds to every conversation, whatever the person
@@ -167,6 +192,7 @@ mod tests {
     fn the_person_s_turn_carries_no_machinery() {
         let composed = compose(Inputs {
             prompt: "Hey",
+            persona_name: "",
             persona_brief: "",
             attachments: &[],
             output_dir: &dir(),
@@ -181,6 +207,7 @@ mod tests {
     fn the_file_rule_tells_an_agent_not_to_narrate_it() {
         let composed = compose(Inputs {
             prompt: "Hey",
+            persona_name: "",
             persona_brief: "",
             attachments: &[],
             output_dir: &dir(),
@@ -189,10 +216,67 @@ mod tests {
         assert!(composed.standing_text.contains("Do not mention this rule"));
     }
 
+    /// A persona has a name on screen all day and the agent behind it was
+    /// never told, so calling it by that name reached nobody.
+    #[test]
+    fn the_persona_name_reaches_the_agent_ahead_of_its_brief() {
+        let composed = compose(Inputs {
+            prompt: "hi",
+            persona_name: "Lumen",
+            persona_brief: "You explain Rust errors patiently.",
+            attachments: &[],
+            output_dir: Path::new("/tmp/out"),
+            backend: "claude",
+        });
+        let name_at = composed
+            .standing_text
+            .find("You are called Lumen")
+            .expect("the agent is told what it is called");
+        let brief_at = composed
+            .standing_text
+            .find("You explain Rust errors patiently.")
+            .expect("the brief still travels");
+        assert!(name_at < brief_at, "{}", composed.standing_text);
+
+        // And a conversation with no persona is not given a name.
+        let anonymous = compose(Inputs {
+            prompt: "hi",
+            persona_name: "",
+            persona_brief: "",
+            attachments: &[],
+            output_dir: Path::new("/tmp/out"),
+            backend: "claude",
+        });
+        assert!(
+            !anonymous.standing_text.contains("You are called"),
+            "{}",
+            anonymous.standing_text
+        );
+    }
+
+    /// Renaming a persona changes what its conversations are told, so the
+    /// rules have to be sent again rather than assumed unchanged.
+    #[test]
+    fn renaming_a_persona_re_sends_the_standing_rules() {
+        let with = |name: &str| {
+            compose(Inputs {
+                prompt: "hi",
+                persona_name: name,
+                persona_brief: "You explain Rust errors patiently.",
+                attachments: &[],
+                output_dir: Path::new("/tmp/out"),
+                backend: "claude",
+            })
+            .standing_fingerprint
+        };
+        assert_ne!(with("Lumen"), with("Sage"));
+    }
+
     #[test]
     fn a_persona_brief_leads_the_standing_text() {
         let composed = compose(Inputs {
             prompt: "Hey",
+            persona_name: "",
             persona_brief: "  You explain Rust errors patiently.  ",
             attachments: &[],
             output_dir: &dir(),
@@ -211,6 +295,7 @@ mod tests {
         let files = vec![PathBuf::from("/data/chat-1/files/a/diagram.png")];
         let spoken = compose(Inputs {
             prompt: "What is this?",
+            persona_name: "",
             persona_brief: "",
             attachments: &files,
             output_dir: &dir(),
@@ -219,6 +304,7 @@ mod tests {
         assert!(spoken.user_text.contains("diagram.png"));
         let flagged = compose(Inputs {
             prompt: "What is this?",
+            persona_name: "",
             persona_brief: "",
             attachments: &files,
             output_dir: &dir(),
@@ -231,6 +317,7 @@ mod tests {
     fn the_fingerprint_moves_only_when_the_rules_do() {
         let base = compose(Inputs {
             prompt: "Hey",
+            persona_name: "",
             persona_brief: "Be brief.",
             attachments: &[],
             output_dir: &dir(),
@@ -238,6 +325,7 @@ mod tests {
         });
         let same_rules_other_turn = compose(Inputs {
             prompt: "Something else entirely",
+            persona_name: "",
             persona_brief: "Be brief.",
             attachments: &[],
             output_dir: &dir(),
@@ -249,6 +337,7 @@ mod tests {
         );
         let new_persona = compose(Inputs {
             prompt: "Hey",
+            persona_name: "",
             persona_brief: "Be thorough.",
             attachments: &[],
             output_dir: &dir(),

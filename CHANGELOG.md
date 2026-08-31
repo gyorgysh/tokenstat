@@ -81,6 +81,18 @@ desktop and Android builds remain previews. Newest first.
   one tool or one command prefix, for that conversation only, and the
   inspector lists what it remembered. A paired phone can answer the same
   card, and whichever surface answers first wins.
+- A persona's name reaches its agent, so you can call it by the name on the
+  screen. Chats used to show you Lumen while the agent behind it had never
+  been told it was anybody, and "Lumen, look at this again" was addressed to
+  nobody. The line tokenstat sends is visible in Instructions with everything
+  else it adds.
+- The starting brief a new folder's persona comes with is sharper about how to
+  work: read the call sites and the tests before changing something, treat
+  failures as seriously as the happy path, reproduce a bug before fixing it,
+  read what a passing suite actually asserts, and finish when the change is
+  verified rather than when the edit is typed. Existing starters nobody has
+  edited pick it up; a brief with a single word of your own in it is left
+  exactly as you wrote it.
 - Personas are a name and a brief now, and nothing else. They used to carry an
   agent, a model, an effort, a mode and an autonomy, all of which already live
   on the conversation, so a persona went stale and could only be used with the
