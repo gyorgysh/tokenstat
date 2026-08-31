@@ -717,6 +717,10 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
             }
         }
         .padding(.horizontal, Theme.Space.m)
+        // Keep the controls a few points clear of the shared hairline. The
+        // bar's fixed height and border stay put; only the contents get this
+        // small internal breathing room.
+        .padding(.bottom, DetailChromeBottomSpacing)
         .frame(maxWidth: .infinity)
         .frame(height: Self.height)
         .background(Theme.tabStrip)
@@ -732,6 +736,7 @@ struct DetailChromeBar<Leading: View, Trailing: View>: View {
 
 /// Shared height for `DetailChromeBar` and matching chrome rows.
 let DetailChromeBarHeight: CGFloat = 40
+let DetailChromeBottomSpacing: CGFloat = 3
 
 /// A flat tab strip, in place of the reference layout's row of agent tabs.
 ///

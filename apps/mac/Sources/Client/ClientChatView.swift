@@ -227,6 +227,7 @@ private struct ClientChatThread: View {
                         ClientChatEventRow(
                             item: item,
                             attachmentData: attachmentData(for: item),
+                            attachmentRevision: model.responseAttachmentRevision,
                             defaultAgentName: model.backend(for: chat.backend)?.label ?? chat.backend.capitalized,
                             agentLabel: { backend in
                                 model.backend(for: backend)?.label ?? backend.capitalized
@@ -277,6 +278,7 @@ private struct ClientChatThread: View {
                             collapsed: false,
                             showsIntro: false
                         )
+                        ChatInstructionsCard(model: model, chat: chat)
                         ChatCostMeter(totals: model.turnUsage)
                         Button("Personas", .persona) { showingPersonas = true }
                             .buttonStyle(SecondaryButtonStyle())

@@ -42,7 +42,12 @@ desktop and Android builds remain previews. Newest first.
   pills beside it. Full setup stays in the inspector (Setup on the phone).
   A grok Standard turn keeps its output format, Cursor without a named
   model uses Auto, and a tool call no longer blanks the transcript or
-  stays Running after the turn ends. The phone is a list first, then a
+  stays Running after the turn ends. A message sends what you wrote and
+  nothing else: an agent's own brief travels as a system prompt where its
+  CLI has one, so a conversation no longer opens by describing tokenstat's
+  own plumbing. Instructions in the inspector holds that brief, editable,
+  beside the one rule tokenstat adds and the exact words it sends. The
+  phone is a list first, then a
   transcript with a glass composer. Windows has the same list, composer,
   transcript, approvals and cost meter. Sidebar badges show how many
   chats a folder holds. Token cost is a quiet in/out bar, and a

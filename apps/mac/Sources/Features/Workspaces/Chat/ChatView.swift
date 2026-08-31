@@ -89,6 +89,7 @@ struct ChatView: View {
                                 model.backend(for: backend)?.label ?? backend.capitalized
                             },
                             attachmentData: attachmentData(for: item),
+                            attachmentRevision: model.responseAttachmentRevision,
                             isPending: pendingApproval(item),
                             resolve: { approval, choice in
                                 Task { await model.resolve(approval, choice: choice) }

@@ -27,6 +27,7 @@ struct ChatInspector: View {
                         VStack(alignment: .leading, spacing: Theme.Space.l) {
                             identity(chat)
                             ChatSetupHeader(model: model, chat: chat, collapsed: false, showsIntro: false)
+                            ChatInstructionsCard(model: model, chat: chat)
                             folderCard
                             allowlist(chat)
                             ChatCostMeter(totals: model.turnUsage)

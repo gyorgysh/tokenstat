@@ -1020,6 +1020,13 @@ extension Bridge {
         )
     }
 
+    /// What this conversation tells its agent before it hears the person.
+    /// Read so the inspector can show it: nothing tokenstat adds to somebody's
+    /// chat should be invisible to them.
+    static func chatInstructions(id: String, peer: String? = nil) async throws -> ChatInstructions {
+        try await chatInvoke(peer: peer, "chat.instructions", ["id": id], as: ChatInstructions.self)
+    }
+
     static func chatApprovals(id: String, peer: String? = nil) async throws -> [ChatApproval] {
         try await chatInvoke(peer: peer, "chat.approvals", ["id": id], as: [ChatApproval].self)
     }

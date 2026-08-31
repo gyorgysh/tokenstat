@@ -1712,6 +1712,7 @@ fn chat_call(method: &str, params: &str) -> Result<Value, DispatchError> {
                 store.events(&p.id.ok_or("chat.events needs id")?, p.offset.unwrap_or(0))?;
             Ok(json!({ "events": events, "nextOffset": next }))
         }
+        "chat.instructions" => Ok(store.instructions(&p.id.ok_or("chat.instructions needs id")?)?),
         "chat.backends" => Ok(Value::Array(crate::chat::backends())),
         "chat.personas" => serde_json::to_value(store.personas()).envelope(),
         "chat.personaSave" => serde_json::to_value(

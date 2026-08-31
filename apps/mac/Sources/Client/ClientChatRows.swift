@@ -10,6 +10,7 @@ import UIKit
 struct ClientChatEventRow: View {
     let item: ChatDisplayItem
     let attachmentData: Data?
+    let attachmentRevision: UInt64
     let defaultAgentName: String
     let agentLabel: (String) -> String
     let isPending: Bool
@@ -39,6 +40,19 @@ struct ClientChatEventRow: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Theme.border.opacity(0.72), lineWidth: 1)
             }
+        case let .turnSeparator(backend):
+            HStack(spacing: Theme.Space.s) {
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(height: 1)
+                Text("\(agentLabel(backend)) · new turn")
+                    .font(ClientType.caption.weight(.medium))
+                    .foregroundStyle(Theme.accent)
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(height: 1)
+            }
+            .accessibilityLabel("New turn with \(agentLabel(backend))")
         case let .thinking(text):
             Text(text)
                 .font(ClientType.caption)
@@ -58,6 +72,7 @@ struct ClientChatEventRow: View {
             ClientChatEditRow(path: path, added: added, removed: removed, patch: patch)
         case let .attachment(attachment):
             ClientChatResponseAttachment(attachment: attachment, data: attachmentData)
+                .id("\(attachment.id)-\(attachmentRevision)")
         case let .approval(approval):
             ClientChatApprovalCard(approval: approval, isPending: isPending, resolve: resolve)
         case let .usage(input, output, cost):

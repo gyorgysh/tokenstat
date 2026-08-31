@@ -400,6 +400,12 @@ pub struct ChatLaunch<'a> {
     /// Absolute path of this daemon for lifecycle hooks. Relative PATH lookup
     /// is wrong for launchd and for the private environment of an agent CLI.
     pub hook_command: Option<&'a str>,
+    /// The conversation's standing rules: its persona brief and how to hand a
+    /// file back. Delivered through a backend's own system-prompt flag where
+    /// one exists, and prepended to the turn in a tagged block where one does
+    /// not. Never glued to the person's sentence unwrapped: see `chat_turn`
+    /// for why an agent answered the plumbing instead of the ask.
+    pub system_append: Option<&'a str>,
     /// Agy discovers hooks from each supplied workspace. The private root goes
     /// first; the person's workspace remains last, preserving its normal cwd.
     pub agy_customization_dir: Option<&'a Path>,
@@ -443,15 +449,33 @@ pub fn chat_agent_command(
     launch: ChatLaunch<'_>,
 ) -> Result<Vec<String>, String> {
     let plan = launch.mode == "plan";
+    // Everything this function has to say to the model, in one tagged block
+    // ahead of the turn, rather than several bare paragraphs the model cannot
+    // tell apart from the person's own words.
+    let mut instructions = String::new();
     // Codex and OpenCode do not expose the same first-class plan switch as the
     // other backends. Give them an explicit turn instruction; Codex also gets
     // a read-only sandbox below, while OpenCode loses its headless auto grant.
-    let plan_prompt = (plan && matches!(backend, "codex" | "opencode" | "opencode2")).then(|| {
-        format!(
-            "Plan mode: inspect and reason only. Do not modify files, run commands that change state, or perform external side effects. Return a proposed plan instead.\n\n{prompt}"
-        )
-    });
-    let prompt = plan_prompt.as_deref().unwrap_or(prompt);
+    if plan && matches!(backend, "codex" | "opencode" | "opencode2") {
+        instructions.push_str(
+            "Plan mode: inspect and reason only. Do not modify files, run commands that change state, or perform external side effects. Return a proposed plan instead.",
+        );
+    }
+    // A backend with a system-prompt flag receives the standing rules there
+    // instead, further down, where they cannot be mistaken for the request.
+    if !crate::chat_turn::accepts_system_prompt(backend)
+        && let Some(standing) = launch
+            .system_append
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+    {
+        if !instructions.is_empty() {
+            instructions.push_str("\n\n");
+        }
+        instructions.push_str(standing);
+    }
+    let composed = crate::chat_turn::as_prompt_prefix(&instructions, prompt);
+    let prompt = composed.as_str();
     // Cursor's Free plan refuses every named model. An empty pick used to
     // omit `--model` and let the CLI choose, which on this machine was not
     // Auto. Always name Auto unless the person picked something else.
@@ -494,6 +518,21 @@ pub fn chat_agent_command(
             for rule in launch.grok_allow_rules {
                 extra.extend(["--allow".into(), rule.clone()]);
             }
+        }
+    }
+    // Append, never override. Replacing a CLI's own system prompt would take
+    // away the tool descriptions and safety text it was built around in order
+    // to deliver two sentences of ours. Sent on every turn, resumes included,
+    // so editing a persona takes effect on the next thing the person says.
+    if let Some(standing) = launch
+        .system_append
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        match backend {
+            "claude" => extra.extend(["--append-system-prompt".into(), standing.into()]),
+            "grok" => extra.extend(["--rules".into(), standing.into()]),
+            _ => {}
         }
     }
     if plan {
@@ -545,9 +584,11 @@ pub fn chat_agent_command(
         }
     }
     // These two CLIs accept image files natively. The other backends receive
-    // the staged paths in the prompt, which lets their normal Read tool make
-    // the same files available without pretending they have image support.
-    if matches!(backend, "codex" | "opencode" | "opencode2") {
+    // the staged paths in the turn text, which lets their normal Read tool
+    // make the same files available without pretending they have image
+    // support. `chat_turn` owns the same predicate so the path is named in
+    // exactly one of the two places, never both.
+    if crate::chat_turn::accepts_attachment_flags(backend) {
         let flag = if backend == "codex" { "-i" } else { "-f" };
         let at = argv
             .iter()
@@ -2153,6 +2194,58 @@ mod tests {
         );
     }
 
+    /// Standing rules must never look like something the person typed.
+    ///
+    /// Claude and grok take them on a flag. The rest get one tagged block
+    /// ahead of the turn, which is still separable, unlike the bare paragraphs
+    /// that used to be glued on and answered as though they were the request.
+    #[test]
+    fn standing_rules_travel_beside_the_turn_not_inside_it() {
+        let launch = |backend: &'static str| {
+            chat_agent_command(
+                backend,
+                "Hey",
+                None,
+                None,
+                DEFAULT_BUDGET_SECONDS,
+                ChatLaunch {
+                    resume: None,
+                    bypass: true,
+                    mode: "execute",
+                    hook_command: None,
+                    system_append: Some("You explain Rust errors patiently."),
+                    agy_customization_dir: None,
+                    grok_allow_rules: &[],
+                    attachments: &[],
+                },
+            )
+            .unwrap()
+        };
+
+        let claude = launch("claude");
+        let flagged = claude
+            .windows(2)
+            .find(|pair| pair[0] == "--append-system-prompt")
+            .map(|pair| pair[1].clone())
+            .expect("claude takes standing rules on its own flag");
+        assert_eq!(flagged, "You explain Rust errors patiently.");
+        assert!(claude.iter().any(|arg| arg == "Hey"));
+
+        let grok = launch("grok");
+        assert!(
+            grok.windows(2)
+                .any(|pair| pair[0] == "--rules" && pair[1] == "You explain Rust errors patiently.")
+        );
+
+        // Codex has no such flag, so the rules ride ahead of the turn inside a
+        // block the model can tell apart from the ask.
+        let codex = launch("codex");
+        let turn = codex.last().expect("codex puts the prompt last");
+        assert!(turn.starts_with("<system-instructions>\nYou explain Rust errors patiently."));
+        assert!(turn.ends_with("</system-instructions>\n\nHey"));
+        assert!(!codex.iter().any(|arg| arg == "--append-system-prompt"));
+    }
+
     #[test]
     fn chat_defaults_to_no_bypass_flags() {
         let claude = chat_agent_command(
@@ -2166,6 +2259,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2190,6 +2284,7 @@ mod tests {
                 hook_command: Some(
                     "/Applications/Tokenstat.app/Contents/Resources/tokenstat-hostd",
                 ),
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2216,6 +2311,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2238,6 +2334,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: Some("/tmp/tokenstat-hostd"),
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2260,6 +2357,7 @@ mod tests {
                 bypass: true,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2283,6 +2381,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: Some("/tmp/tokenstat-hostd"),
+                system_append: None,
                 agy_customization_dir: Some(agy_home),
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2306,6 +2405,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &rules,
                 attachments: &[],
@@ -2340,6 +2440,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2367,6 +2468,7 @@ mod tests {
                 bypass: true,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: &[],
@@ -2393,6 +2495,7 @@ mod tests {
                     bypass: false,
                     mode: "plan",
                     hook_command: None,
+                    system_append: None,
                     agy_customization_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
@@ -2458,6 +2561,7 @@ mod tests {
                     bypass: true,
                     mode: "plan",
                     hook_command: None,
+                    system_append: None,
                     agy_customization_dir: None,
                     grok_allow_rules: &[],
                     attachments: &[],
@@ -2491,6 +2595,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: std::slice::from_ref(&attachment),
@@ -2513,6 +2618,7 @@ mod tests {
                 bypass: false,
                 mode: "execute",
                 hook_command: None,
+                system_append: None,
                 agy_customization_dir: None,
                 grok_allow_rules: &[],
                 attachments: std::slice::from_ref(&attachment),

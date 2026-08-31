@@ -122,31 +122,48 @@ struct PhoneHeatmap: View {
     }
 
     private var gridRow: some View {
-        HStack(alignment: .top, spacing: 6) {
-            weekdayLabels
-            ScrollView(.horizontal, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 6) {
-                    monthLabels
-                    grid
+        GeometryReader { proxy in
+            let intrinsicWidth = gutter + 6 + gridWidth
+            let fits = intrinsicWidth <= proxy.size.width
+
+            Group {
+                if fits {
+                    // A wide tab-mode iPad has room for the entire year. Keep
+                    // the weekday gutter attached to the month/grid unit and
+                    // centre that complete unit, rather than leaving the grid
+                    // biased to the trailing edge as the scroll view did.
+                    HStack(alignment: .top, spacing: 6) {
+                        weekdayLabels
+                        calendarGrid
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    // Narrow cards and sidebar detail retain the recent-week
+                    // opening position and horizontal scrolling behavior.
+                    HStack(alignment: .top, spacing: 6) {
+                        weekdayLabels
+                        ScrollView(.horizontal, showsIndicators: true) {
+                            calendarGrid
+                        }
+                        .defaultScrollAnchor(.trailing)
+                        .scrollDisabled(scrubbing)
+                        .clientHideScrollEdgeEffect()
+                    }
                 }
-                // Room for the indicator, so it sits under the grid rather
-                // than across the bottom row of squares.
-                .padding(.bottom, 6)
             }
-            // Opens on the most recent week, which is the part anybody wants
-            // first.
-            .defaultScrollAnchor(.trailing)
-            // While a finger is scrubbing the grid, the grid is not a scroller.
-            // This is what lets the hold own the touch without a composed
-            // gesture having to win an argument with the scroll view.
-            .scrollDisabled(scrubbing)
-            // No soft fade at the scroll edges. That effect exists so content
-            // dissolves under glass chrome, and there is no chrome here: this
-            // lives inside an opaque card, where the fade only washed out the
-            // leading third of the grid.
-            .clientHideScrollEdgeEffect()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: monthRow + 6 + gridHeight + 6)
+    }
+
+    private var calendarGrid: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            monthLabels
+            grid
+        }
+        // Room for the indicator, so it sits under the grid rather than across
+        // the bottom row of squares.
+        .padding(.bottom, 6)
     }
 
     private var summary: String {

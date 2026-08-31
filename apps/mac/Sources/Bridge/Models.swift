@@ -2515,6 +2515,22 @@ struct ChatTimelineEvent: Codable, Sendable, Identifiable {
     }
 }
 
+/// What a conversation says to its agent before the person's own words.
+///
+/// Two halves on purpose. `brief` belongs to the person and is theirs to edit.
+/// `added` is the one rule tokenstat puts in every conversation, and the
+/// inspector shows it verbatim rather than describing it, because a product
+/// that appends instructions to somebody's chat owes them the actual text.
+struct ChatInstructions: Codable, Sendable, Hashable {
+    var brief: String
+    var added: String
+    /// `systemPrompt` where the backend takes a flag, `turnPrefix` where the
+    /// rules have to ride ahead of the message in a tagged block.
+    var channel: String
+
+    var travelsAsSystemPrompt: Bool { channel == "systemPrompt" }
+}
+
 struct ChatApproval: Codable, Sendable, Identifiable, Hashable {
     var id: String
     var conversationID: String

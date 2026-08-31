@@ -81,7 +81,7 @@ struct ChatSetupHeader: View {
 
     private var chips: some View {
         HStack(spacing: Theme.Space.s) {
-            chip(backend?.label ?? chat.backend)
+            chip("Next response: \(backend?.label ?? chat.backend)")
             chip(chat.mode == "plan" ? "Plan" : "Execute")
             if let modelName = chat.model, !modelName.isEmpty {
                 chip(modelName)

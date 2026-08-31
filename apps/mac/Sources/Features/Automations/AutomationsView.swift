@@ -630,6 +630,7 @@ private struct AutomationRow: View {
     @State private var confirmingDelete = false
     @State private var showingHistory = false
     @State private var editing = false
+    @State private var isDeleteHovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.s) {
@@ -756,9 +757,16 @@ private struct AutomationRow: View {
                 .controlSize(.small)
             Button(role: .destructive) { confirmingDelete = true } label: {
                 Image(systemName: "trash")
+                    .foregroundStyle(isDeleteHovering ? Theme.danger : .secondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        Theme.danger.opacity(isDeleteHovering ? 0.14 : 0),
+                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    )
             }
             .buttonStyle(.borderless)
-            .help("Delete this automation")
+            .onHover { isDeleteHovering = $0 }
+            .help("Remove automation")
             .accessibilityLabel("Delete \(job.name)")
         }
         .sheet(isPresented: $showingHistory) {

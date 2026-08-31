@@ -49,6 +49,16 @@ pub struct Conversation {
     pub resume_token: Option<String>,
     #[serde(default)]
     pub resume_tokens: HashMap<String, String>,
+    /// Which backends have already been told this conversation's standing
+    /// rules, and which version of them, keyed by backend.
+    ///
+    /// Only backends without a system-prompt flag appear here: the rest are
+    /// handed the rules again on every turn, by flag, where repetition costs
+    /// nothing. For the others the rules ride inside a turn, so re-sending
+    /// them every time is what put a paragraph of plumbing in front of every
+    /// sentence the person wrote.
+    #[serde(default)]
+    pub standing_sent: HashMap<String, String>,
     #[serde(default)]
     pub allowed_tools: Vec<String>,
     #[serde(default)]
@@ -619,6 +629,7 @@ impl Store {
                 .unwrap_or_else(default_autonomy),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: Vec::new(),
             allowed_shell_prefixes: Vec::new(),
             budget_seconds: input.budget_seconds.unwrap_or(0),
@@ -759,6 +770,26 @@ impl Store {
         Ok(targets.len())
     }
 
+    /// What this conversation tells its agent before it hears the person.
+    ///
+    /// Split into the two halves deliberately. `brief` is the person's own
+    /// words and is theirs to edit. `added` is the one rule tokenstat puts in
+    /// every conversation, and it is shown rather than hidden: a product that
+    /// quietly appends instructions to somebody's chat should at minimum let
+    /// them read what it appended.
+    pub fn instructions(&self, id: &str) -> Result<Value, String> {
+        let chat = self.get(id)?;
+        Ok(json!({
+            "brief": chat.system_prompt,
+            "added": crate::chat_turn::file_rule(&self.response_output_dir(id)),
+            "channel": if crate::chat_turn::accepts_system_prompt(&chat.backend) {
+                "systemPrompt"
+            } else {
+                "turnPrefix"
+            },
+        }))
+    }
+
     pub fn events(&self, id: &str, offset: u64) -> Result<(Vec<Value>, u64), String> {
         self.get(id)?;
         let path = self.events_path(id);
@@ -854,13 +885,16 @@ impl Store {
                     .then_some(chat.resume_token.as_deref())
                     .flatten()
             });
-        let prompt = prompt_with_response_file_contract(
-            &prompt_with_attachments(
-                &prompt_with_system_prompt(prompt, &chat.system_prompt),
-                &attachments,
-            ),
-            &response_output_dir,
-        );
+        let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            prompt,
+            persona_brief: &chat.system_prompt,
+            attachments: &attachments,
+            output_dir: &response_output_dir,
+            backend: &chat.backend,
+        });
+        let system_append = standing_is_due(&chat, &composed.standing_fingerprint)
+            .then_some(composed.standing_text.as_str());
+        let prompt = composed.user_text.as_str();
         let hook_command = if chat.autonomy == "standard" {
             std::env::current_exe()
                 .ok()
@@ -873,7 +907,7 @@ impl Store {
         let grok_allow_rules = grok_allow_rules(&chat);
         let argv = crate::automations::chat_agent_command(
             &chat.backend,
-            &prompt,
+            prompt,
             chat.model.as_deref(),
             chat.effort.as_deref(),
             chat.budget_seconds,
@@ -882,6 +916,7 @@ impl Store {
                 bypass: chat.autonomy == "bypass",
                 mode: &chat.mode,
                 hook_command: hook_command.as_deref(),
+                system_append,
                 agy_customization_dir: agy_customization_dir.as_deref(),
                 grok_allow_rules: &grok_allow_rules,
                 attachments: &attachments,
@@ -964,6 +999,12 @@ impl Store {
                 environment,
             })
             .map_err(|e| e.to_string())?;
+        // Only once the process exists. A spawn that failed delivered nothing,
+        // and marking it sent would silently drop this conversation's rules
+        // from every later turn on that backend.
+        if system_append.is_some() {
+            self.mark_standing_sent(id, &chat.backend, &composed.standing_fingerprint)?;
+        }
         self.append(
             id,
             &StoredEvent::User {
@@ -1275,6 +1316,23 @@ impl Store {
         drop(chats);
         self.save()
     }
+    /// Remember that one backend now holds this version of the conversation's
+    /// standing rules, so the next turn on it can be the person's words alone.
+    fn mark_standing_sent(&self, id: &str, backend: &str, fingerprint: &str) -> Result<(), String> {
+        let mut chats = self
+            .conversations
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let chat = chats
+            .iter_mut()
+            .find(|chat| chat.id == id)
+            .ok_or("no chat with that id")?;
+        chat.standing_sent
+            .insert(backend.into(), fingerprint.into());
+        drop(chats);
+        self.save()
+    }
+
     fn events_path(&self, id: &str) -> PathBuf {
         self.root.join(id).join("events.ndjson")
     }
@@ -1474,30 +1532,6 @@ fn safe_file_name(name: &str) -> String {
     }
 }
 
-fn prompt_with_attachments(prompt: &str, attachments: &[PathBuf]) -> String {
-    if attachments.is_empty() {
-        return prompt.to_string();
-    }
-    let paths = attachments
-        .iter()
-        .map(|path| path.display().to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("{prompt}\n\nThe user attached these local files. Read them when useful:\n{paths}")
-}
-
-/// A backend's text stream cannot carry arbitrary bytes. This small contract
-/// gives every supported agent the same way to return a file without coupling
-/// chat to a particular image tool or vendor event schema. The temporary
-/// output folder is chat-owned, so a response link cannot turn into an
-/// arbitrary file read.
-fn prompt_with_response_file_contract(prompt: &str, output_dir: &Path) -> String {
-    let output_dir = output_dir.display().to_string();
-    format!(
-        "{prompt}\n\nIf you create a file the user should receive, copy it into {output_dir} and include a Markdown link to that absolute local path in your final response, for example [report.txt](<{output_dir}/report.txt>). tokenstat will attach linked files to the conversation."
-    )
-}
-
 fn collect_agent_text(events: &[Event], text: &mut String) {
     for event in events {
         if let Event::Text { delta } = event {
@@ -1600,6 +1634,19 @@ fn media_type_for_path(path: &Path) -> Option<String> {
     )
 }
 
+/// Whether this turn has to carry the conversation's standing rules.
+///
+/// A backend with a system-prompt flag is given them every turn, because a
+/// flag costs nothing and re-sending is what makes editing a persona take
+/// effect immediately. A backend without one has them prepended to the turn,
+/// so it is told only when it has not already seen this exact version. Sending
+/// them every time is what put a paragraph of plumbing in front of every
+/// sentence somebody wrote.
+fn standing_is_due(chat: &Conversation, fingerprint: &str) -> bool {
+    crate::chat_turn::accepts_system_prompt(&chat.backend)
+        || chat.standing_sent.get(&chat.backend).map(String::as_str) != Some(fingerprint)
+}
+
 fn title_from_prompt(prompt: &str) -> String {
     let line = prompt
         .lines()
@@ -1613,14 +1660,6 @@ fn title_from_prompt(prompt: &str) -> String {
     } else {
         title.to_string()
     }
-}
-
-fn prompt_with_system_prompt(prompt: &str, system_prompt: &str) -> String {
-    let system_prompt = system_prompt.trim();
-    if system_prompt.is_empty() {
-        return prompt.to_string();
-    }
-    format!("{system_prompt}\n\n---\n\n{prompt}")
 }
 
 fn load_personas(root: &Path) -> Vec<Persona> {
@@ -1705,6 +1744,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1733,6 +1773,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1769,6 +1810,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1836,6 +1878,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -1856,7 +1899,17 @@ mod tests {
             .attachment_paths("chat-test", &[attachment.id])
             .unwrap();
         assert_eq!(fs::read(&files[0]).unwrap(), b"hello");
-        assert!(prompt_with_attachments("Inspect this", &files).contains("diagram.png"));
+        // A backend with no image flag is told the path; one with a flag is
+        // handed the file and told nothing, so it cannot describe its own
+        // attachment back to the person.
+        let spoken = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            prompt: "Inspect this",
+            persona_brief: "",
+            attachments: &files,
+            output_dir: root.path(),
+            backend: "claude",
+        });
+        assert!(spoken.user_text.contains("diagram.png"));
     }
 
     #[test]
@@ -1877,9 +1930,20 @@ mod tests {
             })
             .unwrap();
         assert_eq!(store.personas(), vec![saved.clone()]);
-        assert_eq!(
-            prompt_with_system_prompt("Check this", &saved.system_prompt),
-            "Review changes carefully.\n\n---\n\nCheck this"
+        // A persona brief is standing text, not part of the turn. The
+        // person's message stays exactly what they typed.
+        let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            prompt: "Check this",
+            persona_brief: &saved.system_prompt,
+            attachments: &[],
+            output_dir: root.path(),
+            backend: "claude",
+        });
+        assert_eq!(composed.user_text, "Check this");
+        assert!(
+            composed
+                .standing_text
+                .starts_with("Review changes carefully.")
         );
         store
             .save_persona(Persona {
@@ -1911,6 +1975,74 @@ mod tests {
         assert_eq!(claude["gateTier"], "full");
         assert!(claude.get("models").is_some());
         assert!(claude.get("efforts").is_some());
+    }
+
+    #[test]
+    fn the_file_contract_is_sent_once_per_backend() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::at(root.path().join("chat"));
+        let mut chat = Conversation {
+            id: "chat-standing".into(),
+            workspace_id: "ws".into(),
+            title: "Standing".into(),
+            backend: "codex".into(),
+            persona_id: None,
+            model: None,
+            effort: None,
+            system_prompt: String::new(),
+            mode: "execute".into(),
+            autonomy: default_autonomy(),
+            resume_token: None,
+            resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
+            allowed_tools: vec![],
+            allowed_shell_prefixes: vec![],
+            budget_seconds: 0,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            running: false,
+        };
+        store.conversations.lock().unwrap().push(chat.clone());
+        let composed = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            prompt: "Hey",
+            persona_brief: "",
+            attachments: &[],
+            output_dir: root.path(),
+            backend: "codex",
+        });
+
+        // Codex has no system-prompt flag, so its first turn carries the
+        // rules and every later turn is the person's words alone.
+        assert!(standing_is_due(&chat, &composed.standing_fingerprint));
+        store
+            .mark_standing_sent("chat-standing", "codex", &composed.standing_fingerprint)
+            .unwrap();
+        chat = store.get("chat-standing").unwrap();
+        assert!(!standing_is_due(&chat, &composed.standing_fingerprint));
+
+        // A backend that has not been told yet still needs them, even though
+        // the rules themselves have not changed.
+        chat.backend = "cursor".into();
+        assert!(standing_is_due(&chat, &composed.standing_fingerprint));
+
+        // Editing the persona changes the rules, so the backend that already
+        // had the old ones is told the new ones.
+        chat.backend = "codex".into();
+        let edited = crate::chat_turn::compose(crate::chat_turn::Inputs {
+            prompt: "Hey",
+            persona_brief: "Be brief.",
+            attachments: &[],
+            output_dir: root.path(),
+            backend: "codex",
+        });
+        assert!(standing_is_due(&chat, &edited.standing_fingerprint));
+
+        // Claude takes a flag, so repeating costs nothing and it is always due.
+        chat.backend = "claude".into();
+        store
+            .mark_standing_sent("chat-standing", "claude", &composed.standing_fingerprint)
+            .unwrap();
+        assert!(standing_is_due(&chat, &composed.standing_fingerprint));
     }
 
     #[test]
@@ -1958,6 +2090,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -2014,6 +2147,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -2050,6 +2184,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,
@@ -2122,6 +2257,7 @@ mod tests {
             autonomy: default_autonomy(),
             resume_token: None,
             resume_tokens: HashMap::new(),
+            standing_sent: HashMap::new(),
             allowed_tools: vec![],
             allowed_shell_prefixes: vec![],
             budget_seconds: 0,

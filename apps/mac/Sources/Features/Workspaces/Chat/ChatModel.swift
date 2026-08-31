@@ -18,6 +18,9 @@ final class ChatModel {
     var selected: ChatConversation?
     var events: [ChatTimelineEvent] = []
     var approvals: [ChatApproval] = []
+    /// What this conversation says to its agent ahead of the person's
+    /// words. Read so the inspector can show it rather than describe it.
+    var instructions: ChatInstructions?
     var offset: UInt64 = 0
     var attachments: [ChatAttachment] = []
     /// Downsampled JPEG for the composer strip, keyed by attachment id.
@@ -26,6 +29,10 @@ final class ChatModel {
     /// The transcript only persists descriptors, so remote files work exactly
     /// like local ones without exposing a host filesystem path to SwiftUI.
     var responseAttachmentData: [String: Data] = [:]
+    /// Bumped when response bytes arrive. Views use this as an explicit
+    /// invalidation point because a dictionary subscript mutation can be too
+    /// subtle for a lazily rendered transcript row to observe.
+    private(set) var responseAttachmentRevision: UInt64 = 0
     var backends: [ChatBackend] = []
     var personas: [ChatPersona] = []
     var isLoading = false
@@ -99,15 +106,18 @@ final class ChatModel {
         attachments = []
         attachmentPreviews = [:]
         responseAttachmentData = [:]
+        responseAttachmentRevision &+= 1
         attemptedResponseAttachments = []
         loadingResponseAttachments = []
         responseAttachmentRetryAt = [:]
         approvals = []
+        instructions = nil
         events = []
         offset = 0
         guard let chat else { return }
         await loadEvents(id: chat.id, reset: true, generation: generation)
         await loadApprovals(id: chat.id, generation: generation)
+        await loadInstructions(id: chat.id, generation: generation)
     }
 
     func create() async {
@@ -177,6 +187,12 @@ final class ChatModel {
             )
             guard selectionMatches(id: selected.id, generation: generation) else { return }
             replace(updated)
+            // The backend decides whether the rules travel on a flag or ahead
+            // of the turn, and the brief is half of what they say. Either
+            // moving means the shown text is stale.
+            if backend != nil || systemPrompt != nil || personaID != nil {
+                await loadInstructions(id: selected.id, generation: generation)
+            }
         } catch {
             if selectionMatches(id: selected.id, generation: generation) {
                 self.error = error.localizedDescription
@@ -477,12 +493,32 @@ final class ChatModel {
         loadingResponseAttachments.subtract(descriptors.map(\.id))
         guard selectionMatches(id: id, generation: generation) else { return }
         let loadedIDs = Set(loaded.map(\.0))
+        var updatedData = responseAttachmentData
         for (attachmentID, data) in loaded {
-            responseAttachmentData[attachmentID] = data
+            updatedData[attachmentID] = data
             attemptedResponseAttachments.insert(attachmentID)
+        }
+        if updatedData.count != responseAttachmentData.count {
+            responseAttachmentData = updatedData
+            responseAttachmentRevision &+= 1
         }
         for descriptor in descriptors where !loadedIDs.contains(descriptor.id) {
             responseAttachmentRetryAt[descriptor.id] = Date().addingTimeInterval(2)
+        }
+    }
+
+    /// The brief and the one rule tokenstat adds. Reloaded whenever either
+    /// could have moved: a different conversation, a new backend (which changes
+    /// how the text travels), or an edited brief.
+    private func loadInstructions(id: String, generation: UInt64) async {
+        do {
+            let loaded = try await Bridge.chatInstructions(id: id, peer: peer)
+            guard selectionMatches(id: id, generation: generation) else { return }
+            instructions = loaded
+        } catch {
+            // Not worth an alert. The inspector simply shows nothing rather
+            // than interrupting a conversation over a disclosure nobody opened.
+            if selectionMatches(id: id, generation: generation) { instructions = nil }
         }
     }
 
@@ -569,6 +605,7 @@ struct ChatDisplayItem: Identifiable {
     enum Kind {
         case user(String)
         case assistant(String, backend: String?)
+        case turnSeparator(String)
         case thinking(String)
         case tool(ChatToolState)
         case edit(path: String, added: UInt32, removed: UInt32, patch: String)
@@ -586,6 +623,7 @@ struct ChatDisplayItem: Identifiable {
         var textBackend: String?
         var thinking = ""
         var thinkingID = ""
+        var lastBackend: String?
 
         func flushText() {
             let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -641,6 +679,18 @@ struct ChatDisplayItem: Identifiable {
                 continue
             }
             guard let agent = event.event else { continue }
+            let eventBackend = event.backend ?? defaultBackend
+            if let eventBackend, let lastBackend, eventBackend != lastBackend {
+                flushText()
+                flushThinking()
+                items.append(
+                    ChatDisplayItem(
+                        id: "turn-\(event.atMs ?? 0)-\(items.count)",
+                        kind: .turnSeparator(eventBackend)
+                    )
+                )
+            }
+            if let eventBackend { lastBackend = eventBackend }
             switch agent.kind {
             case "text":
                 flushThinking()

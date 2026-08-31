@@ -55,6 +55,8 @@ pub mod automations;
 pub mod base64;
 #[cfg(feature = "local-host")]
 pub mod chat;
+#[cfg(feature = "local-host")]
+pub mod chat_turn;
 pub mod cloud_import;
 pub mod dispatch;
 pub mod dto;
