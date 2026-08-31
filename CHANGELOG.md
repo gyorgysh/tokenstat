@@ -58,6 +58,10 @@ desktop and Android builds remain previews. Newest first.
 
 ### Added
 
+- The Mac's existing notification switch now covers Chat. A conversation can
+  banner when it needs an answer or its turn ends, primes without replaying old
+  work, stays silent for Stop, and removes a waiting banner when the person
+  opens or answers that conversation.
 - Chat can notify a signed-in phone when a turn finishes or fails, using two
   fixed content-free reasons composed into sentences by the account server.
   Stop stays silent, and a burst of unanswered approvals in one conversation

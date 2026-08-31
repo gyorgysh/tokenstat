@@ -9,6 +9,10 @@ import Foundation
 import Observation
 import UserNotifications
 
+#if os(macOS)
+import AppKit
+#endif
+
 /// Being told when an agent finished, on the two paths that need different
 /// machinery.
 ///
@@ -120,6 +124,18 @@ final class RunNotifications {
     /// it is per feed for the same reason the statuses are.
     private var primed: Set<Feed> = []
 
+    private struct ChatState {
+        let title: String
+        let running: Bool
+        let pending: Bool
+        let doneStatus: String?
+    }
+
+    /// Chat state has its own shape: waiting is an approval, while completion
+    /// is the running edge plus the host's terminal Done status.
+    private var lastChats: [String: ChatState] = [:]
+    private var chatsPrimed = false
+
     private init() {
         // `bool(forKey:)` is false for a key that was never written, which is
         // the default this wants.
@@ -179,6 +195,68 @@ final class RunNotifications {
             runs.map { Ended(id: $0.id, name: $0.name, status: $0.status, exitCode: nil) },
             from: .workflows
         )
+    }
+
+    /// Conversations as of the Chat model's existing refresh.
+    ///
+    /// No timer lives here. The model already reads events, approvals and the
+    /// conversation list in one poll; feeding those facts into this object is
+    /// what keeps the notification and the row on screen from disagreeing.
+    func settle(
+        chats: [ChatConversation],
+        approvals: [ChatApproval],
+        selectedID: String?,
+        selectedDoneStatus: String?
+    ) {
+        let pending = Set(approvals.lazy.filter { $0.decision == nil }.map(\.conversationID))
+        let current = Dictionary(
+            uniqueKeysWithValues: chats.map { chat in
+                (
+                    chat.id,
+                    ChatState(
+                        title: chat.title,
+                        running: chat.running,
+                        pending: pending.contains(chat.id),
+                        doneStatus: chat.id == selectedID ? selectedDoneStatus : nil
+                    )
+                )
+            }
+        )
+        defer {
+            lastChats = current
+            chatsPrimed = true
+        }
+        guard isOn, chatsPrimed else { return }
+        for (id, chat) in current {
+            guard let before = lastChats[id] else { continue }
+            if !before.pending, chat.pending {
+                // The card is already the notification while this app and
+                // conversation are in front. A background app is not visible,
+                // even if its route still happens to be Chat.
+                if id != selectedID || !NSApp.isActive {
+                    post(
+                        "chat.\(id)",
+                        title: "Waiting for you",
+                        body: "\(chat.title) needs an answer."
+                    )
+                }
+            }
+            guard before.running, !chat.running else { continue }
+            switch chat.doneStatus {
+            case "ok":
+                post("chat.\(id)", title: "Chat finished", body: "\(chat.title) is done.")
+            case "error":
+                post(
+                    "chat.\(id)",
+                    title: "Chat did not finish",
+                    body: "\(chat.title) did not finish cleanly."
+                )
+            default:
+                // Explicit Stop and an old host with no trustworthy terminal
+                // status are both quieter than guessing that a turn failed.
+                continue
+            }
+        }
     }
 
     private struct Ended {
@@ -249,6 +327,14 @@ final class RunNotifications {
         let identifier = "run.session.\(sessionID).Waiting for you"
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [identifier])
+    }
+
+    /// Take back a waiting-chat banner when its conversation is opened or its
+    /// approval is answered. The approval card is now the source of truth.
+    func chatAttentionHandled(id: String) {
+        UNUserNotificationCenter.current().removeDeliveredNotifications(
+            withIdentifiers: ["run.chat.\(id).Waiting for you"]
+        )
     }
 
     private func post(_ runID: String, title: String, body: String) {

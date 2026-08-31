@@ -125,6 +125,9 @@ final class ChatModel {
         instructions = nil
         events = []
         offset = 0
+        #if os(macOS)
+        if let chat { RunNotifications.shared.chatAttentionHandled(id: chat.id) }
+        #endif
         guard let chat else { return }
         await loadEvents(id: chat.id, reset: true, generation: generation)
         await loadApprovals(id: chat.id, generation: generation)
@@ -358,6 +361,7 @@ final class ChatModel {
             if let current = latest.first(where: { $0.id == selected.id }) {
                 self.selected = current
             }
+            settleNotifications()
         } catch {}
     }
 
@@ -367,6 +371,9 @@ final class ChatModel {
             _ = try await Bridge.resolveChatApproval(id: approval.id, choice: choice, peer: peer)
             guard selectionMatches(id: approval.conversationID, generation: generation) else { return }
             await loadApprovals(id: approval.conversationID, generation: generation)
+            #if os(macOS)
+            RunNotifications.shared.chatAttentionHandled(id: approval.conversationID)
+            #endif
         } catch {
             if selectionMatches(id: approval.conversationID, generation: generation) {
                 self.error = error.localizedDescription
@@ -435,6 +442,7 @@ final class ChatModel {
             if let current = latest.first(where: { $0.id == selected.id }) {
                 self.selected = current
             }
+            settleNotifications()
         } catch {}
     }
 
@@ -548,6 +556,7 @@ final class ChatModel {
                 events.append(contentsOf: chunk.events)
             }
             offset = chunk.nextOffset
+            settleNotifications()
             await loadResponseAttachments(id: id, generation: generation)
         } catch {
             if selectionMatches(id: id, generation: generation) {
@@ -629,6 +638,7 @@ final class ChatModel {
             let loaded = try await Bridge.chatApprovals(id: id, peer: peer)
             guard selectionMatches(id: id, generation: generation) else { return }
             approvals = loaded
+            settleNotifications()
         } catch {
             if selectionMatches(id: id, generation: generation) {
                 self.error = error.localizedDescription
@@ -651,6 +661,22 @@ final class ChatModel {
         }
         chats.sort { $0.updatedAtMs > $1.updatedAtMs }
         saveLaunchChoice(from: chat)
+        settleNotifications()
+    }
+
+    private func settleNotifications() {
+        #if os(macOS)
+        let done = events.reversed().lazy.compactMap { timeline -> String? in
+            guard timeline.kind == "agent", timeline.event?.kind == "done" else { return nil }
+            return timeline.event?.status
+        }.first
+        RunNotifications.shared.settle(
+            chats: chats,
+            approvals: approvals,
+            selectedID: selected?.id,
+            selectedDoneStatus: done
+        )
+        #endif
     }
 
     /// The persona a new chat should start with, or nil to take the
